@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
 import { DestinationProfile } from './components/DestinationProfile';
@@ -41,6 +41,22 @@ export default function App() {
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
     [destinations, selectedDestinationId],
   );
+
+  useEffect(() => {
+    if (!selectedDestination || isInteractionLocked) return undefined;
+
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+
+      event.preventDefault();
+      setSelectedDestinationId(null);
+    };
+
+    window.addEventListener('keydown', handleWindowKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleWindowKeyDown);
+    };
+  }, [isInteractionLocked, selectedDestination]);
 
   const handleAddDestination = useCallback(
     async (input: Parameters<typeof addDestination>[0]) => {

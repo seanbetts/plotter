@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
+import { createDestination } from './domain/destinations';
 import type { Destination, RouteLeg } from './domain/types';
 
 type Deferred<T> = {
@@ -165,6 +166,30 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: 'Kyoto, Japan' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Kyoto profile' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select Kyoto' })).not.toHaveClass('is-selected');
+  });
+
+  it('closes the selected destination profile with Escape', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
+    expect(screen.getByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
+
+    const wasNotCanceled = fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+
+    expect(wasNotCanceled).toBe(false);
+    expect(screen.queryByRole('complementary', { name: 'Balcombe profile' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Balcombe, United Kingdom' })).not.toHaveAttribute(
+      'aria-current',
+    );
   });
 
   it('keeps mutation actions unavailable while trip data is loading', async () => {
