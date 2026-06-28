@@ -1,16 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { createDestination, updateDestination } from './destinations';
+import { formatDestinationLocation } from './locations';
 
 describe('destination helpers', () => {
-  it('creates a destination with consistent structured profile fields', () => {
+  it('creates a destination with structured location fields', () => {
     const destination = createDestination({
-      name: 'Cappadocia',
-      coordinates: { lat: 38.6431, lng: 34.8289 },
-      countryRegion: 'Turkey',
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'maptiler-balcombe',
+      },
     });
 
-    expect(destination.name).toBe('Cappadocia');
-    expect(destination.countryRegion).toBe('Turkey');
+    expect(destination.name).toBe('Balcombe');
+    expect(destination.location.placeName).toBe('Balcombe');
+    expect(destination.location.regionName).toBe('West Sussex');
+    expect(destination.location.countryName).toBe('United Kingdom');
+    expect(destination.countryRegion).toBe('United Kingdom');
     expect(destination.status).toBe('idea');
     expect(destination.priority).toBe('medium');
     expect(destination.order).toBe(0);
@@ -21,6 +33,23 @@ describe('destination helpers', () => {
     expect(destination.activities.items).toEqual([]);
     expect(destination.routeContext.notes).toBe('');
     expect(destination.tags).toEqual([]);
+  });
+
+  it('formats editable stop names separately from geocoded location names', () => {
+    const destination = createDestination({
+      name: 'Home',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+
+    expect(formatDestinationLocation(destination)).toBe('Home, Balcombe, West Sussex, United Kingdom');
   });
 
   it('updates nested profile sections without dropping existing data', () => {

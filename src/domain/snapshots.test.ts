@@ -32,6 +32,34 @@ describe('trip snapshots', () => {
     expect(parsed.routeLegs[0].type).toBe('driving-auto');
   });
 
+  it('normalizes legacy destinations without structured location data', () => {
+    const legacyDestination = {
+      ...createDestination({
+        name: 'Legacy stop',
+        countryRegion: 'Turkey',
+        coordinates: { lat: 38.6431, lng: 34.8289 },
+      }),
+      location: undefined,
+    };
+
+    const parsed = parseTripSnapshot(
+      JSON.stringify({
+        version: 1,
+        exportedAt: '2026-06-28T00:00:00.000Z',
+        destinations: [legacyDestination],
+        routeLegs: [],
+      }),
+    );
+
+    expect(parsed.destinations[0].location).toEqual({
+      placeName: 'Legacy stop',
+      regionName: '',
+      countryName: 'Turkey',
+      sourceLabel: 'Legacy stop, Turkey',
+      sourceProvider: 'legacy',
+    });
+  });
+
   it('rejects invalid snapshot JSON', () => {
     expect(() => parseTripSnapshot('{"destinations":[]}')).toThrow(
       'Trip snapshot must include destinations and routeLegs arrays',

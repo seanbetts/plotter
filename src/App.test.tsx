@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import { searchNominatimPlaces } from './adapters/geocoding';
+import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import type { Destination, RouteLeg } from './domain/types';
 
 type Deferred<T> = {
@@ -102,7 +102,8 @@ vi.mock('./storage/tripRepository', () => ({
 }));
 
 vi.mock('./adapters/geocoding', () => ({
-  searchNominatimPlaces: vi.fn(),
+  resolveMapTilerCoordinates: vi.fn(),
+  searchMapTilerPlaces: vi.fn(),
 }));
 
 vi.mock('maplibre-gl', () => ({
@@ -125,7 +126,8 @@ describe('App', () => {
     repositoryMock.saveRouteLeg.mockClear();
     repositoryMock.deleteRouteLeg.mockClear();
     repositoryMock.replaceTripData.mockClear();
-    vi.mocked(searchNominatimPlaces).mockReset();
+    vi.mocked(searchMapTilerPlaces).mockReset();
+    vi.mocked(resolveMapTilerCoordinates).mockReset();
     maplibreMock.Map.mockClear();
     maplibreMock.NavigationControl.mockClear();
     maplibreMock.mapInstances.length = 0;
@@ -135,12 +137,20 @@ describe('App', () => {
   });
 
   it('adds a searched destination and opens its profile after trip data loads', async () => {
-    vi.mocked(searchNominatimPlaces).mockResolvedValue([
+    vi.mocked(searchMapTilerPlaces).mockResolvedValue([
       {
+        kind: 'place',
         id: 'place-kyoto',
         label: 'Kyoto, Japan',
-        countryRegion: 'Japan',
         coordinates: { lat: 35.0116, lng: 135.7681 },
+        location: {
+          placeName: 'Kyoto',
+          regionName: '',
+          countryName: 'Japan',
+          sourceLabel: 'Kyoto, Japan',
+          sourceProvider: 'maptiler',
+          sourceFeatureId: 'place-kyoto',
+        },
       },
     ]);
 
@@ -149,10 +159,9 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
 
     await userEvent.type(screen.getByLabelText('Search for a destination'), 'Kyoto');
-    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Add Kyoto, Japan' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Kyoto, Japan' }));
 
-    expect(searchNominatimPlaces).toHaveBeenCalledWith('Kyoto');
+    expect(searchMapTilerPlaces).toHaveBeenCalledWith('Kyoto', { apiKey: expect.any(String) });
     expect(await screen.findByRole('complementary', { name: 'Kyoto profile' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Kyoto' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select Kyoto' })).toHaveClass('is-selected');
@@ -163,6 +172,7 @@ describe('App', () => {
     const initialRouteLegs = createDeferred<RouteLeg[]>();
     repositoryMock.initialDestinations = initialDestinations.promise;
     repositoryMock.initialRouteLegs = initialRouteLegs.promise;
+
     render(<App />);
 
     expect(screen.getByText('Loading trip data')).toBeInTheDocument();
@@ -184,7 +194,6 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import trip data' })).not.toBeInTheDocument();
   });
-
 });
 
 function createDeferred<T>(): Deferred<T> {

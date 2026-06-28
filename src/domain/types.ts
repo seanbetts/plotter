@@ -5,6 +5,16 @@ export type Coordinates = {
   lng: number;
 };
 
+export type DestinationLocation = {
+  placeName: string;
+  regionName: string;
+  countryName: string;
+  countryCode?: string;
+  sourceLabel: string;
+  sourceProvider: 'maptiler' | 'legacy';
+  sourceFeatureId?: string;
+};
+
 export type DestinationStatus = 'idea' | 'planned' | 'confirmed' | 'visited';
 export type Priority = 'low' | 'medium' | 'high' | 'must-do';
 export type RouteLegType = 'driving-auto' | 'shipping-manual';
@@ -42,6 +52,7 @@ export type Destination = {
   name: string;
   countryRegion: string;
   coordinates: Coordinates;
+  location: DestinationLocation;
   order: number;
   status: DestinationStatus;
   priority: Priority;

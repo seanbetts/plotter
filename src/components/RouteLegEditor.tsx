@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { formatDestinationLocation } from '../domain/locations';
 import type { Destination, RouteLegType } from '../domain/types';
 
 type CreateRouteLegInput = {
@@ -19,7 +20,7 @@ function hasDestination(destinations: Destination[], destinationId: string) {
 }
 
 function formatDestinationOption(destination: Destination) {
-  return `${destination.name} - ${destination.countryRegion || 'Unassigned region'}`;
+  return formatDestinationLocation(destination);
 }
 
 export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEditorProps) {

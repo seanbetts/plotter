@@ -4,10 +4,12 @@ const appDbName = 'world-tour-planner';
 const savedSummary = 'Gateway from Europe toward Asia.';
 const istanbulResult = [
   {
-    place_id: 7_457_330,
-    display_name: 'Istanbul, Turkey',
-    lat: '41.0082',
-    lon: '28.9784',
+    id: 'place.istanbul',
+    text: 'Istanbul',
+    place_name: 'Istanbul, Turkey',
+    center: [28.9784, 41.0082],
+    properties: { country_code: 'tr' },
+    context: [{ id: 'country.1', text: 'Turkey', short_code: 'tr' }],
   },
 ];
 
@@ -20,14 +22,14 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
     storageTypes: 'indexeddb,local_storage',
   });
 
-  await page.route('https://nominatim.openstreetmap.org/**', async (route) => {
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
     const url = new URL(route.request().url());
 
-    expect(url.searchParams.get('q')).toBe('Istanbul');
+    expect(url.pathname).toBe('/geocoding/Istanbul.json');
 
     await route.fulfill({
       contentType: 'application/json',
-      json: istanbulResult,
+      json: { features: istanbulResult },
     });
   });
 
@@ -36,13 +38,12 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
   await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
 
   await page.getByLabel('Search for a destination').fill('Istanbul');
-  await page.getByRole('button', { name: 'Search' }).click();
-  await page.getByRole('button', { name: 'Add Istanbul, Turkey' }).click();
+  await page.getByRole('option', { name: 'Istanbul, Turkey' }).click();
 
   const profile = page.getByLabel('Istanbul profile');
 
   if (!(await profile.isVisible())) {
-    await page.getByRole('button', { name: 'Select Istanbul' }).click();
+    await page.getByRole('button', { name: 'Istanbul, Turkey' }).click();
   }
 
   await expect(profile).toBeVisible();
@@ -85,7 +86,7 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
-  await page.getByRole('button', { name: 'Select Istanbul' }).click();
+  await page.getByRole('button', { name: 'Istanbul, Turkey' }).click();
 
   await expect(profile).toBeVisible();
   await expect(whyItMatters).toHaveValue(savedSummary);

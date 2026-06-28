@@ -23,8 +23,8 @@ describe('RouteLegEditor', () => {
 
     render(<RouteLegEditor destinations={[origin, target]} onCreateRouteLeg={onCreateRouteLeg} />);
 
-    expect(screen.getAllByRole('option', { name: 'Panama City - Panama' })).toHaveLength(2);
-    expect(screen.getAllByRole('option', { name: 'Cartagena - Colombia' })).toHaveLength(2);
+    expect(screen.getAllByRole('option', { name: 'Panama City, Panama' })).toHaveLength(2);
+    expect(screen.getAllByRole('option', { name: 'Cartagena, Colombia' })).toHaveLength(2);
     await user.selectOptions(screen.getByLabelText('Origin'), origin.id);
     await user.selectOptions(screen.getByLabelText('Target'), target.id);
     await user.selectOptions(screen.getByLabelText('Leg type'), 'shipping-manual');
@@ -77,12 +77,12 @@ describe('RouteLegEditor', () => {
     expect(onCreateRouteLeg).not.toHaveBeenCalled();
   });
 
-  it('labels destinations without a region as unassigned in route selects', () => {
+  it('labels destinations without a region by stop name in route selects', () => {
     const destination = createDestination({ name: 'Springfield', coordinates: { lat: 39.7817, lng: -89.6501 } });
 
     render(<RouteLegEditor destinations={[destination]} onCreateRouteLeg={vi.fn()} />);
 
-    expect(screen.getAllByRole('option', { name: 'Springfield - Unassigned region' })).toHaveLength(2);
+    expect(screen.getAllByRole('option', { name: 'Springfield' })).toHaveLength(2);
   });
 });
 
@@ -136,9 +136,9 @@ describe('ItineraryPanel', () => {
     expect(screen.getByLabelText('Itinerary')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Stops' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Routes' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Istanbul Turkey' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Istanbul, Turkey' })).toBeInTheDocument();
     expect(screen.queryByText('01')).not.toBeInTheDocument();
-    const selectedStop = screen.getByRole('button', { name: 'Tbilisi Georgia' });
+    const selectedStop = screen.getByRole('button', { name: 'Tbilisi, Georgia' });
     expect(selectedStop).toHaveAttribute('aria-current', 'location');
     expect(selectedStop.closest('.stop-item')).toHaveClass('is-selected');
     expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
@@ -149,7 +149,7 @@ describe('ItineraryPanel', () => {
     expect(screen.getByText('2.3 hr')).toBeInTheDocument();
     expect(screen.getByText('99 mi').parentElement).toHaveClass('inline-route-metrics');
 
-    await user.click(screen.getByRole('button', { name: 'Istanbul Turkey' }));
+    await user.click(screen.getByRole('button', { name: 'Istanbul, Turkey' }));
 
     expect(onSelectDestination).toHaveBeenCalledWith(origin.id);
 

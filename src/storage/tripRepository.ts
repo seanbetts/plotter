@@ -1,4 +1,5 @@
 import type { Destination, RouteLeg } from '../domain/types';
+import { createLegacyLocation } from '../domain/locations';
 import type { TripDb } from './tripDb';
 
 type LegacyRouteLeg = Omit<RouteLeg, 'type' | 'status'> & {
@@ -9,6 +10,13 @@ type LegacyRouteLeg = Omit<RouteLeg, 'type' | 'status'> & {
 function normalizeDestination(destination: Destination, index = 0): Destination {
   return {
     ...destination,
+    countryRegion: destination.countryRegion ?? destination.location?.countryName ?? '',
+    location:
+      destination.location ??
+      createLegacyLocation({
+        name: destination.name,
+        countryRegion: destination.countryRegion,
+      }),
     order: Number.isFinite(destination.order) ? destination.order : index,
   };
 }
@@ -77,7 +85,7 @@ export function createTripRepository(db: TripDb) {
       await db.transaction('rw', db.destinations, db.routeLegs, async () => {
         await db.destinations.clear();
         await db.routeLegs.clear();
-        await db.destinations.bulkPut(snapshot.destinations);
+        await db.destinations.bulkPut(snapshot.destinations.map((destination, index) => normalizeDestination(destination, index)));
         await db.routeLegs.bulkPut(snapshot.routeLegs);
       });
     },

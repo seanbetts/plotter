@@ -1,6 +1,7 @@
 import { Car, GripVertical, Ship, Trash2 } from 'lucide-react';
 import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { formatDestinationLocation, formatLocationParts } from '../domain/locations';
 import type { Destination, RouteLeg, RouteLegType } from '../domain/types';
 
 type ItineraryPanelProps = {
@@ -330,7 +331,8 @@ export function ItineraryPanel({
         <div className={stopListClassName}>
           {destinations.length === 0 ? <p>Add your first destination from the map search.</p> : null}
           {displayedDestinations.map((destination, index) => {
-            const region = destination.countryRegion || 'Unassigned region';
+            const locationLabel = formatDestinationLocation(destination);
+            const locationParts = formatLocationParts(destination.location) || 'Unassigned location';
             const isSelected = destination.id === selectedDestinationId;
             const nextDestination = displayedDestinations[index + 1];
             const routeLeg = nextDestination
@@ -389,12 +391,12 @@ export function ItineraryPanel({
                   <button
                     type="button"
                     className="stop-select"
-                    aria-label={`${destination.name} ${region}`}
+                    aria-label={locationLabel}
                     aria-current={isSelected ? 'location' : undefined}
                     onClick={() => onSelectDestination(destination.id)}
                   >
                     <strong>{destination.name}</strong>
-                    <small>{region}</small>
+                    <small>{locationParts}</small>
                   </button>
                   <span className="stop-stay-days">
                     {formatStayDays(destination.timing.expectedStayDays)}
@@ -479,7 +481,7 @@ export function ItineraryPanel({
             </span>
             <span className="stop-drag-preview-copy">
               <strong>{draggedDestination.name}</strong>
-              <small>{draggedDestination.countryRegion || 'Unassigned region'}</small>
+              <small>{formatLocationParts(draggedDestination.location) || 'Unassigned location'}</small>
             </span>
             <span className="stop-stay-days">
               {formatStayDays(draggedDestination.timing.expectedStayDays)}

@@ -15,37 +15,51 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+const balcombeResult = {
+  kind: 'place',
+  id: 'place-1',
+  label: 'Balcombe, West Sussex, England, United Kingdom',
+  coordinates: { lat: 51.0576, lng: -0.1342 },
+  location: {
+    placeName: 'Balcombe',
+    regionName: 'West Sussex',
+    countryName: 'United Kingdom',
+    countryCode: 'gb',
+    sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+    sourceProvider: 'maptiler',
+    sourceFeatureId: 'place-1',
+  },
+} satisfies Extract<PlaceSearchResult, { kind: 'place' }>;
+
 describe('TopToolbar', () => {
-  it('searches places and adds the selected result', async () => {
+  it('shows live search results and adds the selected result', async () => {
+    const user = userEvent.setup();
     const onAddDestination = vi.fn();
+    const searchPlaces = vi.fn().mockResolvedValue([balcombeResult]);
     render(
       <TopToolbar
         onAddDestination={onAddDestination}
-        searchPlaces={vi.fn().mockResolvedValue([
-          {
-            id: 'place-1',
-            label: 'Istanbul, Turkey',
-            countryRegion: 'Turkey',
-            coordinates: { lat: 41.0082, lng: 28.9784 },
-          },
-        ])}
+        resolveSearchResult={vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>)}
+        searchPlaces={searchPlaces}
       />,
     );
 
-    await userEvent.type(screen.getByLabelText('Search for a destination'), 'Istanbul');
-    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await user.type(screen.getByLabelText('Search for a destination'), 'Balcombe');
+
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Balcombe'));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Add Istanbul, Turkey' })).toBeInTheDocument(),
+      expect(
+        screen.getByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' }),
+      ).toBeInTheDocument(),
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Add Istanbul, Turkey' }));
+    await user.keyboard('{Enter}');
 
     expect(onAddDestination).toHaveBeenCalledWith({
-      name: 'Istanbul',
-      countryRegion: 'Turkey',
-      coordinates: { lat: 41.0082, lng: 28.9784 },
+      name: 'Balcombe',
+      location: balcombeResult.location,
+      coordinates: { lat: 51.0576, lng: -0.1342 },
     });
     expect(screen.getByLabelText('Search for a destination')).toHaveValue('');
-    expect(screen.queryByRole('button', { name: 'Add Istanbul, Turkey' })).not.toBeInTheDocument();
   });
 
   it('keeps stale search responses from replacing newer results or loading state', async () => {
@@ -57,80 +71,125 @@ describe('TopToolbar', () => {
     render(
       <TopToolbar
         onAddDestination={vi.fn()}
+        resolveSearchResult={vi.fn()}
         searchPlaces={searchPlaces}
       />,
     );
 
     const input = screen.getByLabelText('Search for a destination');
     await user.type(input, 'Paris');
-    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Paris'));
     await user.clear(input);
     await user.type(input, 'Seoul');
-    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Seoul'));
 
     firstSearch.resolve([
       {
-        id: 'place-1',
+        kind: 'place',
+        id: 'place-paris',
         label: 'Paris, France',
-        countryRegion: 'France',
         coordinates: { lat: 48.8566, lng: 2.3522 },
+        location: {
+          placeName: 'Paris',
+          regionName: 'Ile-de-France',
+          countryName: 'France',
+          countryCode: 'fr',
+          sourceLabel: 'Paris, France',
+          sourceProvider: 'maptiler',
+        },
       },
     ]);
 
     await waitFor(() => expect(screen.getByText('Searching...')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'Add Paris, France' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Paris, France' })).not.toBeInTheDocument();
 
     secondSearch.resolve([
       {
-        id: 'place-2',
+        kind: 'place',
+        id: 'place-seoul',
         label: 'Seoul, South Korea',
-        countryRegion: 'South Korea',
         coordinates: { lat: 37.5665, lng: 126.978 },
+        location: {
+          placeName: 'Seoul',
+          regionName: '',
+          countryName: 'South Korea',
+          countryCode: 'kr',
+          sourceLabel: 'Seoul, South Korea',
+          sourceProvider: 'maptiler',
+        },
       },
     ]);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Seoul, South Korea' })).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'Add Paris, France' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Seoul, South Korea' })).toBeInTheDocument());
+    expect(screen.queryByRole('option', { name: 'Paris, France' })).not.toBeInTheDocument();
   });
 
   it('clears existing results when the latest search fails', async () => {
     const user = userEvent.setup();
-    const searchPlaces = vi
-      .fn()
-      .mockResolvedValueOnce([
-        {
-          id: 'place-1',
-          label: 'Istanbul, Turkey',
-          countryRegion: 'Turkey',
-          coordinates: { lat: 41.0082, lng: 28.9784 },
-        },
-      ])
-      .mockRejectedValueOnce(new Error('Search unavailable'));
+    const searchPlaces = vi.fn().mockResolvedValueOnce([balcombeResult]).mockRejectedValueOnce(new Error('Search unavailable'));
 
     render(
       <TopToolbar
         onAddDestination={vi.fn()}
+        resolveSearchResult={vi.fn()}
         searchPlaces={searchPlaces}
       />,
     );
 
     const input = screen.getByLabelText('Search for a destination');
-    await user.type(input, 'Istanbul');
-    await user.click(screen.getByRole('button', { name: 'Search' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Istanbul, Turkey' })).toBeInTheDocument());
+    await user.type(input, 'Balcombe');
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Balcombe'));
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' })).toBeInTheDocument(),
+    );
 
     await user.clear(input);
     await user.type(input, 'Ankara');
-    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Ankara'));
 
     await waitFor(() => expect(screen.getByText('Search unavailable')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'Add Istanbul, Turkey' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' })).not.toBeInTheDocument();
+  });
+
+  it('resolves a selected coordinate result before adding it', async () => {
+    const user = userEvent.setup();
+    const onAddDestination = vi.fn();
+    const coordinateResult = {
+      kind: 'coordinates',
+      id: 'coordinates:51.0576,-0.1342',
+      label: 'Use coordinates 51.0576, -0.1342',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    } satisfies Extract<PlaceSearchResult, { kind: 'coordinates' }>;
+    const searchPlaces = vi.fn().mockResolvedValue([coordinateResult]);
+
+    render(
+      <TopToolbar
+        onAddDestination={onAddDestination}
+        searchPlaces={searchPlaces}
+        resolveSearchResult={vi.fn(async () => balcombeResult)}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Search for a destination'), '51.0576, -0.1342');
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('51.0576, -0.1342'));
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Use coordinates 51.0576, -0.1342' })).toBeInTheDocument(),
+    );
+    await user.keyboard('{Enter}');
+
+    expect(onAddDestination).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Balcombe',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      }),
+    );
   });
 
   it('does not render temporary import and export controls', () => {
     render(
       <TopToolbar
         onAddDestination={vi.fn()}
+        resolveSearchResult={vi.fn()}
         searchPlaces={vi.fn()}
       />,
     );

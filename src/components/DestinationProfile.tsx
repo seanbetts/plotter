@@ -1,11 +1,13 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { formatLocationParts } from '../domain/locations';
 import type { ActivityItem, Destination } from '../domain/types';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
 
 type DestinationFormState = {
   sourceKey: string;
+  name: string;
   summary: string;
   highlights: string;
   personalRationale: string;
@@ -67,6 +69,7 @@ const destinationSourceKey = (destination: Destination) => `${destination.id}:${
 
 const createFormState = (destination: Destination): DestinationFormState => ({
   sourceKey: destinationSourceKey(destination),
+  name: destination.name,
   summary: destination.why.summary,
   highlights: destination.why.highlights,
   personalRationale: destination.why.personalRationale,
@@ -118,6 +121,8 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
     setSaveStatus('saving');
     try {
       await onUpdate(destination.id, {
+        name: form.name.trim() || destination.name,
+        location: destination.location,
         timing: {
           ...destination.timing,
           idealMonths: textToList(form.idealMonths),
@@ -161,7 +166,7 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
       <div className="profile-header">
         <div>
-          <p>{destination.countryRegion || 'Unassigned region'}</p>
+          <p>{formatLocationParts(destination.location) || 'Unassigned location'}</p>
           <h1>{destination.name}</h1>
         </div>
         <button type="button" onClick={onClose} aria-label="Close destination profile">
@@ -169,6 +174,10 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
         </button>
       </div>
 
+      <label>
+        Stop name
+        <input value={form.name} onChange={(event) => updateForm({ name: event.target.value })} />
+      </label>
       <label>
         Why it matters
         <textarea value={form.summary} onChange={(event) => updateForm({ summary: event.target.value })} />

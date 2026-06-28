@@ -92,6 +92,13 @@ describe('MapCanvas', () => {
     name: 'Cappadocia',
     countryRegion: 'Turkey',
     coordinates: { lat: 38.6431, lng: 34.8289 },
+    location: {
+      placeName: 'Cappadocia',
+      regionName: '',
+      countryName: 'Turkey',
+      sourceLabel: 'Cappadocia, Turkey',
+      sourceProvider: 'legacy',
+    },
     order: 0,
     status: 'idea',
     priority: 'medium',
@@ -112,6 +119,13 @@ describe('MapCanvas', () => {
     name: 'Tbilisi',
     countryRegion: 'Georgia',
     coordinates: { lat: 41.7151, lng: 44.8271 },
+    location: {
+      placeName: 'Tbilisi',
+      regionName: '',
+      countryName: 'Georgia',
+      sourceLabel: 'Tbilisi, Georgia',
+      sourceProvider: 'legacy',
+    },
   };
 
   const routeLeg: RouteLeg = {

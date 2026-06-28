@@ -16,6 +16,38 @@ function deferred<T>() {
 }
 
 describe('DestinationProfile', () => {
+  it('saves an edited stop name without changing location fields', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+    const onUpdate = vi.fn();
+
+    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    const input = screen.getByLabelText('Stop name');
+    await user.clear(input);
+    await user.type(input, 'Home');
+    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+
+    expect(onUpdate).toHaveBeenCalledWith(
+      destination.id,
+      expect.objectContaining({
+        name: 'Home',
+        location: destination.location,
+      }),
+    );
+  });
+
   it('edits destination summary, timing, and tags', async () => {
     const user = userEvent.setup();
     const destination = createDestination({

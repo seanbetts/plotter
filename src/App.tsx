@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { searchNominatimPlaces } from './adapters/geocoding';
+import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
 import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
@@ -12,6 +12,7 @@ import './styles.css';
 
 const repository = createTripRepository(tripDb);
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
+const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 
 export default function App() {
   const calculateRoute = useCallback(
@@ -50,6 +51,18 @@ export default function App() {
     },
     [addDestination, isInteractionLocked],
   );
+  const searchPlaces = useCallback(
+    (query: string) => searchMapTilerPlaces(query, { apiKey: mapTilerApiKey }),
+    [],
+  );
+  const resolveSearchResult = useCallback(
+    (result: Awaited<ReturnType<typeof searchMapTilerPlaces>>[number]) => {
+      if (result.kind === 'place') return Promise.resolve(result);
+
+      return resolveMapTilerCoordinates(result.coordinates, { apiKey: mapTilerApiKey });
+    },
+    [],
+  );
 
   const handleDeleteDestination = useCallback(
     async (destinationId: string) => {
@@ -75,7 +88,8 @@ export default function App() {
         {!isInteractionLocked ? (
           <>
             <TopToolbar
-              searchPlaces={searchNominatimPlaces}
+              searchPlaces={searchPlaces}
+              resolveSearchResult={resolveSearchResult}
               onAddDestination={handleAddDestination}
             />
             <ItineraryPanel

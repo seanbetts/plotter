@@ -1,4 +1,5 @@
 import type { Destination, RouteLeg } from './types';
+import { createLegacyLocation } from './locations';
 
 export type TripSnapshot = {
   version: 1;
@@ -23,6 +24,19 @@ export function serializeTripSnapshot(input: TripSnapshotInput): string {
   return JSON.stringify(snapshot, null, 2);
 }
 
+function normalizeSnapshotDestination(destination: Destination): Destination {
+  return {
+    ...destination,
+    countryRegion: destination.countryRegion ?? destination.location?.countryName ?? '',
+    location:
+      destination.location ??
+      createLegacyLocation({
+        name: destination.name,
+        countryRegion: destination.countryRegion,
+      }),
+  };
+}
+
 export function parseTripSnapshot(json: string): TripSnapshot {
   const value = JSON.parse(json) as Partial<TripSnapshot> | null;
 
@@ -38,7 +52,7 @@ export function parseTripSnapshot(json: string): TripSnapshot {
   return {
     version: 1,
     exportedAt: typeof value.exportedAt === 'string' ? value.exportedAt : new Date().toISOString(),
-    destinations: value.destinations as Destination[],
+    destinations: (value.destinations as Destination[]).map(normalizeSnapshotDestination),
     routeLegs: value.routeLegs as RouteLeg[],
   };
 }

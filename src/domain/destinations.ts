@@ -1,8 +1,10 @@
-import type { Coordinates, Destination } from './types';
+import type { Coordinates, Destination, DestinationLocation } from './types';
+import { createLegacyLocation } from './locations';
 
 type CreateDestinationInput = {
   name: string;
   countryRegion?: string;
+  location?: DestinationLocation;
   coordinates: Coordinates;
   order?: number;
 };
@@ -25,8 +27,9 @@ export function createDestination(input: CreateDestinationInput): Destination {
   return {
     id: createId(),
     name: input.name,
-    countryRegion: input.countryRegion ?? '',
+    countryRegion: input.location?.countryName || input.countryRegion || '',
     coordinates: input.coordinates,
+    location: input.location ?? createLegacyLocation({ name: input.name, countryRegion: input.countryRegion }),
     order: input.order ?? 0,
     status: 'idea',
     priority: 'medium',

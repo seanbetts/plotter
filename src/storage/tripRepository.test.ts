@@ -193,8 +193,10 @@ describe('trip repository', () => {
     const legacyDestination = {
       ...createDestination({
         name: 'Legacy stop',
+        countryRegion: 'Turkey',
         coordinates: { lat: 1, lng: 1 },
       }),
+      location: undefined,
       order: undefined,
     };
     const legacyLeg = {
@@ -214,6 +216,13 @@ describe('trip repository', () => {
     const [routeLeg] = await repository.listRouteLegs();
 
     expect(destination.order).toBe(0);
+    expect(destination.location).toEqual({
+      placeName: 'Legacy stop',
+      regionName: '',
+      countryName: 'Turkey',
+      sourceLabel: 'Legacy stop, Turkey',
+      sourceProvider: 'legacy',
+    });
     expect(routeLeg.type).toBe('driving-auto');
     expect(routeLeg.status).toBe('pending');
   });
