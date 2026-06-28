@@ -140,21 +140,36 @@ select {
   background: #111814;
 }
 
-.major-city-label {
+.major-city-marker {
   position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(17, 24, 20, 0.74);
+  font-size: 0.72rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  white-space: nowrap;
+  transform: translate(-6px, -50%);
+}
+
+.major-city-dot {
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(17, 24, 20, 0.82);
+  border-radius: 50%;
+  background: #f7f0d0;
+  box-shadow: 0 0 0 2px rgba(247, 240, 208, 0.24);
+}
+
+.major-city-label {
   display: block;
   max-width: 120px;
   padding: 2px 5px;
   border: 1px solid rgba(17, 24, 20, 0.18);
   border-radius: 4px;
-  color: rgba(17, 24, 20, 0.74);
-  background: rgba(245, 239, 227, 0.72);
+  background: rgba(245, 239, 227, 0.74);
   box-shadow: 0 4px 14px rgba(17, 24, 20, 0.1);
-  font-size: 0.72rem;
-  line-height: 1.1;
-  overflow-wrap: anywhere;
-  white-space: nowrap;
-  transform: translate(-50%, -120%);
 }
 
 .map-route-count {
@@ -400,7 +415,7 @@ select {
 
 .stop-item {
   display: grid;
-  grid-template-columns: 1fr 34px;
+  grid-template-columns: 30px 1fr 34px;
   gap: 6px;
   border: 1px solid rgba(245, 239, 227, 0.12);
   border-radius: 6px;
@@ -408,11 +423,25 @@ select {
 }
 
 .stop-select,
-.stop-delete {
+.stop-delete,
+.stop-drag {
   border: 0;
   color: #f5efe3;
   background: transparent;
   cursor: pointer;
+}
+
+.stop-drag {
+  display: grid;
+  width: 30px;
+  min-height: 100%;
+  place-items: center;
+  color: rgba(245, 239, 227, 0.42);
+  cursor: grab;
+}
+
+.stop-drag:active {
+  cursor: grabbing;
 }
 
 .stop-select {
@@ -450,6 +479,12 @@ select {
   background: rgba(255, 207, 186, 0.1);
 }
 
+.stop-drag:hover,
+.stop-drag:focus-visible {
+  color: #f5efe3;
+  background: rgba(245, 239, 227, 0.08);
+}
+
 .stop-list span {
   grid-row: span 2;
   color: rgba(245, 239, 227, 0.48);
@@ -473,6 +508,11 @@ select {
   font-size: 0.86rem;
 }
 
+.route-leg-list {
+  display: grid;
+  gap: 7px;
+}
+
 .route-leg-editor {
   display: grid;
   gap: 9px;
@@ -485,6 +525,55 @@ select {
   font-size: 0.78rem;
 }
 
+.route-leg-list p {
+  margin: 0;
+  color: rgba(245, 239, 227, 0.62);
+  font-size: 0.86rem;
+}
+
+.route-leg-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 118px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(245, 239, 227, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.route-leg-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  color: #111814;
+  background: #e9b44c;
+}
+
+.route-leg-row-shipping-manual .route-leg-icon {
+  background: #7ec8e3;
+}
+
+.route-leg-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.route-leg-copy strong,
+.route-leg-copy small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.route-leg-copy small {
+  color: rgba(245, 239, 227, 0.58);
+  font-size: 0.76rem;
+}
+
+.route-leg-type select,
 .route-leg-editor select,
 .route-leg-editor textarea {
   width: 100%;
@@ -495,6 +584,7 @@ select {
   background: rgba(255, 255, 255, 0.07);
 }
 
+.route-leg-type select:focus-visible,
 .route-leg-editor select:focus-visible,
 .route-leg-editor textarea:focus-visible,
 .route-leg-editor button:focus-visible {

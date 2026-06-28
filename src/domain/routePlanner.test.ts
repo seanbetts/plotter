@@ -1,0 +1,98 @@
+import { describe, expect, it } from 'vitest';
+import { createDestination } from './destinations';
+import { createRouteLeg } from './routeLegs';
+import { reconcileRouteLegsForDestinations } from './routePlanner';
+
+describe('route planner helpers', () => {
+  it('creates driving route legs for adjacent ordered destinations', () => {
+    const london = createDestination({
+      name: 'London',
+      coordinates: { lat: 51.5072, lng: -0.1276 },
+      order: 0,
+    });
+    const paris = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+      order: 1,
+    });
+    const istanbul = createDestination({
+      name: 'Istanbul',
+      coordinates: { lat: 41.0082, lng: 28.9784 },
+      order: 2,
+    });
+
+    const result = reconcileRouteLegsForDestinations([london, paris, istanbul], []);
+
+    expect(result.routeLegs).toHaveLength(2);
+    expect(result.removedRouteLegIds).toEqual([]);
+    expect(result.routeLegs).toMatchObject([
+      {
+        originDestinationId: london.id,
+        targetDestinationId: paris.id,
+        type: 'driving-auto',
+        status: 'pending',
+      },
+      {
+        originDestinationId: paris.id,
+        targetDestinationId: istanbul.id,
+        type: 'driving-auto',
+        status: 'pending',
+      },
+    ]);
+  });
+
+  it('preserves existing manual shipping legs for the same adjacent pair', () => {
+    const origin = createDestination({
+      name: 'Singapore',
+      coordinates: { lat: 1.3521, lng: 103.8198 },
+      order: 0,
+    });
+    const target = createDestination({
+      name: 'Perth',
+      coordinates: { lat: -31.9523, lng: 115.8613 },
+      order: 1,
+    });
+    const shippingLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'shipping-manual',
+      notes: 'Ship the truck across here.',
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, target], [shippingLeg]);
+
+    expect(result.routeLegs).toEqual([shippingLeg]);
+    expect(result.removedRouteLegIds).toEqual([]);
+  });
+
+  it('removes route legs that are no longer adjacent after a reorder', () => {
+    const first = createDestination({
+      name: 'First',
+      coordinates: { lat: 1, lng: 1 },
+      order: 0,
+    });
+    const second = createDestination({
+      name: 'Second',
+      coordinates: { lat: 2, lng: 2 },
+      order: 1,
+    });
+    const third = createDestination({
+      name: 'Third',
+      coordinates: { lat: 3, lng: 3 },
+      order: 2,
+    });
+    const oldLeg = createRouteLeg({
+      originDestinationId: first.id,
+      targetDestinationId: second.id,
+      type: 'driving-auto',
+    });
+
+    const result = reconcileRouteLegsForDestinations([first, third, second], [oldLeg]);
+
+    expect(result.removedRouteLegIds).toEqual([oldLeg.id]);
+    expect(result.routeLegs.map((leg) => [leg.originDestinationId, leg.targetDestinationId])).toEqual([
+      [first.id, third.id],
+      [third.id, second.id],
+    ]);
+  });
+});

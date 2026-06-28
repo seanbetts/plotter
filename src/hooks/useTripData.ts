@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
-import { createRouteLeg } from '../domain/routeLegs';
+import { reconcileRouteLegsForDestinations } from '../domain/routePlanner';
+import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
 import type { Coordinates, Destination, RouteLeg, RouteLegType } from '../domain/types';
 import type { createTripRepository } from '../storage/tripRepository';
 
@@ -12,7 +13,24 @@ type AddDestinationInput = {
   coordinates: Coordinates;
 };
 
-export function useTripData(repository: TripRepository) {
+type CalculatedRoute = Pick<
+  RouteLeg,
+  'distanceKm' | 'travelTimeHours' | 'geometry' | 'provider' | 'profile'
+>;
+
+type CalculateRouteInput = {
+  origin: Coordinates;
+  target: Coordinates;
+  profile: 'driving-car';
+};
+
+type UseTripDataOptions = {
+  calculateRoute?: (input: CalculateRouteInput) => Promise<CalculatedRoute>;
+};
+
+const createTimestamp = () => new Date().toISOString();
+
+export function useTripData(repository: TripRepository, options: UseTripDataOptions = {}) {
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [routeLegs, setRouteLegs] = useState<RouteLeg[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,6 +40,7 @@ export function useTripData(repository: TripRepository) {
   const isMountedRef = useRef(false);
   const activeRepositoryTokenRef = useRef<object | null>(null);
   const reloadSequenceRef = useRef(0);
+  const calculateRoute = options.calculateRoute;
   const repositoryToken = useMemo(() => ({ repository }), [repository]);
 
   const replaceDestinations = useCallback((nextDestinations: Destination[]) => {
@@ -129,16 +148,134 @@ export function useTripData(repository: TripRepository) {
     () => {
       const generation = repositoryToken;
       const isActiveAction = () => isActiveGeneration(generation);
+      const calculateDrivingRouteLegs = async (
+        nextDestinations: Destination[],
+        nextRouteLegs: RouteLeg[],
+      ) => {
+        if (!calculateRoute) return nextRouteLegs;
+
+        const destinationsById = new Map(
+          nextDestinations.map((destination) => [destination.id, destination]),
+        );
+        const calculatedRouteLegs: RouteLeg[] = [];
+
+        for (const leg of nextRouteLegs) {
+          const origin = destinationsById.get(leg.originDestinationId);
+          const target = destinationsById.get(leg.targetDestinationId);
+
+          if (
+            leg.type !== 'driving-auto' ||
+            leg.status === 'ready' ||
+            !origin ||
+            !target
+          ) {
+            calculatedRouteLegs.push(leg);
+            continue;
+          }
+
+          try {
+            const route = await calculateRoute({
+              origin: origin.coordinates,
+              target: target.coordinates,
+              profile: 'driving-car',
+            });
+            calculatedRouteLegs.push({
+              ...leg,
+              ...route,
+              status: 'ready',
+              error: undefined,
+              calculatedAt: createTimestamp(),
+              updatedAt: createTimestamp(),
+            });
+          } catch (caught) {
+            calculatedRouteLegs.push({
+              ...leg,
+              status: 'failed',
+              error: caught instanceof Error ? caught.message : 'Route calculation failed',
+              updatedAt: createTimestamp(),
+            });
+          }
+        }
+
+        return calculatedRouteLegs;
+      };
+
+      const finalizeRouteLeg = async (routeLeg: RouteLeg, nextDestinations: Destination[]) => {
+        const destinationsById = new Map(
+          nextDestinations.map((destination) => [destination.id, destination]),
+        );
+        const origin = destinationsById.get(routeLeg.originDestinationId);
+        const target = destinationsById.get(routeLeg.targetDestinationId);
+
+        if (!origin || !target) return routeLeg;
+
+        if (routeLeg.type === 'shipping-manual') {
+          return {
+            ...routeLeg,
+            status: 'manual',
+            geometry: createStraightLineGeometry(origin.coordinates, target.coordinates),
+            distanceKm: undefined,
+            travelTimeHours: undefined,
+            provider: undefined,
+            profile: undefined,
+            routeKey: undefined,
+            calculatedAt: undefined,
+            error: undefined,
+            updatedAt: createTimestamp(),
+          } satisfies RouteLeg;
+        }
+
+        const [calculatedRouteLeg] = await calculateDrivingRouteLegs(nextDestinations, [
+          {
+            ...routeLeg,
+            status: 'pending',
+            profile: routeLeg.profile ?? 'driving-car',
+            error: undefined,
+            updatedAt: createTimestamp(),
+          },
+        ]);
+        return calculatedRouteLeg;
+      };
+
+      const reconcileAndSaveRouteLegs = async (
+        nextDestinations: Destination[],
+        currentRouteLegs: RouteLeg[],
+      ) => {
+        const reconciliation = reconcileRouteLegsForDestinations(
+          nextDestinations,
+          currentRouteLegs,
+        );
+        const nextRouteLegs = await calculateDrivingRouteLegs(
+          nextDestinations,
+          reconciliation.routeLegs,
+        );
+
+        await Promise.all([
+          ...reconciliation.removedRouteLegIds.map((routeLegId) =>
+            repository.deleteRouteLeg(routeLegId),
+          ),
+          ...nextRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)),
+        ]);
+
+        if (!isActiveAction()) return currentRouteLegs;
+
+        replaceRouteLegs(nextRouteLegs);
+        return nextRouteLegs;
+      };
 
       return {
         async addDestination(input: AddDestinationInput) {
-          const destination = createDestination(input);
+          const destination = createDestination({
+            ...input,
+            order: destinationsRef.current.length,
+          });
           if (!isActiveAction()) return destination;
 
           await repository.saveDestination(destination);
           if (!isActiveAction()) return destination;
 
-          updateDestinations((current) => [...current, destination]);
+          const nextDestinations = updateDestinations((current) => [...current, destination]);
+          await reconcileAndSaveRouteLegs(nextDestinations, routeLegsRef.current);
           return destination;
         },
 
@@ -156,9 +293,10 @@ export function useTripData(repository: TripRepository) {
           await repository.saveDestination(updated);
           if (!isActiveAction()) return;
 
-          updateDestinations((current) =>
+          const nextDestinations = updateDestinations((current) =>
             current.map((destination) => (destination.id === destinationId ? updated : destination)),
           );
+          await reconcileAndSaveRouteLegs(nextDestinations, routeLegsRef.current);
         },
 
         async deleteDestination(destinationId: string) {
@@ -167,16 +305,41 @@ export function useTripData(repository: TripRepository) {
           await repository.deleteDestination(destinationId);
           if (!isActiveAction()) return;
 
-          updateDestinations((current) =>
+          const nextDestinations = updateDestinations((current) =>
             current.filter((destination) => destination.id !== destinationId),
           );
-          updateRouteLegs((current) =>
+          const remainingRouteLegs = updateRouteLegs((current) =>
             current.filter(
               (leg) =>
                 leg.originDestinationId !== destinationId &&
                 leg.targetDestinationId !== destinationId,
             ),
           );
+          await reconcileAndSaveRouteLegs(nextDestinations, remainingRouteLegs);
+        },
+
+        async reorderDestinations(destinationIds: string[]) {
+          const currentDestinations = destinationsRef.current;
+          const requestedIds = new Set(destinationIds);
+          const destinationsById = new Map(
+            currentDestinations.map((destination) => [destination.id, destination]),
+          );
+          const orderedDestinations = [
+            ...destinationIds
+              .map((destinationId) => destinationsById.get(destinationId))
+              .filter((destination): destination is Destination => destination !== undefined),
+            ...currentDestinations.filter((destination) => !requestedIds.has(destination.id)),
+          ].map((destination, order) => patchDestination(destination, { order }));
+
+          if (!isActiveAction()) return;
+
+          await Promise.all(
+            orderedDestinations.map((destination) => repository.saveDestination(destination)),
+          );
+          if (!isActiveAction()) return;
+
+          replaceDestinations(orderedDestinations);
+          await reconcileAndSaveRouteLegs(orderedDestinations, routeLegsRef.current);
         },
 
         async addRouteLeg(input: {
@@ -195,6 +358,31 @@ export function useTripData(repository: TripRepository) {
           return leg;
         },
 
+        async updateRouteLeg(
+          routeLegId: string,
+          patch: Partial<Omit<RouteLeg, 'id' | 'createdAt' | 'updatedAt'>>,
+        ) {
+          const existing = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
+          if (!existing) return;
+
+          const updated = await finalizeRouteLeg(
+            {
+              ...existing,
+              ...patch,
+              updatedAt: createTimestamp(),
+            },
+            destinationsRef.current,
+          );
+          if (!isActiveAction()) return;
+
+          await repository.saveRouteLeg(updated);
+          if (!isActiveAction()) return;
+
+          updateRouteLegs((current) =>
+            current.map((routeLeg) => (routeLeg.id === routeLegId ? updated : routeLeg)),
+          );
+        },
+
         async deleteRouteLeg(routeLegId: string) {
           if (!isActiveAction()) return;
 
@@ -207,7 +395,17 @@ export function useTripData(repository: TripRepository) {
         reload,
       };
     },
-    [isActiveGeneration, reload, repository, repositoryToken, updateDestinations, updateRouteLegs],
+    [
+      calculateRoute,
+      isActiveGeneration,
+      reload,
+      replaceDestinations,
+      replaceRouteLegs,
+      repository,
+      repositoryToken,
+      updateDestinations,
+      updateRouteLegs,
+    ],
   );
 
   return {

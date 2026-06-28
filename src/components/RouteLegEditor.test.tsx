@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
@@ -87,7 +87,7 @@ describe('RouteLegEditor', () => {
 });
 
 describe('ItineraryPanel', () => {
-  it('renders selectable stops, route summary, and the nested route editor', async () => {
+  it('renders selectable stops and generated route rows', async () => {
     const user = userEvent.setup();
     const origin = createDestination({
       name: 'Istanbul',
@@ -106,6 +106,8 @@ describe('ItineraryPanel', () => {
     });
     const onSelectDestination = vi.fn();
     const onDeleteDestination = vi.fn();
+    const onReorderDestinations = vi.fn();
+    const onUpdateRouteLeg = vi.fn();
 
     render(
       <ItineraryPanel
@@ -114,7 +116,8 @@ describe('ItineraryPanel', () => {
         selectedDestinationId={target.id}
         onSelectDestination={onSelectDestination}
         onDeleteDestination={onDeleteDestination}
-        onCreateRouteLeg={vi.fn()}
+        onReorderDestinations={onReorderDestinations}
+        onUpdateRouteLeg={onUpdateRouteLeg}
       />,
     );
 
@@ -125,7 +128,9 @@ describe('ItineraryPanel', () => {
     expect(selectedStop).toHaveAttribute('aria-current', 'location');
     expect(selectedStop.closest('.stop-item')).toHaveClass('is-selected');
     expect(screen.getByText('1 route leg')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add route leg' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add route leg' })).not.toBeInTheDocument();
+    expect(screen.getByText('Istanbul to Tbilisi')).toBeInTheDocument();
+    expect(screen.getByText('01 - pending')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '01 Istanbul Turkey' }));
 
@@ -135,6 +140,47 @@ describe('ItineraryPanel', () => {
 
     expect(onDeleteDestination).toHaveBeenCalledWith(origin.id);
     expect(onSelectDestination).toHaveBeenCalledTimes(1);
+
+    await user.selectOptions(
+      screen.getByLabelText('Leg type Istanbul to Tbilisi'),
+      'shipping-manual',
+    );
+
+    expect(onUpdateRouteLeg).toHaveBeenCalledWith(routeLeg.id, {
+      type: 'shipping-manual',
+    });
+  });
+
+  it('reorders stops by drag handle', () => {
+    const origin = createDestination({
+      name: 'Istanbul',
+      countryRegion: 'Turkey',
+      coordinates: { lat: 41.0082, lng: 28.9784 },
+    });
+    const target = createDestination({
+      name: 'Tbilisi',
+      countryRegion: 'Georgia',
+      coordinates: { lat: 41.7151, lng: 44.8271 },
+    });
+    const onReorderDestinations = vi.fn();
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={onReorderDestinations}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Drag Tbilisi' }));
+    fireEvent.dragOver(screen.getByTestId(`stop-drop-target-${origin.id}`));
+    fireEvent.drop(screen.getByTestId(`stop-drop-target-${origin.id}`));
+
+    expect(onReorderDestinations).toHaveBeenCalledWith([target.id, origin.id]);
   });
 
   it('shows an empty stops message', () => {
@@ -145,7 +191,8 @@ describe('ItineraryPanel', () => {
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
         onDeleteDestination={vi.fn()}
-        onCreateRouteLeg={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
       />,
     );
 

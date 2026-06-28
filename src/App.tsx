@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { searchNominatimPlaces } from './adapters/geocoding';
+import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
 import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
@@ -12,8 +13,17 @@ import './styles.css';
 
 const repository = createTripRepository(tripDb);
 const exportFileName = 'world-tour-planner.json';
+const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 
 export default function App() {
+  const calculateRoute = useCallback(
+    (input: Omit<Parameters<typeof calculateOpenRouteServiceRoute>[0], 'apiKey'>) =>
+      calculateOpenRouteServiceRoute({
+        ...input,
+        apiKey: openRouteServiceApiKey,
+      }),
+    [],
+  );
   const {
     destinations,
     routeLegs,
@@ -22,9 +32,10 @@ export default function App() {
     addDestination,
     updateDestination,
     deleteDestination,
-    addRouteLeg,
+    reorderDestinations,
+    updateRouteLeg,
     reload,
-  } = useTripData(repository);
+  } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const isInteractionLocked = isLoading || isImporting;
@@ -62,15 +73,6 @@ export default function App() {
       }
     },
     [isInteractionLocked, reload],
-  );
-
-  const handleCreateRouteLeg = useCallback(
-    async (input: Parameters<typeof addRouteLeg>[0]) => {
-      if (isInteractionLocked) return;
-
-      await addRouteLeg(input);
-    },
-    [addRouteLeg, isInteractionLocked],
   );
 
   const handleDeleteDestination = useCallback(
@@ -124,7 +126,8 @@ export default function App() {
               selectedDestinationId={selectedDestinationId}
               onSelectDestination={setSelectedDestinationId}
               onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
-              onCreateRouteLeg={handleCreateRouteLeg}
+              onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
+              onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
             />
           </>
         ) : null}

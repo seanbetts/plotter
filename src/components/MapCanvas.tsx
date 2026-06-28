@@ -10,7 +10,10 @@ type MapCanvasProps = {
   onSelectDestination: (destinationId: string) => void;
 };
 
-const styleUrl = 'https://demotiles.maplibre.org/style.json';
+const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
+const styleUrl = mapTilerApiKey
+  ? `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${mapTilerApiKey}`
+  : 'https://demotiles.maplibre.org/style.json';
 const majorCityMinZoom = 3;
 
 const majorCities = [
@@ -28,6 +31,20 @@ const majorCities = [
   { id: 'buenos-aires', name: 'Buenos Aires', coordinates: { lat: -34.6037, lng: -58.3816 } },
   { id: 'cape-town', name: 'Cape Town', coordinates: { lat: -33.9249, lng: 18.4241 } },
   { id: 'nairobi', name: 'Nairobi', coordinates: { lat: -1.2921, lng: 36.8219 } },
+  { id: 'madrid', name: 'Madrid', coordinates: { lat: 40.4168, lng: -3.7038 } },
+  { id: 'rome', name: 'Rome', coordinates: { lat: 41.9028, lng: 12.4964 } },
+  { id: 'athens', name: 'Athens', coordinates: { lat: 37.9838, lng: 23.7275 } },
+  { id: 'dubai', name: 'Dubai', coordinates: { lat: 25.2048, lng: 55.2708 } },
+  { id: 'delhi', name: 'Delhi', coordinates: { lat: 28.6139, lng: 77.209 } },
+  { id: 'singapore', name: 'Singapore', coordinates: { lat: 1.3521, lng: 103.8198 } },
+  { id: 'seoul', name: 'Seoul', coordinates: { lat: 37.5665, lng: 126.978 } },
+  { id: 'auckland', name: 'Auckland', coordinates: { lat: -36.8509, lng: 174.7645 } },
+  { id: 'vancouver', name: 'Vancouver', coordinates: { lat: 49.2827, lng: -123.1207 } },
+  { id: 'new-york', name: 'New York', coordinates: { lat: 40.7128, lng: -74.006 } },
+  { id: 'santiago', name: 'Santiago', coordinates: { lat: -33.4489, lng: -70.6693 } },
+  { id: 'lima', name: 'Lima', coordinates: { lat: -12.0464, lng: -77.0428 } },
+  { id: 'casablanca', name: 'Casablanca', coordinates: { lat: 33.5731, lng: -7.5898 } },
+  { id: 'addis-ababa', name: 'Addis Ababa', coordinates: { lat: 8.9806, lng: 38.7578 } },
 ];
 
 type ScreenPoint = {
@@ -187,13 +204,14 @@ export function MapCanvas({
           {majorCities.map((city) => (
             <span
               key={city.id}
-              className="major-city-label"
+              className="major-city-marker"
               style={{
                 left: `${cityPositions[city.id]?.x ?? 0}px`,
                 top: `${cityPositions[city.id]?.y ?? 0}px`,
               }}
             >
-              {city.name}
+              <span className="major-city-dot" aria-hidden="true" />
+              <span className="major-city-label">{city.name}</span>
             </span>
           ))}
         </div>

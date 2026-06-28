@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { createDestination } from '../domain/destinations';
 import { createTripDb } from '../storage/tripDb';
@@ -82,7 +82,7 @@ describe('useTripData', () => {
     expect(result.current.destinations[0].tags).toEqual(['bay']);
   });
 
-  it('adds and deletes a route leg', async () => {
+  it('adds and deletes an automatic route leg', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));
 
@@ -90,7 +90,6 @@ describe('useTripData', () => {
 
     let originDestinationId = '';
     let targetDestinationId = '';
-    let routeLegId = '';
 
     await act(async () => {
       const origin = await result.current.addDestination({
@@ -107,31 +106,152 @@ describe('useTripData', () => {
       targetDestinationId = target.id;
     });
 
-    await act(async () => {
-      const leg = await result.current.addRouteLeg({
-        originDestinationId,
-        targetDestinationId,
-        type: 'driving-auto',
-        notes: 'Mountain road',
-      });
-      routeLegId = leg.id;
-    });
+    const [routeLeg] = result.current.routeLegs;
 
     expect(result.current.routeLegs).toMatchObject([
       {
-        id: routeLegId,
+        id: routeLeg.id,
         originDestinationId,
         targetDestinationId,
         type: 'driving-auto',
-        notes: 'Mountain road',
+        status: 'pending',
       },
     ]);
 
     await act(async () => {
-      await result.current.deleteRouteLeg(routeLegId);
+      await result.current.deleteRouteLeg(routeLeg.id);
     });
 
     expect(result.current.routeLegs).toEqual([]);
+  });
+
+  it('automatically creates and calculates a driving route leg between adjacent destinations', async () => {
+    const repository = createTestRepository();
+    const calculateRoute = vi.fn().mockResolvedValue({
+      distanceKm: 123.4,
+      travelTimeHours: 2.5,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [19.0342, 43.1306],
+          [18.7712, 42.4247],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+    });
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'Durmitor',
+        countryRegion: 'Montenegro',
+        coordinates: { lat: 43.1306, lng: 19.0342 },
+      });
+      await result.current.addDestination({
+        name: 'Kotor',
+        countryRegion: 'Montenegro',
+        coordinates: { lat: 42.4247, lng: 18.7712 },
+      });
+    });
+
+    expect(calculateRoute).toHaveBeenCalledWith({
+      origin: { lat: 43.1306, lng: 19.0342 },
+      target: { lat: 42.4247, lng: 18.7712 },
+      profile: 'driving-car',
+    });
+    expect(result.current.routeLegs).toMatchObject([
+      {
+        type: 'driving-auto',
+        status: 'ready',
+        distanceKm: 123.4,
+        travelTimeHours: 2.5,
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+      },
+    ]);
+  });
+
+  it('reorders destinations and recalculates adjacent route legs', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'First',
+        coordinates: { lat: 1, lng: 1 },
+      });
+      await result.current.addDestination({
+        name: 'Second',
+        coordinates: { lat: 2, lng: 2 },
+      });
+      await result.current.addDestination({
+        name: 'Third',
+        coordinates: { lat: 3, lng: 3 },
+      });
+    });
+
+    const [first, second, third] = result.current.destinations;
+
+    await act(async () => {
+      await result.current.reorderDestinations([third.id, first.id, second.id]);
+    });
+
+    expect(result.current.destinations.map((destination) => destination.name)).toEqual([
+      'Third',
+      'First',
+      'Second',
+    ]);
+    expect(result.current.destinations.map((destination) => destination.order)).toEqual([0, 1, 2]);
+    expect(result.current.routeLegs.map((leg) => [leg.originDestinationId, leg.targetDestinationId])).toEqual([
+      [third.id, first.id],
+      [first.id, second.id],
+    ]);
+  });
+
+  it('marks an automatic route leg as a manual shipping leg', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'Panama City',
+        coordinates: { lat: 8.9824, lng: -79.5199 },
+      });
+      await result.current.addDestination({
+        name: 'Cartagena',
+        coordinates: { lat: 10.391, lng: -75.4794 },
+      });
+    });
+
+    const [routeLeg] = result.current.routeLegs;
+
+    await act(async () => {
+      await result.current.updateRouteLeg(routeLeg.id, {
+        type: 'shipping-manual',
+        notes: 'Ship around the Darien Gap.',
+      });
+    });
+
+    expect(result.current.routeLegs[0]).toMatchObject({
+      id: routeLeg.id,
+      type: 'shipping-manual',
+      status: 'manual',
+      notes: 'Ship around the Darien Gap.',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-79.5199, 8.9824],
+          [-75.4794, 10.391],
+        ],
+      },
+    });
   });
 
   it('removes attached route legs from state when deleting a destination', async () => {
@@ -157,11 +277,6 @@ describe('useTripData', () => {
       originDestinationId = origin.id;
       targetDestinationId = target.id;
 
-      await result.current.addRouteLeg({
-        originDestinationId,
-        targetDestinationId,
-        type: 'driving-auto',
-      });
     });
 
     expect(result.current.routeLegs).toHaveLength(1);
