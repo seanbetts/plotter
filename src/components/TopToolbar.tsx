@@ -1,5 +1,5 @@
 import { Download, Search, Upload } from 'lucide-react';
-import { useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import type { Coordinates } from '../domain/types';
 
@@ -23,24 +23,39 @@ export function TopToolbar({ searchPlaces, onAddDestination, onExport, onImportT
   const [results, setResults] = useState<PlaceSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const latestSearchId = useRef(0);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   async function handleSearch() {
+    const searchId = latestSearchId.current + 1;
+    latestSearchId.current = searchId;
     setIsSearching(true);
     setError(null);
     try {
-      setResults(await searchPlaces(query));
+      const nextResults = await searchPlaces(query);
+      if (searchId !== latestSearchId.current) return;
+      setResults(nextResults);
     } catch (caught) {
+      if (searchId !== latestSearchId.current) return;
+      setResults([]);
       setError(caught instanceof Error ? caught.message : 'Search failed');
     } finally {
-      setIsSearching(false);
+      if (searchId === latestSearchId.current) {
+        setIsSearching(false);
+      }
     }
   }
 
   async function handleImport(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    await onImportText(await file.text());
-    event.target.value = '';
+    try {
+      await onImportText(await file.text());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Import failed');
+    } finally {
+      event.target.value = '';
+    }
   }
 
   return (
@@ -63,10 +78,22 @@ export function TopToolbar({ searchPlaces, onAddDestination, onExport, onImportT
       <button type="button" className="icon-action" onClick={onExport} aria-label="Export trip data">
         <Download size={17} aria-hidden="true" />
       </button>
-      <label className="icon-action file-action" aria-label="Import trip data">
+      <button
+        type="button"
+        className="icon-action"
+        onClick={() => importInputRef.current?.click()}
+        aria-label="Import trip data"
+      >
         <Upload size={17} aria-hidden="true" />
-        <input type="file" accept="application/json" onChange={handleImport} />
-      </label>
+      </button>
+      <input
+        ref={importInputRef}
+        className="file-action-input"
+        type="file"
+        accept="application/json"
+        onChange={handleImport}
+        aria-label="Trip data import file"
+      />
       {isSearching ? <div className="toolbar-status">Searching...</div> : null}
       {error ? <div className="toolbar-error">{error}</div> : null}
       {results.length > 0 ? (

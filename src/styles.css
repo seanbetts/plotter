@@ -195,7 +195,7 @@ select {
   padding: 9px 11px;
 }
 
-.file-action input {
+.file-action-input {
   position: fixed;
   width: 1px;
   height: 1px;
