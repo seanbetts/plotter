@@ -35,9 +35,26 @@ type GeoJsonSource = maplibregl.GeoJSONSource & {
 
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 const styleUrl = mapTilerApiKey
-  ? `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${mapTilerApiKey}`
+  ? `https://api.maptiler.com/maps/streets-v4/style.json?key=${mapTilerApiKey}`
   : 'https://demotiles.maplibre.org/style.json';
-const majorCityMinZoom = 3;
+const majorCityMinZoom = 5;
+const hiddenBasemapLayerPatterns = [
+  'aerialway',
+  'barrier',
+  'building',
+  'contour',
+  'housenumber',
+  'landuse',
+  'mountain',
+  'park-label',
+  'parking',
+  'poi',
+  'rail',
+  'shop',
+  'trail',
+  'transit',
+];
+const softenedLineLayerPatterns = ['minor', 'path', 'track', 'service'];
 
 const majorCities = [
   { id: 'london', name: 'London', coordinates: { lat: 51.5072, lng: -0.1276 } },
@@ -204,6 +221,27 @@ function getGeoJsonSource(map: maplibregl.Map, sourceId: string) {
 
 function setSourceData(map: maplibregl.Map, sourceId: string, data: FeatureCollection) {
   getGeoJsonSource(map, sourceId)?.setData(data);
+}
+
+function layerMatchesPattern(layerId: string, patterns: string[]) {
+  const normalizedLayerId = layerId.toLowerCase();
+
+  return patterns.some((pattern) => normalizedLayerId.includes(pattern));
+}
+
+function calmBasemapStyle(map: maplibregl.Map) {
+  const layers = map.getStyle().layers ?? [];
+
+  for (const layer of layers) {
+    if (layerMatchesPattern(layer.id, hiddenBasemapLayerPatterns)) {
+      map.setLayoutProperty(layer.id, 'visibility', 'none');
+      continue;
+    }
+
+    if (layer.type === 'line' && layerMatchesPattern(layer.id, softenedLineLayerPatterns)) {
+      map.setPaintProperty(layer.id, 'line-opacity', 0.32);
+    }
+  }
 }
 
 export function MapCanvas({
@@ -429,6 +467,7 @@ export function MapCanvas({
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     const handleLoad = () => {
+      calmBasemapStyle(map);
       addMapLayers();
     };
     const handleDestinationClick = (event: maplibregl.MapLayerMouseEvent) => {

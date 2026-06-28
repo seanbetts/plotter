@@ -16,6 +16,9 @@ type MockMap = {
   addSource: Mock;
   addLayer: Mock;
   getLayer: Mock;
+  getStyle: Mock;
+  setLayoutProperty: Mock;
+  setPaintProperty: Mock;
   getCanvas: Mock;
   fitBounds: Mock;
   project: Mock;
@@ -44,6 +47,17 @@ const maplibreMock = vi.hoisted(() => {
       }),
       addLayer: vi.fn(),
       getLayer: vi.fn(),
+      getStyle: vi.fn(() => ({
+        layers: [
+          { id: 'poi-label', type: 'symbol' },
+          { id: 'mountain-peak-label', type: 'symbol' },
+          { id: 'road_minor', type: 'line' },
+          { id: 'road_major', type: 'line' },
+          { id: 'country-label', type: 'symbol' },
+        ],
+      })),
+      setLayoutProperty: vi.fn(),
+      setPaintProperty: vi.fn(),
       getCanvas: vi.fn(() => ({ style: { cursor: '' } })),
       fitBounds: vi.fn(),
       project,
@@ -186,6 +200,47 @@ describe('MapCanvas', () => {
     );
 
     expect(screen.getByText('Blank planning map')).toBeInTheDocument();
+  });
+
+  it('uses the quieter streets basemap style by default', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    expect(maplibreMock.Map).toHaveBeenCalledWith(
+      expect.objectContaining({
+        style: expect.stringContaining('/maps/streets-v4/style.json'),
+      }),
+    );
+  });
+
+  it('hides noisy basemap layers and softens minor roads after style load', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('poi-label', 'visibility', 'none');
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('mountain-peak-label', 'visibility', 'none');
+    expect(map.setLayoutProperty).not.toHaveBeenCalledWith('country-label', 'visibility', 'none');
+    expect(map.setPaintProperty).toHaveBeenCalledWith('road_minor', 'line-opacity', 0.32);
+    expect(map.setPaintProperty).not.toHaveBeenCalledWith('road_major', 'line-opacity', expect.any(Number));
   });
 
   it('adds MapLibre sources and layers for destinations, routes, and major cities', () => {
@@ -384,7 +439,7 @@ describe('MapCanvas', () => {
     expect(map.addLayer).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'world-tour-city-labels',
-        minzoom: 3,
+        minzoom: 5,
       }),
     );
   });
