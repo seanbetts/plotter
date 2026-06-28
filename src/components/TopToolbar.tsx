@@ -133,8 +133,9 @@ export function TopToolbar({ searchPlaces, resolveSearchResult, onAddDestination
 
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape') {
-      setResults([]);
-      setHighlightedIndex(-1);
+      event.preventDefault();
+      event.stopPropagation();
+      handleClearSearch();
       return;
     }
 

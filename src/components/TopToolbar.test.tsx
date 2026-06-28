@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { PlaceSearchResult } from '../adapters/geocoding';
@@ -232,6 +232,58 @@ describe('TopToolbar', () => {
     expect(input).toHaveValue('');
     expect(screen.queryByText('Search unavailable')).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' })).not.toBeInTheDocument();
+  });
+
+  it('clears the active search with Escape', async () => {
+    const user = userEvent.setup();
+    const searchPlaces = vi.fn().mockResolvedValue([balcombeResult]);
+
+    render(
+      <TopToolbar
+        onAddDestination={vi.fn()}
+        resolveSearchResult={vi.fn()}
+        searchPlaces={searchPlaces}
+      />,
+    );
+
+    const input = screen.getByLabelText('Search for a destination');
+    await user.type(input, 'Balcombe');
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Balcombe'));
+    await screen.findByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' });
+
+    await user.keyboard('{Escape}');
+
+    expect(input).toHaveValue('');
+    expect(screen.queryByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear destination search' })).not.toBeInTheDocument();
+  });
+
+  it('cancels Escape when clearing the active search', async () => {
+    const user = userEvent.setup();
+    const onAncestorKeyDown = vi.fn();
+    const searchPlaces = vi.fn().mockResolvedValue([balcombeResult]);
+
+    render(
+      <div onKeyDown={onAncestorKeyDown}>
+        <TopToolbar
+          onAddDestination={vi.fn()}
+          resolveSearchResult={vi.fn()}
+          searchPlaces={searchPlaces}
+        />
+      </div>,
+    );
+
+    const input = screen.getByLabelText('Search for a destination');
+    await user.type(input, 'Balcombe');
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Balcombe'));
+    await screen.findByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' });
+    onAncestorKeyDown.mockClear();
+
+    const wasNotCanceled = fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+
+    expect(wasNotCanceled).toBe(false);
+    expect(onAncestorKeyDown).not.toHaveBeenCalled();
+    expect(input).toHaveValue('');
   });
 
   it('resolves a selected coordinate result before adding it', async () => {
