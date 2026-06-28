@@ -33,14 +33,18 @@ export default function App() {
 
   const handleAddDestination = useCallback(
     async (input: Parameters<typeof addDestination>[0]) => {
+      if (isLoading) return;
+
       const destination = await addDestination(input);
       setSelectedDestinationId(destination.id);
     },
-    [addDestination],
+    [addDestination, isLoading],
   );
 
   const handleDropPin = useCallback(
     async (coordinates: { lat: number; lng: number }) => {
+      if (isLoading) return;
+
       const destination = await addDestination({
         name: `Dropped pin ${destinations.length + 1}`,
         countryRegion: 'Dropped pin',
@@ -48,11 +52,13 @@ export default function App() {
       });
       setSelectedDestinationId(destination.id);
     },
-    [addDestination, destinations.length],
+    [addDestination, destinations.length, isLoading],
   );
 
   const handleImportText = useCallback(
     async (text: string) => {
+      if (isLoading) return;
+
       const snapshot = parseTripSnapshot(text);
       await repository.replaceTripData({
         destinations: snapshot.destinations,
@@ -61,17 +67,21 @@ export default function App() {
       await reload();
       setSelectedDestinationId(snapshot.destinations[0]?.id ?? null);
     },
-    [reload],
+    [isLoading, reload],
   );
 
   const handleCreateRouteLeg = useCallback(
     async (input: Parameters<typeof addRouteLeg>[0]) => {
+      if (isLoading) return;
+
       await addRouteLeg(input);
     },
-    [addRouteLeg],
+    [addRouteLeg, isLoading],
   );
 
   const handleExport = useCallback(() => {
+    if (isLoading) return;
+
     const snapshotJson = serializeTripSnapshot({ destinations, routeLegs });
     const blob = new Blob([snapshotJson], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -83,7 +93,7 @@ export default function App() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-  }, [destinations, routeLegs]);
+  }, [destinations, isLoading, routeLegs]);
 
   return (
     <main className="app-shell">
@@ -95,20 +105,24 @@ export default function App() {
           onSelectDestination={setSelectedDestinationId}
           onDropPin={handleDropPin}
         />
-        <TopToolbar
-          searchPlaces={searchNominatimPlaces}
-          onAddDestination={handleAddDestination}
-          onExport={handleExport}
-          onImportText={handleImportText}
-        />
-        <ItineraryPanel
-          destinations={destinations}
-          routeLegs={routeLegs}
-          selectedDestinationId={selectedDestinationId}
-          onSelectDestination={setSelectedDestinationId}
-          onCreateRouteLeg={handleCreateRouteLeg}
-        />
-        {selectedDestination ? (
+        {!isLoading ? (
+          <>
+            <TopToolbar
+              searchPlaces={searchNominatimPlaces}
+              onAddDestination={handleAddDestination}
+              onExport={handleExport}
+              onImportText={handleImportText}
+            />
+            <ItineraryPanel
+              destinations={destinations}
+              routeLegs={routeLegs}
+              selectedDestinationId={selectedDestinationId}
+              onSelectDestination={setSelectedDestinationId}
+              onCreateRouteLeg={handleCreateRouteLeg}
+            />
+          </>
+        ) : null}
+        {!isLoading && selectedDestination ? (
           <DestinationProfile
             destination={selectedDestination}
             onUpdate={updateDestination}

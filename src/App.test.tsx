@@ -1,46 +1,87 @@
-import Dexie from 'dexie';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { searchNominatimPlaces } from './adapters/geocoding';
+import type { Destination, RouteLeg } from './domain/types';
 
-const tripDbMock = vi.hoisted(() => ({
-  name: `world-tour-app-test-${crypto.randomUUID()}`,
-  db: null as import('./storage/tripDb').TripDb | null,
-}));
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+};
+
+type MockMap = {
+  on: Mock;
+  off: Mock;
+  remove: Mock;
+  addControl: Mock;
+  project: Mock;
+};
 
 const maplibreMock = vi.hoisted(() => {
+  const mapInstances: MockMap[] = [];
   const project = vi.fn(([lng, lat]: [number, number]) => ({
     x: lng * 10 + 1000,
     y: lat * -10 + 500,
   }));
   const Map = vi.fn(function () {
-    return {
+    const map = {
       on: vi.fn(),
       off: vi.fn(),
       remove: vi.fn(),
       addControl: vi.fn(),
       project,
     };
+    mapInstances.push(map);
+    return map;
   });
   const NavigationControl = vi.fn(function () {
     return {};
   });
 
-  return { Map, NavigationControl, project };
+  return { Map, NavigationControl, mapInstances, project };
 });
 
-vi.mock('./storage/tripDb', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./storage/tripDb')>();
-  const db = actual.createTripDb(tripDbMock.name);
-  tripDbMock.db = db;
-
-  return {
-    ...actual,
-    tripDb: db,
+const repositoryMock = vi.hoisted(() => {
+  const repository = {
+    destinations: [] as Destination[],
+    routeLegs: [] as RouteLeg[],
+    initialDestinations: Promise.resolve([] as Destination[]),
+    initialRouteLegs: Promise.resolve([] as RouteLeg[]),
+    listDestinations: vi.fn(async () => repository.initialDestinations),
+    saveDestination: vi.fn(async (destination: Destination) => {
+      repository.destinations.push(destination);
+    }),
+    deleteDestination: vi.fn(async (destinationId: string) => {
+      repository.destinations = repository.destinations.filter((destination) => destination.id !== destinationId);
+      repository.routeLegs = repository.routeLegs.filter(
+        (leg) => leg.originDestinationId !== destinationId && leg.targetDestinationId !== destinationId,
+      );
+    }),
+    listRouteLegs: vi.fn(async () => repository.initialRouteLegs),
+    saveRouteLeg: vi.fn(async (routeLeg: RouteLeg) => {
+      repository.routeLegs.push(routeLeg);
+    }),
+    deleteRouteLeg: vi.fn(async (routeLegId: string) => {
+      repository.routeLegs = repository.routeLegs.filter((routeLeg) => routeLeg.id !== routeLegId);
+    }),
+    replaceTripData: vi.fn(async (snapshot: { destinations: Destination[]; routeLegs: RouteLeg[] }) => {
+      repository.destinations = [...snapshot.destinations];
+      repository.routeLegs = [...snapshot.routeLegs];
+    }),
   };
+
+  return repository;
 });
+
+vi.mock('./storage/tripDb', () => ({
+  tripDb: {},
+}));
+
+vi.mock('./storage/tripRepository', () => ({
+  createTripRepository: vi.fn(() => repositoryMock),
+}));
 
 vi.mock('./adapters/geocoding', () => ({
   searchNominatimPlaces: vi.fn(),
@@ -54,21 +95,27 @@ vi.mock('maplibre-gl', () => ({
 }));
 
 describe('App', () => {
-  beforeEach(async () => {
-    await tripDbMock.db?.destinations.clear();
-    await tripDbMock.db?.routeLegs.clear();
+  beforeEach(() => {
+    repositoryMock.destinations = [];
+    repositoryMock.routeLegs = [];
+    repositoryMock.initialDestinations = Promise.resolve([]);
+    repositoryMock.initialRouteLegs = Promise.resolve([]);
+    repositoryMock.listDestinations.mockClear();
+    repositoryMock.saveDestination.mockClear();
+    repositoryMock.deleteDestination.mockClear();
+    repositoryMock.listRouteLegs.mockClear();
+    repositoryMock.saveRouteLeg.mockClear();
+    repositoryMock.deleteRouteLeg.mockClear();
+    repositoryMock.replaceTripData.mockClear();
     vi.mocked(searchNominatimPlaces).mockReset();
     maplibreMock.Map.mockClear();
     maplibreMock.NavigationControl.mockClear();
+    maplibreMock.mapInstances.length = 0;
     maplibreMock.project.mockClear();
+    vi.unstubAllGlobals();
   });
 
-  afterAll(async () => {
-    tripDbMock.db?.close();
-    await Dexie.delete(tripDbMock.name);
-  });
-
-  it('adds a searched destination and opens its profile', async () => {
+  it('adds a searched destination and opens its profile after trip data loads', async () => {
     vi.mocked(searchNominatimPlaces).mockResolvedValue([
       {
         id: 'place-kyoto',
@@ -91,4 +138,48 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Kyoto' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select Kyoto' })).toHaveClass('is-selected');
   });
+
+  it('keeps mutation and export actions unavailable while trip data is loading', async () => {
+    const initialDestinations = createDeferred<Destination[]>();
+    const initialRouteLegs = createDeferred<RouteLeg[]>();
+    repositoryMock.initialDestinations = initialDestinations.promise;
+    repositoryMock.initialRouteLegs = initialRouteLegs.promise;
+    const createObjectUrl = vi.fn(() => 'blob:trip-data');
+    const revokeObjectUrl = vi.fn();
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    });
+
+    render(<App />);
+
+    expect(screen.getByText('Loading trip data')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
+
+    await waitFor(() => expect(maplibreMock.mapInstances).toHaveLength(1));
+    const doubleClickHandler = maplibreMock.mapInstances[0].on.mock.calls.find(
+      ([eventName]) => eventName === 'dblclick',
+    )?.[1];
+    doubleClickHandler({ lngLat: { lat: 35.0116, lng: 135.7681 } });
+
+    expect(repositoryMock.saveDestination).not.toHaveBeenCalled();
+    expect(createObjectUrl).not.toHaveBeenCalled();
+
+    initialDestinations.resolve([]);
+    initialRouteLegs.resolve([]);
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('Search for a destination')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export trip data' })).toBeInTheDocument();
+  });
 });
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return { promise, resolve };
+}
