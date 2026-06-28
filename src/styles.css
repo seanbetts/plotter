@@ -297,7 +297,7 @@ select {
   bottom: 16px;
   z-index: 9;
   display: grid;
-  width: min(390px, calc(100vw - 32px));
+  width: min(520px, calc(100vw - 32px));
   max-height: 58vh;
   gap: 14px;
   overflow: auto;
@@ -363,10 +363,9 @@ select {
 
 .stop-select {
   display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 2px 8px;
+  gap: 3px;
   min-width: 0;
-  padding: 10px 9px;
+  padding: 12px 9px;
   text-align: left;
 }
 
@@ -402,12 +401,6 @@ select {
   background: rgba(245, 239, 227, 0.08);
 }
 
-.stop-select span {
-  grid-row: span 2;
-  color: rgba(245, 239, 227, 0.48);
-  font-size: 0.78rem;
-}
-
 .stop-select strong {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -432,25 +425,32 @@ select {
 }
 
 .inline-route-leg {
-  display: flex;
+  display: grid;
+  grid-template-columns: 36px 1px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  padding: 4px 42px 4px 64px;
+  gap: 14px;
+  min-height: 58px;
+  padding: 5px 42px 5px 64px;
   color: rgba(245, 239, 227, 0.62);
   font-size: 0.76rem;
 }
 
 .inline-route-rail {
-  width: 24px;
-  height: 1px;
-  background: rgba(245, 239, 227, 0.18);
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: center;
+  width: 1px;
+  height: 46px;
+  background: rgba(245, 239, 227, 0.34);
 }
 
 .inline-route-type {
   display: grid;
-  width: 24px;
-  height: 24px;
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
+  width: 32px;
+  height: 32px;
   place-items: center;
   border: 1px solid rgba(245, 239, 227, 0.14);
   border-radius: 6px;
@@ -467,6 +467,18 @@ select {
 .inline-route-type:focus-visible {
   outline: 2px solid rgba(233, 180, 76, 0.84);
   outline-offset: 2px;
+}
+
+.inline-route-type svg {
+  display: block;
+}
+
+.inline-route-metrics {
+  display: grid;
+  grid-column: 3;
+  grid-row: 1;
+  gap: 2px;
+  justify-items: start;
 }
 
 .inline-route-metric {

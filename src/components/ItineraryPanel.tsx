@@ -105,11 +105,10 @@ export function ItineraryPanel({
                 <button
                   type="button"
                   className="stop-select"
-                  aria-label={`${String(index + 1).padStart(2, '0')} ${destination.name} ${region}`}
+                  aria-label={`${destination.name} ${region}`}
                   aria-current={isSelected ? 'location' : undefined}
                   onClick={() => onSelectDestination(destination.id)}
                 >
-                  <span>{String(index + 1).padStart(2, '0')}</span>
                   <strong>{destination.name}</strong>
                   <small>{region}</small>
                 </button>
@@ -140,10 +139,12 @@ export function ItineraryPanel({
                   >
                     {routeLeg.type === 'shipping-manual' ? <Ship size={15} /> : <Car size={15} />}
                   </button>
-                  <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
-                  {formatLegTime(routeLeg) ? (
-                    <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
-                  ) : null}
+                  <span className="inline-route-metrics">
+                    <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
+                    {formatLegTime(routeLeg) ? (
+                      <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
+                    ) : null}
+                  </span>
                 </div>
               ) : null}
             </div>

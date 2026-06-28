@@ -127,16 +127,18 @@ describe('ItineraryPanel', () => {
     expect(screen.getByLabelText('Itinerary')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Stops' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Routes' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '01 Istanbul Turkey' })).toBeInTheDocument();
-    const selectedStop = screen.getByRole('button', { name: '02 Tbilisi Georgia' });
+    expect(screen.getByRole('button', { name: 'Istanbul Turkey' })).toBeInTheDocument();
+    expect(screen.queryByText('01')).not.toBeInTheDocument();
+    const selectedStop = screen.getByRole('button', { name: 'Tbilisi Georgia' });
     expect(selectedStop).toHaveAttribute('aria-current', 'location');
     expect(selectedStop.closest('.stop-item')).toHaveClass('is-selected');
     expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add route leg' })).not.toBeInTheDocument();
     expect(screen.getByText('99 mi')).toBeInTheDocument();
     expect(screen.getByText('2.3 hr')).toBeInTheDocument();
+    expect(screen.getByText('99 mi').parentElement).toHaveClass('inline-route-metrics');
 
-    await user.click(screen.getByRole('button', { name: '01 Istanbul Turkey' }));
+    await user.click(screen.getByRole('button', { name: 'Istanbul Turkey' }));
 
     expect(onSelectDestination).toHaveBeenCalledWith(origin.id);
 
