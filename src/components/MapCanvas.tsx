@@ -96,6 +96,45 @@ const routeLineLayerId = 'world-tour-routes-line';
 const cityPointsLayerId = 'world-tour-city-points';
 const cityLabelsLayerId = 'world-tour-city-labels';
 
+const mapColorTokenFallbacks = {
+  '--color-accent': '#e9b44c',
+  '--color-map-selected': '#f7f0d0',
+  '--color-route-shipping': '#7ec8e3',
+  '--color-text': '#f5efe3',
+  '--color-text-rgb': '245 239 227',
+  '--color-text-inverse': '#111814',
+  '--color-text-inverse-rgb': '17 24 20',
+};
+
+function readCssToken(tokenName: keyof typeof mapColorTokenFallbacks) {
+  if (typeof window === 'undefined') {
+    return mapColorTokenFallbacks[tokenName];
+  }
+
+  return (
+    window.getComputedStyle(document.documentElement).getPropertyValue(tokenName).trim() ||
+    mapColorTokenFallbacks[tokenName]
+  );
+}
+
+function readCssRgbToken(tokenName: keyof typeof mapColorTokenFallbacks, alpha: number) {
+  const rgbChannels = readCssToken(tokenName).split(/\s+/).join(', ');
+
+  return `rgba(${rgbChannels}, ${alpha})`;
+}
+
+function getMapLayerColors() {
+  return {
+    accent: readCssToken('--color-accent'),
+    selected: readCssToken('--color-map-selected'),
+    shipping: readCssToken('--color-route-shipping'),
+    text: readCssToken('--color-text'),
+    textInverse: readCssToken('--color-text-inverse'),
+    cityText: readCssRgbToken('--color-text-inverse-rgb', 0.82),
+    cityHalo: readCssRgbToken('--color-text-rgb', 0.82),
+  };
+}
+
 function emptyFeatureCollection<TGeometry extends Point | LineString, TProperties>(): FeatureCollection<
   TGeometry,
   TProperties
@@ -324,6 +363,7 @@ export function MapCanvas({
   const addMapLayers = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
+    const mapColors = getMapLayerColors();
 
     if (!map.getSource(destinationsSourceId)) {
       map.addSource(destinationsSourceId, {
@@ -360,10 +400,10 @@ export function MapCanvas({
             'match',
             ['get', 'type'],
             'shipping-manual',
-            '#7ec8e3',
+            mapColors.shipping,
             'failed',
-            '#f5efe3',
-            '#e9b44c',
+            mapColors.text,
+            mapColors.accent,
           ],
           'line-dasharray': [
             'match',
@@ -386,9 +426,9 @@ export function MapCanvas({
         type: 'circle',
         source: destinationsSourceId,
         paint: {
-          'circle-color': ['case', ['get', 'selected'], '#f7f0d0', '#e9b44c'],
+          'circle-color': ['case', ['get', 'selected'], mapColors.selected, mapColors.accent],
           'circle-radius': ['case', ['get', 'selected'], 9, 7],
-          'circle-stroke-color': '#111814',
+          'circle-stroke-color': mapColors.textInverse,
           'circle-stroke-width': 2,
         },
       } as maplibregl.LayerSpecification);
@@ -406,8 +446,8 @@ export function MapCanvas({
           'text-size': 12,
         },
         paint: {
-          'text-color': '#111814',
-          'text-halo-color': '#f5efe3',
+          'text-color': mapColors.textInverse,
+          'text-halo-color': mapColors.text,
           'text-halo-width': 1.5,
         },
       } as maplibregl.LayerSpecification);
@@ -420,9 +460,9 @@ export function MapCanvas({
         source: majorCitiesSourceId,
         minzoom: majorCityMinZoom,
         paint: {
-          'circle-color': '#f7f0d0',
+          'circle-color': mapColors.selected,
           'circle-radius': 3,
-          'circle-stroke-color': '#111814',
+          'circle-stroke-color': mapColors.textInverse,
           'circle-stroke-width': 1,
         },
       } as maplibregl.LayerSpecification);
@@ -442,8 +482,8 @@ export function MapCanvas({
           'text-anchor': 'left',
         },
         paint: {
-          'text-color': 'rgba(17, 24, 20, 0.82)',
-          'text-halo-color': 'rgba(245, 239, 227, 0.82)',
+          'text-color': mapColors.cityText,
+          'text-halo-color': mapColors.cityHalo,
           'text-halo-width': 1.2,
         },
       } as maplibregl.LayerSpecification);
