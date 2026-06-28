@@ -36,5 +36,17 @@ export function createTripRepository(db: TripDb) {
     async deleteRouteLeg(routeLegId: string): Promise<void> {
       await db.routeLegs.delete(routeLegId);
     },
+
+    async replaceTripData(snapshot: {
+      destinations: Destination[];
+      routeLegs: RouteLeg[];
+    }): Promise<void> {
+      await db.transaction('rw', db.destinations, db.routeLegs, async () => {
+        await db.destinations.clear();
+        await db.routeLegs.clear();
+        await db.destinations.bulkPut(snapshot.destinations);
+        await db.routeLegs.bulkPut(snapshot.routeLegs);
+      });
+    },
   };
 }

@@ -114,4 +114,26 @@ describe('trip repository', () => {
 
     expect(await repository.listRouteLegs()).toEqual([]);
   });
+
+  it('replaces all trip data from a snapshot', async () => {
+    const repository = createTestRepository();
+    const oldDestination = createDestination({
+      name: 'Old stop',
+      coordinates: { lat: 0, lng: 0 },
+    });
+    const newDestination = createDestination({
+      name: 'New stop',
+      coordinates: { lat: 1, lng: 1 },
+    });
+
+    await repository.saveDestination(oldDestination);
+    await repository.replaceTripData({
+      destinations: [newDestination],
+      routeLegs: [],
+    });
+
+    expect((await repository.listDestinations()).map((destination) => destination.name)).toEqual([
+      'New stop',
+    ]);
+  });
 });
