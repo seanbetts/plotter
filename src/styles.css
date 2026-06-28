@@ -457,3 +457,77 @@ select {
 .route-leg-editor button:hover {
   background: #f0c564;
 }
+
+.app-status {
+  position: absolute;
+  top: 76px;
+  left: 16px;
+  z-index: 13;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 9px 11px;
+  border: 1px solid rgba(245, 239, 227, 0.14);
+  border-radius: 6px;
+  color: #f5efe3;
+  background: rgba(17, 24, 20, 0.88);
+  backdrop-filter: blur(16px);
+  font-size: 0.86rem;
+}
+
+.app-status-error {
+  border-color: rgba(255, 207, 186, 0.3);
+  color: #ffcfba;
+}
+
+@media (max-width: 760px) {
+  .app-shell,
+  .map-stage {
+    min-height: 100dvh;
+  }
+
+  .top-toolbar {
+    right: 12px;
+    left: 12px;
+    flex-wrap: wrap;
+  }
+
+  .search-group {
+    flex: 1 1 100%;
+  }
+
+  .search-group input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .search-results {
+    width: 100%;
+  }
+
+  .app-status {
+    top: 112px;
+    right: 12px;
+    left: 12px;
+    max-width: none;
+  }
+
+  .itinerary-panel {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 38vh;
+  }
+
+  .destination-profile {
+    top: 92px;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .map-route-count {
+    right: 12px;
+    bottom: calc(38vh + 24px);
+  }
+}
