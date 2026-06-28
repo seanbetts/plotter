@@ -28,6 +28,7 @@ export function ItineraryPanel({
             aria-label={`${String(index + 1).padStart(2, '0')} ${destination.name} ${
               destination.countryRegion || 'Unassigned region'
             }`}
+            aria-current={destination.id === selectedDestinationId ? 'location' : undefined}
             className={destination.id === selectedDestinationId ? 'is-selected' : ''}
             onClick={() => onSelectDestination(destination.id)}
           >

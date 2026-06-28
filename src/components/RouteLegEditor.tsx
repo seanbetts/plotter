@@ -14,16 +14,33 @@ type RouteLegEditorProps = {
   onCreateRouteLeg: (input: CreateRouteLegInput) => Promise<void> | void;
 };
 
+function hasDestination(destinations: Destination[], destinationId: string) {
+  return destinations.some((destination) => destination.id === destinationId);
+}
+
+function formatDestinationOption(destination: Destination) {
+  return `${destination.name} - ${destination.countryRegion || 'Unassigned region'}`;
+}
+
 export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEditorProps) {
   const [originDestinationId, setOriginDestinationId] = useState('');
   const [targetDestinationId, setTargetDestinationId] = useState('');
   const [type, setType] = useState<RouteLegType>('driving');
   const [notes, setNotes] = useState('');
 
+  const originSelectValue = hasDestination(destinations, originDestinationId) ? originDestinationId : '';
+  const targetSelectValue = hasDestination(destinations, targetDestinationId) ? targetDestinationId : '';
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!originDestinationId || !targetDestinationId || originDestinationId === targetDestinationId) {
+    if (
+      !originDestinationId ||
+      !targetDestinationId ||
+      originDestinationId === targetDestinationId ||
+      !hasDestination(destinations, originDestinationId) ||
+      !hasDestination(destinations, targetDestinationId)
+    ) {
       return;
     }
 
@@ -40,11 +57,11 @@ export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEdito
     <form className="route-leg-editor" onSubmit={handleSubmit}>
       <label>
         Origin
-        <select value={originDestinationId} onChange={(event) => setOriginDestinationId(event.target.value)}>
+        <select value={originSelectValue} onChange={(event) => setOriginDestinationId(event.target.value)}>
           <option value="">Choose origin</option>
           {destinations.map((destination) => (
             <option key={destination.id} value={destination.id}>
-              {destination.name}
+              {formatDestinationOption(destination)}
             </option>
           ))}
         </select>
@@ -52,11 +69,11 @@ export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEdito
 
       <label>
         Target
-        <select value={targetDestinationId} onChange={(event) => setTargetDestinationId(event.target.value)}>
+        <select value={targetSelectValue} onChange={(event) => setTargetDestinationId(event.target.value)}>
           <option value="">Choose target</option>
           {destinations.map((destination) => (
             <option key={destination.id} value={destination.id}>
-              {destination.name}
+              {formatDestinationOption(destination)}
             </option>
           ))}
         </select>
