@@ -614,6 +614,34 @@ describe('MapCanvas', () => {
     expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
   });
 
+  it('renders destination stop labels as positioned pill overlays', () => {
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    const destinationLabelLayer = map.addLayer.mock.calls
+      .map(([layer]) => layer)
+      .find((layer) => layer.id === 'world-tour-destination-labels');
+    const stopLabel = screen.getByText('1. Cappadocia');
+
+    expect(destinationLabelLayer).toBeUndefined();
+    expect(stopLabel).toHaveClass('map-destination-label');
+    expect(Number.parseFloat(stopLabel.style.left)).toBeCloseTo(1348.289);
+    expect(Number.parseFloat(stopLabel.style.top)).toBeCloseTo(113.569);
+  });
+
   it('stores destinations and real route geometry in MapLibre sources', () => {
     render(
       <MapCanvas

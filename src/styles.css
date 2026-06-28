@@ -137,6 +137,40 @@ select {
   pointer-events: none;
 }
 
+.map-destination-label-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.map-destination-label {
+  position: absolute;
+  display: inline-flex;
+  max-width: min(190px, 48vw);
+  min-height: 24px;
+  align-items: center;
+  padding: 4px 8px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--color-accent-rgb) / 0.24);
+  border-radius: var(--radius-pill);
+  color: var(--color-accent);
+  background: rgb(255 255 255 / 0.82);
+  box-shadow: 0 2px 8px rgb(var(--color-text-inverse-rgb) / 0.12);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  text-overflow: ellipsis;
+  transform: translate(-50%, 14px);
+  white-space: nowrap;
+}
+
+.map-destination-label.is-selected {
+  border-color: rgb(var(--color-accent-rgb) / 0.44);
+  background: rgb(255 255 255 / 0.9);
+}
+
 .map-detail-dev-panel {
   position: absolute;
   right: 16px;

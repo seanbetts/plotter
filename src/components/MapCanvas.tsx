@@ -30,6 +30,15 @@ type CityFeatureProperties = {
   name: string;
 };
 
+type ProjectedDestinationLabel = {
+  id: string;
+  name: string;
+  order: number;
+  selected: boolean;
+  x: number;
+  y: number;
+};
+
 type GeoJsonSource = maplibregl.GeoJSONSource & {
   setData: (data: FeatureCollection) => void;
 };
@@ -47,6 +56,9 @@ const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 const styleUrl = mapTilerApiKey
   ? `https://api.maptiler.com/maps/streets-v4/style.json?key=${mapTilerApiKey}`
   : 'https://demotiles.maplibre.org/style.json';
+const cityLabelFontStack = mapTilerApiKey
+  ? ['Roboto Regular', 'Noto Sans Regular']
+  : ['Open Sans Semibold'];
 const majorCityMinZoom = 5;
 const showMapDetailDevTools = import.meta.env.VITE_ENABLE_MAP_DETAIL_DEV_TOOLS === 'true';
 const minDetailZoom = 1;
@@ -430,7 +442,6 @@ const destinationsSourceId = 'world-tour-destinations';
 const routesSourceId = 'world-tour-routes';
 const majorCitiesSourceId = 'world-tour-major-cities';
 const destinationPointsLayerId = 'world-tour-destination-points';
-const destinationLabelsLayerId = 'world-tour-destination-labels';
 const routeLineLayerId = 'world-tour-routes-line';
 const cityPointsLayerId = 'world-tour-city-points';
 const cityLabelsLayerId = 'world-tour-city-labels';
@@ -701,6 +712,7 @@ export function MapCanvas({
   const [selectedZoomStep, setSelectedZoomStep] = useState(1);
   const [currentMapZoom, setCurrentMapZoom] = useState(1.4);
   const [mapDetailSettings, setMapDetailSettings] = useState(createDefaultMapDetailSettings);
+  const [projectedDestinationLabels, setProjectedDestinationLabels] = useState<ProjectedDestinationLabel[]>([]);
   const selectedZoomStepRef = useRef(selectedZoomStep);
   const mapDetailSettingsRef = useRef(mapDetailSettings);
 
@@ -720,6 +732,29 @@ export function MapCanvas({
     applyCurrentMapDetailSettings();
   }, [applyCurrentMapDetailSettings, mapDetailSettings, selectedZoomStep]);
 
+  const updateDestinationLabelPositions = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      setProjectedDestinationLabels([]);
+      return;
+    }
+
+    setProjectedDestinationLabels(
+      latestDestinationsRef.current.map((destination, index) => {
+        const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
+
+        return {
+          id: destination.id,
+          name: destination.name,
+          order: index + 1,
+          selected: destination.id === latestSelectedDestinationIdRef.current,
+          x: point.x,
+          y: point.y,
+        };
+      }),
+    );
+  }, []);
+
   const updateMapSources = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -738,7 +773,8 @@ export function MapCanvas({
       buildRouteFeatures(latestDestinationsRef.current, latestRouteLegsRef.current),
     );
     setSourceData(map, majorCitiesSourceId, buildMajorCityFeatures());
-  }, []);
+    updateDestinationLabelPositions();
+  }, [updateDestinationLabelPositions]);
 
   const fitMapToDestinations = useCallback((nextDestinations: Destination[]) => {
     const map = mapRef.current;
@@ -857,25 +893,6 @@ export function MapCanvas({
       } as maplibregl.LayerSpecification);
     }
 
-    if (!map.getLayer(destinationLabelsLayerId)) {
-      map.addLayer({
-        id: destinationLabelsLayerId,
-        type: 'symbol',
-        source: destinationsSourceId,
-        layout: {
-          'text-field': ['concat', ['to-string', ['get', 'order']], '. ', ['get', 'name']],
-          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-          'text-offset': [0, 1.25],
-          'text-size': 12,
-        },
-        paint: {
-          'text-color': mapColors.textInverse,
-          'text-halo-color': mapColors.text,
-          'text-halo-width': 1.5,
-        },
-      } as maplibregl.LayerSpecification);
-    }
-
     if (!map.getLayer(cityPointsLayerId)) {
       map.addLayer({
         id: cityPointsLayerId,
@@ -899,7 +916,7 @@ export function MapCanvas({
         minzoom: majorCityMinZoom,
         layout: {
           'text-field': ['get', 'name'],
-          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-font': cityLabelFontStack,
           'text-offset': [0.7, 0],
           'text-size': 11,
           'text-anchor': 'left',
@@ -913,9 +930,10 @@ export function MapCanvas({
     }
 
     updateMapSources();
+    updateDestinationLabelPositions();
     fitMapToDestinations(latestDestinationsRef.current);
     previousDestinationCountRef.current = latestDestinationsRef.current.length;
-  }, [fitMapToDestinations, updateMapSources]);
+  }, [fitMapToDestinations, updateDestinationLabelPositions, updateMapSources]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -936,6 +954,10 @@ export function MapCanvas({
         calmBasemapStyle(map);
       }
       addMapLayers();
+      updateDestinationLabelPositions();
+    };
+    const handleMapMove = () => {
+      updateDestinationLabelPositions();
     };
     const handleZoomEnd = () => {
       const nextZoom = map.getZoom();
@@ -957,6 +979,9 @@ export function MapCanvas({
     };
 
     map.on('load', handleLoad);
+    map.on('move', handleMapMove);
+    map.on('zoom', handleMapMove);
+    map.on('resize', handleMapMove);
     map.on('zoomend', handleZoomEnd);
     map.on('click', destinationPointsLayerId, handleDestinationClick);
     map.on('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
@@ -966,6 +991,9 @@ export function MapCanvas({
 
     return () => {
       map.off('load', handleLoad);
+      map.off('move', handleMapMove);
+      map.off('zoom', handleMapMove);
+      map.off('resize', handleMapMove);
       map.off('zoomend', handleZoomEnd);
       map.off('click', destinationPointsLayerId, handleDestinationClick);
       map.off('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
@@ -973,7 +1001,7 @@ export function MapCanvas({
       map.remove();
       mapRef.current = null;
     };
-  }, [addMapLayers, applyCurrentMapDetailSettings]);
+  }, [addMapLayers, applyCurrentMapDetailSettings, updateDestinationLabelPositions]);
 
   const selectedZoomSettings = mapDetailSettings[selectedZoomStep];
   const visibleDetailCount = mapDetailCategories.filter(
@@ -1006,6 +1034,25 @@ export function MapCanvas({
     <section className="map-canvas" aria-label="Interactive world tour map">
       <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
       {destinations.length === 0 ? <div className="map-empty-label">Blank planning map</div> : null}
+      <div className="map-destination-label-layer" aria-hidden="true">
+        {projectedDestinationLabels.map((destinationLabel) => (
+          <span
+            key={destinationLabel.id}
+            className={[
+              'map-destination-label',
+              destinationLabel.selected ? 'is-selected' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            style={{
+              left: `${destinationLabel.x}px`,
+              top: `${destinationLabel.y}px`,
+            }}
+          >
+            {destinationLabel.order}. {destinationLabel.name}
+          </span>
+        ))}
+      </div>
       {showMapDetailDevTools ? (
         <section className="map-detail-dev-panel" role="group" aria-label="Map detail by zoom">
           <div className="map-detail-dev-panel__header">
