@@ -25,6 +25,8 @@ export default function App() {
     reload,
   } = useTripData(repository);
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const isInteractionLocked = isLoading || isImporting;
 
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
@@ -33,17 +35,17 @@ export default function App() {
 
   const handleAddDestination = useCallback(
     async (input: Parameters<typeof addDestination>[0]) => {
-      if (isLoading) return;
+      if (isInteractionLocked) return;
 
       const destination = await addDestination(input);
       setSelectedDestinationId(destination.id);
     },
-    [addDestination, isLoading],
+    [addDestination, isInteractionLocked],
   );
 
   const handleDropPin = useCallback(
     async (coordinates: { lat: number; lng: number }) => {
-      if (isLoading) return;
+      if (isInteractionLocked) return;
 
       const destination = await addDestination({
         name: `Dropped pin ${destinations.length + 1}`,
@@ -52,35 +54,40 @@ export default function App() {
       });
       setSelectedDestinationId(destination.id);
     },
-    [addDestination, destinations.length, isLoading],
+    [addDestination, destinations.length, isInteractionLocked],
   );
 
   const handleImportText = useCallback(
     async (text: string) => {
-      if (isLoading) return;
+      if (isInteractionLocked) return;
 
       const snapshot = parseTripSnapshot(text);
-      await repository.replaceTripData({
-        destinations: snapshot.destinations,
-        routeLegs: snapshot.routeLegs,
-      });
-      await reload();
-      setSelectedDestinationId(snapshot.destinations[0]?.id ?? null);
+      setIsImporting(true);
+      try {
+        await repository.replaceTripData({
+          destinations: snapshot.destinations,
+          routeLegs: snapshot.routeLegs,
+        });
+        await reload();
+        setSelectedDestinationId(snapshot.destinations[0]?.id ?? null);
+      } finally {
+        setIsImporting(false);
+      }
     },
-    [isLoading, reload],
+    [isInteractionLocked, reload],
   );
 
   const handleCreateRouteLeg = useCallback(
     async (input: Parameters<typeof addRouteLeg>[0]) => {
-      if (isLoading) return;
+      if (isInteractionLocked) return;
 
       await addRouteLeg(input);
     },
-    [addRouteLeg, isLoading],
+    [addRouteLeg, isInteractionLocked],
   );
 
   const handleExport = useCallback(() => {
-    if (isLoading) return;
+    if (isInteractionLocked) return;
 
     const snapshotJson = serializeTripSnapshot({ destinations, routeLegs });
     const blob = new Blob([snapshotJson], { type: 'application/json' });
@@ -93,7 +100,7 @@ export default function App() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-  }, [destinations, isLoading, routeLegs]);
+  }, [destinations, isInteractionLocked, routeLegs]);
 
   return (
     <main className="app-shell">
@@ -105,7 +112,7 @@ export default function App() {
           onSelectDestination={setSelectedDestinationId}
           onDropPin={handleDropPin}
         />
-        {!isLoading ? (
+        {!isInteractionLocked ? (
           <>
             <TopToolbar
               searchPlaces={searchNominatimPlaces}
@@ -122,14 +129,14 @@ export default function App() {
             />
           </>
         ) : null}
-        {!isLoading && selectedDestination ? (
+        {!isInteractionLocked && selectedDestination ? (
           <DestinationProfile
             destination={selectedDestination}
             onUpdate={updateDestination}
             onClose={() => setSelectedDestinationId(null)}
           />
         ) : null}
-        {isLoading ? (
+        {isInteractionLocked ? (
           <div className="app-status" role="status">
             Loading trip data
           </div>
