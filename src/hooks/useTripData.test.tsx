@@ -111,7 +111,7 @@ describe('useTripData', () => {
       const leg = await result.current.addRouteLeg({
         originDestinationId,
         targetDestinationId,
-        type: 'driving',
+        type: 'driving-auto',
         notes: 'Mountain road',
       });
       routeLegId = leg.id;
@@ -122,7 +122,7 @@ describe('useTripData', () => {
         id: routeLegId,
         originDestinationId,
         targetDestinationId,
-        type: 'driving',
+        type: 'driving-auto',
         notes: 'Mountain road',
       },
     ]);
@@ -160,7 +160,7 @@ describe('useTripData', () => {
       await result.current.addRouteLeg({
         originDestinationId,
         targetDestinationId,
-        type: 'driving',
+        type: 'driving-auto',
       });
     });
 

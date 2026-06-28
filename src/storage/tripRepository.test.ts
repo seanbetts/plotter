@@ -56,7 +56,7 @@ describe('trip repository', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving',
+      type: 'driving-auto',
     });
 
     await repository.saveDestination(origin);
@@ -80,7 +80,7 @@ describe('trip repository', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving',
+      type: 'driving-auto',
     });
 
     await repository.saveDestination(origin);
@@ -104,7 +104,7 @@ describe('trip repository', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving',
+      type: 'driving-auto',
     });
 
     await repository.saveRouteLeg(leg);
@@ -128,7 +128,7 @@ describe('trip repository', () => {
     const oldLeg = createRouteLeg({
       originDestinationId: oldOrigin.id,
       targetDestinationId: oldTarget.id,
-      type: 'uncertain',
+      type: 'shipping-manual',
     });
     const newOrigin = createDestination({
       name: 'New origin',
@@ -141,7 +141,7 @@ describe('trip repository', () => {
     const newLeg = createRouteLeg({
       originDestinationId: newOrigin.id,
       targetDestinationId: newTarget.id,
-      type: 'driving',
+      type: 'driving-auto',
     });
 
     await repository.saveDestination(oldOrigin);
@@ -164,5 +164,57 @@ describe('trip repository', () => {
     expect(destinationNames).not.toContain('Old target');
     expect(routeLegIds).toEqual([newLeg.id]);
     expect(routeLegIds).not.toContain(oldLeg.id);
+  });
+
+  it('lists destinations by itinerary order', async () => {
+    const repository = createTestRepository();
+    const second = createDestination({
+      name: 'Second',
+      coordinates: { lat: 2, lng: 2 },
+      order: 2,
+    });
+    const first = createDestination({
+      name: 'First',
+      coordinates: { lat: 1, lng: 1 },
+      order: 1,
+    });
+
+    await repository.saveDestination(second);
+    await repository.saveDestination(first);
+
+    expect((await repository.listDestinations()).map((destination) => destination.name)).toEqual([
+      'First',
+      'Second',
+    ]);
+  });
+
+  it('normalizes legacy records without order or route status', async () => {
+    const repository = createTestRepository();
+    const legacyDestination = {
+      ...createDestination({
+        name: 'Legacy stop',
+        coordinates: { lat: 1, lng: 1 },
+      }),
+      order: undefined,
+    };
+    const legacyLeg = {
+      ...createRouteLeg({
+        originDestinationId: 'origin-1',
+        targetDestinationId: 'target-1',
+        type: 'driving-auto',
+      }),
+      type: 'driving',
+      status: undefined,
+    };
+
+    await repository.saveDestination(legacyDestination as never);
+    await repository.saveRouteLeg(legacyLeg as never);
+
+    const [destination] = await repository.listDestinations();
+    const [routeLeg] = await repository.listRouteLegs();
+
+    expect(destination.order).toBe(0);
+    expect(routeLeg.type).toBe('driving-auto');
+    expect(routeLeg.status).toBe('pending');
   });
 });

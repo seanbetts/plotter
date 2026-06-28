@@ -16,7 +16,7 @@ describe('trip snapshots', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving',
+      type: 'driving-auto',
     });
 
     const json = serializeTripSnapshot({
@@ -29,7 +29,7 @@ describe('trip snapshots', () => {
       'Meteora',
       'Cappadocia',
     ]);
-    expect(parsed.routeLegs[0].type).toBe('driving');
+    expect(parsed.routeLegs[0].type).toBe('driving-auto');
   });
 
   it('rejects invalid snapshot JSON', () => {

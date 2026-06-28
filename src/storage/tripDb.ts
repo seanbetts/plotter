@@ -14,6 +14,11 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
     routeLegs: 'id, originDestinationId, targetDestinationId, type, updatedAt',
   });
 
+  db.version(2).stores({
+    destinations: 'id, order, name, countryRegion, status, priority, updatedAt',
+    routeLegs: 'id, originDestinationId, targetDestinationId, type, status, routeKey, updatedAt',
+  });
+
   return db;
 }
 

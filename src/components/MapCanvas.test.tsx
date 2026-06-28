@@ -65,6 +65,7 @@ describe('MapCanvas', () => {
     name: 'Cappadocia',
     countryRegion: 'Turkey',
     coordinates: { lat: 38.6431, lng: 34.8289 },
+    order: 0,
     status: 'idea',
     priority: 'medium',
     timing: { idealMonths: [], expectedStayDays: 3, provisionalStartDate: '', provisionalEndDate: '' },
@@ -90,7 +91,8 @@ describe('MapCanvas', () => {
     id: 'route-1',
     originDestinationId: destination.id,
     targetDestinationId: targetDestination.id,
-    type: 'driving',
+    type: 'driving-auto',
+    status: 'ready',
     notes: '',
     createdAt: '2026-06-28T00:00:00.000Z',
     updatedAt: '2026-06-28T00:00:00.000Z',
@@ -175,7 +177,7 @@ describe('MapCanvas', () => {
     );
 
     expect(screen.getByText('1 route leg')).toBeInTheDocument();
-    expect(container.querySelector('.route-line-driving')).toBeInTheDocument();
+    expect(container.querySelector('.route-line-driving-auto')).toBeInTheDocument();
   });
 
   it('uses map projection for pin and route placement', () => {
@@ -191,7 +193,7 @@ describe('MapCanvas', () => {
     );
 
     const pin = screen.getByRole('button', { name: 'Select Cappadocia' });
-    const route = container.querySelector('.route-line-driving');
+    const route = container.querySelector('.route-line-driving-auto');
 
     expect(maplibreMock.project).toHaveBeenCalledWith([destination.coordinates.lng, destination.coordinates.lat]);
     expect(pin).toHaveStyle({ left: '34.8289px', top: '38.6431px' });

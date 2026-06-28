@@ -97,16 +97,16 @@ select {
   opacity: 0.9;
 }
 
-.route-line-driving {
+.route-line-driving-auto {
   stroke: #e9b44c;
 }
 
-.route-line-ferry-shipping {
+.route-line-shipping-manual {
   stroke: #7ec8e3;
   stroke-dasharray: 8 9;
 }
 
-.route-line-uncertain {
+.route-line-failed {
   stroke: #f5efe3;
   stroke-dasharray: 3 8;
   opacity: 0.72;

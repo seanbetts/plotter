@@ -25,7 +25,7 @@ function formatDestinationOption(destination: Destination) {
 export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEditorProps) {
   const [originDestinationId, setOriginDestinationId] = useState('');
   const [targetDestinationId, setTargetDestinationId] = useState('');
-  const [type, setType] = useState<RouteLegType>('driving');
+  const [type, setType] = useState<RouteLegType>('driving-auto');
   const [notes, setNotes] = useState('');
 
   const originSelectValue = hasDestination(destinations, originDestinationId) ? originDestinationId : '';
@@ -82,9 +82,8 @@ export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEdito
       <label>
         Leg type
         <select value={type} onChange={(event) => setType(event.target.value as RouteLegType)}>
-          <option value="driving">driving</option>
-          <option value="ferry-shipping">ferry-shipping</option>
-          <option value="uncertain">uncertain</option>
+          <option value="driving-auto">driving-auto</option>
+          <option value="shipping-manual">shipping-manual</option>
         </select>
       </label>
 

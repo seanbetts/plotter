@@ -1,10 +1,39 @@
 import type { Destination, RouteLeg } from '../domain/types';
 import type { TripDb } from './tripDb';
 
+type LegacyRouteLeg = Omit<RouteLeg, 'type' | 'status'> & {
+  type?: RouteLeg['type'] | 'driving' | 'ferry-shipping' | 'uncertain';
+  status?: RouteLeg['status'];
+};
+
+function normalizeDestination(destination: Destination, index = 0): Destination {
+  return {
+    ...destination,
+    order: Number.isFinite(destination.order) ? destination.order : index,
+  };
+}
+
+function normalizeRouteLeg(routeLeg: LegacyRouteLeg): RouteLeg {
+  const type = routeLeg.type === 'shipping-manual' || routeLeg.type === 'ferry-shipping' || routeLeg.type === 'uncertain'
+    ? 'shipping-manual'
+    : 'driving-auto';
+
+  return {
+    ...routeLeg,
+    type,
+    status: routeLeg.status ?? (type === 'shipping-manual' ? 'manual' : 'pending'),
+    profile: routeLeg.profile ?? (type === 'driving-auto' ? 'driving-car' : undefined),
+  };
+}
+
 export function createTripRepository(db: TripDb) {
   return {
     async listDestinations(): Promise<Destination[]> {
-      return db.destinations.orderBy('updatedAt').toArray();
+      const destinations = await db.destinations.toArray();
+
+      return destinations
+        .map((destination, index) => normalizeDestination(destination, index))
+        .sort((left, right) => left.order - right.order || left.createdAt.localeCompare(right.createdAt));
     },
 
     async saveDestination(destination: Destination): Promise<void> {
@@ -26,7 +55,11 @@ export function createTripRepository(db: TripDb) {
     },
 
     async listRouteLegs(): Promise<RouteLeg[]> {
-      return db.routeLegs.orderBy('updatedAt').toArray();
+      const routeLegs = await db.routeLegs.toArray();
+
+      return routeLegs
+        .map((routeLeg) => normalizeRouteLeg(routeLeg as LegacyRouteLeg))
+        .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
     },
 
     async saveRouteLeg(routeLeg: RouteLeg): Promise<void> {

@@ -7,7 +7,8 @@ export type Coordinates = {
 
 export type DestinationStatus = 'idea' | 'planned' | 'confirmed' | 'visited';
 export type Priority = 'low' | 'medium' | 'high' | 'must-do';
-export type RouteLegType = 'driving' | 'ferry-shipping' | 'uncertain';
+export type RouteLegType = 'driving-auto' | 'shipping-manual';
+export type RouteLegStatus = 'pending' | 'calculating' | 'ready' | 'failed' | 'manual';
 
 export type MediaItem = {
   id: string;
@@ -41,6 +42,7 @@ export type Destination = {
   name: string;
   countryRegion: string;
   coordinates: Coordinates;
+  order: number;
   status: DestinationStatus;
   priority: Priority;
   timing: {
@@ -79,9 +81,15 @@ export type RouteLeg = {
   originDestinationId: string;
   targetDestinationId: string;
   type: RouteLegType;
+  status: RouteLegStatus;
   distanceKm?: number;
   travelTimeHours?: number;
   geometry?: LineString;
+  provider?: string;
+  profile?: string;
+  routeKey?: string;
+  calculatedAt?: string;
+  error?: string;
   notes: string;
   createdAt: string;
   updatedAt: string;

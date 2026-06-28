@@ -4,6 +4,7 @@ type CreateDestinationInput = {
   name: string;
   countryRegion?: string;
   coordinates: Coordinates;
+  order?: number;
 };
 
 const nowIso = () => new Date().toISOString();
@@ -26,6 +27,7 @@ export function createDestination(input: CreateDestinationInput): Destination {
     name: input.name,
     countryRegion: input.countryRegion ?? '',
     coordinates: input.coordinates,
+    order: input.order ?? 0,
     status: 'idea',
     priority: 'medium',
     timing: {

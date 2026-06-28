@@ -237,6 +237,7 @@ function createDestinationSnapshot(id: string, name: string): Destination {
     name,
     countryRegion: 'Portugal',
     coordinates: { lat: 38.7223, lng: -9.1393 },
+    order: 0,
     status: 'idea',
     priority: 'medium',
     timing: {

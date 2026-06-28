@@ -13,6 +13,7 @@ describe('destination helpers', () => {
     expect(destination.countryRegion).toBe('Turkey');
     expect(destination.status).toBe('idea');
     expect(destination.priority).toBe('medium');
+    expect(destination.order).toBe(0);
     expect(destination.timing.expectedStayDays).toBe(3);
     expect(destination.why.summary).toBe('');
     expect(destination.media).toEqual([]);
@@ -40,5 +41,15 @@ describe('destination helpers', () => {
     expect(updated.why.summary).toContain('Southern Alps');
     expect(updated.tags).toEqual(['ski', 'mountains']);
     expect(updated.updatedAt).not.toBe(destination.updatedAt);
+  });
+
+  it('accepts an explicit itinerary order', () => {
+    const destination = createDestination({
+      name: 'Tbilisi',
+      coordinates: { lat: 41.7151, lng: 44.8271 },
+      order: 12,
+    });
+
+    expect(destination.order).toBe(12);
   });
 });

@@ -27,14 +27,14 @@ describe('RouteLegEditor', () => {
     expect(screen.getAllByRole('option', { name: 'Cartagena - Colombia' })).toHaveLength(2);
     await user.selectOptions(screen.getByLabelText('Origin'), origin.id);
     await user.selectOptions(screen.getByLabelText('Target'), target.id);
-    await user.selectOptions(screen.getByLabelText('Leg type'), 'ferry-shipping');
+    await user.selectOptions(screen.getByLabelText('Leg type'), 'shipping-manual');
     await user.type(screen.getByLabelText('Route notes'), 'Darien Gap shipping leg.');
     await user.click(screen.getByRole('button', { name: 'Add route leg' }));
 
     expect(onCreateRouteLeg).toHaveBeenCalledWith({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'ferry-shipping',
+      type: 'shipping-manual',
       notes: 'Darien Gap shipping leg.',
     });
     expect(screen.getByLabelText('Route notes')).toHaveValue('');
@@ -102,7 +102,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving',
+      type: 'driving-auto',
     });
     const onSelectDestination = vi.fn();
     const onDeleteDestination = vi.fn();
