@@ -1,5 +1,5 @@
 import { createRouteKey, createRouteLeg } from './routeLegs';
-import type { Destination, RouteLeg } from './types';
+import type { Coordinates, Destination, RouteLeg } from './types';
 
 type ReconcileRouteLegsResult = {
   routeLegs: RouteLeg[];
@@ -8,6 +8,51 @@ type ReconcileRouteLegsResult = {
 
 function routePairKey(originDestinationId: string, targetDestinationId: string) {
   return `${originDestinationId}:${targetDestinationId}`;
+}
+
+function degreesToRadians(degrees: number) {
+  return (degrees * Math.PI) / 180;
+}
+
+function distanceKm(left: Coordinates, right: Coordinates) {
+  const earthRadiusKm = 6371;
+  const latDelta = degreesToRadians(right.lat - left.lat);
+  const lngDelta = degreesToRadians(right.lng - left.lng);
+  const leftLat = degreesToRadians(left.lat);
+  const rightLat = degreesToRadians(right.lat);
+  const haversine =
+    Math.sin(latDelta / 2) ** 2 +
+    Math.cos(leftLat) * Math.cos(rightLat) * Math.sin(lngDelta / 2) ** 2;
+
+  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+export function findBestDestinationInsertionIndex(
+  destinations: Destination[],
+  coordinates: Coordinates,
+): number {
+  if (destinations.length <= 1) {
+    return destinations.length;
+  }
+
+  let bestIndex = destinations.length;
+  let bestScore = distanceKm(destinations[destinations.length - 1].coordinates, coordinates);
+
+  for (let insertionIndex = 1; insertionIndex < destinations.length; insertionIndex += 1) {
+    const previousDestination = destinations[insertionIndex - 1];
+    const nextDestination = destinations[insertionIndex];
+    const addedDistance =
+      distanceKm(previousDestination.coordinates, coordinates) +
+      distanceKm(coordinates, nextDestination.coordinates) -
+      distanceKm(previousDestination.coordinates, nextDestination.coordinates);
+
+    if (addedDistance < bestScore) {
+      bestScore = addedDistance;
+      bestIndex = insertionIndex;
+    }
+  }
+
+  return bestIndex;
 }
 
 export function reconcileRouteLegsForDestinations(

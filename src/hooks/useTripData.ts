@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
-import { reconcileRouteLegsForDestinations } from '../domain/routePlanner';
+import { findBestDestinationInsertionIndex, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
-import type { Coordinates, Destination, RouteLeg, RouteLegType } from '../domain/types';
+import type { Coordinates, Destination, DestinationLocation, RouteLeg, RouteLegType } from '../domain/types';
 import type { createTripRepository } from '../storage/tripRepository';
 
 type TripRepository = ReturnType<typeof createTripRepository>;
@@ -10,6 +10,7 @@ type TripRepository = ReturnType<typeof createTripRepository>;
 type AddDestinationInput = {
   name: string;
   countryRegion?: string;
+  location?: DestinationLocation;
   coordinates: Coordinates;
 };
 
@@ -271,17 +272,33 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
       return {
         async addDestination(input: AddDestinationInput) {
+          const insertionIndex = findBestDestinationInsertionIndex(
+            destinationsRef.current,
+            input.coordinates,
+          );
           const destination = createDestination({
             ...input,
-            order: destinationsRef.current.length,
+            order: insertionIndex,
           });
           if (!isActiveAction()) return destination;
 
-          await repository.saveDestination(destination);
+          const nextDestinations = [...destinationsRef.current];
+          nextDestinations.splice(insertionIndex, 0, destination);
+          const orderedDestinations = nextDestinations.map((nextDestination, order) =>
+            nextDestination.order === order
+              ? nextDestination
+              : patchDestination(nextDestination, { order }),
+          );
+
+          await Promise.all(
+            orderedDestinations.map((orderedDestination) =>
+              repository.saveDestination(orderedDestination),
+            ),
+          );
           if (!isActiveAction()) return destination;
 
-          const nextDestinations = updateDestinations((current) => [...current, destination]);
-          await reconcileAndSaveRouteLegs(nextDestinations, routeLegsRef.current);
+          replaceDestinations(orderedDestinations);
+          await reconcileAndSaveRouteLegs(orderedDestinations, routeLegsRef.current);
           return destination;
         },
 

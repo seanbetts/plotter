@@ -1,9 +1,62 @@
 import { describe, expect, it } from 'vitest';
 import { createDestination } from './destinations';
 import { createRouteLeg } from './routeLegs';
-import { reconcileRouteLegsForDestinations } from './routePlanner';
+import { findBestDestinationInsertionIndex, reconcileRouteLegsForDestinations } from './routePlanner';
 
 describe('route planner helpers', () => {
+  it('finds the best insertion point after the fixed first stop', () => {
+    const balcombe = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      order: 0,
+    });
+    const liseleje = createDestination({
+      name: 'Liseleje',
+      coordinates: { lat: 56.0111, lng: 11.9656 },
+      order: 1,
+    });
+
+    expect(
+      findBestDestinationInsertionIndex(
+        [balcombe, liseleje],
+        { lat: 48.8566, lng: 2.3522 },
+      ),
+    ).toBe(1);
+  });
+
+  it('never places a new destination before the first stop', () => {
+    const london = createDestination({
+      name: 'London',
+      coordinates: { lat: 51.5072, lng: -0.1276 },
+      order: 0,
+    });
+    const paris = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+      order: 1,
+    });
+
+    const insertionIndex =
+      findBestDestinationInsertionIndex(
+        [london, paris],
+        { lat: 55.9533, lng: -3.1883 },
+      );
+
+    expect(insertionIndex).not.toBe(0);
+    expect(insertionIndex).toBeGreaterThanOrEqual(1);
+  });
+
+  it('appends when adding to an empty or single-stop trip', () => {
+    const london = createDestination({
+      name: 'London',
+      coordinates: { lat: 51.5072, lng: -0.1276 },
+      order: 0,
+    });
+
+    expect(findBestDestinationInsertionIndex([], { lat: 48.8566, lng: 2.3522 })).toBe(0);
+    expect(findBestDestinationInsertionIndex([london], { lat: 48.8566, lng: 2.3522 })).toBe(1);
+  });
+
   it('creates driving route legs for adjacent ordered destinations', () => {
     const london = createDestination({
       name: 'London',

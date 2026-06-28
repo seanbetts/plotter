@@ -213,6 +213,47 @@ describe('useTripData', () => {
     ]);
   });
 
+  it('inserts new destinations at the best route position after the first stop', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'Balcombe',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      });
+      await result.current.addDestination({
+        name: 'Liseleje',
+        coordinates: { lat: 56.0111, lng: 11.9656 },
+      });
+      await result.current.addDestination({
+        name: 'Paris',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      });
+    });
+
+    const [balcombe, paris, liseleje] = result.current.destinations;
+
+    expect(result.current.destinations.map((destination) => destination.name)).toEqual([
+      'Balcombe',
+      'Paris',
+      'Liseleje',
+    ]);
+    expect(result.current.destinations.map((destination) => destination.order)).toEqual([0, 1, 2]);
+    expect(result.current.routeLegs.map((leg) => [leg.originDestinationId, leg.targetDestinationId])).toEqual([
+      [balcombe.id, paris.id],
+      [paris.id, liseleje.id],
+    ]);
+
+    expect((await repository.listDestinations()).map((destination) => destination.name)).toEqual([
+      'Balcombe',
+      'Paris',
+      'Liseleje',
+    ]);
+  });
+
   it('optimistically reorders destinations and shows pending route legs while persistence is in flight', async () => {
     const first = createDestination({
       name: 'First',
