@@ -6,6 +6,8 @@ import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
 import { useTripData } from './useTripData';
 
+type TripRepository = ReturnType<typeof createTripRepository>;
+
 describe('useTripData', () => {
   const testDatabases: Array<{ db: ReturnType<typeof createTripDb>; name: string }> = [];
 
@@ -211,6 +213,50 @@ describe('useTripData', () => {
 
     expect(result.current.destinations[0].name).toBe('Current');
   });
+
+  it('does not start the queued initial reload after fast unmount', async () => {
+    const repository = createMemoryRepository(Promise.resolve([]));
+    const { unmount } = renderHook(() => useTripData(repository));
+
+    unmount();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(repository.destinationListCalls).toBe(0);
+  });
+
+  it('does not apply stale add destination results after the repository changes', async () => {
+    const oldSave = createDeferred<void>(undefined);
+    const oldRepository = createMemoryRepository(Promise.resolve([]), {
+      saveDestination: () => oldSave.promise,
+    });
+    const newRepository = createMemoryRepository(Promise.resolve([]));
+    const { result, rerender } = renderHook(
+      ({ repository }) => useTripData(repository),
+      { initialProps: { repository: oldRepository } },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    const capturedActions = result.current;
+    const addDestinationPromise = capturedActions.addDestination({
+      name: 'Old repository destination',
+      coordinates: { lat: 3, lng: 3 },
+    });
+
+    rerender({ repository: newRepository });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      oldSave.resolve();
+      await addDestinationPromise;
+    });
+
+    expect(result.current.destinations).toEqual([]);
+  });
 });
 
 function createDeferred<T>(value: T) {
@@ -222,8 +268,11 @@ function createDeferred<T>(value: T) {
   return { promise, resolve };
 }
 
-function createMemoryRepository(destinations: Promise<ReturnType<typeof createDestination>[]>) {
-  return {
+function createMemoryRepository(
+  destinations: Promise<ReturnType<typeof createDestination>[]>,
+  overrides: Partial<TripRepository> = {},
+): TripRepository & { destinationListCalls: number } {
+  const repository = {
     destinationListCalls: 0,
 
     async listDestinations() {
@@ -244,5 +293,7 @@ function createMemoryRepository(destinations: Promise<ReturnType<typeof createDe
     async deleteRouteLeg() {},
 
     async replaceTripData() {},
-  };
+  } satisfies TripRepository & { destinationListCalls: number };
+
+  return Object.assign(repository, overrides);
 }

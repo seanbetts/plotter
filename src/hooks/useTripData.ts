@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
 import { createRouteLeg } from '../domain/routeLegs';
 import type { Coordinates, Destination, RouteLeg, RouteLegType } from '../domain/types';
@@ -20,7 +20,9 @@ export function useTripData(repository: TripRepository) {
   const destinationsRef = useRef<Destination[]>([]);
   const routeLegsRef = useRef<RouteLeg[]>([]);
   const isMountedRef = useRef(false);
+  const activeRepositoryTokenRef = useRef<object | null>(null);
   const reloadSequenceRef = useRef(0);
+  const repositoryToken = useMemo(() => ({ repository }), [repository]);
 
   const replaceDestinations = useCallback((nextDestinations: Destination[]) => {
     destinationsRef.current = nextDestinations;
@@ -46,7 +48,7 @@ export function useTripData(repository: TripRepository) {
     return nextRouteLegs;
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     isMountedRef.current = true;
 
     return () => {
@@ -55,10 +57,31 @@ export function useTripData(repository: TripRepository) {
     };
   }, []);
 
-  const reload = useCallback(async () => {
+  useLayoutEffect(() => {
+    activeRepositoryTokenRef.current = repositoryToken;
+    reloadSequenceRef.current += 1;
+
+    return () => {
+      if (activeRepositoryTokenRef.current === repositoryToken) {
+        activeRepositoryTokenRef.current = null;
+        reloadSequenceRef.current += 1;
+      }
+    };
+  }, [repositoryToken]);
+
+  const isActiveGeneration = useCallback(
+    (generation: object) =>
+      isMountedRef.current && activeRepositoryTokenRef.current === generation,
+    [],
+  );
+
+  const startReload = useCallback(async (generation: object) => {
+    if (!isActiveGeneration(generation)) return;
+
     const sequence = reloadSequenceRef.current + 1;
     reloadSequenceRef.current = sequence;
-    const isCurrentReload = () => isMountedRef.current && reloadSequenceRef.current === sequence;
+    const isCurrentReload = () =>
+      isActiveGeneration(generation) && reloadSequenceRef.current === sequence;
 
     setIsLoading(true);
     setError(null);
@@ -81,71 +104,110 @@ export function useTripData(repository: TripRepository) {
     if (!isCurrentReload()) return;
 
     setIsLoading(false);
-  }, [replaceDestinations, replaceRouteLegs, repository]);
+  }, [isActiveGeneration, replaceDestinations, replaceRouteLegs, repository]);
+
+  const reload = useCallback(async () => {
+    await startReload(repositoryToken);
+  }, [repositoryToken, startReload]);
 
   useEffect(() => {
+    const generation = repositoryToken;
+    let isCancelled = false;
+
     queueMicrotask(() => {
-      void reload();
+      if (isCancelled || !isActiveGeneration(generation)) return;
+
+      void startReload(generation);
     });
-  }, [reload]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isActiveGeneration, repositoryToken, startReload]);
 
   const actions = useMemo(
-    () => ({
-      async addDestination(input: AddDestinationInput) {
-        const destination = createDestination(input);
-        await repository.saveDestination(destination);
-        updateDestinations((current) => [...current, destination]);
-        return destination;
-      },
+    () => {
+      const generation = repositoryToken;
+      const isActiveAction = () => isActiveGeneration(generation);
 
-      async updateDestination(
-        destinationId: string,
-        patch: Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>,
-      ) {
-        const existing = destinationsRef.current.find(
-          (destination) => destination.id === destinationId,
-        );
-        if (!existing) return;
-        const updated = patchDestination(existing, patch);
-        await repository.saveDestination(updated);
-        updateDestinations((current) =>
-          current.map((destination) => (destination.id === destinationId ? updated : destination)),
-        );
-      },
+      return {
+        async addDestination(input: AddDestinationInput) {
+          const destination = createDestination(input);
+          if (!isActiveAction()) return destination;
 
-      async deleteDestination(destinationId: string) {
-        await repository.deleteDestination(destinationId);
-        updateDestinations((current) =>
-          current.filter((destination) => destination.id !== destinationId),
-        );
-        updateRouteLegs((current) =>
-          current.filter(
-            (leg) =>
-              leg.originDestinationId !== destinationId && leg.targetDestinationId !== destinationId,
-          ),
-        );
-      },
+          await repository.saveDestination(destination);
+          if (!isActiveAction()) return destination;
 
-      async addRouteLeg(input: {
-        originDestinationId: string;
-        targetDestinationId: string;
-        type: RouteLegType;
-        notes?: string;
-      }) {
-        const leg = createRouteLeg(input);
-        await repository.saveRouteLeg(leg);
-        updateRouteLegs((current) => [...current, leg]);
-        return leg;
-      },
+          updateDestinations((current) => [...current, destination]);
+          return destination;
+        },
 
-      async deleteRouteLeg(routeLegId: string) {
-        await repository.deleteRouteLeg(routeLegId);
-        updateRouteLegs((current) => current.filter((leg) => leg.id !== routeLegId));
-      },
+        async updateDestination(
+          destinationId: string,
+          patch: Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>,
+        ) {
+          const existing = destinationsRef.current.find(
+            (destination) => destination.id === destinationId,
+          );
+          if (!existing) return;
+          const updated = patchDestination(existing, patch);
+          if (!isActiveAction()) return;
 
-      reload,
-    }),
-    [reload, repository, updateDestinations, updateRouteLegs],
+          await repository.saveDestination(updated);
+          if (!isActiveAction()) return;
+
+          updateDestinations((current) =>
+            current.map((destination) => (destination.id === destinationId ? updated : destination)),
+          );
+        },
+
+        async deleteDestination(destinationId: string) {
+          if (!isActiveAction()) return;
+
+          await repository.deleteDestination(destinationId);
+          if (!isActiveAction()) return;
+
+          updateDestinations((current) =>
+            current.filter((destination) => destination.id !== destinationId),
+          );
+          updateRouteLegs((current) =>
+            current.filter(
+              (leg) =>
+                leg.originDestinationId !== destinationId &&
+                leg.targetDestinationId !== destinationId,
+            ),
+          );
+        },
+
+        async addRouteLeg(input: {
+          originDestinationId: string;
+          targetDestinationId: string;
+          type: RouteLegType;
+          notes?: string;
+        }) {
+          const leg = createRouteLeg(input);
+          if (!isActiveAction()) return leg;
+
+          await repository.saveRouteLeg(leg);
+          if (!isActiveAction()) return leg;
+
+          updateRouteLegs((current) => [...current, leg]);
+          return leg;
+        },
+
+        async deleteRouteLeg(routeLegId: string) {
+          if (!isActiveAction()) return;
+
+          await repository.deleteRouteLeg(routeLegId);
+          if (!isActiveAction()) return;
+
+          updateRouteLegs((current) => current.filter((leg) => leg.id !== routeLegId));
+        },
+
+        reload,
+      };
+    },
+    [isActiveGeneration, reload, repository, repositoryToken, updateDestinations, updateRouteLegs],
   );
 
   return {
