@@ -106,9 +106,12 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     globals: true,
+    passWithNoTests: true,
   },
 });
 ```
+
+`passWithNoTests` is only for the empty scaffold baseline. Remove it in Task 2 after the first real tests are added.
 
 - [ ] **Step 5: Add test setup**
 
@@ -339,7 +342,19 @@ npm run test -- src/domain/destinations.test.ts src/domain/routeLegs.test.ts
 
 Expected: FAIL because `src/domain/destinations.ts` and `src/domain/routeLegs.ts` do not exist.
 
-- [ ] **Step 4: Add domain types**
+- [ ] **Step 4: Remove empty-scaffold Vitest allowance**
+
+Update `vite.config.ts` so the `test` block no longer includes `passWithNoTests`:
+
+```ts
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.ts',
+    globals: true,
+  },
+```
+
+- [ ] **Step 5: Add domain types**
 
 Create `src/domain/types.ts`:
 
@@ -434,7 +449,7 @@ export type RouteLeg = {
 };
 ```
 
-- [ ] **Step 5: Add destination helpers**
+- [ ] **Step 6: Add destination helpers**
 
 Create `src/domain/destinations.ts`:
 
@@ -504,7 +519,7 @@ export function updateDestination(
 }
 ```
 
-- [ ] **Step 6: Add route-leg helpers**
+- [ ] **Step 7: Add route-leg helpers**
 
 Create `src/domain/routeLegs.ts`:
 
@@ -553,7 +568,7 @@ export function createRouteLeg(input: CreateRouteLegInput): RouteLeg {
 }
 ```
 
-- [ ] **Step 7: Verify domain tests pass**
+- [ ] **Step 8: Verify domain tests pass**
 
 Run:
 
@@ -563,10 +578,10 @@ npm run test -- src/domain/destinations.test.ts src/domain/routeLegs.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/domain
+git add vite.config.ts src/domain
 git commit -m "feat: add trip domain model"
 ```
 
