@@ -359,7 +359,7 @@ select {
   top: 16px;
   right: 16px;
   bottom: 16px;
-  z-index: 12;
+  z-index: 20;
   display: grid;
   width: min(430px, calc(100vw - 32px));
   align-content: start;
@@ -383,7 +383,7 @@ select {
 }
 
 .profile-header p {
-  margin: 0 0 4px;
+  margin: 5px 0 0;
   color: rgb(var(--color-text-rgb) / 0.64);
   font-size: 0.78rem;
 }
@@ -394,7 +394,8 @@ select {
   line-height: 1.15;
 }
 
-.profile-header button,
+.profile-title-button,
+.profile-close-button,
 .primary-action {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
@@ -403,7 +404,31 @@ select {
   cursor: pointer;
 }
 
-.profile-header button {
+.profile-title-button {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  text-align: left;
+  background: transparent;
+}
+
+.profile-title-button:hover,
+.profile-title-button:focus-visible {
+  color: var(--color-accent);
+}
+
+.profile-title-editor {
+  margin: 0;
+}
+
+.profile-title-editor input {
+  font-size: 1.28rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.profile-close-button {
   display: grid;
   width: 34px;
   height: 34px;

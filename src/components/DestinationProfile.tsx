@@ -1,21 +1,14 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { formatLocationParts } from '../domain/locations';
-import type { ActivityItem, Destination } from '../domain/types';
+import type { Destination } from '../domain/types';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
 
 type DestinationFormState = {
   sourceKey: string;
   name: string;
-  summary: string;
-  highlights: string;
-  personalRationale: string;
   expectedStayDays: string;
-  idealMonths: string;
-  researchNotes: string;
-  activities: string;
-  routeNotes: string;
   tags: string;
 };
 
@@ -45,39 +38,12 @@ const normalizeExpectedStayDays = (value: string) => {
   return Math.max(1, Math.floor(parsed));
 };
 
-const createActivityItems = (labels: string[], existingItems: ActivityItem[]): ActivityItem[] => {
-  const remainingExistingItems = [...existingItems];
-
-  return labels.map((label) => {
-    const existingIndex = remainingExistingItems.findIndex((item) => item.label === label);
-
-    if (existingIndex >= 0) {
-      const [existingItem] = remainingExistingItems.splice(existingIndex, 1);
-      return existingItem;
-    }
-
-    return {
-      id: crypto.randomUUID(),
-      label,
-      category: 'other',
-      notes: '',
-    };
-  });
-};
-
 const destinationSourceKey = (destination: Destination) => `${destination.id}:${destination.updatedAt}`;
 
 const createFormState = (destination: Destination): DestinationFormState => ({
   sourceKey: destinationSourceKey(destination),
   name: destination.name,
-  summary: destination.why.summary,
-  highlights: destination.why.highlights,
-  personalRationale: destination.why.personalRationale,
   expectedStayDays: String(destination.timing.expectedStayDays),
-  idealMonths: listToText(destination.timing.idealMonths),
-  researchNotes: destination.research.notes,
-  activities: listToText(destination.activities.items.map((item) => item.label)),
-  routeNotes: destination.routeContext.notes,
   tags: listToText(destination.tags),
 });
 
@@ -95,7 +61,9 @@ export function DestinationProfile({ destination, onUpdate, onClose }: Destinati
 function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationProfileProps) {
   const [draft, setDraft] = useState(() => createFormState(destination));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [isEditingName, setIsEditingName] = useState(false);
   const savedTimerRef = useRef<number | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
   const sourceKey = destinationSourceKey(destination);
   const form = draft.sourceKey === sourceKey || saveStatus === 'saving' ? draft : createFormState(destination);
 
@@ -107,6 +75,13 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
     },
     [],
   );
+
+  useEffect(() => {
+    if (isEditingName) {
+      nameInputRef.current?.focus();
+      nameInputRef.current?.select();
+    }
+  }, [isEditingName]);
 
   function updateForm(patch: Partial<DestinationFormState>) {
     if (savedTimerRef.current !== null) {
@@ -125,24 +100,7 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
         location: destination.location,
         timing: {
           ...destination.timing,
-          idealMonths: textToList(form.idealMonths),
           expectedStayDays: normalizeExpectedStayDays(form.expectedStayDays),
-        },
-        why: {
-          summary: form.summary,
-          highlights: form.highlights,
-          personalRationale: form.personalRationale,
-        },
-        research: {
-          ...destination.research,
-          notes: form.researchNotes,
-        },
-        activities: {
-          items: createActivityItems(textToList(form.activities), destination.activities.items),
-        },
-        routeContext: {
-          ...destination.routeContext,
-          notes: form.routeNotes,
         },
         tags: textToList(form.tags),
       });
@@ -164,35 +122,44 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
 
   return (
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
-      <div className="profile-header">
+      <header className="profile-header" aria-label="Stop detail header">
         <div>
+          {isEditingName ? (
+            <label className="profile-title-editor">
+              <span className="sr-only">Stop name</span>
+              <input
+                ref={nameInputRef}
+                value={form.name}
+                onChange={(event) => updateForm({ name: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    setIsEditingName(false);
+                  }
+                }}
+              />
+            </label>
+          ) : (
+            <button
+              type="button"
+              className="profile-title-button"
+              aria-label={`Edit stop name ${form.name || destination.name}`}
+              onClick={() => setIsEditingName(true)}
+            >
+              <h1>{form.name || destination.name}</h1>
+            </button>
+          )}
           <p>{formatLocationParts(destination.location) || 'Unassigned location'}</p>
-          <h1>{destination.name}</h1>
         </div>
-        <button type="button" onClick={onClose} aria-label="Close destination profile">
+        <button
+          type="button"
+          className="profile-close-button"
+          onClick={onClose}
+          aria-label="Close destination profile"
+        >
           <X size={18} aria-hidden="true" />
         </button>
-      </div>
+      </header>
 
-      <label>
-        Stop name
-        <input value={form.name} onChange={(event) => updateForm({ name: event.target.value })} />
-      </label>
-      <label>
-        Why it matters
-        <textarea value={form.summary} onChange={(event) => updateForm({ summary: event.target.value })} />
-      </label>
-      <label>
-        Highlights
-        <textarea value={form.highlights} onChange={(event) => updateForm({ highlights: event.target.value })} />
-      </label>
-      <label>
-        Personal rationale
-        <textarea
-          value={form.personalRationale}
-          onChange={(event) => updateForm({ personalRationale: event.target.value })}
-        />
-      </label>
       <label>
         Expected stay days
         <input
@@ -201,22 +168,6 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
           value={form.expectedStayDays}
           onChange={(event) => updateForm({ expectedStayDays: event.target.value })}
         />
-      </label>
-      <label>
-        Ideal months
-        <input value={form.idealMonths} onChange={(event) => updateForm({ idealMonths: event.target.value })} />
-      </label>
-      <label>
-        Research notes
-        <textarea value={form.researchNotes} onChange={(event) => updateForm({ researchNotes: event.target.value })} />
-      </label>
-      <label>
-        Activities
-        <textarea value={form.activities} onChange={(event) => updateForm({ activities: event.target.value })} />
-      </label>
-      <label>
-        Route notes
-        <textarea value={form.routeNotes} onChange={(event) => updateForm({ routeNotes: event.target.value })} />
       </label>
       <label>
         Tags
