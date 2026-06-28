@@ -38,6 +38,10 @@ function formatLegTime(routeLeg: RouteLeg) {
   return `${routeLeg.travelTimeHours.toFixed(1)} hr`;
 }
 
+function formatStayDays(days: number) {
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
 function isRouteLegCalculating(routeLeg: RouteLeg) {
   return routeLeg.status === 'pending' || routeLeg.status === 'calculating';
 }
@@ -344,6 +348,7 @@ export function ItineraryPanel({
                   <strong>{destination.name}</strong>
                   <small>{region}</small>
                 </button>
+                <span className="stop-stay-days">{formatStayDays(destination.timing.expectedStayDays)}</span>
                 <button
                   type="button"
                   className="stop-delete"

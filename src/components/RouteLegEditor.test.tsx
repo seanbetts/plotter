@@ -114,6 +114,8 @@ describe('ItineraryPanel', () => {
       distanceKm: 160,
       travelTimeHours: 2.25,
     });
+    origin.timing.expectedStayDays = 1;
+    target.timing.expectedStayDays = 4;
     const onSelectDestination = vi.fn();
     const onDeleteDestination = vi.fn();
     const onReorderDestinations = vi.fn();
@@ -141,6 +143,8 @@ describe('ItineraryPanel', () => {
     expect(selectedStop.closest('.stop-item')).toHaveClass('is-selected');
     expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add route leg' })).not.toBeInTheDocument();
+    expect(screen.getByText('1 day')).toBeInTheDocument();
+    expect(screen.getByText('4 days')).toBeInTheDocument();
     expect(screen.getByText('99 mi')).toBeInTheDocument();
     expect(screen.getByText('2.3 hr')).toBeInTheDocument();
     expect(screen.getByText('99 mi').parentElement).toHaveClass('inline-route-metrics');

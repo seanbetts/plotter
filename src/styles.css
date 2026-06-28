@@ -382,7 +382,7 @@ select {
 
 .stop-item {
   display: grid;
-  grid-template-columns: 30px 1fr 34px;
+  grid-template-columns: 30px minmax(0, 1fr) auto 34px;
   gap: 6px;
   border: 1px solid rgba(245, 239, 227, 0.12);
   border-radius: 6px;
@@ -424,6 +424,22 @@ select {
   min-width: 0;
   padding: 12px 9px;
   text-align: left;
+}
+
+.stop-stay-days {
+  align-self: center;
+  justify-self: end;
+  min-width: 48px;
+  padding: 4px 7px;
+  border: 1px solid rgba(245, 239, 227, 0.12);
+  border-radius: 6px;
+  color: rgba(245, 239, 227, 0.7);
+  background: rgba(17, 24, 20, 0.22);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .stop-delete {
