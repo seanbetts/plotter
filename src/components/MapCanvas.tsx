@@ -48,7 +48,7 @@ const styleUrl = mapTilerApiKey
   ? `https://api.maptiler.com/maps/streets-v4/style.json?key=${mapTilerApiKey}`
   : 'https://demotiles.maplibre.org/style.json';
 const majorCityMinZoom = 5;
-const showMapDetailDevTools = import.meta.env.DEV;
+const showMapDetailDevTools = import.meta.env.VITE_ENABLE_MAP_DETAIL_DEV_TOOLS === 'true';
 const minDetailZoom = 1;
 const maxDetailZoom = 18;
 const hiddenBasemapLayerPatterns = [
