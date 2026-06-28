@@ -31,6 +31,22 @@ const balcombeResult = {
   },
 } satisfies Extract<PlaceSearchResult, { kind: 'place' }>;
 
+const parisResult = {
+  kind: 'place',
+  id: 'place-2',
+  label: 'Paris, Ile-de-France, France',
+  coordinates: { lat: 48.8566, lng: 2.3522 },
+  location: {
+    placeName: 'Paris',
+    regionName: 'Ile-de-France',
+    countryName: 'France',
+    countryCode: 'fr',
+    sourceLabel: 'Paris, Ile-de-France, France',
+    sourceProvider: 'maptiler',
+    sourceFeatureId: 'place-2',
+  },
+} satisfies Extract<PlaceSearchResult, { kind: 'place' }>;
+
 describe('TopToolbar', () => {
   it('shows live search results and adds the selected result', async () => {
     const user = userEvent.setup();
@@ -52,7 +68,7 @@ describe('TopToolbar', () => {
         screen.getByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' }),
       ).toBeInTheDocument(),
     );
-    await user.keyboard('{Enter}');
+    await user.keyboard('{ArrowDown}{Enter}');
 
     expect(onAddDestination).toHaveBeenCalledWith({
       name: 'Balcombe',
@@ -60,6 +76,44 @@ describe('TopToolbar', () => {
       coordinates: { lat: 51.0576, lng: -0.1342 },
     });
     expect(screen.getByLabelText('Search for a destination')).toHaveValue('');
+  });
+
+  it('moves through results with arrow keys and selects the highlighted option', async () => {
+    const user = userEvent.setup();
+    const onAddDestination = vi.fn();
+    const searchPlaces = vi.fn().mockResolvedValue([balcombeResult, parisResult]);
+
+    render(
+      <TopToolbar
+        onAddDestination={onAddDestination}
+        resolveSearchResult={vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>)}
+        searchPlaces={searchPlaces}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Search for a destination'), 'B');
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('B'));
+
+    const firstOption = await screen.findByRole('option', {
+      name: 'Balcombe, West Sussex, England, United Kingdom',
+    });
+    const secondOption = screen.getByRole('option', { name: 'Paris, Ile-de-France, France' });
+
+    expect(firstOption).toHaveAttribute('aria-selected', 'false');
+    expect(secondOption).toHaveAttribute('aria-selected', 'false');
+
+    await user.keyboard('{ArrowDown}');
+
+    expect(firstOption).toHaveAttribute('aria-selected', 'true');
+    expect(secondOption).toHaveAttribute('aria-selected', 'false');
+
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(onAddDestination).toHaveBeenCalledWith({
+      name: 'Paris',
+      location: parisResult.location,
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
   });
 
   it('keeps stale search responses from replacing newer results or loading state', async () => {
@@ -175,7 +229,7 @@ describe('TopToolbar', () => {
     await waitFor(() =>
       expect(screen.getByRole('option', { name: 'Use coordinates 51.0576, -0.1342' })).toBeInTheDocument(),
     );
-    await user.keyboard('{Enter}');
+    await user.keyboard('{ArrowDown}{Enter}');
 
     expect(onAddDestination).toHaveBeenCalledWith(
       expect.objectContaining({

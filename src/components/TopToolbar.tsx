@@ -43,7 +43,7 @@ export function TopToolbar({ searchPlaces, resolveSearchResult, onAddDestination
         const nextResults = await searchPlaces(nextQuery);
         if (searchId !== latestSearchId.current) return;
         setResults(nextResults);
-        setHighlightedIndex(nextResults.length > 0 ? 0 : -1);
+        setHighlightedIndex(-1);
       } catch (caught) {
         if (searchId !== latestSearchId.current) return;
         setResults([]);

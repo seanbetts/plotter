@@ -161,6 +161,12 @@ select {
   text-align: left;
 }
 
+.search-results button.is-highlighted,
+.search-results button[aria-selected='true'] {
+  color: #111814;
+  background: #e9b44c;
+}
+
 .toolbar-status,
 .toolbar-error {
   position: absolute;
