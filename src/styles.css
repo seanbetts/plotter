@@ -336,12 +336,24 @@ select {
 
 .stop-sequence-item {
   display: grid;
+  position: relative;
 }
 
 .stop-drop-indicator {
-  position: relative;
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  z-index: 2;
   height: 14px;
-  margin: 0 8px;
+  pointer-events: none;
+}
+
+.stop-drop-indicator[data-drop-position="before"] {
+  top: -12px;
+}
+
+.stop-drop-indicator[data-drop-position="after"] {
+  bottom: -12px;
 }
 
 .stop-drop-indicator::before {

@@ -26,6 +26,7 @@ type DropPreview = {
 const kmToMiles = 0.621371;
 
 function formatLegDistance(routeLeg: RouteLeg) {
+  if (isRouteLegCalculating(routeLeg)) return null;
   if (routeLeg.distanceKm === undefined) return routeLeg.status;
 
   return `${Math.round(routeLeg.distanceKm * kmToMiles).toLocaleString()} mi`;
@@ -393,7 +394,9 @@ export function ItineraryPanel({
                         aria-label={`Calculating ${destination.name} to ${nextDestination.name} route`}
                       />
                     ) : null}
-                    <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
+                    {formatLegDistance(routeLeg) ? (
+                      <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
+                    ) : null}
                     {formatLegTime(routeLeg) ? (
                       <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
                     ) : null}

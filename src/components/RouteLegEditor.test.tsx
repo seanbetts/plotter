@@ -233,7 +233,7 @@ describe('ItineraryPanel', () => {
     expect(
       screen.getByRole('status', { name: 'Calculating Istanbul to Tbilisi route' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('pending')).toBeInTheDocument();
+    expect(screen.queryByText('pending')).not.toBeInTheDocument();
   });
 
   it('shows an insertion marker and reorders stops before the hovered stop', () => {
