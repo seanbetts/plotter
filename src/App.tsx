@@ -41,6 +41,13 @@ export default function App() {
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
     [destinations, selectedDestinationId],
   );
+  const selectedDestinationNumber = useMemo(() => {
+    const selectedDestinationIndex = destinations.findIndex(
+      (destination) => destination.id === selectedDestinationId,
+    );
+
+    return selectedDestinationIndex === -1 ? undefined : selectedDestinationIndex + 1;
+  }, [destinations, selectedDestinationId]);
 
   useEffect(() => {
     if (!selectedDestination || isInteractionLocked) return undefined;
@@ -121,6 +128,7 @@ export default function App() {
         {!isInteractionLocked && selectedDestination ? (
           <DestinationProfile
             destination={selectedDestination}
+            stopNumber={selectedDestinationNumber}
             onUpdate={updateDestination}
             onClose={() => setSelectedDestinationId(null)}
           />

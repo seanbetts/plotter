@@ -38,6 +38,18 @@ describe('DestinationProfile', () => {
     expect(screen.queryByLabelText('Stop name')).not.toBeInTheDocument();
   });
 
+  it('shows the stop number when one is provided', () => {
+    const destination = createDestination({
+      name: 'Trondheim',
+      countryRegion: 'Norway',
+      coordinates: { lat: 63.4305, lng: 10.3951 },
+    });
+
+    render(<DestinationProfile destination={destination} stopNumber={3} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Stop 03')).toBeInTheDocument();
+  });
+
   it('only shows editable fields for stay days and tags until the stop name is clicked', () => {
     const destination = createDestination({
       name: 'Samarkand',

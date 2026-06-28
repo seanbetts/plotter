@@ -31,6 +31,7 @@ type PointerCoordinates = {
 
 const kmToMiles = 0.621371;
 const stopListStyle = { '--stop-list-gap': '8px' } as CSSProperties;
+const formatStopNumber = (stopNumber: number) => String(stopNumber).padStart(2, '0');
 
 function formatLegDistance(routeLeg: RouteLeg) {
   if (isRouteLegCalculating(routeLeg)) return null;
@@ -334,6 +335,8 @@ export function ItineraryPanel({
           {displayedDestinations.map((destination, index) => {
             const locationLabel = formatDestinationLocation(destination);
             const locationParts = formatLocationParts(destination.location) || 'Unassigned location';
+            const stopNumber =
+              destinations.findIndex((orderedDestination) => orderedDestination.id === destination.id) + 1;
             const isSelected = destination.id === selectedDestinationId;
             const nextDestination = displayedDestinations[index + 1];
             const routeLeg = nextDestination
@@ -389,6 +392,9 @@ export function ItineraryPanel({
                   >
                     <GripVertical size={16} aria-hidden="true" />
                   </button>
+                  <span className="stop-number" aria-label={`Stop ${stopNumber}`}>
+                    {formatStopNumber(stopNumber)}
+                  </span>
                   <button
                     type="button"
                     className="stop-select"

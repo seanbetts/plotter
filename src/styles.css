@@ -559,6 +559,17 @@ select {
   font-size: 0.78rem;
 }
 
+.profile-stop-number {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .profile-header h1 {
   margin: 0;
   font-size: 1.45rem;
@@ -761,7 +772,7 @@ select {
 
 .stop-item {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto 34px;
+  grid-template-columns: 30px 30px minmax(0, 1fr) auto 34px;
   gap: 6px;
   border: 1px solid var(--border-row);
   border-radius: var(--radius-control);
@@ -795,6 +806,22 @@ select {
 
 .stop-drag:active {
   cursor: grabbing;
+}
+
+.stop-number {
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--border-row);
+  border-radius: var(--radius-control);
+  color: var(--text-soft);
+  background: var(--surface-badge);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .stop-select {
@@ -937,7 +964,7 @@ select {
   align-items: center;
   gap: 14px;
   min-height: 58px;
-  padding: 5px 42px 5px 64px;
+  padding: 5px 42px 5px 33px;
   color: var(--text-muted);
   font-size: 0.76rem;
 }

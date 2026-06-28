@@ -15,6 +15,7 @@ type DestinationFormState = {
 
 type DestinationProfileProps = {
   destination: Destination;
+  stopNumber?: number;
   onUpdate: (destinationId: string, patch: DestinationPatch) => Promise<void> | void;
   onClose: () => void;
 };
@@ -44,6 +45,7 @@ const profileTitleControlStyle = {
   '--profile-title-block-padding': '0px',
   '--profile-title-inline-padding': '0px',
 } as CSSProperties;
+const formatStopNumber = (stopNumber: number) => String(stopNumber).padStart(2, '0');
 
 const createFormState = (destination: Destination): DestinationFormState => ({
   sourceKey: destinationSourceKey(destination),
@@ -52,18 +54,19 @@ const createFormState = (destination: Destination): DestinationFormState => ({
   tags: listToText(destination.tags),
 });
 
-export function DestinationProfile({ destination, onUpdate, onClose }: DestinationProfileProps) {
+export function DestinationProfile({ destination, stopNumber, onUpdate, onClose }: DestinationProfileProps) {
   return (
     <DestinationProfileForm
       key={destination.id}
       destination={destination}
+      stopNumber={stopNumber}
       onUpdate={onUpdate}
       onClose={onClose}
     />
   );
 }
 
-function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationProfileProps) {
+function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: DestinationProfileProps) {
   const [draft, setDraft] = useState(() => createFormState(destination));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [isEditingName, setIsEditingName] = useState(false);
@@ -129,6 +132,7 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
       <header className="profile-header" aria-label="Stop detail header">
         <div>
+          {stopNumber ? <span className="profile-stop-number">Stop {formatStopNumber(stopNumber)}</span> : null}
           {isEditingName ? (
             <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
               <span className="sr-only">Stop name</span>

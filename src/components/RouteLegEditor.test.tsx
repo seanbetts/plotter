@@ -137,7 +137,8 @@ describe('ItineraryPanel', () => {
     expect(screen.getByRole('heading', { name: 'Stops' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Routes' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Istanbul, Turkey' })).toBeInTheDocument();
-    expect(screen.queryByText('01')).not.toBeInTheDocument();
+    expect(screen.getByText('01')).toHaveAccessibleName('Stop 1');
+    expect(screen.getByText('02')).toHaveAccessibleName('Stop 2');
     const selectedStop = screen.getByRole('button', { name: 'Tbilisi, Georgia' });
     expect(selectedStop).toHaveAttribute('aria-current', 'location');
     expect(selectedStop.closest('.stop-item')).toHaveClass('is-selected');

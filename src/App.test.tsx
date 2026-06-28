@@ -182,6 +182,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
     expect(screen.getByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
+    expect(screen.getByText('Stop 01')).toBeInTheDocument();
 
     const wasNotCanceled = fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
 
