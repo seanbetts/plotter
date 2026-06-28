@@ -201,10 +201,41 @@ select {
   line-height: 1;
 }
 
-.map-detail-dev-panel__zoom input {
+.map-detail-dev-panel__zoom-controls {
+  display: grid;
   grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.map-detail-dev-panel__zoom-controls input {
   width: 100%;
   accent-color: var(--color-accent);
+}
+
+.map-detail-dev-panel__zoom-controls button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--surface-action-subtle);
+  cursor: pointer;
+}
+
+.map-detail-dev-panel__zoom-controls button:hover:not(:disabled),
+.map-detail-dev-panel__zoom-controls button:focus-visible:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--surface-control-hover);
+}
+
+.map-detail-dev-panel__zoom-controls button:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+  opacity: 0.62;
 }
 
 .map-detail-dev-panel__summary {

@@ -276,7 +276,8 @@ describe('MapCanvas', () => {
     expect(map.setLayoutProperty).toHaveBeenCalledWith('poi-label', 'visibility', 'none');
     expect(map.setLayoutProperty).toHaveBeenCalledWith('mountain-peak-label', 'visibility', 'none');
     expect(map.setLayoutProperty).not.toHaveBeenCalledWith('country-label', 'visibility', 'none');
-    expect(map.setLayoutProperty).toHaveBeenCalledWith('road_minor', 'visibility', 'visible');
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('road_minor', 'visibility', 'none');
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('Water', 'visibility', 'visible');
     expect(map.setPaintProperty).not.toHaveBeenCalled();
   });
 
@@ -294,7 +295,7 @@ describe('MapCanvas', () => {
     expect(screen.getByRole('slider', { name: 'Zoom step' })).toHaveValue('1');
     expect(screen.getByRole('slider', { name: 'Zoom step' })).toHaveAttribute('min', '1');
     expect(screen.getByRole('checkbox', { name: 'POIs' })).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Minor roads' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Minor roads' })).not.toBeChecked();
   });
 
   it('syncs the selected zoom step when the map zoom changes outside the slider', async () => {
@@ -436,6 +437,8 @@ describe('MapCanvas', () => {
       loadHandler();
     });
 
+    fireEvent.change(screen.getByRole('slider', { name: 'Zoom step' }), { target: { value: '6' } });
+
     await userEvent.click(screen.getByRole('checkbox', { name: 'Highways' }));
     await userEvent.click(screen.getByRole('checkbox', { name: 'Capital city labels' }));
 
@@ -443,6 +446,137 @@ describe('MapCanvas', () => {
     expect(map.setLayoutProperty).toHaveBeenCalledWith('Major road', 'visibility', 'visible');
     expect(map.setLayoutProperty).toHaveBeenCalledWith('Capital city labels', 'visibility', 'none');
     expect(map.setLayoutProperty).toHaveBeenCalledWith('City labels', 'visibility', 'visible');
+  });
+
+  it('loads calibrated minimum detail settings for zoom levels 1 through 5', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox', { name: 'Water' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Rivers & streams' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Country labels' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Continent labels' })).toBeChecked();
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Zoom step' }), { target: { value: '4' } });
+    expect(screen.getByRole('checkbox', { name: 'Regional borders' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Capital city labels' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'City labels' })).not.toBeChecked();
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Zoom step' }), { target: { value: '5' } });
+    expect(screen.getByRole('checkbox', { name: 'Highways' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Capital city labels' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'City labels' })).toBeChecked();
+  });
+
+  it('loads recommended progressive detail settings for zoom levels 6 through 18', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const zoomSlider = screen.getByRole('slider', { name: 'Zoom step' });
+
+    fireEvent.change(zoomSlider, { target: { value: '6' } });
+    expect(screen.getByRole('checkbox', { name: 'Major roads' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Road labels' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Region labels' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Rivers & streams' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '7' } });
+    expect(screen.getByRole('checkbox', { name: 'Rivers & streams' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Terrain surfaces' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Town & place labels' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Minor roads' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '8' } });
+    expect(screen.getByRole('checkbox', { name: 'Minor roads' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Railways' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Airports' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Service roads' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '9' } });
+    expect(screen.getByRole('checkbox', { name: 'Service roads' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Residential areas' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Pedestrian areas' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Transit stops' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '10' } });
+    expect(screen.getByRole('checkbox', { name: 'Paths & cycleways' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Tracks' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Transit stops' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Parking' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '11' } });
+    expect(screen.getByRole('checkbox', { name: 'Parking' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Transport POIs' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Accommodation' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Food' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '12' } });
+    expect(screen.getByRole('checkbox', { name: 'Food' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Shopping' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Park labels' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Buildings' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '13' } });
+    expect(screen.getByRole('checkbox', { name: 'Buildings' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Road construction' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Steps' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Street furniture' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '14' } });
+    expect(screen.getByRole('checkbox', { name: 'Street furniture' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Mountain labels' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Aerialways' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Building numbers' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '15' } });
+    expect(screen.getByRole('checkbox', { name: 'Building numbers' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'House numbers' })).toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '18' } });
+    expect(screen.getByRole('checkbox', { name: 'Building numbers' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'House numbers' })).toBeChecked();
+  });
+
+  it('steps zoom levels up and down with dedicated buttons', async () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const zoomSlider = screen.getByRole('slider', { name: 'Zoom step' });
+    const zoomOut = screen.getByRole('button', { name: 'Decrease zoom step' });
+    const zoomIn = screen.getByRole('button', { name: 'Increase zoom step' });
+
+    expect(zoomSlider).toHaveValue('1');
+    expect(zoomOut).toBeDisabled();
+
+    await userEvent.click(zoomIn);
+    expect(zoomSlider).toHaveValue('2');
+    expect(map.jumpTo).toHaveBeenLastCalledWith({ zoom: 2 });
+
+    await userEvent.click(zoomOut);
+    expect(zoomSlider).toHaveValue('1');
+    expect(map.jumpTo).toHaveBeenLastCalledWith({ zoom: 1 });
+
+    fireEvent.change(zoomSlider, { target: { value: '18' } });
+    expect(zoomIn).toBeDisabled();
   });
 
   it('adds MapLibre sources and layers for destinations, routes, and major cities', () => {

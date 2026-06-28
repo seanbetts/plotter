@@ -289,6 +289,111 @@ const mapDetailCategories: MapDetailCategory[] = [
   { id: 'park-label', label: 'Park labels', group: 'Labels', idPatterns: ['park-label'], defaultVisible: false },
 ];
 const mapDetailGroups = Array.from(new Set(mapDetailCategories.map((category) => category.group)));
+const zoom1EnabledCategories = [
+  'water',
+  'water-labels',
+  'landcover',
+  'country-borders',
+  'continent-labels',
+];
+const zoom3EnabledCategories = [...zoom1EnabledCategories, 'country-labels'];
+const zoom4EnabledCategories = [
+  ...zoom3EnabledCategories,
+  'sub-borders',
+  'capital-city-labels',
+];
+const zoom5EnabledCategories = [...zoom4EnabledCategories, 'highways', 'city-labels'];
+const zoom6EnabledCategories = [
+  ...zoom5EnabledCategories,
+  'major-roads',
+  'road-labels',
+  'region-labels',
+];
+const zoom7EnabledCategories = [
+  ...zoom6EnabledCategories,
+  'waterway',
+  'terrain',
+  'dam-pier',
+  'bridges',
+  'other-roads',
+  'town-place-labels',
+];
+const zoom8EnabledCategories = [
+  ...zoom7EnabledCategories,
+  'minor',
+  'rail',
+  'ferries',
+  'airports',
+];
+const zoom9EnabledCategories = [
+  ...zoom8EnabledCategories,
+  'service',
+  'residential',
+  'commercial-industrial',
+  'education-health',
+  'leisure-culture',
+  'pedestrian',
+];
+const zoom10EnabledCategories = [
+  ...zoom9EnabledCategories,
+  'paths-cycleways',
+  'track',
+  'transit',
+];
+const zoom11EnabledCategories = [
+  ...zoom10EnabledCategories,
+  'parking',
+  'poi-transport',
+  'poi-tourism-culture',
+  'poi-accommodation',
+];
+const zoom12EnabledCategories = [
+  ...zoom11EnabledCategories,
+  'poi-food',
+  'poi-shopping',
+  'poi-health-education',
+  'poi-public-sport',
+  'park-label',
+];
+const zoom13EnabledCategories = [
+  ...zoom12EnabledCategories,
+  'building',
+  'construction',
+  'restricted-roads',
+  'road-construction',
+  'steps',
+];
+const zoom14EnabledCategories = [
+  ...zoom13EnabledCategories,
+  'street-furniture',
+  'mountain',
+  'aerialway',
+];
+const zoom15EnabledCategories = [
+  ...zoom14EnabledCategories,
+  'building-numbers',
+  'housenumber',
+];
+const calibratedMapDetailEnabledCategories: Record<number, string[]> = {
+  1: zoom1EnabledCategories,
+  2: zoom1EnabledCategories,
+  3: zoom3EnabledCategories,
+  4: zoom4EnabledCategories,
+  5: zoom5EnabledCategories,
+  6: zoom6EnabledCategories,
+  7: zoom7EnabledCategories,
+  8: zoom8EnabledCategories,
+  9: zoom9EnabledCategories,
+  10: zoom10EnabledCategories,
+  11: zoom11EnabledCategories,
+  12: zoom12EnabledCategories,
+  13: zoom13EnabledCategories,
+  14: zoom14EnabledCategories,
+  15: zoom15EnabledCategories,
+  16: zoom15EnabledCategories,
+  17: zoom15EnabledCategories,
+  18: zoom15EnabledCategories,
+};
 
 const majorCities = [
   { id: 'london', name: 'London', coordinates: { lat: 51.5072, lng: -0.1276 } },
@@ -510,11 +615,20 @@ function createDefaultMapDetailSettings() {
   return Object.fromEntries(
     Array.from({ length: maxDetailZoom - minDetailZoom + 1 }, (_, index) => {
       const zoomStep = minDetailZoom + index;
+      const calibratedEnabledCategories = calibratedMapDetailEnabledCategories[zoomStep];
+      const calibratedEnabledCategorySet = calibratedEnabledCategories
+        ? new Set(calibratedEnabledCategories)
+        : null;
 
       return [
         zoomStep,
         Object.fromEntries(
-          mapDetailCategories.map((category) => [category.id, category.defaultVisible]),
+          mapDetailCategories.map((category) => [
+            category.id,
+            calibratedEnabledCategorySet
+              ? calibratedEnabledCategorySet.has(category.id)
+              : category.defaultVisible,
+          ]),
         ) as Record<string, boolean>,
       ];
     }),
@@ -867,11 +981,15 @@ export function MapCanvas({
   ).length;
   const hiddenDetailCount = mapDetailCategories.length - visibleDetailCount;
 
-  const handleZoomStepChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextZoomStep = clampDetailZoomStep(Number(event.currentTarget.value));
+  const setZoomStep = (nextZoom: number) => {
+    const nextZoomStep = clampDetailZoomStep(nextZoom);
     setSelectedZoomStep(nextZoomStep);
     setCurrentMapZoom(nextZoomStep);
     mapRef.current?.jumpTo({ zoom: nextZoomStep });
+  };
+
+  const handleZoomStepChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setZoomStep(Number(event.currentTarget.value));
   };
 
   const handleDetailCategoryChange = (categoryId: string, enabled: boolean) => {
@@ -894,19 +1012,37 @@ export function MapCanvas({
             <h2>Map detail by zoom</h2>
             <span>Current map zoom: {currentMapZoom.toFixed(1)}</span>
           </div>
-          <label className="map-detail-dev-panel__zoom">
-            <span>Zoom step</span>
+          <div className="map-detail-dev-panel__zoom">
+            <span id="map-detail-zoom-step-label">Zoom step</span>
             <strong>z{selectedZoomStep}</strong>
-            <input
-              type="range"
-              min={minDetailZoom}
-              max={maxDetailZoom}
-              step={1}
-              value={selectedZoomStep}
-              aria-label="Zoom step"
-              onChange={handleZoomStepChange}
-            />
-          </label>
+            <div className="map-detail-dev-panel__zoom-controls">
+              <button
+                type="button"
+                aria-label="Decrease zoom step"
+                disabled={selectedZoomStep <= minDetailZoom}
+                onClick={() => setZoomStep(selectedZoomStep - 1)}
+              >
+                -
+              </button>
+              <input
+                type="range"
+                min={minDetailZoom}
+                max={maxDetailZoom}
+                step={1}
+                value={selectedZoomStep}
+                aria-labelledby="map-detail-zoom-step-label"
+                onChange={handleZoomStepChange}
+              />
+              <button
+                type="button"
+                aria-label="Increase zoom step"
+                disabled={selectedZoomStep >= maxDetailZoom}
+                onClick={() => setZoomStep(selectedZoomStep + 1)}
+              >
+                +
+              </button>
+            </div>
+          </div>
           <div className="map-detail-dev-panel__summary">
             {visibleDetailCount} on / {hiddenDetailCount} off at zoom {selectedZoomStep}
           </div>
