@@ -53,6 +53,8 @@
 - Create: `src/App.tsx`
 - Create: `src/styles.css`
 - Create: `src/test/setup.ts`
+- Create: `tests/scaffold.spec.ts`
+- Modify: `.gitignore`
 
 - [ ] **Step 1: Create the Vite app**
 
@@ -215,21 +217,45 @@ select {
 }
 ```
 
-- [ ] **Step 8: Verify scaffold**
+- [ ] **Step 8: Add scaffold browser smoke test**
+
+Create `tests/scaffold.spec.ts` so `npm run test:e2e` is runnable before the real trip workflow smoke test lands:
+
+```ts
+import { expect, test } from '@playwright/test';
+
+test('loads the world tour planner shell', async ({ page }) => {
+  await page.goto('/');
+
+  await expect(page.getByLabel('World tour map workspace')).toBeVisible();
+  await expect(page.getByText('World Tour Planner')).toBeVisible();
+});
+```
+
+Add Playwright output directories to `.gitignore`:
+
+```gitignore
+test-results/
+playwright-report/
+```
+
+- [ ] **Step 9: Verify scaffold**
 
 Run:
 
 ```bash
+npm run lint
 npm run test
 npm run build
+npm run test:e2e
 ```
 
-Expected: both commands exit with code 0.
+Expected: all commands exit with code 0.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add package.json package-lock.json index.html vite.config.ts tsconfig.json tsconfig.node.json playwright.config.ts src
+git add .gitignore package.json package-lock.json index.html vite.config.ts tsconfig.json tsconfig.node.json playwright.config.ts src tests/scaffold.spec.ts
 git commit -m "chore: scaffold world tour app"
 ```
 
