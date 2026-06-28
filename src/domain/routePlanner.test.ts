@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createDestination } from './destinations';
 import { createRouteLeg } from './routeLegs';
-import { findBestDestinationInsertionIndex, reconcileRouteLegsForDestinations } from './routePlanner';
+import {
+  findBestDestinationInsertionIndex,
+  getDestinationInsertionCandidates,
+  reconcileRouteLegsForDestinations,
+} from './routePlanner';
 
 describe('route planner helpers', () => {
   it('finds the best insertion point after the fixed first stop', () => {
@@ -22,6 +26,63 @@ describe('route planner helpers', () => {
         { lat: 48.8566, lng: 2.3522 },
       ),
     ).toBe(1);
+  });
+
+  it('scores candidate insertion points for Norway stops', () => {
+    const oslo = createDestination({
+      name: 'Oslo',
+      coordinates: { lat: 59.9139, lng: 10.7522 },
+      order: 0,
+    });
+    const bodo = createDestination({
+      name: 'Bodo',
+      coordinates: { lat: 67.2804, lng: 14.4049 },
+      order: 1,
+    });
+    const trondheimCoordinates = { lat: 63.4305, lng: 10.3951 };
+
+    const candidates = getDestinationInsertionCandidates([oslo, bodo], trondheimCoordinates);
+
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        insertionIndex: 1,
+        previousDestinationId: oslo.id,
+        nextDestinationId: bodo.id,
+      }),
+      expect.objectContaining({
+        insertionIndex: 2,
+        previousDestinationId: bodo.id,
+      }),
+    ]);
+    expect(candidates[1]).not.toHaveProperty('nextDestinationId');
+    expect(candidates[0].addedDistanceKm).toBeLessThan(candidates[1].addedDistanceKm);
+    expect(findBestDestinationInsertionIndex([oslo, bodo], trondheimCoordinates)).toBe(1);
+  });
+
+  it('scores Bergen between Oslo and Trondheim when Bodo is already last', () => {
+    const oslo = createDestination({
+      name: 'Oslo',
+      coordinates: { lat: 59.9139, lng: 10.7522 },
+      order: 0,
+    });
+    const trondheim = createDestination({
+      name: 'Trondheim',
+      coordinates: { lat: 63.4305, lng: 10.3951 },
+      order: 1,
+    });
+    const bodo = createDestination({
+      name: 'Bodo',
+      coordinates: { lat: 67.2804, lng: 14.4049 },
+      order: 2,
+    });
+    const bergenCoordinates = { lat: 60.3913, lng: 5.3221 };
+
+    const candidates = getDestinationInsertionCandidates([oslo, trondheim, bodo], bergenCoordinates);
+
+    expect(candidates.map((candidate) => candidate.insertionIndex)).toEqual([1, 2, 3]);
+    expect(findBestDestinationInsertionIndex([oslo, trondheim, bodo], bergenCoordinates)).toBe(1);
+    expect(candidates[0].addedDistanceKm).toBeLessThan(candidates[1].addedDistanceKm);
+    expect(candidates[0].addedDistanceKm).toBeLessThan(candidates[2].addedDistanceKm);
   });
 
   it('never places a new destination before the first stop', () => {

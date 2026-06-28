@@ -254,6 +254,47 @@ describe('useTripData', () => {
     ]);
   });
 
+  it('places Norway stops into the expected route order while keeping Oslo first', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'Oslo',
+        coordinates: { lat: 59.9139, lng: 10.7522 },
+      });
+      await result.current.addDestination({
+        name: 'Bodo',
+        coordinates: { lat: 67.2804, lng: 14.4049 },
+      });
+      await result.current.addDestination({
+        name: 'Trondheim',
+        coordinates: { lat: 63.4305, lng: 10.3951 },
+      });
+      await result.current.addDestination({
+        name: 'Bergen',
+        coordinates: { lat: 60.3913, lng: 5.3221 },
+      });
+    });
+
+    const [oslo, bergen, trondheim, bodo] = result.current.destinations;
+
+    expect(result.current.destinations.map((destination) => destination.name)).toEqual([
+      'Oslo',
+      'Bergen',
+      'Trondheim',
+      'Bodo',
+    ]);
+    expect(result.current.destinations.map((destination) => destination.order)).toEqual([0, 1, 2, 3]);
+    expect(result.current.routeLegs.map((leg) => [leg.originDestinationId, leg.targetDestinationId])).toEqual([
+      [oslo.id, bergen.id],
+      [bergen.id, trondheim.id],
+      [trondheim.id, bodo.id],
+    ]);
+  });
+
   it('optimistically reorders destinations and shows pending route legs while persistence is in flight', async () => {
     const first = createDestination({
       name: 'First',

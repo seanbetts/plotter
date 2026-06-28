@@ -6,6 +6,13 @@ type ReconcileRouteLegsResult = {
   removedRouteLegIds: string[];
 };
 
+export type DestinationInsertionCandidate = {
+  insertionIndex: number;
+  previousDestinationId?: string;
+  nextDestinationId?: string;
+  addedDistanceKm: number;
+};
+
 function routePairKey(originDestinationId: string, targetDestinationId: string) {
   return `${originDestinationId}:${targetDestinationId}`;
 }
@@ -31,12 +38,37 @@ export function findBestDestinationInsertionIndex(
   destinations: Destination[],
   coordinates: Coordinates,
 ): number {
-  if (destinations.length <= 1) {
-    return destinations.length;
+  const candidates = getDestinationInsertionCandidates(destinations, coordinates);
+  const bestCandidate = candidates.reduce<DestinationInsertionCandidate | null>(
+    (best, candidate) =>
+      best === null || candidate.addedDistanceKm < best.addedDistanceKm ? candidate : best,
+    null,
+  );
+
+  return bestCandidate?.insertionIndex ?? destinations.length;
+}
+
+export function getDestinationInsertionCandidates(
+  destinations: Destination[],
+  coordinates: Coordinates,
+): DestinationInsertionCandidate[] {
+  if (destinations.length === 0) {
+    return [{ insertionIndex: 0, addedDistanceKm: 0 }];
   }
 
-  let bestIndex = destinations.length;
-  let bestScore = distanceKm(destinations[destinations.length - 1].coordinates, coordinates);
+  if (destinations.length <= 1) {
+    const [onlyDestination] = destinations;
+
+    return [
+      {
+        insertionIndex: destinations.length,
+        previousDestinationId: onlyDestination.id,
+        addedDistanceKm: distanceKm(onlyDestination.coordinates, coordinates),
+      },
+    ];
+  }
+
+  const candidates: DestinationInsertionCandidate[] = [];
 
   for (let insertionIndex = 1; insertionIndex < destinations.length; insertionIndex += 1) {
     const previousDestination = destinations[insertionIndex - 1];
@@ -46,13 +78,22 @@ export function findBestDestinationInsertionIndex(
       distanceKm(coordinates, nextDestination.coordinates) -
       distanceKm(previousDestination.coordinates, nextDestination.coordinates);
 
-    if (addedDistance < bestScore) {
-      bestScore = addedDistance;
-      bestIndex = insertionIndex;
-    }
+    candidates.push({
+      insertionIndex,
+      previousDestinationId: previousDestination.id,
+      nextDestinationId: nextDestination.id,
+      addedDistanceKm: addedDistance,
+    });
   }
 
-  return bestIndex;
+  const lastDestination = destinations[destinations.length - 1];
+  candidates.push({
+    insertionIndex: destinations.length,
+    previousDestinationId: lastDestination.id,
+    addedDistanceKm: distanceKm(lastDestination.coordinates, coordinates),
+  });
+
+  return candidates;
 }
 
 export function reconcileRouteLegsForDestinations(
