@@ -213,6 +213,63 @@ describe('useTripData', () => {
     ]);
   });
 
+  it('optimistically reorders destinations and shows pending route legs while persistence is in flight', async () => {
+    const first = createDestination({
+      name: 'First',
+      coordinates: { lat: 1, lng: 1 },
+      order: 0,
+    });
+    const second = createDestination({
+      name: 'Second',
+      coordinates: { lat: 2, lng: 2 },
+      order: 1,
+    });
+    const third = createDestination({
+      name: 'Third',
+      coordinates: { lat: 3, lng: 3 },
+      order: 2,
+    });
+    const saveDestination = createDeferred<void>(undefined);
+    const repository = createMemoryRepository(Promise.resolve([first, second, third]), {
+      saveDestination: () => saveDestination.promise,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let reorderPromise: Promise<void>;
+
+    await act(async () => {
+      reorderPromise = result.current.reorderDestinations([third.id, first.id, second.id]);
+      await Promise.resolve();
+    });
+
+    expect(result.current.destinations.map((destination) => destination.name)).toEqual([
+      'Third',
+      'First',
+      'Second',
+    ]);
+    expect(result.current.routeLegs).toMatchObject([
+      {
+        originDestinationId: third.id,
+        targetDestinationId: first.id,
+        type: 'driving-auto',
+        status: 'pending',
+      },
+      {
+        originDestinationId: first.id,
+        targetDestinationId: second.id,
+        type: 'driving-auto',
+        status: 'pending',
+      },
+    ]);
+
+    await act(async () => {
+      saveDestination.resolve();
+      await reorderPromise;
+    });
+  });
+
   it('marks an automatic route leg as a manual shipping leg', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));

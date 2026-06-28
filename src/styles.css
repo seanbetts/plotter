@@ -535,8 +535,30 @@ select {
   justify-items: start;
 }
 
+.inline-route-metrics.is-calculating-route {
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+}
+
+.inline-route-spinner {
+  grid-row: span 2;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(245, 239, 227, 0.18);
+  border-top-color: #e9b44c;
+  border-radius: 999px;
+  animation: route-spin 900ms linear infinite;
+}
+
 .inline-route-metric {
   white-space: nowrap;
+}
+
+@keyframes route-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .route-leg-editor select,

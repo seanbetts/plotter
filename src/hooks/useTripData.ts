@@ -240,11 +240,17 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       const reconcileAndSaveRouteLegs = async (
         nextDestinations: Destination[],
         currentRouteLegs: RouteLeg[],
+        options: { publishPendingRouteLegs?: boolean } = {},
       ) => {
         const reconciliation = reconcileRouteLegsForDestinations(
           nextDestinations,
           currentRouteLegs,
         );
+
+        if (options.publishPendingRouteLegs && isActiveAction()) {
+          replaceRouteLegs(reconciliation.routeLegs);
+        }
+
         const nextRouteLegs = await calculateDrivingRouteLegs(
           nextDestinations,
           reconciliation.routeLegs,
@@ -333,13 +339,17 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
           if (!isActiveAction()) return;
 
-          await Promise.all(
+          replaceDestinations(orderedDestinations);
+          const routeLegReconciliation = reconcileAndSaveRouteLegs(
+            orderedDestinations,
+            routeLegsRef.current,
+            { publishPendingRouteLegs: true },
+          );
+
+          const saveDestinations = Promise.all(
             orderedDestinations.map((destination) => repository.saveDestination(destination)),
           );
-          if (!isActiveAction()) return;
-
-          replaceDestinations(orderedDestinations);
-          await reconcileAndSaveRouteLegs(orderedDestinations, routeLegsRef.current);
+          await Promise.all([saveDestinations, routeLegReconciliation]);
         },
 
         async addRouteLeg(input: {

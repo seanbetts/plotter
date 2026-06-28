@@ -200,6 +200,42 @@ describe('ItineraryPanel', () => {
     });
   });
 
+  it('shows a calculating indicator for pending inline route legs', () => {
+    const origin = createDestination({
+      name: 'Istanbul',
+      countryRegion: 'Turkey',
+      coordinates: { lat: 41.0082, lng: 28.9784 },
+    });
+    const target = createDestination({
+      name: 'Tbilisi',
+      countryRegion: 'Georgia',
+      coordinates: { lat: 41.7151, lng: 44.8271 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'pending',
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('status', { name: 'Calculating Istanbul to Tbilisi route' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('pending')).toBeInTheDocument();
+  });
+
   it('shows an insertion marker and reorders stops before the hovered stop', () => {
     const origin = createDestination({
       name: 'Istanbul',

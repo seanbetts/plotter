@@ -37,6 +37,10 @@ function formatLegTime(routeLeg: RouteLeg) {
   return `${routeLeg.travelTimeHours.toFixed(1)} hr`;
 }
 
+function isRouteLegCalculating(routeLeg: RouteLeg) {
+  return routeLeg.status === 'pending' || routeLeg.status === 'calculating';
+}
+
 function nextRouteType(type: RouteLegType): RouteLegType {
   return type === 'shipping-manual' ? 'driving-auto' : 'shipping-manual';
 }
@@ -165,6 +169,7 @@ export function ItineraryPanel({
           const routeLeg = nextDestination
             ? routeLegsByPair.get(`${destination.id}:${nextDestination.id}`)
             : undefined;
+          const isCalculatingRoute = routeLeg ? isRouteLegCalculating(routeLeg) : false;
           const isDragging = draggedDestinationId === destination.id;
           const activeDropPosition =
             dropPreview?.destinationId === destination.id ? dropPreview.position : null;
@@ -253,7 +258,18 @@ export function ItineraryPanel({
                   >
                     {routeLeg.type === 'shipping-manual' ? <Ship size={15} /> : <Car size={15} />}
                   </button>
-                  <span className="inline-route-metrics">
+                  <span
+                    className={`inline-route-metrics ${
+                      isCalculatingRoute ? 'is-calculating-route' : ''
+                    }`}
+                  >
+                    {isCalculatingRoute ? (
+                      <span
+                        className="inline-route-spinner"
+                        role="status"
+                        aria-label={`Calculating ${destination.name} to ${nextDestination.name} route`}
+                      />
+                    ) : null}
                     <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
                     {formatLegTime(routeLeg) ? (
                       <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
