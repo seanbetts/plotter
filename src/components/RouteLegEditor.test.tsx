@@ -391,6 +391,70 @@ describe('ItineraryPanel', () => {
     expect(onReorderDestinations).toHaveBeenCalledWith([second.id, first.id, third.id]);
   });
 
+  it('reorders a non-bottom stop with pointer dragging from the handle', () => {
+    const first = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0567, lng: -0.1357 },
+    });
+    const second = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const third = createDestination({
+      name: 'Brussels',
+      countryRegion: 'Belgium',
+      coordinates: { lat: 50.8503, lng: 4.3517 },
+    });
+    const onReorderDestinations = vi.fn();
+
+    render(
+      <ItineraryPanel
+        destinations={[first, second, third]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={onReorderDestinations}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    const dragHandle = screen.getByRole('button', { name: 'Drag Balcombe' });
+    const thirdDropTarget = screen.getByTestId(`stop-drop-target-${third.id}`);
+    vi.spyOn(thirdDropTarget, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 260,
+      width: 300,
+      height: 80,
+      top: 260,
+      right: 300,
+      bottom: 340,
+      left: 0,
+      toJSON: () => ({}),
+    });
+    const originalElementFromPoint = document.elementFromPoint;
+    const elementFromPoint = vi.fn().mockReturnValue(thirdDropTarget);
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: elementFromPoint,
+    });
+
+    try {
+      fireEvent.pointerDown(dragHandle, { pointerId: 1, button: 0, clientX: 12, clientY: 120 });
+      fireEvent.pointerMove(dragHandle, { pointerId: 1, clientX: 12, clientY: 270 });
+      fireEvent.pointerUp(dragHandle, { pointerId: 1, clientX: 12, clientY: 270 });
+
+      expect(onReorderDestinations).toHaveBeenCalledWith([second.id, first.id, third.id]);
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+    }
+  });
+
   it('shows an empty stops message', () => {
     render(
       <ItineraryPanel

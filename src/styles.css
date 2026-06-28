@@ -398,6 +398,8 @@ select {
   place-items: center;
   color: rgba(245, 239, 227, 0.42);
   cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
 .stop-drag:active {

@@ -1,6 +1,6 @@
 import { Car, GripVertical, Ship, Trash2 } from 'lucide-react';
-import type { DragEvent } from 'react';
-import { useState } from 'react';
+import type { DragEvent, PointerEvent } from 'react';
+import { useRef, useState } from 'react';
 import type { Destination, RouteLeg, RouteLegType } from '../domain/types';
 
 type ItineraryPanelProps = {
@@ -102,6 +102,8 @@ export function ItineraryPanel({
 }: ItineraryPanelProps) {
   const [draggedDestinationId, setDraggedDestinationId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
+  const draggedDestinationIdRef = useRef<string | null>(null);
+  const dropPreviewRef = useRef<DropPreview | null>(null);
   const routeLegsByPair = new Map(
     routeLegs.map((routeLeg) => [
       `${routeLeg.originDestinationId}:${routeLeg.targetDestinationId}`,
@@ -112,7 +114,19 @@ export function ItineraryPanel({
     .filter(Boolean)
     .join(' ');
 
+  const setActiveDraggedDestinationId = (destinationId: string | null) => {
+    draggedDestinationIdRef.current = destinationId;
+    setDraggedDestinationId(destinationId);
+  };
+
+  const setActiveDropPreview = (preview: DropPreview | null) => {
+    dropPreviewRef.current = preview;
+    setDropPreview(preview);
+  };
+
   const clearDragState = () => {
+    draggedDestinationIdRef.current = null;
+    dropPreviewRef.current = null;
     setDraggedDestinationId(null);
     setDropPreview(null);
   };
@@ -124,7 +138,7 @@ export function ItineraryPanel({
     }
 
     if (!draggedDestinationId || draggedDestinationId === targetDestinationId) {
-      setDropPreview(null);
+      setActiveDropPreview(null);
       return;
     }
 
@@ -132,7 +146,7 @@ export function ItineraryPanel({
     const targetMidpoint = targetBounds.top + targetBounds.height / 2;
     const position = event.clientY > targetMidpoint ? 'after' : 'before';
 
-    setDropPreview(
+    setActiveDropPreview(
       dropPreviewForPointer(destinations, draggedDestinationId, targetDestinationId, position),
     );
   };
@@ -151,24 +165,106 @@ export function ItineraryPanel({
     handleDrop(targetDestinationId);
   };
 
+  const reorderDraggedDestination = (
+    activeDraggedDestinationId: string,
+    resolvedDropPreview: DropPreview,
+  ) => {
+    const nextDestinationIds = reorderedDestinationIds(
+      destinations,
+      activeDraggedDestinationId,
+      resolvedDropPreview.destinationId,
+      resolvedDropPreview.position,
+    );
+    onReorderDestinations(nextDestinationIds);
+    clearDragState();
+  };
+
   const handleDrop = (targetDestinationId: string) => {
     if (!draggedDestinationId || draggedDestinationId === targetDestinationId) {
       clearDragState();
       return;
     }
 
-    const resolvedDropPreview = dropPreview ?? {
+    const resolvedDropPreview = dropPreviewRef.current ?? dropPreview ?? {
       destinationId: targetDestinationId,
       position: 'before' as const,
     };
-    const nextDestinationIds = reorderedDestinationIds(
+    reorderDraggedDestination(draggedDestinationId, resolvedDropPreview);
+  };
+
+  const getPointerDropPreview = (event: PointerEvent<HTMLElement>) => {
+    const activeDraggedDestinationId = draggedDestinationIdRef.current;
+
+    if (!activeDraggedDestinationId || typeof document.elementFromPoint !== 'function') {
+      return null;
+    }
+
+    const hoveredElement = document.elementFromPoint(event.clientX, event.clientY);
+    const dropIndicator = hoveredElement?.closest<HTMLElement>('[data-drop-target-id]');
+
+    if (dropIndicator?.dataset.dropTargetId) {
+      const position =
+        dropIndicator.dataset.dropPosition === 'after' ? 'after' : 'before';
+      return {
+        destinationId: dropIndicator.dataset.dropTargetId,
+        position,
+      } satisfies DropPreview;
+    }
+
+    const stopItem = hoveredElement?.closest<HTMLElement>('[data-stop-id]');
+    const targetDestinationId = stopItem?.dataset.stopId;
+
+    if (!stopItem || !targetDestinationId || targetDestinationId === activeDraggedDestinationId) {
+      return null;
+    }
+
+    const targetBounds = stopItem.getBoundingClientRect();
+    const targetMidpoint = targetBounds.top + targetBounds.height / 2;
+    const position = event.clientY > targetMidpoint ? 'after' : 'before';
+
+    return dropPreviewForPointer(
       destinations,
-      draggedDestinationId,
-      resolvedDropPreview.destinationId,
-      resolvedDropPreview.position,
+      activeDraggedDestinationId,
+      targetDestinationId,
+      position,
     );
-    onReorderDestinations(nextDestinationIds);
-    clearDragState();
+  };
+
+  const handlePointerDown = (
+    event: PointerEvent<HTMLButtonElement>,
+    destinationId: string,
+  ) => {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setActiveDraggedDestinationId(destinationId);
+    setActiveDropPreview(null);
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLButtonElement>) => {
+    if (!draggedDestinationIdRef.current) return;
+
+    event.preventDefault();
+    setActiveDropPreview(getPointerDropPreview(event));
+  };
+
+  const handlePointerUp = (event: PointerEvent<HTMLButtonElement>) => {
+    const activeDraggedDestinationId = draggedDestinationIdRef.current;
+
+    if (!activeDraggedDestinationId) return;
+
+    event.preventDefault();
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+
+    const resolvedDropPreview = getPointerDropPreview(event) ?? dropPreviewRef.current;
+
+    if (!resolvedDropPreview) {
+      clearDragState();
+      return;
+    }
+
+    reorderDraggedDestination(activeDraggedDestinationId, resolvedDropPreview);
   };
 
   return (
@@ -202,6 +298,8 @@ export function ItineraryPanel({
                 <div
                   className="stop-drop-indicator"
                   data-testid={`stop-insert-before-${destination.id}`}
+                  data-drop-target-id={destination.id}
+                  data-drop-position="before"
                   aria-hidden="true"
                   onDragOver={handleMarkerDragOver}
                   onDrop={(event) => handleMarkerDrop(event, destination.id)}
@@ -210,6 +308,7 @@ export function ItineraryPanel({
               <div
                 className={stopItemClassName}
                 data-testid={`stop-drop-target-${destination.id}`}
+                data-stop-id={destination.id}
                 onDragOver={(event) => handleDragOver(event, destination.id)}
                 onDrop={() => handleDrop(destination.id)}
               >
@@ -217,14 +316,18 @@ export function ItineraryPanel({
                   type="button"
                   className="stop-drag"
                   aria-label={`Drag ${destination.name}`}
-                  draggable
+                  draggable={false}
+                  onPointerDown={(event) => handlePointerDown(event, destination.id)}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={clearDragState}
                   onDragStart={(event) => {
                     if (event.dataTransfer) {
                       event.dataTransfer.effectAllowed = 'move';
                       event.dataTransfer.setData('text/plain', destination.id);
                     }
-                    setDraggedDestinationId(destination.id);
-                    setDropPreview(null);
+                    setActiveDraggedDestinationId(destination.id);
+                    setActiveDropPreview(null);
                   }}
                   onDragEnd={clearDragState}
                 >
@@ -253,6 +356,8 @@ export function ItineraryPanel({
                 <div
                   className="stop-drop-indicator"
                   data-testid={`stop-insert-after-${destination.id}`}
+                  data-drop-target-id={destination.id}
+                  data-drop-position="after"
                   aria-hidden="true"
                   onDragOver={handleMarkerDragOver}
                   onDrop={(event) => handleMarkerDrop(event, destination.id)}
