@@ -579,7 +579,7 @@ describe('MapCanvas', () => {
     expect(zoomIn).toBeDisabled();
   });
 
-  it('adds MapLibre sources and layers for destinations, routes, and major cities', () => {
+  it('adds MapLibre sources and layers for destinations and routes', () => {
     render(
       <MapCanvas
         destinations={[destination, targetDestination]}
@@ -604,13 +604,8 @@ describe('MapCanvas', () => {
       'world-tour-routes',
       expect.objectContaining({ type: 'geojson' }),
     );
-    expect(map.addSource).toHaveBeenCalledWith(
-      'world-tour-major-cities',
-      expect.objectContaining({ type: 'geojson' }),
-    );
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-routes-line' }));
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-destination-points' }));
-    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-city-points' }));
     expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
   });
 
@@ -779,7 +774,7 @@ describe('MapCanvas', () => {
     expect(map.on).not.toHaveBeenCalledWith('dblclick', expect.any(Function));
   });
 
-  it('keeps major cities in a MapLibre source with a minimum zoom layer', () => {
+  it('uses MapTiler basemap labels instead of adding duplicate major city labels', () => {
     render(
       <MapCanvas
         destinations={[]}
@@ -796,16 +791,12 @@ describe('MapCanvas', () => {
       loadHandler();
     });
 
-    const citySource = maplibreMock.getSource('world-tour-major-cities');
-    const cityData = citySource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<Point>;
-
-    expect(cityData.features.some((feature) => feature.properties?.name === 'London')).toBe(true);
-    expect(map.addLayer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'world-tour-city-labels',
-        minzoom: 5,
-      }),
+    expect(map.addSource).not.toHaveBeenCalledWith(
+      'world-tour-major-cities',
+      expect.objectContaining({ type: 'geojson' }),
     );
+    expect(map.addLayer).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-city-points' }));
+    expect(map.addLayer).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-city-labels' }));
   });
 
   it('removes the map on unmount', () => {

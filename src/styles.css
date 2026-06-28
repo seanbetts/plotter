@@ -1140,6 +1140,10 @@ select {
     min-height: 100dvh;
   }
 
+  .map-stage {
+    --mobile-itinerary-panel-clearance: 38vh;
+  }
+
   .top-toolbar {
     right: 12px;
     left: 12px;
@@ -1173,7 +1177,11 @@ select {
     bottom: 12px;
     left: 12px;
     width: auto;
-    max-height: 38vh;
+    max-height: var(--mobile-itinerary-panel-clearance);
+  }
+
+  .map-canvas .maplibregl-ctrl-bottom-right {
+    bottom: calc(var(--mobile-itinerary-panel-clearance) + 24px);
   }
 
   .destination-profile {

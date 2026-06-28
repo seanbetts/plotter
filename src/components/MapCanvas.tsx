@@ -59,6 +59,7 @@ const styleUrl = mapTilerApiKey
 const cityLabelFontStack = mapTilerApiKey
   ? ['Roboto Regular', 'Noto Sans Regular']
   : ['Open Sans Semibold'];
+const shouldRenderFallbackMajorCities = !mapTilerApiKey;
 const majorCityMinZoom = 5;
 const showMapDetailDevTools = import.meta.env.VITE_ENABLE_MAP_DETAIL_DEV_TOOLS === 'true';
 const minDetailZoom = 1;
@@ -772,7 +773,9 @@ export function MapCanvas({
       routesSourceId,
       buildRouteFeatures(latestDestinationsRef.current, latestRouteLegsRef.current),
     );
-    setSourceData(map, majorCitiesSourceId, buildMajorCityFeatures());
+    if (shouldRenderFallbackMajorCities) {
+      setSourceData(map, majorCitiesSourceId, buildMajorCityFeatures());
+    }
     updateDestinationLabelPositions();
   }, [updateDestinationLabelPositions]);
 
@@ -838,7 +841,7 @@ export function MapCanvas({
       });
     }
 
-    if (!map.getSource(majorCitiesSourceId)) {
+    if (shouldRenderFallbackMajorCities && !map.getSource(majorCitiesSourceId)) {
       map.addSource(majorCitiesSourceId, {
         type: 'geojson',
         data: emptyFeatureCollection<Point, CityFeatureProperties>(),
@@ -893,7 +896,7 @@ export function MapCanvas({
       } as maplibregl.LayerSpecification);
     }
 
-    if (!map.getLayer(cityPointsLayerId)) {
+    if (shouldRenderFallbackMajorCities && !map.getLayer(cityPointsLayerId)) {
       map.addLayer({
         id: cityPointsLayerId,
         type: 'circle',
@@ -908,7 +911,7 @@ export function MapCanvas({
       } as maplibregl.LayerSpecification);
     }
 
-    if (!map.getLayer(cityLabelsLayerId)) {
+    if (shouldRenderFallbackMajorCities && !map.getLayer(cityLabelsLayerId)) {
       map.addLayer({
         id: cityLabelsLayerId,
         type: 'symbol',
