@@ -46,8 +46,7 @@ export default function App() {
     async (input: Parameters<typeof addDestination>[0]) => {
       if (isInteractionLocked) return;
 
-      const destination = await addDestination(input);
-      setSelectedDestinationId(destination.id);
+      await addDestination(input);
     },
     [addDestination, isInteractionLocked],
   );

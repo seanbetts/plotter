@@ -136,7 +136,7 @@ describe('App', () => {
     vi.unstubAllGlobals();
   });
 
-  it('adds a searched destination and opens its profile after trip data loads', async () => {
+  it('adds a searched destination without opening its profile after trip data loads', async () => {
     vi.mocked(searchMapTilerPlaces).mockResolvedValue([
       {
         kind: 'place',
@@ -162,9 +162,9 @@ describe('App', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'Kyoto, Japan' }));
 
     expect(searchMapTilerPlaces).toHaveBeenCalledWith('Kyoto', { apiKey: expect.any(String) });
-    expect(await screen.findByRole('complementary', { name: 'Kyoto profile' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Kyoto' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Select Kyoto' })).toHaveClass('is-selected');
+    expect(await screen.findByRole('button', { name: 'Kyoto, Japan' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Kyoto profile' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select Kyoto' })).not.toHaveClass('is-selected');
   });
 
   it('keeps mutation actions unavailable while trip data is loading', async () => {
