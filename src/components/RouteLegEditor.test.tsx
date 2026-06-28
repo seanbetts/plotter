@@ -339,6 +339,58 @@ describe('ItineraryPanel', () => {
     expect(onReorderDestinations).toHaveBeenCalledWith([first.id, third.id, second.id]);
   });
 
+  it('reorders when dropping directly on the insertion marker', () => {
+    const first = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0567, lng: -0.1357 },
+    });
+    const second = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const third = createDestination({
+      name: 'Brussels',
+      countryRegion: 'Belgium',
+      coordinates: { lat: 50.8503, lng: 4.3517 },
+    });
+    const onReorderDestinations = vi.fn();
+
+    render(
+      <ItineraryPanel
+        destinations={[first, second, third]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={onReorderDestinations}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    const thirdDropTarget = screen.getByTestId(`stop-drop-target-${third.id}`);
+    vi.spyOn(thirdDropTarget, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 260,
+      width: 300,
+      height: 80,
+      top: 260,
+      right: 300,
+      bottom: 340,
+      left: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Drag Balcombe' }));
+    dragOverAt(thirdDropTarget, 270);
+
+    const insertionMarker = screen.getByTestId(`stop-insert-before-${third.id}`);
+    fireEvent.drop(insertionMarker);
+
+    expect(onReorderDestinations).toHaveBeenCalledWith([second.id, first.id, third.id]);
+  });
+
   it('shows an empty stops message', () => {
     render(
       <ItineraryPanel

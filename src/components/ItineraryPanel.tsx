@@ -137,6 +137,20 @@ export function ItineraryPanel({
     );
   };
 
+  const handleMarkerDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+  };
+
+  const handleMarkerDrop = (event: DragEvent<HTMLDivElement>, targetDestinationId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handleDrop(targetDestinationId);
+  };
+
   const handleDrop = (targetDestinationId: string) => {
     if (!draggedDestinationId || draggedDestinationId === targetDestinationId) {
       clearDragState();
@@ -189,6 +203,8 @@ export function ItineraryPanel({
                   className="stop-drop-indicator"
                   data-testid={`stop-insert-before-${destination.id}`}
                   aria-hidden="true"
+                  onDragOver={handleMarkerDragOver}
+                  onDrop={(event) => handleMarkerDrop(event, destination.id)}
                 />
               ) : null}
               <div
@@ -238,6 +254,8 @@ export function ItineraryPanel({
                   className="stop-drop-indicator"
                   data-testid={`stop-insert-after-${destination.id}`}
                   aria-hidden="true"
+                  onDragOver={handleMarkerDragOver}
+                  onDrop={(event) => handleMarkerDrop(event, destination.id)}
                 />
               ) : null}
               {routeLeg && nextDestination ? (
