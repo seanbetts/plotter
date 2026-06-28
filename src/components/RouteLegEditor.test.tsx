@@ -87,7 +87,7 @@ describe('RouteLegEditor', () => {
 });
 
 describe('ItineraryPanel', () => {
-  it('renders selectable stops and generated route rows', async () => {
+  it('renders stops with inline route leg summaries in miles', async () => {
     const user = userEvent.setup();
     const origin = createDestination({
       name: 'Istanbul',
@@ -103,6 +103,9 @@ describe('ItineraryPanel', () => {
       originDestinationId: origin.id,
       targetDestinationId: target.id,
       type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 160,
+      travelTimeHours: 2.25,
     });
     const onSelectDestination = vi.fn();
     const onDeleteDestination = vi.fn();
@@ -123,14 +126,15 @@ describe('ItineraryPanel', () => {
 
     expect(screen.getByLabelText('Itinerary')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Stops' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Routes' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '01 Istanbul Turkey' })).toBeInTheDocument();
     const selectedStop = screen.getByRole('button', { name: '02 Tbilisi Georgia' });
     expect(selectedStop).toHaveAttribute('aria-current', 'location');
     expect(selectedStop.closest('.stop-item')).toHaveClass('is-selected');
-    expect(screen.getByText('1 route leg')).toBeInTheDocument();
+    expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add route leg' })).not.toBeInTheDocument();
-    expect(screen.getByText('Istanbul to Tbilisi')).toBeInTheDocument();
-    expect(screen.getByText('01 - pending')).toBeInTheDocument();
+    expect(screen.getByText('99 mi')).toBeInTheDocument();
+    expect(screen.getByText('2.3 hr')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '01 Istanbul Turkey' }));
 
@@ -141,13 +145,49 @@ describe('ItineraryPanel', () => {
     expect(onDeleteDestination).toHaveBeenCalledWith(origin.id);
     expect(onSelectDestination).toHaveBeenCalledTimes(1);
 
-    await user.selectOptions(
-      screen.getByLabelText('Leg type Istanbul to Tbilisi'),
-      'shipping-manual',
-    );
+    await user.click(screen.getByRole('button', { name: 'Set Istanbul to Tbilisi to shipping/manual' }));
 
     expect(onUpdateRouteLeg).toHaveBeenCalledWith(routeLeg.id, {
       type: 'shipping-manual',
+    });
+  });
+
+  it('cycles inline route leg travel type back to driving', async () => {
+    const user = userEvent.setup();
+    const origin = createDestination({
+      name: 'Panama City',
+      countryRegion: 'Panama',
+      coordinates: { lat: 8.9824, lng: -79.5199 },
+    });
+    const target = createDestination({
+      name: 'Cartagena',
+      countryRegion: 'Colombia',
+      coordinates: { lat: 10.391, lng: -75.4794 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'shipping-manual',
+      status: 'manual',
+    });
+    const onUpdateRouteLeg = vi.fn();
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={onUpdateRouteLeg}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Set Panama City to Cartagena to driving' }));
+
+    expect(onUpdateRouteLeg).toHaveBeenCalledWith(routeLeg.id, {
+      type: 'driving-auto',
     });
   });
 
@@ -197,6 +237,6 @@ describe('ItineraryPanel', () => {
     );
 
     expect(screen.getByText('Add your first destination from the map search.')).toBeInTheDocument();
-    expect(screen.getByText('0 route legs')).toBeInTheDocument();
+    expect(screen.queryByText('0 route legs')).not.toBeInTheDocument();
   });
 });

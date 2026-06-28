@@ -15,6 +15,24 @@ type ItineraryPanelProps = {
   ) => void;
 };
 
+const kmToMiles = 0.621371;
+
+function formatLegDistance(routeLeg: RouteLeg) {
+  if (routeLeg.distanceKm === undefined) return routeLeg.status;
+
+  return `${Math.round(routeLeg.distanceKm * kmToMiles).toLocaleString()} mi`;
+}
+
+function formatLegTime(routeLeg: RouteLeg) {
+  if (routeLeg.travelTimeHours === undefined) return null;
+
+  return `${routeLeg.travelTimeHours.toFixed(1)} hr`;
+}
+
+function nextRouteType(type: RouteLegType): RouteLegType {
+  return type === 'shipping-manual' ? 'driving-auto' : 'shipping-manual';
+}
+
 export function ItineraryPanel({
   destinations,
   routeLegs,
@@ -25,8 +43,11 @@ export function ItineraryPanel({
   onUpdateRouteLeg,
 }: ItineraryPanelProps) {
   const [draggedDestinationId, setDraggedDestinationId] = useState<string | null>(null);
-  const destinationsById = new Map(
-    destinations.map((destination) => [destination.id, destination]),
+  const routeLegsByPair = new Map(
+    routeLegs.map((routeLeg) => [
+      `${routeLeg.originDestinationId}:${routeLeg.targetDestinationId}`,
+      routeLeg,
+    ]),
   );
 
   const handleDrop = (targetDestinationId: string) => {
@@ -58,93 +79,73 @@ export function ItineraryPanel({
         {destinations.map((destination, index) => {
           const region = destination.countryRegion || 'Unassigned region';
           const isSelected = destination.id === selectedDestinationId;
+          const nextDestination = destinations[index + 1];
+          const routeLeg = nextDestination
+            ? routeLegsByPair.get(`${destination.id}:${nextDestination.id}`)
+            : undefined;
 
           return (
-            <div
-              key={destination.id}
-              className={`stop-item ${isSelected ? 'is-selected' : ''}`}
-              data-testid={`stop-drop-target-${destination.id}`}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => handleDrop(destination.id)}
-            >
-              <button
-                type="button"
-                className="stop-drag"
-                aria-label={`Drag ${destination.name}`}
-                draggable
-                onDragStart={() => setDraggedDestinationId(destination.id)}
-                onDragEnd={() => setDraggedDestinationId(null)}
+            <div key={destination.id} className="stop-sequence-item">
+              <div
+                className={`stop-item ${isSelected ? 'is-selected' : ''}`}
+                data-testid={`stop-drop-target-${destination.id}`}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => handleDrop(destination.id)}
               >
-                <GripVertical size={16} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="stop-select"
-                aria-label={`${String(index + 1).padStart(2, '0')} ${destination.name} ${region}`}
-                aria-current={isSelected ? 'location' : undefined}
-                onClick={() => onSelectDestination(destination.id)}
-              >
-                <span>{String(index + 1).padStart(2, '0')}</span>
-                <strong>{destination.name}</strong>
-                <small>{region}</small>
-              </button>
-              <button
-                type="button"
-                className="stop-delete"
-                aria-label={`Delete ${destination.name}`}
-                onClick={() => onDeleteDestination(destination.id)}
-              >
-                <Trash2 size={15} aria-hidden="true" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      <h2>Routes</h2>
-      <p className="route-summary">
-        {routeLegs.length} route {routeLegs.length === 1 ? 'leg' : 'legs'}
-      </p>
-
-      <div className="route-leg-list">
-        {routeLegs.length === 0 ? <p>No route legs yet.</p> : null}
-        {routeLegs.map((routeLeg, index) => {
-          const origin = destinationsById.get(routeLeg.originDestinationId);
-          const target = destinationsById.get(routeLeg.targetDestinationId);
-          const originName = origin?.name ?? 'Unknown origin';
-          const targetName = target?.name ?? 'Unknown target';
-          const legLabel = `${originName} to ${targetName}`;
-          const metricLabel =
-            routeLeg.distanceKm !== undefined && routeLeg.travelTimeHours !== undefined
-              ? `${Math.round(routeLeg.distanceKm).toLocaleString()} km, ${routeLeg.travelTimeHours.toFixed(1)} hr`
-              : routeLeg.status;
-
-          return (
-            <div key={routeLeg.id} className={`route-leg-row route-leg-row-${routeLeg.type}`}>
-              <div className="route-leg-icon" aria-hidden="true">
-                {routeLeg.type === 'shipping-manual' ? <Ship size={16} /> : <Car size={16} />}
-              </div>
-              <div className="route-leg-copy">
-                <strong>{legLabel}</strong>
-                <small>
-                  {String(index + 1).padStart(2, '0')} - {metricLabel}
-                </small>
-              </div>
-              <label className="route-leg-type">
-                <span className="sr-only">Leg type {legLabel}</span>
-                <select
-                  aria-label={`Leg type ${legLabel}`}
-                  value={routeLeg.type}
-                  onChange={(event) =>
-                    onUpdateRouteLeg(routeLeg.id, {
-                      type: event.target.value as RouteLegType,
-                    })
-                  }
+                <button
+                  type="button"
+                  className="stop-drag"
+                  aria-label={`Drag ${destination.name}`}
+                  draggable
+                  onDragStart={() => setDraggedDestinationId(destination.id)}
+                  onDragEnd={() => setDraggedDestinationId(null)}
                 >
-                  <option value="driving-auto">Drive</option>
-                  <option value="shipping-manual">Ship/manual</option>
-                </select>
-              </label>
+                  <GripVertical size={16} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="stop-select"
+                  aria-label={`${String(index + 1).padStart(2, '0')} ${destination.name} ${region}`}
+                  aria-current={isSelected ? 'location' : undefined}
+                  onClick={() => onSelectDestination(destination.id)}
+                >
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <strong>{destination.name}</strong>
+                  <small>{region}</small>
+                </button>
+                <button
+                  type="button"
+                  className="stop-delete"
+                  aria-label={`Delete ${destination.name}`}
+                  onClick={() => onDeleteDestination(destination.id)}
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                </button>
+              </div>
+              {routeLeg && nextDestination ? (
+                <div className={`inline-route-leg inline-route-leg-${routeLeg.type}`}>
+                  <span className="inline-route-rail" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className="inline-route-type"
+                    aria-label={`Set ${destination.name} to ${nextDestination.name} to ${
+                      routeLeg.type === 'shipping-manual' ? 'driving' : 'shipping/manual'
+                    }`}
+                    title={routeLeg.type === 'shipping-manual' ? 'Set to driving' : 'Set to shipping/manual'}
+                    onClick={() =>
+                      onUpdateRouteLeg(routeLeg.id, {
+                        type: nextRouteType(routeLeg.type),
+                      })
+                    }
+                  >
+                    {routeLeg.type === 'shipping-manual' ? <Ship size={15} /> : <Car size={15} />}
+                  </button>
+                  <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
+                  {formatLegTime(routeLeg) ? (
+                    <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           );
         })}

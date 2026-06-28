@@ -297,11 +297,11 @@ select {
   bottom: 16px;
   z-index: 9;
   display: grid;
-  width: min(360px, calc(100vw - 32px));
-  max-height: 46vh;
-  gap: 12px;
+  width: min(390px, calc(100vw - 32px));
+  max-height: 58vh;
+  gap: 14px;
   overflow: auto;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid rgba(245, 239, 227, 0.14);
   border-radius: 8px;
   background: rgba(17, 24, 20, 0.84);
@@ -311,19 +311,23 @@ select {
 
 .itinerary-panel h2 {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 1.08rem;
   letter-spacing: 0;
 }
 
 .stop-list {
   display: grid;
-  gap: 7px;
+  gap: 0;
 }
 
 .stop-list p {
   margin: 0;
   color: rgba(245, 239, 227, 0.62);
   font-size: 0.86rem;
+}
+
+.stop-sequence-item {
+  display: grid;
 }
 
 .stop-item {
@@ -362,7 +366,7 @@ select {
   grid-template-columns: 34px 1fr;
   gap: 2px 8px;
   min-width: 0;
-  padding: 9px;
+  padding: 10px 9px;
   text-align: left;
 }
 
@@ -398,32 +402,21 @@ select {
   background: rgba(245, 239, 227, 0.08);
 }
 
-.stop-list span {
+.stop-select span {
   grid-row: span 2;
   color: rgba(245, 239, 227, 0.48);
   font-size: 0.78rem;
 }
 
-.stop-list strong {
+.stop-select strong {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.stop-list small {
+.stop-select small {
   min-width: 0;
   overflow-wrap: anywhere;
   color: rgba(245, 239, 227, 0.55);
-}
-
-.route-summary {
-  margin: 0;
-  color: rgba(245, 239, 227, 0.62);
-  font-size: 0.86rem;
-}
-
-.route-leg-list {
-  display: grid;
-  gap: 7px;
 }
 
 .route-leg-editor {
@@ -438,55 +431,48 @@ select {
   font-size: 0.78rem;
 }
 
-.route-leg-list p {
-  margin: 0;
-  color: rgba(245, 239, 227, 0.62);
-  font-size: 0.86rem;
-}
-
-.route-leg-row {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 118px;
-  gap: 8px;
+.inline-route-leg {
+  display: flex;
   align-items: center;
-  padding: 8px;
-  border: 1px solid rgba(245, 239, 227, 0.12);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.route-leg-icon {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 6px;
-  color: #111814;
-  background: #e9b44c;
-}
-
-.route-leg-row-shipping-manual .route-leg-icon {
-  background: #7ec8e3;
-}
-
-.route-leg-copy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.route-leg-copy strong,
-.route-leg-copy small {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.route-leg-copy small {
-  color: rgba(245, 239, 227, 0.58);
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 42px 4px 64px;
+  color: rgba(245, 239, 227, 0.62);
   font-size: 0.76rem;
 }
 
-.route-leg-type select,
+.inline-route-rail {
+  width: 24px;
+  height: 1px;
+  background: rgba(245, 239, 227, 0.18);
+}
+
+.inline-route-type {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid rgba(245, 239, 227, 0.14);
+  border-radius: 6px;
+  color: #111814;
+  background: #e9b44c;
+  cursor: pointer;
+}
+
+.inline-route-leg-shipping-manual .inline-route-type {
+  background: #7ec8e3;
+}
+
+.inline-route-type:hover,
+.inline-route-type:focus-visible {
+  outline: 2px solid rgba(233, 180, 76, 0.84);
+  outline-offset: 2px;
+}
+
+.inline-route-metric {
+  white-space: nowrap;
+}
+
 .route-leg-editor select,
 .route-leg-editor textarea {
   width: 100%;
@@ -497,7 +483,6 @@ select {
   background: rgba(255, 255, 255, 0.07);
 }
 
-.route-leg-type select:focus-visible,
 .route-leg-editor select:focus-visible,
 .route-leg-editor textarea:focus-visible,
 .route-leg-editor button:focus-visible {
