@@ -3,7 +3,7 @@ import { searchNominatimPlaces } from './geocoding';
 
 describe('geocoding adapter', () => {
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('maps Nominatim results into place search results', async () => {
@@ -32,5 +32,26 @@ describe('geocoding adapter', () => {
         countryRegion: 'Turkey',
       },
     ]);
+  });
+
+  it('returns no results and skips fetch for a blank query', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const results = await searchNominatimPlaces('   ');
+
+    expect(results).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects when Nominatim returns a non-OK response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+      }),
+    );
+
+    await expect(searchNominatimPlaces('Istanbul')).rejects.toThrow('Place search failed');
   });
 });
