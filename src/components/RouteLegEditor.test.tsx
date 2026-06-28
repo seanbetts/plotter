@@ -105,6 +105,7 @@ describe('ItineraryPanel', () => {
       type: 'driving',
     });
     const onSelectDestination = vi.fn();
+    const onDeleteDestination = vi.fn();
 
     render(
       <ItineraryPanel
@@ -112,6 +113,7 @@ describe('ItineraryPanel', () => {
         routeLegs={[routeLeg]}
         selectedDestinationId={target.id}
         onSelectDestination={onSelectDestination}
+        onDeleteDestination={onDeleteDestination}
         onCreateRouteLeg={vi.fn()}
       />,
     );
@@ -119,14 +121,20 @@ describe('ItineraryPanel', () => {
     expect(screen.getByLabelText('Itinerary')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Stops' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '01 Istanbul Turkey' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '02 Tbilisi Georgia' })).toHaveClass('is-selected');
-    expect(screen.getByRole('button', { name: '02 Tbilisi Georgia' })).toHaveAttribute('aria-current', 'location');
+    const selectedStop = screen.getByRole('button', { name: '02 Tbilisi Georgia' });
+    expect(selectedStop).toHaveAttribute('aria-current', 'location');
+    expect(selectedStop.closest('.stop-item')).toHaveClass('is-selected');
     expect(screen.getByText('1 route leg')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add route leg' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '01 Istanbul Turkey' }));
 
     expect(onSelectDestination).toHaveBeenCalledWith(origin.id);
+
+    await user.click(screen.getByRole('button', { name: 'Delete Istanbul' }));
+
+    expect(onDeleteDestination).toHaveBeenCalledWith(origin.id);
+    expect(onSelectDestination).toHaveBeenCalledTimes(1);
   });
 
   it('shows an empty stops message', () => {
@@ -136,6 +144,7 @@ describe('ItineraryPanel', () => {
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
         onCreateRouteLeg={vi.fn()}
       />,
     );

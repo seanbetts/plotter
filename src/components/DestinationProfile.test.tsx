@@ -1,9 +1,19 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
 import type { Destination } from '../domain/types';
 import { DestinationProfile } from './DestinationProfile';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return { promise, resolve };
+}
 
 describe('DestinationProfile', () => {
   it('edits destination summary, timing, and tags', async () => {
@@ -276,5 +286,66 @@ describe('DestinationProfile', () => {
         timing: expect.objectContaining({ expectedStayDays: 4 }),
       }),
     );
+  });
+
+  it('shows saving and saved feedback after saving destination changes', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+    const save = deferred<void>();
+    const onUpdate = vi.fn(() => save.promise);
+
+    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    await user.type(screen.getByLabelText('Why it matters'), 'Silk Road architecture.');
+    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
+
+    save.resolve();
+
+    await waitFor(() => expect(screen.getByText('Destination saved')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Saved' })).toBeInTheDocument();
+  });
+
+  it('keeps saved feedback visible when the saved destination version updates', async () => {
+    const user = userEvent.setup();
+    const destination = {
+      ...createDestination({
+        name: 'Samarkand',
+        countryRegion: 'Uzbekistan',
+        coordinates: { lat: 39.6542, lng: 66.9597 },
+      }),
+      updatedAt: '2026-06-28T09:00:00.000Z',
+    };
+
+    function ProfileHarness() {
+      const [currentDestination, setCurrentDestination] = useState(destination);
+
+      return (
+        <DestinationProfile
+          destination={currentDestination}
+          onUpdate={(_, patch) => {
+            setCurrentDestination({
+              ...currentDestination,
+              ...patch,
+              updatedAt: '2026-06-28T10:00:00.000Z',
+            });
+          }}
+          onClose={vi.fn()}
+        />
+      );
+    }
+
+    render(<ProfileHarness />);
+
+    await user.type(screen.getByLabelText('Why it matters'), 'Silk Road architecture.');
+    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+
+    await waitFor(() => expect(screen.getByText('Destination saved')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Saved' })).toBeInTheDocument();
   });
 });

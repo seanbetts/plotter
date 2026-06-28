@@ -46,6 +46,8 @@ describe('TopToolbar', () => {
       countryRegion: 'Turkey',
       coordinates: { lat: 41.0082, lng: 28.9784 },
     });
+    expect(screen.getByLabelText('Search for a destination')).toHaveValue('');
+    expect(screen.queryByRole('button', { name: 'Add Istanbul, Turkey' })).not.toBeInTheDocument();
   });
 
   it('keeps stale search responses from replacing newer results or loading state', async () => {

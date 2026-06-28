@@ -8,10 +8,27 @@ type MapCanvasProps = {
   routeLegs: RouteLeg[];
   selectedDestinationId: string | null;
   onSelectDestination: (destinationId: string) => void;
-  onDropPin: (coordinates: { lat: number; lng: number }) => void;
 };
 
 const styleUrl = 'https://demotiles.maplibre.org/style.json';
+const majorCityMinZoom = 3;
+
+const majorCities = [
+  { id: 'london', name: 'London', coordinates: { lat: 51.5072, lng: -0.1276 } },
+  { id: 'paris', name: 'Paris', coordinates: { lat: 48.8566, lng: 2.3522 } },
+  { id: 'istanbul', name: 'Istanbul', coordinates: { lat: 41.0082, lng: 28.9784 } },
+  { id: 'cairo', name: 'Cairo', coordinates: { lat: 30.0444, lng: 31.2357 } },
+  { id: 'mumbai', name: 'Mumbai', coordinates: { lat: 19.076, lng: 72.8777 } },
+  { id: 'bangkok', name: 'Bangkok', coordinates: { lat: 13.7563, lng: 100.5018 } },
+  { id: 'tokyo', name: 'Tokyo', coordinates: { lat: 35.6762, lng: 139.6503 } },
+  { id: 'sydney', name: 'Sydney', coordinates: { lat: -33.8688, lng: 151.2093 } },
+  { id: 'los-angeles', name: 'Los Angeles', coordinates: { lat: 34.0522, lng: -118.2437 } },
+  { id: 'mexico-city', name: 'Mexico City', coordinates: { lat: 19.4326, lng: -99.1332 } },
+  { id: 'bogota', name: 'Bogota', coordinates: { lat: 4.711, lng: -74.0721 } },
+  { id: 'buenos-aires', name: 'Buenos Aires', coordinates: { lat: -34.6037, lng: -58.3816 } },
+  { id: 'cape-town', name: 'Cape Town', coordinates: { lat: -33.9249, lng: 18.4241 } },
+  { id: 'nairobi', name: 'Nairobi', coordinates: { lat: -1.2921, lng: 36.8219 } },
+];
 
 type ScreenPoint = {
   x: number;
@@ -29,14 +46,14 @@ export function MapCanvas({
   routeLegs,
   selectedDestinationId,
   onSelectDestination,
-  onDropPin,
 }: MapCanvasProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const onDropPinRef = useRef(onDropPin);
   const updateOverlayRef = useRef(() => {});
   const [pinPositions, setPinPositions] = useState<Record<string, ScreenPoint>>({});
   const [routePaths, setRoutePaths] = useState<RoutePath[]>([]);
+  const [cityPositions, setCityPositions] = useState<Record<string, ScreenPoint>>({});
+  const [showMajorCities, setShowMajorCities] = useState(false);
 
   const updateOverlayPositions = useCallback(() => {
     const map = mapRef.current;
@@ -81,11 +98,17 @@ export function MapCanvas({
         })
         .filter((path): path is RoutePath => path !== null),
     );
-  }, [destinations, routeLegs]);
 
-  useEffect(() => {
-    onDropPinRef.current = onDropPin;
-  }, [onDropPin]);
+    setShowMajorCities(map.getZoom() >= majorCityMinZoom);
+    setCityPositions(
+      Object.fromEntries(
+        majorCities.map((city) => {
+          const point = map.project([city.coordinates.lng, city.coordinates.lat]);
+          return [city.id, { x: point.x, y: point.y }];
+        }),
+      ),
+    );
+  }, [destinations, routeLegs]);
 
   useEffect(() => {
     updateOverlayRef.current = updateOverlayPositions;
@@ -103,14 +126,10 @@ export function MapCanvas({
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    const handleDropPin = (event: maplibregl.MapMouseEvent) => {
-      onDropPinRef.current({ lat: event.lngLat.lat, lng: event.lngLat.lng });
-    };
     const syncOverlay = () => {
       updateOverlayRef.current();
     };
 
-    map.on('dblclick', handleDropPin);
     map.on('move', syncOverlay);
     map.on('zoom', syncOverlay);
     map.on('resize', syncOverlay);
@@ -119,7 +138,6 @@ export function MapCanvas({
     syncOverlay();
 
     return () => {
-      map.off('dblclick', handleDropPin);
       map.off('move', syncOverlay);
       map.off('zoom', syncOverlay);
       map.off('resize', syncOverlay);
@@ -164,6 +182,22 @@ export function MapCanvas({
           </button>
         ))}
       </div>
+      {showMajorCities ? (
+        <div className="major-city-layer" aria-label="Major cities">
+          {majorCities.map((city) => (
+            <span
+              key={city.id}
+              className="major-city-label"
+              style={{
+                left: `${cityPositions[city.id]?.x ?? 0}px`,
+                top: `${cityPositions[city.id]?.y ?? 0}px`,
+              }}
+            >
+              {city.name}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <div className="map-route-count" aria-live="polite">
         {routeCount} route {routeCount === 1 ? 'leg' : 'legs'}
       </div>

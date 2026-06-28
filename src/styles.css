@@ -74,6 +74,13 @@ select {
   pointer-events: none;
 }
 
+.major-city-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
 .route-layer {
   position: absolute;
   inset: 0;
@@ -131,6 +138,23 @@ select {
   margin: 7px auto;
   border-radius: 50%;
   background: #111814;
+}
+
+.major-city-label {
+  position: absolute;
+  display: block;
+  max-width: 120px;
+  padding: 2px 5px;
+  border: 1px solid rgba(17, 24, 20, 0.18);
+  border-radius: 4px;
+  color: rgba(17, 24, 20, 0.74);
+  background: rgba(245, 239, 227, 0.72);
+  box-shadow: 0 4px 14px rgba(17, 24, 20, 0.1);
+  font-size: 0.72rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  white-space: nowrap;
+  transform: translate(-50%, -120%);
 }
 
 .map-route-count {
@@ -328,6 +352,17 @@ select {
   background: #e9b44c;
 }
 
+.primary-action:disabled {
+  cursor: wait;
+  opacity: 0.82;
+}
+
+.profile-save-status {
+  min-height: 1rem;
+  color: rgba(245, 239, 227, 0.66);
+  font-size: 0.78rem;
+}
+
 .itinerary-panel {
   position: absolute;
   left: 16px;
@@ -363,29 +398,56 @@ select {
   font-size: 0.86rem;
 }
 
-.stop-list button {
+.stop-item {
   display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 2px 8px;
-  width: 100%;
-  padding: 9px;
+  grid-template-columns: 1fr 34px;
+  gap: 6px;
   border: 1px solid rgba(245, 239, 227, 0.12);
   border-radius: 6px;
-  color: #f5efe3;
   background: rgba(255, 255, 255, 0.06);
-  text-align: left;
+}
+
+.stop-select,
+.stop-delete {
+  border: 0;
+  color: #f5efe3;
+  background: transparent;
   cursor: pointer;
 }
 
-.stop-list button:hover,
-.stop-list button:focus-visible {
+.stop-select {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 2px 8px;
+  min-width: 0;
+  padding: 9px;
+  text-align: left;
+}
+
+.stop-delete {
+  display: grid;
+  width: 34px;
+  min-height: 100%;
+  place-items: center;
+  border-left: 1px solid rgba(245, 239, 227, 0.1);
+  color: rgba(245, 239, 227, 0.58);
+}
+
+.stop-item:hover,
+.stop-item:focus-within {
   border-color: rgba(245, 239, 227, 0.32);
   background: rgba(255, 255, 255, 0.09);
 }
 
-.stop-list button.is-selected {
+.stop-item.is-selected {
   border-color: rgba(233, 180, 76, 0.72);
   background: rgba(233, 180, 76, 0.12);
+}
+
+.stop-delete:hover,
+.stop-delete:focus-visible {
+  color: #ffcfba;
+  background: rgba(255, 207, 186, 0.1);
 }
 
 .stop-list span {

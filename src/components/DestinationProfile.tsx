@@ -1,10 +1,11 @@
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ActivityItem, Destination } from '../domain/types';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
 
 type DestinationFormState = {
+  sourceKey: string;
   summary: string;
   highlights: string;
   personalRationale: string;
@@ -21,6 +22,8 @@ type DestinationProfileProps = {
   onUpdate: (destinationId: string, patch: DestinationPatch) => Promise<void> | void;
   onClose: () => void;
 };
+
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const listToText = (items: string[]) => items.join(', ');
 
@@ -60,7 +63,10 @@ const createActivityItems = (labels: string[], existingItems: ActivityItem[]): A
   });
 };
 
+const destinationSourceKey = (destination: Destination) => `${destination.id}:${destination.updatedAt}`;
+
 const createFormState = (destination: Destination): DestinationFormState => ({
+  sourceKey: destinationSourceKey(destination),
   summary: destination.why.summary,
   highlights: destination.why.highlights,
   personalRationale: destination.why.personalRationale,
@@ -75,7 +81,7 @@ const createFormState = (destination: Destination): DestinationFormState => ({
 export function DestinationProfile({ destination, onUpdate, onClose }: DestinationProfileProps) {
   return (
     <DestinationProfileForm
-      key={`${destination.id}:${destination.updatedAt}`}
+      key={destination.id}
       destination={destination}
       onUpdate={onUpdate}
       onClose={onClose}
@@ -85,38 +91,71 @@ export function DestinationProfile({ destination, onUpdate, onClose }: Destinati
 
 function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationProfileProps) {
   const [draft, setDraft] = useState(() => createFormState(destination));
-  const form = draft;
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const savedTimerRef = useRef<number | null>(null);
+  const sourceKey = destinationSourceKey(destination);
+  const form = draft.sourceKey === sourceKey || saveStatus === 'saving' ? draft : createFormState(destination);
+
+  useEffect(
+    () => () => {
+      if (savedTimerRef.current !== null) {
+        window.clearTimeout(savedTimerRef.current);
+      }
+    },
+    [],
+  );
 
   function updateForm(patch: Partial<DestinationFormState>) {
+    if (savedTimerRef.current !== null) {
+      window.clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = null;
+    }
+    setSaveStatus('idle');
     setDraft({ ...form, ...patch });
   }
 
   async function handleSave() {
-    await onUpdate(destination.id, {
-      timing: {
-        ...destination.timing,
-        idealMonths: textToList(form.idealMonths),
-        expectedStayDays: normalizeExpectedStayDays(form.expectedStayDays),
-      },
-      why: {
-        summary: form.summary,
-        highlights: form.highlights,
-        personalRationale: form.personalRationale,
-      },
-      research: {
-        ...destination.research,
-        notes: form.researchNotes,
-      },
-      activities: {
-        items: createActivityItems(textToList(form.activities), destination.activities.items),
-      },
-      routeContext: {
-        ...destination.routeContext,
-        notes: form.routeNotes,
-      },
-      tags: textToList(form.tags),
-    });
+    setSaveStatus('saving');
+    try {
+      await onUpdate(destination.id, {
+        timing: {
+          ...destination.timing,
+          idealMonths: textToList(form.idealMonths),
+          expectedStayDays: normalizeExpectedStayDays(form.expectedStayDays),
+        },
+        why: {
+          summary: form.summary,
+          highlights: form.highlights,
+          personalRationale: form.personalRationale,
+        },
+        research: {
+          ...destination.research,
+          notes: form.researchNotes,
+        },
+        activities: {
+          items: createActivityItems(textToList(form.activities), destination.activities.items),
+        },
+        routeContext: {
+          ...destination.routeContext,
+          notes: form.routeNotes,
+        },
+        tags: textToList(form.tags),
+      });
+      setSaveStatus('saved');
+      if (savedTimerRef.current !== null) {
+        window.clearTimeout(savedTimerRef.current);
+      }
+      savedTimerRef.current = window.setTimeout(() => {
+        setSaveStatus('idle');
+        savedTimerRef.current = null;
+      }, 1600);
+    } catch {
+      setSaveStatus('error');
+    }
   }
+
+  const saveButtonLabel =
+    saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : 'Save destination';
 
   return (
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
@@ -175,9 +214,18 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
         <input value={form.tags} onChange={(event) => updateForm({ tags: event.target.value })} />
       </label>
 
-      <button type="button" className="primary-action" onClick={handleSave}>
-        Save destination
+      <button
+        type="button"
+        className="primary-action"
+        onClick={() => void handleSave()}
+        disabled={saveStatus === 'saving'}
+      >
+        {saveButtonLabel}
       </button>
+      <div className="profile-save-status" aria-live="polite">
+        {saveStatus === 'saved' ? 'Destination saved' : null}
+        {saveStatus === 'error' ? 'Unable to save destination' : null}
+      </div>
     </aside>
   );
 }

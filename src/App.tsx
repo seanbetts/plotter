@@ -21,6 +21,7 @@ export default function App() {
     error,
     addDestination,
     updateDestination,
+    deleteDestination,
     addRouteLeg,
     reload,
   } = useTripData(repository);
@@ -41,20 +42,6 @@ export default function App() {
       setSelectedDestinationId(destination.id);
     },
     [addDestination, isInteractionLocked],
-  );
-
-  const handleDropPin = useCallback(
-    async (coordinates: { lat: number; lng: number }) => {
-      if (isInteractionLocked) return;
-
-      const destination = await addDestination({
-        name: `Dropped pin ${destinations.length + 1}`,
-        countryRegion: 'Dropped pin',
-        coordinates,
-      });
-      setSelectedDestinationId(destination.id);
-    },
-    [addDestination, destinations.length, isInteractionLocked],
   );
 
   const handleImportText = useCallback(
@@ -86,6 +73,18 @@ export default function App() {
     [addRouteLeg, isInteractionLocked],
   );
 
+  const handleDeleteDestination = useCallback(
+    async (destinationId: string) => {
+      if (isInteractionLocked) return;
+
+      await deleteDestination(destinationId);
+      setSelectedDestinationId((currentDestinationId) =>
+        currentDestinationId === destinationId ? null : currentDestinationId,
+      );
+    },
+    [deleteDestination, isInteractionLocked],
+  );
+
   const handleExport = useCallback(() => {
     if (isInteractionLocked) return;
 
@@ -110,7 +109,6 @@ export default function App() {
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
           onSelectDestination={setSelectedDestinationId}
-          onDropPin={handleDropPin}
         />
         {!isInteractionLocked ? (
           <>
@@ -125,6 +123,7 @@ export default function App() {
               routeLegs={routeLegs}
               selectedDestinationId={selectedDestinationId}
               onSelectDestination={setSelectedDestinationId}
+              onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
               onCreateRouteLeg={handleCreateRouteLeg}
             />
           </>

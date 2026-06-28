@@ -10,6 +10,7 @@ type MockMap = {
   off: Mock;
   remove: Mock;
   addControl: Mock;
+  getZoom: Mock;
   getSource: Mock;
   addSource: Mock;
   addLayer: Mock;
@@ -21,6 +22,7 @@ type MockMap = {
 
 const maplibreMock = vi.hoisted(() => {
   const mapInstances: MockMap[] = [];
+  let zoom = 1.4;
   const project = vi.fn(([lng, lat]: [number, number]) => ({ x: lng * 10 + 1000, y: lat * -10 + 500 }));
   const Map = vi.fn(function () {
     const map = {
@@ -28,6 +30,7 @@ const maplibreMock = vi.hoisted(() => {
       off: vi.fn(),
       remove: vi.fn(),
       addControl: vi.fn(),
+      getZoom: vi.fn(() => zoom),
       getSource: vi.fn(),
       addSource: vi.fn(),
       addLayer: vi.fn(),
@@ -42,8 +45,11 @@ const maplibreMock = vi.hoisted(() => {
   const NavigationControl = vi.fn(function () {
     return {};
   });
+  const setZoom = (nextZoom: number) => {
+    zoom = nextZoom;
+  };
 
-  return { Map, NavigationControl, mapInstances, project };
+  return { Map, NavigationControl, mapInstances, project, setZoom };
 });
 
 vi.mock('maplibre-gl', () => ({
@@ -94,6 +100,7 @@ describe('MapCanvas', () => {
     maplibreMock.Map.mockClear();
     maplibreMock.NavigationControl.mockClear();
     maplibreMock.mapInstances.length = 0;
+    maplibreMock.setZoom(1.4);
     maplibreMock.project.mockClear();
     maplibreMock.project.mockImplementation(([lng, lat]: [number, number]) => ({
       x: lng * 10 + 1000,
@@ -108,7 +115,6 @@ describe('MapCanvas', () => {
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -124,7 +130,6 @@ describe('MapCanvas', () => {
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={onSelectDestination}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -140,7 +145,6 @@ describe('MapCanvas', () => {
         routeLegs={[]}
         selectedDestinationId={destination.id}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -154,7 +158,6 @@ describe('MapCanvas', () => {
         routeLegs={[] as RouteLeg[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -168,7 +171,6 @@ describe('MapCanvas', () => {
         routeLegs={[routeLeg]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -185,7 +187,6 @@ describe('MapCanvas', () => {
         routeLegs={[routeLeg]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -204,7 +205,6 @@ describe('MapCanvas', () => {
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -225,34 +225,43 @@ describe('MapCanvas', () => {
     expect(pin).toHaveStyle({ left: '222px', top: '333px' });
   });
 
-  it('calls the latest onDropPin callback from map double-clicks', () => {
-    const firstDropPin = vi.fn();
-    const latestDropPin = vi.fn();
-    const { rerender } = render(
+  it('does not intercept map double-clicks so MapLibre can zoom normally', () => {
+    render(
       <MapCanvas
         destinations={[]}
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={firstDropPin}
       />,
     );
 
-    rerender(
+    const map = maplibreMock.mapInstances[0];
+
+    expect(map.on).not.toHaveBeenCalledWith('dblclick', expect.any(Function));
+  });
+
+  it('shows major city labels after zooming in', () => {
+    render(
       <MapCanvas
         destinations={[]}
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={latestDropPin}
       />,
     );
 
-    const dblclickHandler = maplibreMock.mapInstances[0].on.mock.calls.find(([eventName]) => eventName === 'dblclick')?.[1];
-    dblclickHandler({ lngLat: { lat: 51.5, lng: -0.1 } });
+    expect(screen.queryByText('London')).not.toBeInTheDocument();
 
-    expect(firstDropPin).not.toHaveBeenCalled();
-    expect(latestDropPin).toHaveBeenCalledWith({ lat: 51.5, lng: -0.1 });
+    const map = maplibreMock.mapInstances[0];
+    const zoomHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoom')?.[1];
+
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomHandler();
+    });
+
+    expect(screen.getByText('London')).toBeInTheDocument();
+    expect(screen.getByText('Istanbul')).toBeInTheDocument();
   });
 
   it('removes the map on unmount', () => {
@@ -262,7 +271,6 @@ describe('MapCanvas', () => {
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -272,14 +280,13 @@ describe('MapCanvas', () => {
     expect(map.remove).toHaveBeenCalled();
   });
 
-  it('does not recreate the map when onDropPin changes', () => {
+  it('does not recreate the map when parent rerenders', () => {
     const { rerender } = render(
       <MapCanvas
         destinations={[]}
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 
@@ -289,7 +296,6 @@ describe('MapCanvas', () => {
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
-        onDropPin={vi.fn()}
       />,
     );
 

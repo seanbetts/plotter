@@ -16,6 +16,7 @@ type MockMap = {
   off: Mock;
   remove: Mock;
   addControl: Mock;
+  getZoom: Mock;
   project: Mock;
 };
 
@@ -31,6 +32,7 @@ const maplibreMock = vi.hoisted(() => {
       off: vi.fn(),
       remove: vi.fn(),
       addControl: vi.fn(),
+      getZoom: vi.fn(() => 1.4),
       project,
     };
     mapInstances.push(map);
@@ -162,7 +164,7 @@ describe('App', () => {
     const doubleClickHandler = maplibreMock.mapInstances[0].on.mock.calls.find(
       ([eventName]) => eventName === 'dblclick',
     )?.[1];
-    doubleClickHandler({ lngLat: { lat: 35.0116, lng: 135.7681 } });
+    expect(doubleClickHandler).toBeUndefined();
 
     expect(repositoryMock.saveDestination).not.toHaveBeenCalled();
     expect(createObjectUrl).not.toHaveBeenCalled();

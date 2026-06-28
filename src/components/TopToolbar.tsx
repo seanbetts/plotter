@@ -58,6 +58,21 @@ export function TopToolbar({ searchPlaces, onAddDestination, onExport, onImportT
     }
   }
 
+  async function handleSelectResult(result: PlaceSearchResult) {
+    setError(null);
+    try {
+      await onAddDestination({
+        name: nameFromLabel(result.label),
+        countryRegion: result.countryRegion,
+        coordinates: result.coordinates,
+      });
+      setQuery('');
+      setResults([]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to add destination');
+    }
+  }
+
   return (
     <header className="top-toolbar" aria-label="Map planning tools">
       <div className="search-group">
@@ -102,13 +117,7 @@ export function TopToolbar({ searchPlaces, onAddDestination, onExport, onImportT
             <button
               key={result.id}
               type="button"
-              onClick={() =>
-                onAddDestination({
-                  name: nameFromLabel(result.label),
-                  countryRegion: result.countryRegion,
-                  coordinates: result.coordinates,
-                })
-              }
+              onClick={() => void handleSelectResult(result)}
               aria-label={`Add ${result.label}`}
             >
               {result.label}
