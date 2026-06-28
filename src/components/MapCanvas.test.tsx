@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Mock } from 'vitest';
@@ -22,6 +22,7 @@ type MockMap = {
   getCanvas: Mock;
   fitBounds: Mock;
   project: Mock;
+  jumpTo: Mock;
 };
 
 type MockGeoJsonSource = {
@@ -53,6 +54,14 @@ const maplibreMock = vi.hoisted(() => {
           { id: 'mountain-peak-label', type: 'symbol' },
           { id: 'road_minor', type: 'line' },
           { id: 'road_major', type: 'line' },
+          { id: 'Water', type: 'fill', 'source-layer': 'water' },
+          { id: 'Country labels', type: 'symbol', 'source-layer': 'country_label' },
+          { id: 'Road labels', type: 'symbol', 'source-layer': 'road_label' },
+          { id: 'Airport zone', type: 'fill', 'source-layer': 'aviation' },
+          { id: 'Highway', type: 'line', 'source-layer': 'road' },
+          { id: 'Major road', type: 'line', 'source-layer': 'road' },
+          { id: 'Capital city labels', type: 'symbol', 'source-layer': 'city_label' },
+          { id: 'City labels', type: 'symbol', 'source-layer': 'city_label' },
           { id: 'country-label', type: 'symbol' },
         ],
       })),
@@ -61,6 +70,7 @@ const maplibreMock = vi.hoisted(() => {
       getCanvas: vi.fn(() => ({ style: { cursor: '' } })),
       fitBounds: vi.fn(),
       project,
+      jumpTo: vi.fn(),
     };
     mapInstances.push(map);
     return map;
@@ -246,7 +256,7 @@ describe('MapCanvas', () => {
     );
   });
 
-  it('hides noisy basemap layers and softens minor roads after style load', () => {
+  it('hides noisy basemap layers and keeps enabled detail layers visible after style load', () => {
     render(
       <MapCanvas
         destinations={[]}
@@ -266,8 +276,173 @@ describe('MapCanvas', () => {
     expect(map.setLayoutProperty).toHaveBeenCalledWith('poi-label', 'visibility', 'none');
     expect(map.setLayoutProperty).toHaveBeenCalledWith('mountain-peak-label', 'visibility', 'none');
     expect(map.setLayoutProperty).not.toHaveBeenCalledWith('country-label', 'visibility', 'none');
-    expect(map.setPaintProperty).toHaveBeenCalledWith('road_minor', 'line-opacity', 0.32);
-    expect(map.setPaintProperty).not.toHaveBeenCalledWith('road_major', 'line-opacity', expect.any(Number));
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('road_minor', 'visibility', 'visible');
+    expect(map.setPaintProperty).not.toHaveBeenCalled();
+  });
+
+  it('renders development map detail controls for the selected zoom step', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('group', { name: 'Map detail by zoom' })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: 'Zoom step' })).toHaveValue('1');
+    expect(screen.getByRole('slider', { name: 'Zoom step' })).toHaveAttribute('min', '1');
+    expect(screen.getByRole('checkbox', { name: 'POIs' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Minor roads' })).toBeChecked();
+  });
+
+  it('syncs the selected zoom step when the map zoom changes outside the slider', async () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Zoom step' }), { target: { value: '8' } });
+    await userEvent.click(screen.getByRole('checkbox', { name: 'POIs' }));
+    fireEvent.change(screen.getByRole('slider', { name: 'Zoom step' }), { target: { value: '1' } });
+
+    maplibreMock.setZoom(8.2);
+    act(() => {
+      zoomEndHandler();
+    });
+
+    expect(screen.getByRole('slider', { name: 'Zoom step' })).toHaveValue('8');
+    expect(screen.getByRole('checkbox', { name: 'POIs' })).toBeChecked();
+  });
+
+  it('keeps the dev controls mounted when the map style is temporarily unavailable during zoom changes', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    map.getStyle.mockReturnValue(undefined);
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Zoom step' }), { target: { value: '8' } });
+
+    expect(screen.getByRole('group', { name: 'Map detail by zoom' })).toBeInTheDocument();
+  });
+
+  it('toggles basemap detail visibility for the selected zoom step', async () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'POIs' }));
+
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('poi-label', 'visibility', 'visible');
+  });
+
+  it('keeps detail checkbox choices separate for each zoom step', async () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const zoomSlider = screen.getByRole('slider', { name: 'Zoom step' });
+    const poiCheckbox = screen.getByRole('checkbox', { name: 'POIs' });
+
+    expect(poiCheckbox).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '8' } });
+    await userEvent.click(poiCheckbox);
+    expect(poiCheckbox).toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '1' } });
+    expect(screen.getByRole('checkbox', { name: 'POIs' })).not.toBeChecked();
+
+    fireEvent.change(zoomSlider, { target: { value: '8' } });
+    expect(screen.getByRole('checkbox', { name: 'POIs' })).toBeChecked();
+  });
+
+  it('shows a copyable JSON snapshot of the zoom detail settings', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Config JSON')).toBeInTheDocument();
+    expect(screen.getByLabelText('Map detail settings JSON')).toHaveTextContent('"poi": false');
+  });
+
+  it('exposes broader MapTiler detail categories as checkboxes', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox', { name: 'Water' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Country labels' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Road labels' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Airports' })).toBeInTheDocument();
+  });
+
+  it('controls highways separately from major roads and capital labels separately from city labels', async () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Highways' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Capital city labels' }));
+
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('Highway', 'visibility', 'none');
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('Major road', 'visibility', 'visible');
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('Capital city labels', 'visibility', 'none');
+    expect(map.setLayoutProperty).toHaveBeenCalledWith('City labels', 'visibility', 'visible');
   });
 
   it('adds MapLibre sources and layers for destinations, routes, and major cities', () => {

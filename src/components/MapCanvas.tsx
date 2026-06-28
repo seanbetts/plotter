@@ -1,6 +1,7 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Destination, RouteLeg } from '../domain/types';
 
@@ -33,11 +34,23 @@ type GeoJsonSource = maplibregl.GeoJSONSource & {
   setData: (data: FeatureCollection) => void;
 };
 
+type MapDetailCategory = {
+  id: string;
+  label: string;
+  group: string;
+  idPatterns?: string[];
+  sourceLayers?: string[];
+  defaultVisible: boolean;
+};
+
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 const styleUrl = mapTilerApiKey
   ? `https://api.maptiler.com/maps/streets-v4/style.json?key=${mapTilerApiKey}`
   : 'https://demotiles.maplibre.org/style.json';
 const majorCityMinZoom = 5;
+const showMapDetailDevTools = import.meta.env.DEV;
+const minDetailZoom = 1;
+const maxDetailZoom = 18;
 const hiddenBasemapLayerPatterns = [
   'aerialway',
   'barrier',
@@ -55,6 +68,227 @@ const hiddenBasemapLayerPatterns = [
   'transit',
 ];
 const softenedLineLayerPatterns = ['minor', 'path', 'track', 'service'];
+const mapDetailCategories: MapDetailCategory[] = [
+  { id: 'water', label: 'Water', group: 'Natural', sourceLayers: ['water'], defaultVisible: true },
+  { id: 'waterway', label: 'Rivers & streams', group: 'Natural', sourceLayers: ['waterway'], defaultVisible: true },
+  {
+    id: 'water-labels',
+    label: 'Water labels',
+    group: 'Natural',
+    sourceLayers: ['water_label', 'water_centroid'],
+    defaultVisible: true,
+  },
+  {
+    id: 'landcover',
+    label: 'Forests & vegetation',
+    group: 'Natural',
+    sourceLayers: ['forest', 'wood', 'vegetation', 'grass', 'tree'],
+    defaultVisible: true,
+  },
+  {
+    id: 'terrain',
+    label: 'Terrain surfaces',
+    group: 'Natural',
+    sourceLayers: ['farmland', 'ice', 'sand'],
+    defaultVisible: true,
+  },
+  { id: 'contour', label: 'Contours', group: 'Natural', idPatterns: ['contour'], defaultVisible: false },
+  { id: 'dam-pier', label: 'Dams & piers', group: 'Natural', sourceLayers: ['dam', 'pier'], defaultVisible: true },
+  {
+    id: 'country-borders',
+    label: 'Country borders',
+    group: 'Borders',
+    sourceLayers: ['country_border', 'country_border_disputed'],
+    defaultVisible: true,
+  },
+  { id: 'sub-borders', label: 'Regional borders', group: 'Borders', sourceLayers: ['sub_border'], defaultVisible: true },
+  { id: 'aerialway', label: 'Aerialways', group: 'Transport', sourceLayers: ['aerialway'], defaultVisible: false },
+  {
+    id: 'airports',
+    label: 'Airports',
+    group: 'Transport',
+    sourceLayers: ['aviation', 'aviation_line'],
+    idPatterns: ['airport', 'aeroway', 'heliport'],
+    defaultVisible: false,
+  },
+  { id: 'ferries', label: 'Ferries', group: 'Transport', sourceLayers: ['ferry', 'ferry_label'], defaultVisible: false },
+  { id: 'rail', label: 'Railways', group: 'Transport', sourceLayers: ['railway', 'railway_label'], defaultVisible: false },
+  { id: 'transit', label: 'Transit stops', group: 'Transport', sourceLayers: ['poi_station'], defaultVisible: false },
+  {
+    id: 'bridges',
+    label: 'Bridges',
+    group: 'Roads',
+    sourceLayers: ['bridge'],
+    defaultVisible: true,
+  },
+  { id: 'highways', label: 'Highways', group: 'Roads', idPatterns: ['highway'], defaultVisible: true },
+  {
+    id: 'major-roads',
+    label: 'Major roads',
+    group: 'Roads',
+    idPatterns: ['major road', 'road_major'],
+    defaultVisible: true,
+  },
+  { id: 'minor', label: 'Minor roads', group: 'Roads', idPatterns: ['minor road', 'road_minor'], defaultVisible: true },
+  { id: 'service', label: 'Service roads', group: 'Roads', idPatterns: ['service road'], defaultVisible: true },
+  {
+    id: 'restricted-roads',
+    label: 'Restricted roads',
+    group: 'Roads',
+    idPatterns: ['no access'],
+    defaultVisible: false,
+  },
+  {
+    id: 'road-construction',
+    label: 'Road construction',
+    group: 'Roads',
+    idPatterns: ['under construction'],
+    defaultVisible: false,
+  },
+  { id: 'other-roads', label: 'Other roads', group: 'Roads', sourceLayers: ['road'], defaultVisible: true },
+  { id: 'road-labels', label: 'Road labels', group: 'Roads', sourceLayers: ['road_label', 'road_exit'], defaultVisible: true },
+  {
+    id: 'paths-cycleways',
+    label: 'Paths & cycleways',
+    group: 'Paths',
+    sourceLayers: ['pathway', 'pathway_label'],
+    idPatterns: ['cycleway', 'pathway'],
+    defaultVisible: true,
+  },
+  { id: 'track', label: 'Tracks', group: 'Paths', idPatterns: ['track'], defaultVisible: true },
+  { id: 'steps', label: 'Steps', group: 'Paths', idPatterns: ['steps'], defaultVisible: false },
+  { id: 'building', label: 'Buildings', group: 'Land use', sourceLayers: ['building'], defaultVisible: false },
+  {
+    id: 'building-numbers',
+    label: 'Building numbers',
+    group: 'Land use',
+    sourceLayers: ['building_number'],
+    defaultVisible: false,
+  },
+  {
+    id: 'residential',
+    label: 'Residential areas',
+    group: 'Land use',
+    sourceLayers: ['residential'],
+    defaultVisible: true,
+  },
+  {
+    id: 'commercial-industrial',
+    label: 'Commercial & industrial',
+    group: 'Land use',
+    sourceLayers: ['commercial', 'industrial'],
+    defaultVisible: true,
+  },
+  {
+    id: 'education-health',
+    label: 'Education & healthcare',
+    group: 'Land use',
+    sourceLayers: ['education', 'hospital'],
+    defaultVisible: true,
+  },
+  {
+    id: 'leisure-culture',
+    label: 'Leisure & culture areas',
+    group: 'Land use',
+    sourceLayers: ['leisure', 'cemetery'],
+    defaultVisible: true,
+  },
+  {
+    id: 'construction',
+    label: 'Construction areas',
+    group: 'Land use',
+    sourceLayers: ['construction'],
+    defaultVisible: false,
+  },
+  { id: 'military', label: 'Military areas', group: 'Land use', sourceLayers: ['military'], defaultVisible: false },
+  { id: 'pedestrian', label: 'Pedestrian areas', group: 'Land use', sourceLayers: ['pedestrian'], defaultVisible: true },
+  { id: 'parking', label: 'Parking', group: 'Places', sourceLayers: ['parking'], defaultVisible: false },
+  { id: 'poi-food', label: 'Food', group: 'Places', sourceLayers: ['poi_food'], defaultVisible: false },
+  { id: 'poi-shopping', label: 'Shopping', group: 'Places', sourceLayers: ['poi_shopping'], defaultVisible: false },
+  {
+    id: 'poi-accommodation',
+    label: 'Accommodation',
+    group: 'Places',
+    sourceLayers: ['poi_accommodation'],
+    defaultVisible: false,
+  },
+  {
+    id: 'poi-tourism-culture',
+    label: 'Tourism & culture',
+    group: 'Places',
+    sourceLayers: ['poi_tourism', 'poi_culture'],
+    defaultVisible: false,
+  },
+  {
+    id: 'poi-health-education',
+    label: 'Health & education POIs',
+    group: 'Places',
+    sourceLayers: ['poi_healthcare', 'poi_education'],
+    defaultVisible: false,
+  },
+  {
+    id: 'poi-public-sport',
+    label: 'Public & sport POIs',
+    group: 'Places',
+    sourceLayers: ['poi_public', 'poi_sport'],
+    defaultVisible: false,
+  },
+  { id: 'poi-transport', label: 'Transport POIs', group: 'Places', sourceLayers: ['poi_transport'], defaultVisible: false },
+  { id: 'poi', label: 'POIs', group: 'Places', idPatterns: ['poi'], defaultVisible: false },
+  { id: 'street-furniture', label: 'Street furniture', group: 'Places', sourceLayers: ['street_furniture'], defaultVisible: false },
+  {
+    id: 'country-labels',
+    label: 'Country labels',
+    group: 'Labels',
+    sourceLayers: ['country_label', 'country_disputed_label'],
+    defaultVisible: true,
+  },
+  {
+    id: 'region-labels',
+    label: 'Region labels',
+    group: 'Labels',
+    sourceLayers: ['state_label'],
+    defaultVisible: true,
+  },
+  {
+    id: 'capital-city-labels',
+    label: 'Capital city labels',
+    group: 'Labels',
+    idPatterns: ['capital city labels'],
+    defaultVisible: true,
+  },
+  { id: 'city-labels', label: 'City labels', group: 'Labels', idPatterns: ['city labels'], defaultVisible: true },
+  {
+    id: 'town-place-labels',
+    label: 'Town & place labels',
+    group: 'Labels',
+    sourceLayers: ['town_label', 'place_label', 'island_label'],
+    defaultVisible: true,
+  },
+  {
+    id: 'continent-labels',
+    label: 'Continent labels',
+    group: 'Labels',
+    sourceLayers: ['continent_label', 'archipelago_label'],
+    defaultVisible: true,
+  },
+  {
+    id: 'housenumber',
+    label: 'House numbers',
+    group: 'Labels',
+    idPatterns: ['housenumber'],
+    defaultVisible: false,
+  },
+  {
+    id: 'mountain',
+    label: 'Mountain labels',
+    group: 'Labels',
+    idPatterns: ['mountain'],
+    defaultVisible: false,
+  },
+  { id: 'park-label', label: 'Park labels', group: 'Labels', idPatterns: ['park-label'], defaultVisible: false },
+];
+const mapDetailGroups = Array.from(new Set(mapDetailCategories.map((category) => category.group)));
 
 const majorCities = [
   { id: 'london', name: 'London', coordinates: { lat: 51.5072, lng: -0.1276 } },
@@ -268,8 +502,62 @@ function layerMatchesPattern(layerId: string, patterns: string[]) {
   return patterns.some((pattern) => normalizedLayerId.includes(pattern));
 }
 
+function clampDetailZoomStep(zoom: number) {
+  return Math.min(maxDetailZoom, Math.max(minDetailZoom, Math.round(zoom)));
+}
+
+function createDefaultMapDetailSettings() {
+  return Object.fromEntries(
+    Array.from({ length: maxDetailZoom - minDetailZoom + 1 }, (_, index) => {
+      const zoomStep = minDetailZoom + index;
+
+      return [
+        zoomStep,
+        Object.fromEntries(
+          mapDetailCategories.map((category) => [category.id, category.defaultVisible]),
+        ) as Record<string, boolean>,
+      ];
+    }),
+  ) as Record<number, Record<string, boolean>>;
+}
+
+function sourceLayerForLayer(layer: maplibregl.LayerSpecification) {
+  return 'source-layer' in layer ? layer['source-layer'] : undefined;
+}
+
+function layerMatchesCategory(layer: maplibregl.LayerSpecification, category: MapDetailCategory) {
+  const sourceLayer = sourceLayerForLayer(layer);
+  const matchesSourceLayer = sourceLayer
+    ? category.sourceLayers?.includes(sourceLayer) ?? false
+    : false;
+  const matchesLayerId = category.idPatterns
+    ? layerMatchesPattern(layer.id, category.idPatterns)
+    : false;
+
+  return matchesSourceLayer || matchesLayerId;
+}
+
+function findMapDetailCategory(layer: maplibregl.LayerSpecification) {
+  return mapDetailCategories.find((category) => layerMatchesCategory(layer, category));
+}
+
+function applyMapDetailSettings(map: maplibregl.Map, settings: Record<string, boolean>) {
+  const layers = map.getStyle()?.layers ?? [];
+
+  for (const layer of layers) {
+    const category = findMapDetailCategory(layer);
+    if (!category) continue;
+
+    map.setLayoutProperty(
+      layer.id,
+      'visibility',
+      settings[category.id] ? 'visible' : 'none',
+    );
+  }
+}
+
 function calmBasemapStyle(map: maplibregl.Map) {
-  const layers = map.getStyle().layers ?? [];
+  const layers = map.getStyle()?.layers ?? [];
 
   for (const layer of layers) {
     if (layerMatchesPattern(layer.id, hiddenBasemapLayerPatterns)) {
@@ -296,6 +584,27 @@ export function MapCanvas({
   const latestSelectedDestinationIdRef = useRef(selectedDestinationId);
   const onSelectDestinationRef = useRef(onSelectDestination);
   const previousDestinationCountRef = useRef(0);
+  const [selectedZoomStep, setSelectedZoomStep] = useState(1);
+  const [currentMapZoom, setCurrentMapZoom] = useState(1.4);
+  const [mapDetailSettings, setMapDetailSettings] = useState(createDefaultMapDetailSettings);
+  const selectedZoomStepRef = useRef(selectedZoomStep);
+  const mapDetailSettingsRef = useRef(mapDetailSettings);
+
+  const applyCurrentMapDetailSettings = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !showMapDetailDevTools) return;
+
+    applyMapDetailSettings(
+      map,
+      mapDetailSettingsRef.current[selectedZoomStepRef.current],
+    );
+  }, []);
+
+  useEffect(() => {
+    selectedZoomStepRef.current = selectedZoomStep;
+    mapDetailSettingsRef.current = mapDetailSettings;
+    applyCurrentMapDetailSettings();
+  }, [applyCurrentMapDetailSettings, mapDetailSettings, selectedZoomStep]);
 
   const updateMapSources = useCallback(() => {
     const map = mapRef.current;
@@ -507,8 +816,17 @@ export function MapCanvas({
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     const handleLoad = () => {
-      calmBasemapStyle(map);
+      if (showMapDetailDevTools) {
+        applyCurrentMapDetailSettings();
+      } else {
+        calmBasemapStyle(map);
+      }
       addMapLayers();
+    };
+    const handleZoomEnd = () => {
+      const nextZoom = map.getZoom();
+      setCurrentMapZoom(nextZoom);
+      setSelectedZoomStep(clampDetailZoomStep(nextZoom));
     };
     const handleDestinationClick = (event: maplibregl.MapLayerMouseEvent) => {
       const destinationId = event.features?.[0]?.properties?.id;
@@ -525,6 +843,7 @@ export function MapCanvas({
     };
 
     map.on('load', handleLoad);
+    map.on('zoomend', handleZoomEnd);
     map.on('click', destinationPointsLayerId, handleDestinationClick);
     map.on('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
     map.on('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
@@ -533,18 +852,93 @@ export function MapCanvas({
 
     return () => {
       map.off('load', handleLoad);
+      map.off('zoomend', handleZoomEnd);
       map.off('click', destinationPointsLayerId, handleDestinationClick);
       map.off('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
       map.off('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
       map.remove();
       mapRef.current = null;
     };
-  }, [addMapLayers]);
+  }, [addMapLayers, applyCurrentMapDetailSettings]);
+
+  const selectedZoomSettings = mapDetailSettings[selectedZoomStep];
+  const visibleDetailCount = mapDetailCategories.filter(
+    (category) => selectedZoomSettings[category.id],
+  ).length;
+  const hiddenDetailCount = mapDetailCategories.length - visibleDetailCount;
+
+  const handleZoomStepChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextZoomStep = clampDetailZoomStep(Number(event.currentTarget.value));
+    setSelectedZoomStep(nextZoomStep);
+    setCurrentMapZoom(nextZoomStep);
+    mapRef.current?.jumpTo({ zoom: nextZoomStep });
+  };
+
+  const handleDetailCategoryChange = (categoryId: string, enabled: boolean) => {
+    setMapDetailSettings((currentSettings) => ({
+      ...currentSettings,
+      [selectedZoomStep]: {
+        ...currentSettings[selectedZoomStep],
+        [categoryId]: enabled,
+      },
+    }));
+  };
 
   return (
     <section className="map-canvas" aria-label="Interactive world tour map">
       <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
       {destinations.length === 0 ? <div className="map-empty-label">Blank planning map</div> : null}
+      {showMapDetailDevTools ? (
+        <section className="map-detail-dev-panel" role="group" aria-label="Map detail by zoom">
+          <div className="map-detail-dev-panel__header">
+            <h2>Map detail by zoom</h2>
+            <span>Current map zoom: {currentMapZoom.toFixed(1)}</span>
+          </div>
+          <label className="map-detail-dev-panel__zoom">
+            <span>Zoom step</span>
+            <strong>z{selectedZoomStep}</strong>
+            <input
+              type="range"
+              min={minDetailZoom}
+              max={maxDetailZoom}
+              step={1}
+              value={selectedZoomStep}
+              aria-label="Zoom step"
+              onChange={handleZoomStepChange}
+            />
+          </label>
+          <div className="map-detail-dev-panel__summary">
+            {visibleDetailCount} on / {hiddenDetailCount} off at zoom {selectedZoomStep}
+          </div>
+          <div className="map-detail-dev-panel__groups">
+            {mapDetailGroups.map((group) => (
+              <div key={group} className="map-detail-dev-panel__group">
+                <h3>{group}</h3>
+                {mapDetailCategories
+                  .filter((category) => category.group === group)
+                  .map((category) => (
+                    <label key={category.id} className="map-detail-dev-panel__option">
+                      <input
+                        type="checkbox"
+                        checked={selectedZoomSettings[category.id]}
+                        onChange={(event) =>
+                          handleDetailCategoryChange(category.id, event.currentTarget.checked)
+                        }
+                      />
+                      <span>{category.label}</span>
+                    </label>
+                  ))}
+              </div>
+            ))}
+          </div>
+          <details className="map-detail-dev-panel__config">
+            <summary>Config JSON</summary>
+            <pre aria-label="Map detail settings JSON">
+              {JSON.stringify(mapDetailSettings, null, 2)}
+            </pre>
+          </details>
+        </section>
+      ) : null}
       <div className="map-accessible-destination-list" aria-label="Destination pins">
         {destinations.map((destination) => (
           <button

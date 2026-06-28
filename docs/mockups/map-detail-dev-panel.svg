@@ -1,0 +1,147 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#d8e4d4"/>
+  <path d="M0 654 C198 603 374 674 540 624 C734 566 880 603 1048 548 C1190 501 1293 438 1440 469 L1440 900 L0 900 Z" fill="#c1d2bc"/>
+  <path d="M0 104 C157 130 284 99 430 133 C586 169 693 111 829 146 C1010 193 1168 117 1440 166 L1440 0 L0 0 Z" fill="#c8d8c2"/>
+  <path d="M89 808 C273 726 402 672 575 626 C774 573 898 510 1058 450 C1166 409 1272 366 1396 294" stroke="#f7f2e7" stroke-width="14" stroke-linecap="round"/>
+  <path d="M88 807 C272 725 401 671 574 625 C773 572 897 509 1057 449 C1165 408 1271 365 1395 293" stroke="#d2ad52" stroke-width="4" stroke-linecap="round"/>
+  <path d="M296 0 C309 133 335 263 376 386 C415 505 474 604 533 737 C557 792 577 847 589 900" stroke="#fff8e8" stroke-width="8" stroke-linecap="round" opacity="0.86"/>
+  <path d="M963 0 C929 93 917 176 931 251 C950 349 1021 398 1077 470 C1154 569 1175 690 1161 900" stroke="#fff8e8" stroke-width="7" stroke-linecap="round" opacity="0.76"/>
+  <path d="M42 314 C180 331 272 361 375 421 C463 472 550 512 665 526 C778 540 902 535 1045 583 C1168 625 1278 697 1406 752" stroke="#fff8e8" stroke-width="5" stroke-linecap="round" opacity="0.5"/>
+
+  <g opacity="0.72">
+    <circle cx="310" cy="226" r="4" fill="#1b211d"/>
+    <text x="324" y="230" font-family="Inter, Arial, sans-serif" font-size="16" fill="#1b211d">London</text>
+    <circle cx="698" cy="462" r="4" fill="#1b211d"/>
+    <text x="712" y="466" font-family="Inter, Arial, sans-serif" font-size="16" fill="#1b211d">Istanbul</text>
+    <circle cx="1037" cy="430" r="4" fill="#1b211d"/>
+    <text x="1051" y="434" font-family="Inter, Arial, sans-serif" font-size="16" fill="#1b211d">Dubai</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="952" y="32" width="456" height="830" rx="10" fill="#fbf9f2" stroke="#1f2a24" stroke-opacity="0.16"/>
+    <rect x="952" y="32" width="456" height="72" rx="10" fill="#243027"/>
+    <text x="976" y="64" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#fbf9f2">Map detail by zoom</text>
+    <text x="976" y="88" font-family="Inter, Arial, sans-serif" font-size="12" fill="#cfd8ce">Edit which layers are visible at the selected zoom step.</text>
+
+    <text x="976" y="136" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" letter-spacing="1" fill="#6f766d">SELECT ZOOM STEP</text>
+    <rect x="976" y="154" width="408" height="96" rx="8" fill="#f3efe4" stroke="#e0d8c8"/>
+    <text x="1000" y="188" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="800" fill="#1f2a24">z7</text>
+    <text x="1066" y="178" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" fill="#6b725f">Current map zoom: 7.4</text>
+    <text x="1066" y="199" font-family="Inter, Arial, sans-serif" font-size="12" fill="#73786d">Checkboxes below define visibility for zoom 7.</text>
+    <line x1="1000" y1="226" x2="1360" y2="226" stroke="#d4ccba" stroke-width="6" stroke-linecap="round"/>
+    <line x1="1000" y1="226" x2="1140" y2="226" stroke="#d2ad52" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="1140" cy="226" r="11" fill="#243027"/>
+    <g font-family="Inter, Arial, sans-serif" font-size="10" fill="#7c8177">
+      <text x="997" y="244">0</text>
+      <text x="1076" y="244">4</text>
+      <text x="1136" y="244" font-weight="800" fill="#1f2a24">7</text>
+      <text x="1214" y="244">12</text>
+      <text x="1300" y="244">16</text>
+      <text x="1352" y="244">18</text>
+    </g>
+
+    <text x="976" y="288" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" letter-spacing="1" fill="#6f766d">VISIBLE AT ZOOM 7</text>
+    <text x="1286" y="288" font-family="Inter, Arial, sans-serif" font-size="12" fill="#73786d">12 on / 9 off</text>
+    <line x1="976" y1="302" x2="1384" y2="302" stroke="#ded8c8"/>
+
+    <text x="976" y="332" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#7a806f">ROADS &amp; TRANSPORT</text>
+    <g font-family="Inter, Arial, sans-serif" font-size="14" fill="#1f2a24">
+      <g transform="translate(976 350)">
+        <rect width="18" height="18" rx="4" fill="#243027"/><path d="M4.5 9.5L7.8 12.8L14 5.8" stroke="#fbf9f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="30" y="14">Major roads</text>
+      </g>
+      <g transform="translate(1190 350)">
+        <rect width="18" height="18" rx="4" fill="#243027"/><path d="M4.5 9.5L7.8 12.8L14 5.8" stroke="#fbf9f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="30" y="14">Minor roads</text>
+      </g>
+      <g transform="translate(976 386)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Service roads</text>
+      </g>
+      <g transform="translate(1190 386)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Paths &amp; trails</text>
+      </g>
+      <g transform="translate(976 422)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Rail</text>
+      </g>
+      <g transform="translate(1190 422)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Transit</text>
+      </g>
+    </g>
+
+    <text x="976" y="482" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#7a806f">PLACES &amp; LABELS</text>
+    <g font-family="Inter, Arial, sans-serif" font-size="14" fill="#1f2a24">
+      <g transform="translate(976 500)">
+        <rect width="18" height="18" rx="4" fill="#243027"/><path d="M4.5 9.5L7.8 12.8L14 5.8" stroke="#fbf9f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="30" y="14">Country labels</text>
+      </g>
+      <g transform="translate(1190 500)">
+        <rect width="18" height="18" rx="4" fill="#243027"/><path d="M4.5 9.5L7.8 12.8L14 5.8" stroke="#fbf9f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="30" y="14">City labels</text>
+      </g>
+      <g transform="translate(976 536)">
+        <rect width="18" height="18" rx="4" fill="#243027"/><path d="M4.5 9.5L7.8 12.8L14 5.8" stroke="#fbf9f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="30" y="14">Water labels</text>
+      </g>
+      <g transform="translate(1190 536)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Road labels</text>
+      </g>
+      <g transform="translate(976 572)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">POIs</text>
+      </g>
+      <g transform="translate(1190 572)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Shops &amp; food</text>
+      </g>
+    </g>
+
+    <text x="976" y="632" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#7a806f">LAND &amp; DETAIL</text>
+    <g font-family="Inter, Arial, sans-serif" font-size="14" fill="#1f2a24">
+      <g transform="translate(976 650)">
+        <rect width="18" height="18" rx="4" fill="#243027"/><path d="M4.5 9.5L7.8 12.8L14 5.8" stroke="#fbf9f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="30" y="14">Water</text>
+      </g>
+      <g transform="translate(1190 650)">
+        <rect width="18" height="18" rx="4" fill="#243027"/><path d="M4.5 9.5L7.8 12.8L14 5.8" stroke="#fbf9f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="30" y="14">Parks &amp; landuse</text>
+      </g>
+      <g transform="translate(976 686)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Buildings</text>
+      </g>
+      <g transform="translate(1190 686)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">House numbers</text>
+      </g>
+      <g transform="translate(976 722)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Contours</text>
+      </g>
+      <g transform="translate(1190 722)">
+        <rect width="18" height="18" rx="4" fill="#fbf9f2" stroke="#a8a18f" stroke-width="1.5"/>
+        <text x="30" y="14" fill="#62685f">Mountain labels</text>
+      </g>
+    </g>
+
+    <rect x="976" y="778" width="408" height="54" rx="8" fill="#f3efe4" stroke="#e0d8c8"/>
+    <text x="1000" y="801" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700" fill="#6f766d">CAPTURED CONFIG</text>
+    <text x="1000" y="821" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#1f2a24">zoom[7] = roads + labels + landuse; no POIs/buildings</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="32" y="32" width="286" height="72" rx="10" fill="#fbf9f2" stroke="#1f2a24" stroke-opacity="0.14"/>
+    <text x="52" y="60" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700" fill="#1f2a24">Developer calibration mode</text>
+    <text x="52" y="82" font-family="Inter, Arial, sans-serif" font-size="12" fill="#697167">Pick a zoom step, then choose what should render there.</text>
+  </g>
+
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#1d261f" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+</svg>
