@@ -1,5 +1,5 @@
 import { Car, GripVertical, Ship, Trash2 } from 'lucide-react';
-import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { formatDestinationLocation, formatLocationParts } from '../domain/locations';
 import type { Destination, RouteLeg, RouteLegType } from '../domain/types';
@@ -30,6 +30,7 @@ type PointerCoordinates = {
 };
 
 const kmToMiles = 0.621371;
+const stopListStyle = { '--stop-list-gap': '8px' } as CSSProperties;
 
 function formatLegDistance(routeLeg: RouteLeg) {
   if (isRouteLegCalculating(routeLeg)) return null;
@@ -328,7 +329,7 @@ export function ItineraryPanel({
     <>
       <aside className="itinerary-panel" aria-label="Itinerary">
         <h2>Stops</h2>
-        <div className={stopListClassName}>
+        <div className={stopListClassName} style={stopListStyle}>
           {destinations.length === 0 ? <p>Add your first destination from the map search.</p> : null}
           {displayedDestinations.map((destination, index) => {
             const locationLabel = formatDestinationLocation(destination);

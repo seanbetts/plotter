@@ -234,10 +234,41 @@ describe('ItineraryPanel', () => {
       />,
     );
 
-    expect(
-      screen.getByRole('status', { name: 'Calculating Istanbul to Tbilisi route' }),
-    ).toBeInTheDocument();
+    const calculatingIndicator = screen.getByRole('status', {
+      name: 'Calculating Istanbul to Tbilisi route',
+    });
+
+    expect(calculatingIndicator).toBeInTheDocument();
     expect(screen.queryByText('pending')).not.toBeInTheDocument();
+  });
+
+  it('defines base spacing between stops before route legs exist', () => {
+    const origin = createDestination({
+      name: 'Istanbul',
+      countryRegion: 'Turkey',
+      coordinates: { lat: 41.0082, lng: 28.9784 },
+    });
+    const target = createDestination({
+      name: 'Tbilisi',
+      countryRegion: 'Georgia',
+      coordinates: { lat: 41.7151, lng: 44.8271 },
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Itinerary').querySelector('.stop-list')).toHaveStyle(
+      '--stop-list-gap: 8px',
+    );
   });
 
   it('shows an insertion marker and reorders stops before the hovered stop', () => {

@@ -461,7 +461,7 @@ select {
 
 .stop-list {
   display: grid;
-  gap: 0;
+  gap: var(--stop-list-gap, 8px);
 }
 
 .stop-list.is-reordering {
