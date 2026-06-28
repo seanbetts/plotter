@@ -108,12 +108,13 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     globals: true,
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
     passWithNoTests: true,
   },
 });
 ```
 
-`passWithNoTests` is only for the empty scaffold baseline. Remove it in Task 2 after the first real tests are added.
+`include` keeps Vitest from collecting Playwright tests under `tests/`. `passWithNoTests` is only for the empty scaffold baseline. Remove `passWithNoTests` in Task 2 after the first real Vitest tests are added.
 
 - [ ] **Step 5: Add test setup**
 
@@ -134,13 +135,13 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
   webServer: {
-    command: 'npm run dev',
-    url: 'http://127.0.0.1:5173',
-    reuseExistingServer: true,
+    command: 'npm run dev -- --port 5174 --strictPort',
+    url: 'http://127.0.0.1:5174',
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: 'http://127.0.0.1:5174',
     trace: 'on-first-retry',
   },
   projects: [
