@@ -5,8 +5,8 @@
 :root {
   --color-bg: #111814;
   --color-map-bg: #14201a;
-  --color-text: #f5efe3;
-  --color-text-rgb: 245 239 227;
+  --color-text: #17201c;
+  --color-text-rgb: 23 32 28;
   --color-text-inverse: #111814;
   --color-text-inverse-rgb: 17 24 20;
   --color-accent: #d9467a;
@@ -14,29 +14,29 @@
   --color-accent-rgb: 217 70 122;
   --color-route-shipping: #7ec8e3;
   --color-map-selected: #f7f0d0;
-  --color-danger: #ffcfba;
-  --color-danger-rgb: 255 207 186;
+  --color-danger: #b4234c;
+  --color-danger-rgb: 180 35 76;
 
-  --surface-control: rgb(255 255 255 / 0.07);
-  --surface-control-hover: rgb(255 255 255 / 0.09);
-  --surface-control-focus: rgb(255 255 255 / 0.1);
-  --surface-overlay: rgb(var(--color-text-inverse-rgb) / 0.82);
-  --surface-overlay-strong: rgb(var(--color-text-inverse-rgb) / 0.88);
-  --surface-overlay-panel: rgb(var(--color-text-inverse-rgb) / 0.84);
-  --surface-overlay-profile: rgb(var(--color-text-inverse-rgb) / 0.9);
-  --surface-overlay-menu: rgb(var(--color-text-inverse-rgb) / 0.92);
-  --surface-action-subtle: rgb(var(--color-text-rgb) / 0.1);
-  --surface-row: rgb(255 255 255 / 0.06);
-  --surface-badge: rgb(var(--color-text-inverse-rgb) / 0.22);
+  --surface-control: rgb(255 255 255 / 0.56);
+  --surface-control-hover: rgb(255 255 255 / 0.72);
+  --surface-control-focus: rgb(255 255 255 / 0.82);
+  --surface-overlay: rgb(255 255 255 / 0.68);
+  --surface-overlay-strong: rgb(255 255 255 / 0.82);
+  --surface-overlay-panel: rgb(255 255 255 / 0.72);
+  --surface-overlay-profile: rgb(255 255 255 / 0.84);
+  --surface-overlay-menu: rgb(255 255 255 / 0.86);
+  --surface-action-subtle: rgb(var(--color-text-rgb) / 0.07);
+  --surface-row: rgb(255 255 255 / 0.46);
+  --surface-badge: rgb(255 255 255 / 0.62);
   --surface-selected: rgb(var(--color-accent-rgb) / 0.12);
   --surface-drop-target: rgb(var(--color-accent-rgb) / 0.08);
-  --surface-drag-preview: rgb(39 55 51 / 0.96);
+  --surface-drag-preview: rgb(255 255 255 / 0.9);
   --surface-danger-subtle: rgb(var(--color-danger-rgb) / 0.1);
 
-  --border-subtle: rgb(var(--color-text-rgb) / 0.14);
-  --border-control: rgb(var(--color-text-rgb) / 0.15);
-  --border-strong: rgb(var(--color-text-rgb) / 0.16);
-  --border-row: rgb(var(--color-text-rgb) / 0.12);
+  --border-subtle: rgb(var(--color-text-rgb) / 0.12);
+  --border-control: rgb(var(--color-text-rgb) / 0.14);
+  --border-strong: rgb(var(--color-text-rgb) / 0.18);
+  --border-row: rgb(var(--color-text-rgb) / 0.11);
   --border-divider: rgb(var(--color-text-rgb) / 0.1);
   --border-hover: rgb(var(--color-text-rgb) / 0.32);
   --border-selected: rgb(var(--color-accent-rgb) / 0.72);
@@ -46,22 +46,28 @@
   --border-danger: rgb(var(--color-danger-rgb) / 0.3);
 
   --text-secondary: rgb(var(--color-text-rgb) / 0.74);
-  --text-muted: rgb(var(--color-text-rgb) / 0.62);
-  --text-faint: rgb(var(--color-text-rgb) / 0.55);
-  --text-soft: rgb(var(--color-text-rgb) / 0.7);
-  --text-disabled: rgb(var(--color-text-rgb) / 0.42);
+  --text-muted: rgb(var(--color-text-rgb) / 0.6);
+  --text-faint: rgb(var(--color-text-rgb) / 0.5);
+  --text-soft: rgb(var(--color-text-rgb) / 0.68);
+  --text-disabled: rgb(var(--color-text-rgb) / 0.38);
 
   --radius-panel: 8px;
   --radius-control: 6px;
   --radius-pill: 999px;
 
-  --blur-overlay: 16px;
-  --blur-profile: 18px;
+  --blur-overlay: 22px;
+  --blur-profile: 28px;
 
-  --shadow-panel: 0 20px 58px rgb(0 0 0 / 0.28);
-  --shadow-profile: 0 24px 70px rgb(0 0 0 / 0.35);
-  --shadow-dragging: 0 10px 28px rgb(0 0 0 / 0.24);
-  --shadow-drag-preview: 0 16px 34px rgb(0 0 0 / 0.32);
+  --shadow-panel:
+    inset 0 1px 0 rgb(255 255 255 / 0.72),
+    0 18px 54px rgb(31 45 56 / 0.18);
+  --shadow-profile:
+    inset 0 1px 0 rgb(255 255 255 / 0.78),
+    0 22px 68px rgb(31 45 56 / 0.22);
+  --shadow-dragging: 0 10px 28px rgb(31 45 56 / 0.18);
+  --shadow-drag-preview:
+    inset 0 1px 0 rgb(255 255 255 / 0.75),
+    0 16px 34px rgb(31 45 56 / 0.2);
   --shadow-drop-indicator: 0 0 0 4px rgb(var(--color-accent-rgb) / 0.14);
   --focus-ring: 2px solid rgb(var(--color-accent-rgb) / 0.84);
 }
@@ -153,7 +159,7 @@ select {
   position: absolute;
   top: 16px;
   left: 50%;
-  z-index: 10;
+  z-index: 16;
   display: flex;
   width: min(680px, calc(100vw - 32px));
   align-items: flex-start;
@@ -170,7 +176,10 @@ select {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel);
   background: var(--surface-overlay);
+  box-shadow: var(--shadow-panel);
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   backdrop-filter: blur(var(--blur-overlay));
+  backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
 }
 
 .search-input-shell {
@@ -272,7 +281,10 @@ select {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel);
   background: var(--surface-overlay-menu);
+  box-shadow: var(--shadow-panel);
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   backdrop-filter: blur(var(--blur-overlay));
+  backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
 }
 
 .search-results button {
@@ -357,7 +369,9 @@ select {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-panel);
   background: var(--surface-overlay-profile);
+  -webkit-backdrop-filter: blur(var(--blur-profile)) saturate(1.25);
   backdrop-filter: blur(var(--blur-profile));
+  backdrop-filter: blur(var(--blur-profile)) saturate(1.25);
   box-shadow: var(--shadow-profile);
 }
 
@@ -449,7 +463,9 @@ select {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel);
   background: var(--surface-overlay-panel);
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   backdrop-filter: blur(var(--blur-overlay));
+  backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   box-shadow: var(--shadow-panel);
 }
 
@@ -728,6 +744,7 @@ select {
   border-radius: var(--radius-control);
   color: var(--color-text-inverse);
   background: var(--color-accent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.34);
   cursor: pointer;
 }
 
@@ -825,7 +842,10 @@ select {
   border-radius: var(--radius-control);
   color: var(--color-text);
   background: var(--surface-overlay-strong);
+  box-shadow: var(--shadow-panel);
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   backdrop-filter: blur(var(--blur-overlay));
+  backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   font-size: 0.86rem;
 }
 
