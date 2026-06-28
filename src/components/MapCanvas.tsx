@@ -97,7 +97,7 @@ const cityPointsLayerId = 'world-tour-city-points';
 const cityLabelsLayerId = 'world-tour-city-labels';
 
 const mapColorTokenFallbacks = {
-  '--color-accent': '#e9b44c',
+  '--color-accent': '#d9467a',
   '--color-map-selected': '#f7f0d0',
   '--color-route-shipping': '#7ec8e3',
   '--color-text': '#f5efe3',
