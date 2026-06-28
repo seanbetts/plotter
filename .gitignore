@@ -4,6 +4,8 @@ dist/
 build/
 test-results/
 playwright-report/
+.playwright-cli/
+output/
 .env
 .env.*
 !.env.example
