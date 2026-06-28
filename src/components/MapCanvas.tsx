@@ -1,6 +1,6 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Destination, RouteLeg } from '../domain/types';
 
 type MapCanvasProps = {
@@ -13,6 +13,17 @@ type MapCanvasProps = {
 
 const styleUrl = 'https://demotiles.maplibre.org/style.json';
 
+type ScreenPoint = {
+  x: number;
+  y: number;
+};
+
+type RoutePath = {
+  id: string;
+  type: RouteLeg['type'];
+  points: string;
+};
+
 export function MapCanvas({
   destinations,
   routeLegs,
@@ -22,6 +33,63 @@ export function MapCanvas({
 }: MapCanvasProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const onDropPinRef = useRef(onDropPin);
+  const updateOverlayRef = useRef(() => {});
+  const [pinPositions, setPinPositions] = useState<Record<string, ScreenPoint>>({});
+  const [routePaths, setRoutePaths] = useState<RoutePath[]>([]);
+
+  const updateOverlayPositions = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    setPinPositions(
+      Object.fromEntries(
+        destinations.map((destination) => {
+          const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
+          return [destination.id, { x: point.x, y: point.y }];
+        }),
+      ),
+    );
+
+    setRoutePaths(
+      routeLegs
+        .map((leg) => {
+          const origin = destinations.find((destination) => destination.id === leg.originDestinationId);
+          const target = destinations.find((destination) => destination.id === leg.targetDestinationId);
+          const coordinates =
+            leg.geometry && leg.geometry.coordinates.length >= 2
+              ? leg.geometry.coordinates
+              : origin && target
+                ? [
+                    [origin.coordinates.lng, origin.coordinates.lat],
+                    [target.coordinates.lng, target.coordinates.lat],
+                  ]
+                : null;
+
+          if (!coordinates) return null;
+
+          return {
+            id: leg.id,
+            type: leg.type,
+            points: coordinates
+              .map(([lng, lat]) => {
+                const point = map.project([lng, lat]);
+                return `${point.x},${point.y}`;
+              })
+              .join(' '),
+          };
+        })
+        .filter((path): path is RoutePath => path !== null),
+    );
+  }, [destinations, routeLegs]);
+
+  useEffect(() => {
+    onDropPinRef.current = onDropPin;
+  }, [onDropPin]);
+
+  useEffect(() => {
+    updateOverlayRef.current = updateOverlayPositions;
+  }, [updateOverlayPositions]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -35,54 +103,47 @@ export function MapCanvas({
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    map.on('dblclick', (event) => {
-      onDropPin({ lat: event.lngLat.lat, lng: event.lngLat.lng });
-    });
+    const handleDropPin = (event: maplibregl.MapMouseEvent) => {
+      onDropPinRef.current({ lat: event.lngLat.lat, lng: event.lngLat.lng });
+    };
+    const syncOverlay = () => {
+      updateOverlayRef.current();
+    };
+
+    map.on('dblclick', handleDropPin);
+    map.on('move', syncOverlay);
+    map.on('zoom', syncOverlay);
+    map.on('resize', syncOverlay);
 
     mapRef.current = map;
+    syncOverlay();
 
     return () => {
+      map.off('dblclick', handleDropPin);
+      map.off('move', syncOverlay);
+      map.off('zoom', syncOverlay);
+      map.off('resize', syncOverlay);
       map.remove();
       mapRef.current = null;
     };
-  }, [onDropPin]);
+  }, []);
+
+  useEffect(() => {
+    updateOverlayPositions();
+  }, [updateOverlayPositions]);
 
   const routeCount = useMemo(() => routeLegs.length, [routeLegs.length]);
-
-  const routeSegments = useMemo(
-    () =>
-      routeLegs
-        .map((leg) => {
-          const origin = destinations.find((destination) => destination.id === leg.originDestinationId);
-          const target = destinations.find((destination) => destination.id === leg.targetDestinationId);
-          if (!origin || !target) return null;
-
-          return {
-            id: leg.id,
-            type: leg.type,
-            x1: ((origin.coordinates.lng + 180) / 360) * 100,
-            y1: ((90 - origin.coordinates.lat) / 180) * 100,
-            x2: ((target.coordinates.lng + 180) / 360) * 100,
-            y2: ((90 - target.coordinates.lat) / 180) * 100,
-          };
-        })
-        .filter((segment): segment is NonNullable<typeof segment> => segment !== null),
-    [destinations, routeLegs],
-  );
 
   return (
     <section className="map-canvas" aria-label="Interactive world tour map">
       <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
       {destinations.length === 0 ? <div className="map-empty-label">Blank planning map</div> : null}
       <svg className="route-layer" aria-label="Route legs">
-        {routeSegments.map((segment) => (
-          <line
-            key={segment.id}
-            className={`route-line route-line-${segment.type}`}
-            x1={`${segment.x1}%`}
-            y1={`${segment.y1}%`}
-            x2={`${segment.x2}%`}
-            y2={`${segment.y2}%`}
+        {routePaths.map((path) => (
+          <polyline
+            key={path.id}
+            className={`route-line route-line-${path.type}`}
+            points={path.points}
           />
         ))}
       </svg>
@@ -95,8 +156,8 @@ export function MapCanvas({
             aria-label={`Select ${destination.name}`}
             onClick={() => onSelectDestination(destination.id)}
             style={{
-              left: `${((destination.coordinates.lng + 180) / 360) * 100}%`,
-              top: `${((90 - destination.coordinates.lat) / 180) * 100}%`,
+              left: `${pinPositions[destination.id]?.x ?? 0}px`,
+              top: `${pinPositions[destination.id]?.y ?? 0}px`,
             }}
           >
             <span />

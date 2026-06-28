@@ -1,28 +1,55 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { Mock } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Destination, RouteLeg } from '../domain/types';
 import { MapCanvas } from './MapCanvas';
 
+type MockMap = {
+  on: Mock;
+  off: Mock;
+  remove: Mock;
+  addControl: Mock;
+  getSource: Mock;
+  addSource: Mock;
+  addLayer: Mock;
+  getLayer: Mock;
+  setData: Mock;
+  fitBounds: Mock;
+  project: Mock;
+};
+
+const maplibreMock = vi.hoisted(() => {
+  const mapInstances: MockMap[] = [];
+  const project = vi.fn(([lng, lat]: [number, number]) => ({ x: lng * 10 + 1000, y: lat * -10 + 500 }));
+  const Map = vi.fn(function () {
+    const map = {
+      on: vi.fn(),
+      off: vi.fn(),
+      remove: vi.fn(),
+      addControl: vi.fn(),
+      getSource: vi.fn(),
+      addSource: vi.fn(),
+      addLayer: vi.fn(),
+      getLayer: vi.fn(),
+      setData: vi.fn(),
+      fitBounds: vi.fn(),
+      project,
+    };
+    mapInstances.push(map);
+    return map;
+  });
+  const NavigationControl = vi.fn(function () {
+    return {};
+  });
+
+  return { Map, NavigationControl, mapInstances, project };
+});
+
 vi.mock('maplibre-gl', () => ({
   default: {
-    Map: vi.fn(function () {
-      return {
-        on: vi.fn(),
-        off: vi.fn(),
-        remove: vi.fn(),
-        addControl: vi.fn(),
-        getSource: vi.fn(),
-        addSource: vi.fn(),
-        addLayer: vi.fn(),
-        getLayer: vi.fn(),
-        setData: vi.fn(),
-        fitBounds: vi.fn(),
-        project: vi.fn(() => ({ x: 120, y: 80 })),
-      };
-    }),
-    NavigationControl: vi.fn(function () {
-      return {};
-    }),
+    Map: maplibreMock.Map,
+    NavigationControl: maplibreMock.NavigationControl,
   },
 }));
 
@@ -45,6 +72,35 @@ describe('MapCanvas', () => {
     updatedAt: '2026-06-28T00:00:00.000Z',
   };
 
+  const targetDestination: Destination = {
+    ...destination,
+    id: 'dest-2',
+    name: 'Tbilisi',
+    countryRegion: 'Georgia',
+    coordinates: { lat: 41.7151, lng: 44.8271 },
+  };
+
+  const routeLeg: RouteLeg = {
+    id: 'route-1',
+    originDestinationId: destination.id,
+    targetDestinationId: targetDestination.id,
+    type: 'driving',
+    notes: '',
+    createdAt: '2026-06-28T00:00:00.000Z',
+    updatedAt: '2026-06-28T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    maplibreMock.Map.mockClear();
+    maplibreMock.NavigationControl.mockClear();
+    maplibreMock.mapInstances.length = 0;
+    maplibreMock.project.mockClear();
+    maplibreMock.project.mockImplementation(([lng, lat]: [number, number]) => ({
+      x: lng * 10 + 1000,
+      y: lat * -10 + 500,
+    }));
+  });
+
   it('renders destination pins as accessible buttons', () => {
     render(
       <MapCanvas
@@ -59,6 +115,38 @@ describe('MapCanvas', () => {
     expect(screen.getByRole('button', { name: 'Select Cappadocia' })).toBeInTheDocument();
   });
 
+  it('fires onSelectDestination when a pin button is clicked', async () => {
+    const onSelectDestination = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={onSelectDestination}
+        onDropPin={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Select Cappadocia' }));
+
+    expect(onSelectDestination).toHaveBeenCalledWith(destination.id);
+  });
+
+  it('marks the selected pin', () => {
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        onSelectDestination={vi.fn()}
+        onDropPin={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Select Cappadocia' })).toHaveClass('is-selected');
+  });
+
   it('renders the empty planning map label with no destinations', () => {
     render(
       <MapCanvas
@@ -71,5 +159,140 @@ describe('MapCanvas', () => {
     );
 
     expect(screen.getByText('Blank planning map')).toBeInTheDocument();
+  });
+
+  it('renders a route line and route count for a route leg', () => {
+    const { container } = render(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDropPin={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('1 route leg')).toBeInTheDocument();
+    expect(container.querySelector('.route-line-driving')).toBeInTheDocument();
+  });
+
+  it('uses map projection for pin and route placement', () => {
+    maplibreMock.project.mockImplementation(([lng, lat]: [number, number]) => ({ x: lng, y: lat }));
+
+    const { container } = render(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDropPin={vi.fn()}
+      />,
+    );
+
+    const pin = screen.getByRole('button', { name: 'Select Cappadocia' });
+    const route = container.querySelector('.route-line-driving');
+
+    expect(maplibreMock.project).toHaveBeenCalledWith([destination.coordinates.lng, destination.coordinates.lat]);
+    expect(pin).toHaveStyle({ left: '34.8289px', top: '38.6431px' });
+    expect(route).toHaveAttribute('points', '34.8289,38.6431 44.8271,41.7151');
+  });
+
+  it('reprojects overlay positions on map move, zoom, and resize events', () => {
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDropPin={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const moveHandler = map.on.mock.calls.find(([eventName]) => eventName === 'move')?.[1];
+    const zoomHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoom')?.[1];
+    const resizeHandler = map.on.mock.calls.find(([eventName]) => eventName === 'resize')?.[1];
+
+    maplibreMock.project.mockReturnValue({ x: 222, y: 333 });
+
+    act(() => {
+      moveHandler();
+      zoomHandler();
+      resizeHandler();
+    });
+
+    const pin = screen.getByRole('button', { name: 'Select Cappadocia' });
+    expect(pin).toHaveStyle({ left: '222px', top: '333px' });
+  });
+
+  it('calls the latest onDropPin callback from map double-clicks', () => {
+    const firstDropPin = vi.fn();
+    const latestDropPin = vi.fn();
+    const { rerender } = render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDropPin={firstDropPin}
+      />,
+    );
+
+    rerender(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDropPin={latestDropPin}
+      />,
+    );
+
+    const dblclickHandler = maplibreMock.mapInstances[0].on.mock.calls.find(([eventName]) => eventName === 'dblclick')?.[1];
+    dblclickHandler({ lngLat: { lat: 51.5, lng: -0.1 } });
+
+    expect(firstDropPin).not.toHaveBeenCalled();
+    expect(latestDropPin).toHaveBeenCalledWith({ lat: 51.5, lng: -0.1 });
+  });
+
+  it('removes the map on unmount', () => {
+    const { unmount } = render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDropPin={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    unmount();
+
+    expect(map.remove).toHaveBeenCalled();
+  });
+
+  it('does not recreate the map when onDropPin changes', () => {
+    const { rerender } = render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDropPin={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDropPin={vi.fn()}
+      />,
+    );
+
+    expect(maplibreMock.Map).toHaveBeenCalledTimes(1);
   });
 });
