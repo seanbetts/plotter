@@ -105,4 +105,60 @@ describe('DestinationProfile', () => {
       }),
     );
   });
+
+  it('syncs same-id destination updates without wiping edits on same-version rerenders', async () => {
+    const user = userEvent.setup();
+    const destination: Destination = {
+      ...createDestination({
+        name: 'Samarkand',
+        countryRegion: 'Uzbekistan',
+        coordinates: { lat: 39.6542, lng: 66.9597 },
+      }),
+      why: {
+        summary: 'Initial summary.',
+        highlights: '',
+        personalRationale: '',
+      },
+      updatedAt: '2026-06-28T09:00:00.000Z',
+    };
+    const onUpdate = vi.fn();
+
+    const { rerender } = render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    await user.clear(screen.getByLabelText('Why it matters'));
+    await user.type(screen.getByLabelText('Why it matters'), 'Local draft');
+
+    rerender(
+      <DestinationProfile
+        destination={{
+          ...destination,
+          why: {
+            ...destination.why,
+            highlights: 'Parent rerender with unchanged version.',
+          },
+        }}
+        onUpdate={onUpdate}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Why it matters')).toHaveValue('Local draft');
+
+    rerender(
+      <DestinationProfile
+        destination={{
+          ...destination,
+          why: {
+            ...destination.why,
+            summary: 'Saved server summary.',
+          },
+          updatedAt: '2026-06-28T10:00:00.000Z',
+        }}
+        onUpdate={onUpdate}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Why it matters')).toHaveValue('Saved server summary.');
+  });
 });

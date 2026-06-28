@@ -6,6 +6,7 @@ type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedA
 
 type DestinationFormState = {
   destinationId: string;
+  sourceUpdatedAt: string;
   summary: string;
   highlights: string;
   personalRationale: string;
@@ -33,6 +34,7 @@ const textToList = (value: string) =>
 
 const createFormState = (destination: Destination): DestinationFormState => ({
   destinationId: destination.id,
+  sourceUpdatedAt: destination.updatedAt,
   summary: destination.why.summary,
   highlights: destination.why.highlights,
   personalRationale: destination.why.personalRationale,
@@ -46,9 +48,12 @@ const createFormState = (destination: Destination): DestinationFormState => ({
 
 export function DestinationProfile({ destination, onUpdate, onClose }: DestinationProfileProps) {
   const [draft, setDraft] = useState(() => createFormState(destination));
-  const form = draft.destinationId === destination.id ? draft : createFormState(destination);
+  const form =
+    draft.destinationId === destination.id && draft.sourceUpdatedAt === destination.updatedAt
+      ? draft
+      : createFormState(destination);
 
-  function updateForm(patch: Partial<Omit<DestinationFormState, 'destinationId'>>) {
+  function updateForm(patch: Partial<Omit<DestinationFormState, 'destinationId' | 'sourceUpdatedAt'>>) {
     setDraft({ ...form, ...patch });
   }
 
