@@ -245,3 +245,85 @@ select {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
 }
+
+.destination-profile {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 12;
+  display: grid;
+  width: min(430px, calc(100vw - 32px));
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid rgba(245, 239, 227, 0.16);
+  border-radius: 8px;
+  background: rgba(17, 24, 20, 0.9);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
+.profile-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-header p {
+  margin: 0 0 4px;
+  color: rgba(245, 239, 227, 0.64);
+  font-size: 0.78rem;
+}
+
+.profile-header h1 {
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.15;
+}
+
+.profile-header button,
+.primary-action {
+  border: 1px solid rgba(245, 239, 227, 0.16);
+  border-radius: 6px;
+  color: #f5efe3;
+  background: rgba(245, 239, 227, 0.1);
+  cursor: pointer;
+}
+
+.profile-header button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+}
+
+.destination-profile label {
+  display: grid;
+  gap: 6px;
+  color: rgba(245, 239, 227, 0.74);
+  font-size: 0.82rem;
+}
+
+.destination-profile input,
+.destination-profile textarea {
+  width: 100%;
+  border: 1px solid rgba(245, 239, 227, 0.15);
+  border-radius: 6px;
+  padding: 9px 10px;
+  color: #f5efe3;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.destination-profile textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.primary-action {
+  padding: 11px 12px;
+  color: #111814;
+  background: #e9b44c;
+}
