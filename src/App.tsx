@@ -5,14 +5,12 @@ import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
-import { parseTripSnapshot, serializeTripSnapshot } from './domain/snapshots';
 import { useTripData } from './hooks/useTripData';
 import { tripDb } from './storage/tripDb';
 import { createTripRepository } from './storage/tripRepository';
 import './styles.css';
 
 const repository = createTripRepository(tripDb);
-const exportFileName = 'world-tour-planner.json';
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 
 export default function App() {
@@ -34,11 +32,9 @@ export default function App() {
     deleteDestination,
     reorderDestinations,
     updateRouteLeg,
-    reload,
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
-  const isInteractionLocked = isLoading || isImporting;
+  const isInteractionLocked = isLoading;
 
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
@@ -55,26 +51,6 @@ export default function App() {
     [addDestination, isInteractionLocked],
   );
 
-  const handleImportText = useCallback(
-    async (text: string) => {
-      if (isInteractionLocked) return;
-
-      const snapshot = parseTripSnapshot(text);
-      setIsImporting(true);
-      try {
-        await repository.replaceTripData({
-          destinations: snapshot.destinations,
-          routeLegs: snapshot.routeLegs,
-        });
-        await reload();
-        setSelectedDestinationId(snapshot.destinations[0]?.id ?? null);
-      } finally {
-        setIsImporting(false);
-      }
-    },
-    [isInteractionLocked, reload],
-  );
-
   const handleDeleteDestination = useCallback(
     async (destinationId: string) => {
       if (isInteractionLocked) return;
@@ -86,22 +62,6 @@ export default function App() {
     },
     [deleteDestination, isInteractionLocked],
   );
-
-  const handleExport = useCallback(() => {
-    if (isInteractionLocked) return;
-
-    const snapshotJson = serializeTripSnapshot({ destinations, routeLegs });
-    const blob = new Blob([snapshotJson], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-
-    anchor.href = url;
-    anchor.download = exportFileName;
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  }, [destinations, isInteractionLocked, routeLegs]);
 
   return (
     <main className="app-shell">
@@ -117,8 +77,6 @@ export default function App() {
             <TopToolbar
               searchPlaces={searchNominatimPlaces}
               onAddDestination={handleAddDestination}
-              onExport={handleExport}
-              onImportText={handleImportText}
             />
             <ItineraryPanel
               destinations={destinations}

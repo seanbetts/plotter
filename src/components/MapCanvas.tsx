@@ -1,6 +1,6 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Destination, RouteLeg } from '../domain/types';
 
@@ -501,8 +501,6 @@ export function MapCanvas({
     };
   }, [addMapLayers]);
 
-  const routeCount = useMemo(() => routeLegs.length, [routeLegs.length]);
-
   return (
     <section className="map-canvas" aria-label="Interactive world tour map">
       <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
@@ -517,9 +515,6 @@ export function MapCanvas({
             onClick={() => onSelectDestinationRef.current(destination.id)}
           />
         ))}
-      </div>
-      <div className="map-route-count" aria-live="polite">
-        {routeCount} route {routeCount === 1 ? 'leg' : 'legs'}
       </div>
     </section>
   );

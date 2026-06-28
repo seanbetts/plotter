@@ -85,19 +85,6 @@ select {
   opacity: 0;
 }
 
-.map-route-count {
-  position: absolute;
-  right: 18px;
-  bottom: 18px;
-  z-index: 5;
-  padding: 8px 10px;
-  border: 1px solid rgba(245, 239, 227, 0.16);
-  border-radius: 6px;
-  color: #f5efe3;
-  background: rgba(17, 24, 20, 0.78);
-  backdrop-filter: blur(12px);
-  font-size: 0.8rem;
-}
 
 .top-toolbar {
   position: absolute;
@@ -738,8 +725,4 @@ select {
     width: auto;
   }
 
-  .map-route-count {
-    right: 12px;
-    bottom: calc(38vh + 24px);
-  }
 }

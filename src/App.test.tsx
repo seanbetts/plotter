@@ -158,19 +158,11 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Select Kyoto' })).toHaveClass('is-selected');
   });
 
-  it('keeps mutation and export actions unavailable while trip data is loading', async () => {
+  it('keeps mutation actions unavailable while trip data is loading', async () => {
     const initialDestinations = createDeferred<Destination[]>();
     const initialRouteLegs = createDeferred<RouteLeg[]>();
     repositoryMock.initialDestinations = initialDestinations.promise;
     repositoryMock.initialRouteLegs = initialRouteLegs.promise;
-    const createObjectUrl = vi.fn(() => 'blob:trip-data');
-    const revokeObjectUrl = vi.fn();
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: createObjectUrl,
-      revokeObjectURL: revokeObjectUrl,
-    });
-
     render(<App />);
 
     expect(screen.getByText('Loading trip data')).toBeInTheDocument();
@@ -184,59 +176,15 @@ describe('App', () => {
     expect(doubleClickHandler).toBeUndefined();
 
     expect(repositoryMock.saveDestination).not.toHaveBeenCalled();
-    expect(createObjectUrl).not.toHaveBeenCalled();
 
     initialDestinations.resolve([]);
     initialRouteLegs.resolve([]);
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
     expect(screen.getByLabelText('Search for a destination')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Export trip data' })).toBeInTheDocument();
-  });
-
-  it('locks mutation and export actions while imported trip data is replacing storage', async () => {
-    const user = userEvent.setup();
-    const replaceTripData = createDeferred<void>();
-    repositoryMock.replaceTripData.mockImplementationOnce(async (snapshot) => {
-      repositoryMock.destinations = [...snapshot.destinations];
-      repositoryMock.routeLegs = [...snapshot.routeLegs];
-      await replaceTripData.promise;
-    });
-    const createObjectUrl = vi.fn(() => 'blob:trip-data');
-    const revokeObjectUrl = vi.fn();
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: createObjectUrl,
-      revokeObjectURL: revokeObjectUrl,
-    });
-    const importedDestination = createDestinationSnapshot('dest-imported', 'Lisbon');
-    const importFile = new File(
-      [
-        JSON.stringify({
-          version: 1,
-          exportedAt: '2026-06-28T00:00:00.000Z',
-          destinations: [importedDestination],
-          routeLegs: [],
-        }),
-      ],
-      'world-tour-planner.json',
-      { type: 'application/json' },
-    );
-
-    render(<App />);
-
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
-    await user.upload(screen.getByLabelText('Trip data import file'), importFile);
-    await waitFor(() => expect(repositoryMock.replaceTripData).toHaveBeenCalled());
-
     expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
-    expect(createObjectUrl).not.toHaveBeenCalled();
-
-    replaceTripData.resolve();
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
-    expect(screen.getByLabelText('Search for a destination')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Export trip data' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import trip data' })).not.toBeInTheDocument();
   });
+
 });
 
 function createDeferred<T>(): Deferred<T> {
@@ -246,45 +194,4 @@ function createDeferred<T>(): Deferred<T> {
   });
 
   return { promise, resolve };
-}
-
-function createDestinationSnapshot(id: string, name: string): Destination {
-  return {
-    id,
-    name,
-    countryRegion: 'Portugal',
-    coordinates: { lat: 38.7223, lng: -9.1393 },
-    order: 0,
-    status: 'idea',
-    priority: 'medium',
-    timing: {
-      idealMonths: [],
-      expectedStayDays: 3,
-      provisionalStartDate: '',
-      provisionalEndDate: '',
-    },
-    why: {
-      summary: '',
-      highlights: '',
-      personalRationale: '',
-    },
-    media: [],
-    research: {
-      notes: '',
-      links: [],
-      bookReferences: [],
-    },
-    activities: {
-      items: [],
-    },
-    routeContext: {
-      previousNextNotes: '',
-      drivingNotes: '',
-      borderShippingNotes: '',
-      notes: '',
-    },
-    tags: [],
-    createdAt: '2026-06-28T00:00:00.000Z',
-    updatedAt: '2026-06-28T00:00:00.000Z',
-  };
 }

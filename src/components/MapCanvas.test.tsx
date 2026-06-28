@@ -202,6 +202,19 @@ describe('MapCanvas', () => {
     expect(screen.getByText('Blank planning map')).toBeInTheDocument();
   });
 
+  it('does not render the route leg count badge', () => {
+    render(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
+  });
+
   it('uses the quieter streets basemap style by default', () => {
     render(
       <MapCanvas
@@ -275,7 +288,7 @@ describe('MapCanvas', () => {
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-routes-line' }));
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-destination-points' }));
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-city-points' }));
-    expect(screen.getByText('1 route leg')).toBeInTheDocument();
+    expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
   });
 
   it('stores destinations and real route geometry in MapLibre sources', () => {

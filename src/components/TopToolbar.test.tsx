@@ -21,8 +21,6 @@ describe('TopToolbar', () => {
     render(
       <TopToolbar
         onAddDestination={onAddDestination}
-        onExport={vi.fn()}
-        onImportText={vi.fn()}
         searchPlaces={vi.fn().mockResolvedValue([
           {
             id: 'place-1',
@@ -59,8 +57,6 @@ describe('TopToolbar', () => {
     render(
       <TopToolbar
         onAddDestination={vi.fn()}
-        onExport={vi.fn()}
-        onImportText={vi.fn()}
         searchPlaces={searchPlaces}
       />,
     );
@@ -114,8 +110,6 @@ describe('TopToolbar', () => {
     render(
       <TopToolbar
         onAddDestination={vi.fn()}
-        onExport={vi.fn()}
-        onImportText={vi.fn()}
         searchPlaces={searchPlaces}
       />,
     );
@@ -133,46 +127,16 @@ describe('TopToolbar', () => {
     expect(screen.queryByRole('button', { name: 'Add Istanbul, Turkey' })).not.toBeInTheDocument();
   });
 
-  it('clears a failed import selection so the same file can be retried', async () => {
-    const user = userEvent.setup();
-    const onImportText = vi.fn().mockRejectedValue(new Error('Invalid trip data'));
+  it('does not render temporary import and export controls', () => {
     render(
       <TopToolbar
         onAddDestination={vi.fn()}
-        onExport={vi.fn()}
-        onImportText={onImportText}
-        searchPlaces={vi.fn()}
-      />,
-    );
-    const file = new File(['not json'], 'trip.json', { type: 'application/json' });
-    const input = screen.getByLabelText('Trip data import file');
-
-    await user.upload(input, file);
-    await waitFor(() => expect(onImportText).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(input).toHaveValue(''));
-
-    await user.upload(input, file);
-
-    await waitFor(() => expect(onImportText).toHaveBeenCalledTimes(2));
-  });
-
-  it('opens the import file picker from a keyboard-operable button', async () => {
-    const user = userEvent.setup();
-    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click');
-    render(
-      <TopToolbar
-        onAddDestination={vi.fn()}
-        onExport={vi.fn()}
-        onImportText={vi.fn()}
         searchPlaces={vi.fn()}
       />,
     );
 
-    const importButton = screen.getByRole('button', { name: 'Import trip data' });
-    importButton.focus();
-    await user.keyboard('{Enter}');
-
-    expect(inputClick).toHaveBeenCalled();
-    inputClick.mockRestore();
+    expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import trip data' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Trip data import file')).not.toBeInTheDocument();
   });
 });
