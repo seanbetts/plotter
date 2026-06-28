@@ -64,6 +64,29 @@ function reorderedDestinationIds(
   return withoutDragged;
 }
 
+function dropPreviewForPointer(
+  destinations: Destination[],
+  draggedDestinationId: string,
+  targetDestinationId: string,
+  targetPosition: DropPosition,
+): DropPreview {
+  if (targetPosition === 'before') {
+    return { destinationId: targetDestinationId, position: 'before' };
+  }
+
+  const destinationIdsWithoutDragged = destinations
+    .map((destination) => destination.id)
+    .filter((destinationId) => destinationId !== draggedDestinationId);
+  const targetIndex = destinationIdsWithoutDragged.indexOf(targetDestinationId);
+  const nextDestinationId = destinationIdsWithoutDragged[targetIndex + 1];
+
+  if (nextDestinationId) {
+    return { destinationId: nextDestinationId, position: 'before' };
+  }
+
+  return { destinationId: targetDestinationId, position: 'after' };
+}
+
 export function ItineraryPanel({
   destinations,
   routeLegs,
@@ -105,7 +128,9 @@ export function ItineraryPanel({
     const targetMidpoint = targetBounds.top + targetBounds.height / 2;
     const position = event.clientY > targetMidpoint ? 'after' : 'before';
 
-    setDropPreview({ destinationId: targetDestinationId, position });
+    setDropPreview(
+      dropPreviewForPointer(destinations, draggedDestinationId, targetDestinationId, position),
+    );
   };
 
   const handleDrop = (targetDestinationId: string) => {
@@ -114,11 +139,15 @@ export function ItineraryPanel({
       return;
     }
 
+    const resolvedDropPreview = dropPreview ?? {
+      destinationId: targetDestinationId,
+      position: 'before' as const,
+    };
     const nextDestinationIds = reorderedDestinationIds(
       destinations,
       draggedDestinationId,
-      targetDestinationId,
-      dropPreview?.destinationId === targetDestinationId ? dropPreview.position : 'before',
+      resolvedDropPreview.destinationId,
+      resolvedDropPreview.position,
     );
     onReorderDestinations(nextDestinationIds);
     clearDragState();

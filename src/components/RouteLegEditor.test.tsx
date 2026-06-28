@@ -249,7 +249,7 @@ describe('ItineraryPanel', () => {
     expect(onReorderDestinations).toHaveBeenCalledWith([target.id, origin.id]);
   });
 
-  it('reorders stops after the hovered stop when dragging over the lower half', () => {
+  it('uses one insertion marker between stops when dragging over the lower half', () => {
     const first = createDestination({
       name: 'Balcombe',
       countryRegion: 'United Kingdom',
@@ -295,7 +295,8 @@ describe('ItineraryPanel', () => {
     fireEvent.dragStart(screen.getByRole('button', { name: 'Drag Brussels' }));
     dragOverAt(firstDropTarget, 170);
 
-    expect(screen.getByTestId(`stop-insert-after-${first.id}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`stop-insert-after-${first.id}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId(`stop-insert-before-${second.id}`)).toBeInTheDocument();
 
     fireEvent.drop(firstDropTarget);
 
