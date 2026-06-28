@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
@@ -87,6 +87,13 @@ describe('RouteLegEditor', () => {
 });
 
 describe('ItineraryPanel', () => {
+  function dragOverAt(element: Element, clientY: number) {
+    const dragOverEvent = createEvent.dragOver(element);
+
+    Object.defineProperty(dragOverEvent, 'clientY', { value: clientY });
+    fireEvent(element, dragOverEvent);
+  }
+
   it('renders stops with inline route leg summaries in miles', async () => {
     const user = userEvent.setup();
     const origin = createDestination({
@@ -193,7 +200,7 @@ describe('ItineraryPanel', () => {
     });
   });
 
-  it('reorders stops by drag handle', () => {
+  it('shows an insertion marker and reorders stops before the hovered stop', () => {
     const origin = createDestination({
       name: 'Istanbul',
       countryRegion: 'Turkey',
@@ -218,11 +225,81 @@ describe('ItineraryPanel', () => {
       />,
     );
 
+    const originDropTarget = screen.getByTestId(`stop-drop-target-${origin.id}`);
+    vi.spyOn(originDropTarget, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 100,
+      width: 300,
+      height: 80,
+      top: 100,
+      right: 300,
+      bottom: 180,
+      left: 0,
+      toJSON: () => ({}),
+    });
+
     fireEvent.dragStart(screen.getByRole('button', { name: 'Drag Tbilisi' }));
-    fireEvent.dragOver(screen.getByTestId(`stop-drop-target-${origin.id}`));
-    fireEvent.drop(screen.getByTestId(`stop-drop-target-${origin.id}`));
+    dragOverAt(originDropTarget, 110);
+
+    expect(screen.getByTestId(`stop-insert-before-${origin.id}`)).toBeInTheDocument();
+    expect(originDropTarget).toHaveClass('is-drop-target');
+
+    fireEvent.drop(originDropTarget);
 
     expect(onReorderDestinations).toHaveBeenCalledWith([target.id, origin.id]);
+  });
+
+  it('reorders stops after the hovered stop when dragging over the lower half', () => {
+    const first = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0567, lng: -0.1357 },
+    });
+    const second = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const third = createDestination({
+      name: 'Brussels',
+      countryRegion: 'Belgium',
+      coordinates: { lat: 50.8503, lng: 4.3517 },
+    });
+    const onReorderDestinations = vi.fn();
+
+    render(
+      <ItineraryPanel
+        destinations={[first, second, third]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={onReorderDestinations}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    const firstDropTarget = screen.getByTestId(`stop-drop-target-${first.id}`);
+    vi.spyOn(firstDropTarget, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 100,
+      width: 300,
+      height: 80,
+      top: 100,
+      right: 300,
+      bottom: 180,
+      left: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Drag Brussels' }));
+    dragOverAt(firstDropTarget, 170);
+
+    expect(screen.getByTestId(`stop-insert-after-${first.id}`)).toBeInTheDocument();
+
+    fireEvent.drop(firstDropTarget);
+
+    expect(onReorderDestinations).toHaveBeenCalledWith([first.id, third.id, second.id]);
   });
 
   it('shows an empty stops message', () => {

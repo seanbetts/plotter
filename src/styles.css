@@ -320,6 +320,10 @@ select {
   gap: 0;
 }
 
+.stop-list.is-reordering .inline-route-leg {
+  display: none;
+}
+
 .stop-list p {
   margin: 0;
   color: rgba(245, 239, 227, 0.62);
@@ -330,6 +334,36 @@ select {
   display: grid;
 }
 
+.stop-drop-indicator {
+  position: relative;
+  height: 14px;
+  margin: 0 8px;
+}
+
+.stop-drop-indicator::before {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: #e9b44c;
+  box-shadow: 0 0 0 4px rgba(233, 180, 76, 0.14);
+  content: "";
+}
+
+.stop-drop-indicator::after {
+  position: absolute;
+  top: 2px;
+  left: 38px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #111814;
+  border-radius: 999px;
+  background: #e9b44c;
+  content: "";
+}
+
 .stop-item {
   display: grid;
   grid-template-columns: 30px 1fr 34px;
@@ -337,6 +371,11 @@ select {
   border: 1px solid rgba(245, 239, 227, 0.12);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.06);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
 }
 
 .stop-select,
@@ -387,6 +426,17 @@ select {
 .stop-item.is-selected {
   border-color: rgba(233, 180, 76, 0.72);
   background: rgba(233, 180, 76, 0.12);
+}
+
+.stop-item.is-dragging {
+  border-color: rgba(233, 180, 76, 0.42);
+  opacity: 0.52;
+  transform: scale(0.985);
+}
+
+.stop-item.is-drop-target {
+  border-color: rgba(233, 180, 76, 0.5);
+  background: rgba(233, 180, 76, 0.08);
 }
 
 .stop-delete:hover,

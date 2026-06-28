@@ -1,4 +1,5 @@
 import { Car, GripVertical, Ship, Trash2 } from 'lucide-react';
+import type { DragEvent } from 'react';
 import { useState } from 'react';
 import type { Destination, RouteLeg, RouteLegType } from '../domain/types';
 
@@ -13,6 +14,13 @@ type ItineraryPanelProps = {
     routeLegId: string,
     patch: Partial<Omit<RouteLeg, 'id' | 'createdAt' | 'updatedAt'>>,
   ) => void;
+};
+
+type DropPosition = 'before' | 'after';
+
+type DropPreview = {
+  destinationId: string;
+  position: DropPosition;
 };
 
 const kmToMiles = 0.621371;
@@ -33,6 +41,29 @@ function nextRouteType(type: RouteLegType): RouteLegType {
   return type === 'shipping-manual' ? 'driving-auto' : 'shipping-manual';
 }
 
+function reorderedDestinationIds(
+  destinations: Destination[],
+  draggedDestinationId: string,
+  targetDestinationId: string,
+  position: DropPosition,
+) {
+  if (draggedDestinationId === targetDestinationId) {
+    return destinations.map((destination) => destination.id);
+  }
+
+  const destinationIds = destinations.map((destination) => destination.id);
+  const withoutDragged = destinationIds.filter((destinationId) => destinationId !== draggedDestinationId);
+  const targetIndex = withoutDragged.indexOf(targetDestinationId);
+
+  if (targetIndex === -1) {
+    return destinationIds;
+  }
+
+  const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
+  withoutDragged.splice(insertIndex, 0, draggedDestinationId);
+  return withoutDragged;
+}
+
 export function ItineraryPanel({
   destinations,
   routeLegs,
@@ -43,38 +74,60 @@ export function ItineraryPanel({
   onUpdateRouteLeg,
 }: ItineraryPanelProps) {
   const [draggedDestinationId, setDraggedDestinationId] = useState<string | null>(null);
+  const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const routeLegsByPair = new Map(
     routeLegs.map((routeLeg) => [
       `${routeLeg.originDestinationId}:${routeLeg.targetDestinationId}`,
       routeLeg,
     ]),
   );
+  const stopListClassName = ['stop-list', draggedDestinationId ? 'is-reordering' : '']
+    .filter(Boolean)
+    .join(' ');
+
+  const clearDragState = () => {
+    setDraggedDestinationId(null);
+    setDropPreview(null);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>, targetDestinationId: string) => {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+
+    if (!draggedDestinationId || draggedDestinationId === targetDestinationId) {
+      setDropPreview(null);
+      return;
+    }
+
+    const targetBounds = event.currentTarget.getBoundingClientRect();
+    const targetMidpoint = targetBounds.top + targetBounds.height / 2;
+    const position = event.clientY > targetMidpoint ? 'after' : 'before';
+
+    setDropPreview({ destinationId: targetDestinationId, position });
+  };
 
   const handleDrop = (targetDestinationId: string) => {
     if (!draggedDestinationId || draggedDestinationId === targetDestinationId) {
-      setDraggedDestinationId(null);
+      clearDragState();
       return;
     }
 
-    const nextDestinationIds = destinations.map((destination) => destination.id);
-    const draggedIndex = nextDestinationIds.indexOf(draggedDestinationId);
-    const targetIndex = nextDestinationIds.indexOf(targetDestinationId);
-
-    if (draggedIndex === -1 || targetIndex === -1) {
-      setDraggedDestinationId(null);
-      return;
-    }
-
-    nextDestinationIds.splice(draggedIndex, 1);
-    nextDestinationIds.splice(targetIndex, 0, draggedDestinationId);
+    const nextDestinationIds = reorderedDestinationIds(
+      destinations,
+      draggedDestinationId,
+      targetDestinationId,
+      dropPreview?.destinationId === targetDestinationId ? dropPreview.position : 'before',
+    );
     onReorderDestinations(nextDestinationIds);
-    setDraggedDestinationId(null);
+    clearDragState();
   };
 
   return (
     <aside className="itinerary-panel" aria-label="Itinerary">
       <h2>Stops</h2>
-      <div className="stop-list">
+      <div className={stopListClassName}>
         {destinations.length === 0 ? <p>Add your first destination from the map search.</p> : null}
         {destinations.map((destination, index) => {
           const region = destination.countryRegion || 'Unassigned region';
@@ -83,13 +136,31 @@ export function ItineraryPanel({
           const routeLeg = nextDestination
             ? routeLegsByPair.get(`${destination.id}:${nextDestination.id}`)
             : undefined;
+          const isDragging = draggedDestinationId === destination.id;
+          const activeDropPosition =
+            dropPreview?.destinationId === destination.id ? dropPreview.position : null;
+          const stopItemClassName = [
+            'stop-item',
+            isSelected ? 'is-selected' : '',
+            isDragging ? 'is-dragging' : '',
+            activeDropPosition ? 'is-drop-target' : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
 
           return (
             <div key={destination.id} className="stop-sequence-item">
+              {activeDropPosition === 'before' ? (
+                <div
+                  className="stop-drop-indicator"
+                  data-testid={`stop-insert-before-${destination.id}`}
+                  aria-hidden="true"
+                />
+              ) : null}
               <div
-                className={`stop-item ${isSelected ? 'is-selected' : ''}`}
+                className={stopItemClassName}
                 data-testid={`stop-drop-target-${destination.id}`}
-                onDragOver={(event) => event.preventDefault()}
+                onDragOver={(event) => handleDragOver(event, destination.id)}
                 onDrop={() => handleDrop(destination.id)}
               >
                 <button
@@ -97,8 +168,15 @@ export function ItineraryPanel({
                   className="stop-drag"
                   aria-label={`Drag ${destination.name}`}
                   draggable
-                  onDragStart={() => setDraggedDestinationId(destination.id)}
-                  onDragEnd={() => setDraggedDestinationId(null)}
+                  onDragStart={(event) => {
+                    if (event.dataTransfer) {
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', destination.id);
+                    }
+                    setDraggedDestinationId(destination.id);
+                    setDropPreview(null);
+                  }}
+                  onDragEnd={clearDragState}
                 >
                   <GripVertical size={16} aria-hidden="true" />
                 </button>
@@ -121,6 +199,13 @@ export function ItineraryPanel({
                   <Trash2 size={15} aria-hidden="true" />
                 </button>
               </div>
+              {activeDropPosition === 'after' ? (
+                <div
+                  className="stop-drop-indicator"
+                  data-testid={`stop-insert-after-${destination.id}`}
+                  aria-hidden="true"
+                />
+              ) : null}
               {routeLeg && nextDestination ? (
                 <div className={`inline-route-leg inline-route-leg-${routeLeg.type}`}>
                   <span className="inline-route-rail" aria-hidden="true" />
