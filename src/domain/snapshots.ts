@@ -24,9 +24,14 @@ export function serializeTripSnapshot(input: TripSnapshotInput): string {
 }
 
 export function parseTripSnapshot(json: string): TripSnapshot {
-  const value = JSON.parse(json) as Partial<TripSnapshot>;
+  const value = JSON.parse(json) as Partial<TripSnapshot> | null;
 
-  if (!Array.isArray(value.destinations) || !Array.isArray(value.routeLegs)) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    !Array.isArray(value.destinations) ||
+    !Array.isArray(value.routeLegs)
+  ) {
     throw new Error('Trip snapshot must include destinations and routeLegs arrays');
   }
 

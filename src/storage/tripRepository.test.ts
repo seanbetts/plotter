@@ -117,23 +117,52 @@ describe('trip repository', () => {
 
   it('replaces all trip data from a snapshot', async () => {
     const repository = createTestRepository();
-    const oldDestination = createDestination({
-      name: 'Old stop',
+    const oldOrigin = createDestination({
+      name: 'Old origin',
       coordinates: { lat: 0, lng: 0 },
     });
-    const newDestination = createDestination({
-      name: 'New stop',
+    const oldTarget = createDestination({
+      name: 'Old target',
+      coordinates: { lat: 0.5, lng: 0.5 },
+    });
+    const oldLeg = createRouteLeg({
+      originDestinationId: oldOrigin.id,
+      targetDestinationId: oldTarget.id,
+      type: 'uncertain',
+    });
+    const newOrigin = createDestination({
+      name: 'New origin',
       coordinates: { lat: 1, lng: 1 },
     });
-
-    await repository.saveDestination(oldDestination);
-    await repository.replaceTripData({
-      destinations: [newDestination],
-      routeLegs: [],
+    const newTarget = createDestination({
+      name: 'New target',
+      coordinates: { lat: 2, lng: 2 },
+    });
+    const newLeg = createRouteLeg({
+      originDestinationId: newOrigin.id,
+      targetDestinationId: newTarget.id,
+      type: 'driving',
     });
 
-    expect((await repository.listDestinations()).map((destination) => destination.name)).toEqual([
-      'New stop',
-    ]);
+    await repository.saveDestination(oldOrigin);
+    await repository.saveDestination(oldTarget);
+    await repository.saveRouteLeg(oldLeg);
+    await repository.replaceTripData({
+      destinations: [newOrigin, newTarget],
+      routeLegs: [newLeg],
+    });
+
+    const destinationNames = (await repository.listDestinations()).map(
+      (destination) => destination.name,
+    );
+    const routeLegIds = (await repository.listRouteLegs()).map((routeLeg) => routeLeg.id);
+
+    expect(destinationNames).toHaveLength(2);
+    expect(destinationNames).toContain('New origin');
+    expect(destinationNames).toContain('New target');
+    expect(destinationNames).not.toContain('Old origin');
+    expect(destinationNames).not.toContain('Old target');
+    expect(routeLegIds).toEqual([newLeg.id]);
+    expect(routeLegIds).not.toContain(oldLeg.id);
   });
 });

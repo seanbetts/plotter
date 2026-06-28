@@ -36,5 +36,11 @@ describe('trip snapshots', () => {
     expect(() => parseTripSnapshot('{"destinations":[]}')).toThrow(
       'Trip snapshot must include destinations and routeLegs arrays',
     );
+    expect(() => parseTripSnapshot('null')).toThrow(
+      'Trip snapshot must include destinations and routeLegs arrays',
+    );
+    expect(() => parseTripSnapshot('"not an object"')).toThrow(
+      'Trip snapshot must include destinations and routeLegs arrays',
+    );
   });
 });
