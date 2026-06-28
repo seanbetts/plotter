@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+const appDbName = 'world-tour-planner';
+const savedSummary = 'Gateway from Europe toward Asia.';
 const istanbulResult = [
   {
     place_id: 7_457_330,
@@ -19,6 +21,10 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
   });
 
   await page.route('https://nominatim.openstreetmap.org/**', async (route) => {
+    const url = new URL(route.request().url());
+
+    expect(url.searchParams.get('q')).toBe('Istanbul');
+
     await route.fulfill({
       contentType: 'application/json',
       json: istanbulResult,
@@ -43,8 +49,44 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   const whyItMatters = profile.getByLabel('Why it matters');
 
-  await whyItMatters.fill('Gateway from Europe toward Asia.');
+  await whyItMatters.fill(savedSummary);
   await profile.getByRole('button', { name: 'Save destination' }).click();
 
-  await expect(whyItMatters).toHaveValue('Gateway from Europe toward Asia.');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ dbName, destinationSummary }) =>
+          new Promise<boolean>((resolve, reject) => {
+            const request = indexedDB.open(dbName);
+
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+              const db = request.result;
+              const transaction = db.transaction('destinations', 'readonly');
+              const getAllRequest = transaction.objectStore('destinations').getAll();
+
+              getAllRequest.onerror = () => reject(getAllRequest.error);
+              getAllRequest.onsuccess = () => {
+                resolve(
+                  getAllRequest.result.some(
+                    (destination) =>
+                      destination.name === 'Istanbul' &&
+                      destination.why?.summary === destinationSummary,
+                  ),
+                );
+              };
+              transaction.oncomplete = () => db.close();
+            };
+          }),
+        { dbName: appDbName, destinationSummary: savedSummary },
+      ),
+    )
+    .toBe(true);
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await page.getByRole('button', { name: 'Select Istanbul' }).click();
+
+  await expect(profile).toBeVisible();
+  await expect(whyItMatters).toHaveValue(savedSummary);
 });
