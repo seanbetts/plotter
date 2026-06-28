@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, render, screen } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
@@ -447,8 +447,8 @@ describe('ItineraryPanel', () => {
 
     try {
       fireEvent.pointerDown(dragHandle, { pointerId: 1, button: 0, clientX: 12, clientY: 120 });
-      fireEvent.pointerMove(dragHandle, { pointerId: 1, clientX: 12, clientY: 270 });
-      fireEvent.pointerUp(dragHandle, { pointerId: 1, clientX: 12, clientY: 270 });
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 12, clientY: 270 });
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 12, clientY: 270 });
 
       expect(onReorderDestinations).toHaveBeenCalledWith([second.id, first.id, third.id]);
     } finally {
@@ -457,6 +457,45 @@ describe('ItineraryPanel', () => {
         value: originalElementFromPoint,
       });
     }
+  });
+
+  it('removes the dragged stop from the active list and shows a floating preview', () => {
+    const first = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0567, lng: -0.1357 },
+    });
+    const second = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[first, second]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Drag Balcombe' }), {
+      pointerId: 1,
+      button: 0,
+      clientX: 12,
+      clientY: 120,
+    });
+
+    expect(screen.queryByTestId(`stop-drop-target-${first.id}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId(`stop-drag-preview-${first.id}`)).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId(`stop-drag-preview-${first.id}`)).getByText('Balcombe'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId(`stop-drop-target-${second.id}`)).toBeInTheDocument();
   });
 
   it('shows an empty stops message', () => {

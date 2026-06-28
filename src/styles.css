@@ -473,6 +473,50 @@ select {
   background: rgba(233, 180, 76, 0.08);
 }
 
+.stop-drag-preview {
+  position: fixed;
+  z-index: 40;
+  width: min(460px, calc(100vw - 32px));
+  pointer-events: none;
+  transform: translate(12px, calc(-100% - 8px));
+}
+
+.stop-drag-preview-card {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+  border: 1px solid rgba(233, 180, 76, 0.55);
+  border-radius: 6px;
+  background: rgba(39, 55, 51, 0.96);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.32);
+}
+
+.stop-drag-preview-grip {
+  display: grid;
+  min-height: 58px;
+  place-items: center;
+  color: rgba(245, 239, 227, 0.56);
+}
+
+.stop-drag-preview-copy {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 9px;
+}
+
+.stop-drag-preview-copy strong,
+.stop-drag-preview-copy small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stop-drag-preview-copy small {
+  color: rgba(245, 239, 227, 0.55);
+}
+
 .stop-delete:hover,
 .stop-delete:focus-visible {
   color: #ffcfba;
