@@ -205,6 +205,35 @@ describe('TopToolbar', () => {
     expect(screen.queryByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' })).not.toBeInTheDocument();
   });
 
+  it('clears the query, results, and error from the clear button', async () => {
+    const user = userEvent.setup();
+    const searchPlaces = vi.fn().mockResolvedValueOnce([balcombeResult]).mockRejectedValueOnce(new Error('Search unavailable'));
+
+    render(
+      <TopToolbar
+        onAddDestination={vi.fn()}
+        resolveSearchResult={vi.fn()}
+        searchPlaces={searchPlaces}
+      />,
+    );
+
+    const input = screen.getByLabelText('Search for a destination');
+    await user.type(input, 'Balcombe');
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Balcombe'));
+    await screen.findByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' });
+
+    await user.clear(input);
+    await user.type(input, 'Ankara');
+    await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('Ankara'));
+    await screen.findByText('Search unavailable');
+
+    await user.click(screen.getByRole('button', { name: 'Clear destination search' }));
+
+    expect(input).toHaveValue('');
+    expect(screen.queryByText('Search unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' })).not.toBeInTheDocument();
+  });
+
   it('resolves a selected coordinate result before adding it', async () => {
     const user = userEvent.setup();
     const onAddDestination = vi.fn();

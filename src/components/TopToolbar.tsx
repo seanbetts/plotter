@@ -1,3 +1,4 @@
+import { Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import type { Coordinates, DestinationLocation } from '../domain/types';
@@ -21,6 +22,22 @@ function addInputFromResult(result: Extract<PlaceSearchResult, { kind: 'place' }
     name: result.location.placeName,
     location: result.location,
     coordinates: result.coordinates,
+  };
+}
+
+function formatSearchResult(result: PlaceSearchResult) {
+  if (result.kind === 'coordinates') {
+    return {
+      title: 'Use coordinates',
+      subtitle: `${result.coordinates.lat}, ${result.coordinates.lng}`,
+    };
+  }
+
+  return {
+    title: result.location.placeName,
+    subtitle:
+      [result.location.regionName, result.location.countryName].filter(Boolean).join(', ') ||
+      result.location.sourceLabel,
   };
 }
 
@@ -92,6 +109,15 @@ export function TopToolbar({ searchPlaces, resolveSearchResult, onAddDestination
     }
   }
 
+  function handleClearSearch() {
+    latestSearchId.current += 1;
+    setQuery('');
+    setResults([]);
+    setHighlightedIndex(-1);
+    setIsSearching(false);
+    setError(null);
+  }
+
   async function handleSelectResult(result: PlaceSearchResult) {
     setError(null);
     try {
@@ -139,37 +165,56 @@ export function TopToolbar({ searchPlaces, resolveSearchResult, onAddDestination
         <label className="sr-only" htmlFor="destination-search">
           Search for a destination
         </label>
-        <input
-          id="destination-search"
-          value={query}
-          onChange={handleQueryChange}
-          onKeyDown={handleSearchKeyDown}
-          placeholder="Search places or paste lat/lng"
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={results.length > 0}
-          aria-controls="destination-search-results"
-          aria-activedescendant={activeResultId}
-        />
+        <div className="search-input-shell">
+          <Search className="search-input-icon" size={18} aria-hidden="true" />
+          <input
+            id="destination-search"
+            value={query}
+            onChange={handleQueryChange}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search places or paste lat/lng"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={results.length > 0}
+            aria-controls="destination-search-results"
+            aria-activedescendant={activeResultId}
+          />
+          {query ? (
+            <button
+              type="button"
+              className="search-clear"
+              aria-label="Clear destination search"
+              onClick={handleClearSearch}
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
       </div>
       {isSearching ? <div className="toolbar-status">Searching...</div> : null}
       {error ? <div className="toolbar-error">{error}</div> : null}
       {results.length > 0 ? (
         <div id="destination-search-results" className="search-results" role="listbox">
-          {results.map((result, index) => (
-            <button
-              id={`destination-result-${result.id}`}
-              key={result.id}
-              type="button"
-              role="option"
-              aria-selected={index === highlightedIndex}
-              className={index === highlightedIndex ? 'is-highlighted' : undefined}
-              onMouseEnter={() => setHighlightedIndex(index)}
-              onClick={() => void handleSelectResult(result)}
-            >
-              {result.label}
-            </button>
-          ))}
+          {results.map((result, index) => {
+            const formattedResult = formatSearchResult(result);
+
+            return (
+              <button
+                id={`destination-result-${result.id}`}
+                key={result.id}
+                type="button"
+                role="option"
+                aria-label={result.label}
+                aria-selected={index === highlightedIndex}
+                className={index === highlightedIndex ? 'is-highlighted' : undefined}
+                onMouseEnter={() => setHighlightedIndex(index)}
+                onClick={() => void handleSelectResult(result)}
+              >
+                <span className="search-result-title">{formattedResult.title}</span>
+                <span className="search-result-subtitle">{formattedResult.subtitle}</span>
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </header>
