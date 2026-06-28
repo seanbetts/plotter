@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
 import { createRouteLeg } from '../domain/routeLegs';
 import type { Coordinates, Destination, RouteLeg, RouteLegType } from '../domain/types';
@@ -17,8 +17,49 @@ export function useTripData(repository: TripRepository) {
   const [routeLegs, setRouteLegs] = useState<RouteLeg[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const destinationsRef = useRef<Destination[]>([]);
+  const routeLegsRef = useRef<RouteLeg[]>([]);
+  const isMountedRef = useRef(false);
+  const reloadSequenceRef = useRef(0);
+
+  const replaceDestinations = useCallback((nextDestinations: Destination[]) => {
+    destinationsRef.current = nextDestinations;
+    setDestinations(nextDestinations);
+  }, []);
+
+  const updateDestinations = useCallback((updater: (current: Destination[]) => Destination[]) => {
+    const nextDestinations = updater(destinationsRef.current);
+    destinationsRef.current = nextDestinations;
+    setDestinations(nextDestinations);
+    return nextDestinations;
+  }, []);
+
+  const replaceRouteLegs = useCallback((nextRouteLegs: RouteLeg[]) => {
+    routeLegsRef.current = nextRouteLegs;
+    setRouteLegs(nextRouteLegs);
+  }, []);
+
+  const updateRouteLegs = useCallback((updater: (current: RouteLeg[]) => RouteLeg[]) => {
+    const nextRouteLegs = updater(routeLegsRef.current);
+    routeLegsRef.current = nextRouteLegs;
+    setRouteLegs(nextRouteLegs);
+    return nextRouteLegs;
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+      reloadSequenceRef.current += 1;
+    };
+  }, []);
 
   const reload = useCallback(async () => {
+    const sequence = reloadSequenceRef.current + 1;
+    reloadSequenceRef.current = sequence;
+    const isCurrentReload = () => isMountedRef.current && reloadSequenceRef.current === sequence;
+
     setIsLoading(true);
     setError(null);
     try {
@@ -26,14 +67,21 @@ export function useTripData(repository: TripRepository) {
         repository.listDestinations(),
         repository.listRouteLegs(),
       ]);
-      setDestinations(loadedDestinations);
-      setRouteLegs(loadedRouteLegs);
+
+      if (!isCurrentReload()) return;
+
+      replaceDestinations(loadedDestinations);
+      replaceRouteLegs(loadedRouteLegs);
     } catch (caught) {
+      if (!isCurrentReload()) return;
+
       setError(caught instanceof Error ? caught.message : 'Unable to load trip data');
-    } finally {
-      setIsLoading(false);
     }
-  }, [repository]);
+
+    if (!isCurrentReload()) return;
+
+    setIsLoading(false);
+  }, [replaceDestinations, replaceRouteLegs, repository]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -46,7 +94,7 @@ export function useTripData(repository: TripRepository) {
       async addDestination(input: AddDestinationInput) {
         const destination = createDestination(input);
         await repository.saveDestination(destination);
-        setDestinations((current) => [...current, destination]);
+        updateDestinations((current) => [...current, destination]);
         return destination;
       },
 
@@ -54,21 +102,23 @@ export function useTripData(repository: TripRepository) {
         destinationId: string,
         patch: Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>,
       ) {
-        const existing = destinations.find((destination) => destination.id === destinationId);
+        const existing = destinationsRef.current.find(
+          (destination) => destination.id === destinationId,
+        );
         if (!existing) return;
         const updated = patchDestination(existing, patch);
         await repository.saveDestination(updated);
-        setDestinations((current) =>
+        updateDestinations((current) =>
           current.map((destination) => (destination.id === destinationId ? updated : destination)),
         );
       },
 
       async deleteDestination(destinationId: string) {
         await repository.deleteDestination(destinationId);
-        setDestinations((current) =>
+        updateDestinations((current) =>
           current.filter((destination) => destination.id !== destinationId),
         );
-        setRouteLegs((current) =>
+        updateRouteLegs((current) =>
           current.filter(
             (leg) =>
               leg.originDestinationId !== destinationId && leg.targetDestinationId !== destinationId,
@@ -84,18 +134,18 @@ export function useTripData(repository: TripRepository) {
       }) {
         const leg = createRouteLeg(input);
         await repository.saveRouteLeg(leg);
-        setRouteLegs((current) => [...current, leg]);
+        updateRouteLegs((current) => [...current, leg]);
         return leg;
       },
 
       async deleteRouteLeg(routeLegId: string) {
         await repository.deleteRouteLeg(routeLegId);
-        setRouteLegs((current) => current.filter((leg) => leg.id !== routeLegId));
+        updateRouteLegs((current) => current.filter((leg) => leg.id !== routeLegId));
       },
 
       reload,
     }),
-    [destinations, reload, repository],
+    [reload, repository, updateDestinations, updateRouteLegs],
   );
 
   return {
