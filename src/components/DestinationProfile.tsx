@@ -1,12 +1,10 @@
 import { X } from 'lucide-react';
 import { useState } from 'react';
-import type { Destination } from '../domain/types';
+import type { ActivityItem, Destination } from '../domain/types';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
 
 type DestinationFormState = {
-  destinationId: string;
-  sourceUpdatedAt: string;
   summary: string;
   highlights: string;
   personalRationale: string;
@@ -32,9 +30,37 @@ const textToList = (value: string) =>
     .map((item) => item.trim())
     .filter(Boolean);
 
+const normalizeExpectedStayDays = (value: string) => {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.floor(parsed));
+};
+
+const createActivityItems = (labels: string[], existingItems: ActivityItem[]): ActivityItem[] => {
+  const remainingExistingItems = [...existingItems];
+
+  return labels.map((label) => {
+    const existingIndex = remainingExistingItems.findIndex((item) => item.label === label);
+
+    if (existingIndex >= 0) {
+      const [existingItem] = remainingExistingItems.splice(existingIndex, 1);
+      return existingItem;
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      label,
+      category: 'other',
+      notes: '',
+    };
+  });
+};
+
 const createFormState = (destination: Destination): DestinationFormState => ({
-  destinationId: destination.id,
-  sourceUpdatedAt: destination.updatedAt,
   summary: destination.why.summary,
   highlights: destination.why.highlights,
   personalRationale: destination.why.personalRationale,
@@ -47,13 +73,21 @@ const createFormState = (destination: Destination): DestinationFormState => ({
 });
 
 export function DestinationProfile({ destination, onUpdate, onClose }: DestinationProfileProps) {
-  const [draft, setDraft] = useState(() => createFormState(destination));
-  const form =
-    draft.destinationId === destination.id && draft.sourceUpdatedAt === destination.updatedAt
-      ? draft
-      : createFormState(destination);
+  return (
+    <DestinationProfileForm
+      key={`${destination.id}:${destination.updatedAt}`}
+      destination={destination}
+      onUpdate={onUpdate}
+      onClose={onClose}
+    />
+  );
+}
 
-  function updateForm(patch: Partial<Omit<DestinationFormState, 'destinationId' | 'sourceUpdatedAt'>>) {
+function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationProfileProps) {
+  const [draft, setDraft] = useState(() => createFormState(destination));
+  const form = draft;
+
+  function updateForm(patch: Partial<DestinationFormState>) {
     setDraft({ ...form, ...patch });
   }
 
@@ -62,7 +96,7 @@ export function DestinationProfile({ destination, onUpdate, onClose }: Destinati
       timing: {
         ...destination.timing,
         idealMonths: textToList(form.idealMonths),
-        expectedStayDays: Number(form.expectedStayDays) || 1,
+        expectedStayDays: normalizeExpectedStayDays(form.expectedStayDays),
       },
       why: {
         summary: form.summary,
@@ -74,12 +108,7 @@ export function DestinationProfile({ destination, onUpdate, onClose }: Destinati
         notes: form.researchNotes,
       },
       activities: {
-        items: textToList(form.activities).map((label) => ({
-          id: crypto.randomUUID(),
-          label,
-          category: 'other',
-          notes: '',
-        })),
+        items: createActivityItems(textToList(form.activities), destination.activities.items),
       },
       routeContext: {
         ...destination.routeContext,
