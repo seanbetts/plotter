@@ -327,3 +327,133 @@ select {
   color: #111814;
   background: #e9b44c;
 }
+
+.itinerary-panel {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 9;
+  display: grid;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 46vh;
+  gap: 12px;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid rgba(245, 239, 227, 0.14);
+  border-radius: 8px;
+  background: rgba(17, 24, 20, 0.84);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 20px 58px rgba(0, 0, 0, 0.28);
+}
+
+.itinerary-panel h2 {
+  margin: 0;
+  font-size: 0.92rem;
+  letter-spacing: 0;
+}
+
+.stop-list {
+  display: grid;
+  gap: 7px;
+}
+
+.stop-list p {
+  margin: 0;
+  color: rgba(245, 239, 227, 0.62);
+  font-size: 0.86rem;
+}
+
+.stop-list button {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 9px;
+  border: 1px solid rgba(245, 239, 227, 0.12);
+  border-radius: 6px;
+  color: #f5efe3;
+  background: rgba(255, 255, 255, 0.06);
+  text-align: left;
+  cursor: pointer;
+}
+
+.stop-list button:hover,
+.stop-list button:focus-visible {
+  border-color: rgba(245, 239, 227, 0.32);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.stop-list button.is-selected {
+  border-color: rgba(233, 180, 76, 0.72);
+  background: rgba(233, 180, 76, 0.12);
+}
+
+.stop-list span {
+  grid-row: span 2;
+  color: rgba(245, 239, 227, 0.48);
+  font-size: 0.78rem;
+}
+
+.stop-list strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stop-list small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: rgba(245, 239, 227, 0.55);
+}
+
+.route-summary {
+  margin: 0;
+  color: rgba(245, 239, 227, 0.62);
+  font-size: 0.86rem;
+}
+
+.route-leg-editor {
+  display: grid;
+  gap: 9px;
+}
+
+.route-leg-editor label {
+  display: grid;
+  gap: 5px;
+  color: rgba(245, 239, 227, 0.7);
+  font-size: 0.78rem;
+}
+
+.route-leg-editor select,
+.route-leg-editor textarea {
+  width: 100%;
+  border: 1px solid rgba(245, 239, 227, 0.15);
+  border-radius: 6px;
+  padding: 8px;
+  color: #f5efe3;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.route-leg-editor select:focus-visible,
+.route-leg-editor textarea:focus-visible,
+.route-leg-editor button:focus-visible {
+  outline: 2px solid rgba(233, 180, 76, 0.84);
+  outline-offset: 2px;
+}
+
+.route-leg-editor textarea {
+  min-height: 68px;
+  resize: vertical;
+}
+
+.route-leg-editor button {
+  padding: 9px 10px;
+  border: 1px solid rgba(245, 239, 227, 0.15);
+  border-radius: 6px;
+  color: #111814;
+  background: #e9b44c;
+  cursor: pointer;
+}
+
+.route-leg-editor button:hover {
+  background: #f0c564;
+}
