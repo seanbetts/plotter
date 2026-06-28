@@ -1,6 +1,7 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Destination, RouteLeg } from '../domain/types';
 
 type MapCanvasProps = {
@@ -8,6 +9,28 @@ type MapCanvasProps = {
   routeLegs: RouteLeg[];
   selectedDestinationId: string | null;
   onSelectDestination: (destinationId: string) => void;
+};
+
+type DestinationFeatureProperties = {
+  id: string;
+  name: string;
+  order: number;
+  selected: boolean;
+};
+
+type RouteFeatureProperties = {
+  id: string;
+  type: RouteLeg['type'] | 'failed';
+  status: RouteLeg['status'];
+};
+
+type CityFeatureProperties = {
+  id: string;
+  name: string;
+};
+
+type GeoJsonSource = maplibregl.GeoJSONSource & {
+  setData: (data: FeatureCollection) => void;
 };
 
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
@@ -47,16 +70,141 @@ const majorCities = [
   { id: 'addis-ababa', name: 'Addis Ababa', coordinates: { lat: 8.9806, lng: 38.7578 } },
 ];
 
-type ScreenPoint = {
-  x: number;
-  y: number;
-};
+const destinationsSourceId = 'world-tour-destinations';
+const routesSourceId = 'world-tour-routes';
+const majorCitiesSourceId = 'world-tour-major-cities';
+const destinationPointsLayerId = 'world-tour-destination-points';
+const destinationLabelsLayerId = 'world-tour-destination-labels';
+const routeLineLayerId = 'world-tour-routes-line';
+const cityPointsLayerId = 'world-tour-city-points';
+const cityLabelsLayerId = 'world-tour-city-labels';
 
-type RoutePath = {
-  id: string;
-  type: RouteLeg['type'];
-  points: string;
-};
+function emptyFeatureCollection<TGeometry extends Point | LineString, TProperties>(): FeatureCollection<
+  TGeometry,
+  TProperties
+> {
+  return {
+    type: 'FeatureCollection',
+    features: [],
+  };
+}
+
+function buildDestinationFeatures(
+  destinations: Destination[],
+  selectedDestinationId: string | null,
+): FeatureCollection<Point, DestinationFeatureProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: destinations.map((destination, index) => ({
+      type: 'Feature',
+      id: destination.id,
+      geometry: {
+        type: 'Point',
+        coordinates: [destination.coordinates.lng, destination.coordinates.lat],
+      },
+      properties: {
+        id: destination.id,
+        name: destination.name,
+        order: index + 1,
+        selected: destination.id === selectedDestinationId,
+      },
+    })),
+  };
+}
+
+function buildMajorCityFeatures(): FeatureCollection<Point, CityFeatureProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: majorCities.map((city) => ({
+      type: 'Feature',
+      id: city.id,
+      geometry: {
+        type: 'Point',
+        coordinates: [city.coordinates.lng, city.coordinates.lat],
+      },
+      properties: {
+        id: city.id,
+        name: city.name,
+      },
+    })),
+  };
+}
+
+function findDestination(destinations: Destination[], destinationId: string) {
+  return destinations.find((destination) => destination.id === destinationId);
+}
+
+function straightLineGeometry(origin: Destination, target: Destination): LineString {
+  return {
+    type: 'LineString',
+    coordinates: [
+      [origin.coordinates.lng, origin.coordinates.lat],
+      [target.coordinates.lng, target.coordinates.lat],
+    ],
+  };
+}
+
+function hasUsableLineString(geometry: RouteLeg['geometry']): geometry is LineString {
+  return geometry?.type === 'LineString' && geometry.coordinates.length >= 2;
+}
+
+function routeGeometryForLeg(destinations: Destination[], leg: RouteLeg): LineString | null {
+  if (leg.type === 'driving-auto' && leg.status === 'ready' && hasUsableLineString(leg.geometry)) {
+    return leg.geometry;
+  }
+
+  const origin = findDestination(destinations, leg.originDestinationId);
+  const target = findDestination(destinations, leg.targetDestinationId);
+  if (!origin || !target) return null;
+
+  if (leg.type === 'shipping-manual') {
+    return hasUsableLineString(leg.geometry) ? leg.geometry : straightLineGeometry(origin, target);
+  }
+
+  if (leg.status === 'failed') {
+    return straightLineGeometry(origin, target);
+  }
+
+  return null;
+}
+
+function routeTypeForLeg(leg: RouteLeg): RouteFeatureProperties['type'] {
+  return leg.status === 'failed' ? 'failed' : leg.type;
+}
+
+function buildRouteFeatures(
+  destinations: Destination[],
+  routeLegs: RouteLeg[],
+): FeatureCollection<LineString, RouteFeatureProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: routeLegs.flatMap((leg) => {
+      const geometry = routeGeometryForLeg(destinations, leg);
+      if (!geometry) return [];
+
+      return [
+        {
+          type: 'Feature' as const,
+          id: leg.id,
+          geometry,
+          properties: {
+            id: leg.id,
+            type: routeTypeForLeg(leg),
+            status: leg.status,
+          },
+        },
+      ];
+    }),
+  };
+}
+
+function getGeoJsonSource(map: maplibregl.Map, sourceId: string) {
+  return map.getSource(sourceId) as GeoJsonSource | undefined;
+}
+
+function setSourceData(map: maplibregl.Map, sourceId: string, data: FeatureCollection) {
+  getGeoJsonSource(map, sourceId)?.setData(data);
+}
 
 export function MapCanvas({
   destinations,
@@ -66,70 +214,207 @@ export function MapCanvas({
 }: MapCanvasProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const updateOverlayRef = useRef(() => {});
-  const [pinPositions, setPinPositions] = useState<Record<string, ScreenPoint>>({});
-  const [routePaths, setRoutePaths] = useState<RoutePath[]>([]);
-  const [cityPositions, setCityPositions] = useState<Record<string, ScreenPoint>>({});
-  const [showMajorCities, setShowMajorCities] = useState(false);
+  const latestDestinationsRef = useRef(destinations);
+  const latestRouteLegsRef = useRef(routeLegs);
+  const latestSelectedDestinationIdRef = useRef(selectedDestinationId);
+  const onSelectDestinationRef = useRef(onSelectDestination);
+  const previousDestinationCountRef = useRef(0);
 
-  const updateOverlayPositions = useCallback(() => {
+  const updateMapSources = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    setPinPositions(
-      Object.fromEntries(
-        destinations.map((destination) => {
-          const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
-          return [destination.id, { x: point.x, y: point.y }];
-        }),
+    setSourceData(
+      map,
+      destinationsSourceId,
+      buildDestinationFeatures(
+        latestDestinationsRef.current,
+        latestSelectedDestinationIdRef.current,
       ),
     );
-
-    setRoutePaths(
-      routeLegs
-        .map((leg) => {
-          const origin = destinations.find((destination) => destination.id === leg.originDestinationId);
-          const target = destinations.find((destination) => destination.id === leg.targetDestinationId);
-          const coordinates =
-            leg.geometry && leg.geometry.coordinates.length >= 2
-              ? leg.geometry.coordinates
-              : origin && target
-                ? [
-                    [origin.coordinates.lng, origin.coordinates.lat],
-                    [target.coordinates.lng, target.coordinates.lat],
-                  ]
-                : null;
-
-          if (!coordinates) return null;
-
-          return {
-            id: leg.id,
-            type: leg.type,
-            points: coordinates
-              .map(([lng, lat]) => {
-                const point = map.project([lng, lat]);
-                return `${point.x},${point.y}`;
-              })
-              .join(' '),
-          };
-        })
-        .filter((path): path is RoutePath => path !== null),
+    setSourceData(
+      map,
+      routesSourceId,
+      buildRouteFeatures(latestDestinationsRef.current, latestRouteLegsRef.current),
     );
+    setSourceData(map, majorCitiesSourceId, buildMajorCityFeatures());
+  }, []);
 
-    setShowMajorCities(map.getZoom() >= majorCityMinZoom);
-    setCityPositions(
-      Object.fromEntries(
-        majorCities.map((city) => {
-          const point = map.project([city.coordinates.lng, city.coordinates.lat]);
-          return [city.id, { x: point.x, y: point.y }];
-        }),
-      ),
+  const fitMapToDestinations = useCallback((nextDestinations: Destination[]) => {
+    const map = mapRef.current;
+    if (!map || nextDestinations.length < 2) return;
+
+    const lngs = nextDestinations.map((destination) => destination.coordinates.lng);
+    const lats = nextDestinations.map((destination) => destination.coordinates.lat);
+
+    map.fitBounds(
+      [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ],
+      {
+        padding: 92,
+        maxZoom: 6,
+        duration: 700,
+      },
     );
-  }, [destinations, routeLegs]);
+  }, []);
 
   useEffect(() => {
-    updateOverlayRef.current = updateOverlayPositions;
-  }, [updateOverlayPositions]);
+    const previousDestinationCount = previousDestinationCountRef.current;
+    latestDestinationsRef.current = destinations;
+    latestRouteLegsRef.current = routeLegs;
+    latestSelectedDestinationIdRef.current = selectedDestinationId;
+    onSelectDestinationRef.current = onSelectDestination;
+    updateMapSources();
+
+    if (destinations.length > previousDestinationCount) {
+      fitMapToDestinations(destinations);
+    }
+    if (mapRef.current) {
+      previousDestinationCountRef.current = destinations.length;
+    }
+  }, [
+    destinations,
+    routeLegs,
+    selectedDestinationId,
+    onSelectDestination,
+    fitMapToDestinations,
+    updateMapSources,
+  ]);
+
+  const addMapLayers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!map.getSource(destinationsSourceId)) {
+      map.addSource(destinationsSourceId, {
+        type: 'geojson',
+        data: emptyFeatureCollection<Point, DestinationFeatureProperties>(),
+      });
+    }
+
+    if (!map.getSource(routesSourceId)) {
+      map.addSource(routesSourceId, {
+        type: 'geojson',
+        data: emptyFeatureCollection<LineString, RouteFeatureProperties>(),
+      });
+    }
+
+    if (!map.getSource(majorCitiesSourceId)) {
+      map.addSource(majorCitiesSourceId, {
+        type: 'geojson',
+        data: emptyFeatureCollection<Point, CityFeatureProperties>(),
+      });
+    }
+
+    if (!map.getLayer(routeLineLayerId)) {
+      map.addLayer({
+        id: routeLineLayerId,
+        type: 'line',
+        source: routesSourceId,
+        layout: {
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        paint: {
+          'line-color': [
+            'match',
+            ['get', 'type'],
+            'shipping-manual',
+            '#7ec8e3',
+            'failed',
+            '#f5efe3',
+            '#e9b44c',
+          ],
+          'line-dasharray': [
+            'match',
+            ['get', 'type'],
+            'shipping-manual',
+            ['literal', [2, 2]],
+            'failed',
+            ['literal', [1, 2]],
+            ['literal', [1, 0]],
+          ],
+          'line-opacity': ['case', ['==', ['get', 'type'], 'failed'], 0.72, 0.92],
+          'line-width': 4,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
+    if (!map.getLayer(destinationPointsLayerId)) {
+      map.addLayer({
+        id: destinationPointsLayerId,
+        type: 'circle',
+        source: destinationsSourceId,
+        paint: {
+          'circle-color': ['case', ['get', 'selected'], '#f7f0d0', '#e9b44c'],
+          'circle-radius': ['case', ['get', 'selected'], 9, 7],
+          'circle-stroke-color': '#111814',
+          'circle-stroke-width': 2,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
+    if (!map.getLayer(destinationLabelsLayerId)) {
+      map.addLayer({
+        id: destinationLabelsLayerId,
+        type: 'symbol',
+        source: destinationsSourceId,
+        layout: {
+          'text-field': ['concat', ['to-string', ['get', 'order']], '. ', ['get', 'name']],
+          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+          'text-offset': [0, 1.25],
+          'text-size': 12,
+        },
+        paint: {
+          'text-color': '#111814',
+          'text-halo-color': '#f5efe3',
+          'text-halo-width': 1.5,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
+    if (!map.getLayer(cityPointsLayerId)) {
+      map.addLayer({
+        id: cityPointsLayerId,
+        type: 'circle',
+        source: majorCitiesSourceId,
+        minzoom: majorCityMinZoom,
+        paint: {
+          'circle-color': '#f7f0d0',
+          'circle-radius': 3,
+          'circle-stroke-color': '#111814',
+          'circle-stroke-width': 1,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
+    if (!map.getLayer(cityLabelsLayerId)) {
+      map.addLayer({
+        id: cityLabelsLayerId,
+        type: 'symbol',
+        source: majorCitiesSourceId,
+        minzoom: majorCityMinZoom,
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-offset': [0.7, 0],
+          'text-size': 11,
+          'text-anchor': 'left',
+        },
+        paint: {
+          'text-color': 'rgba(17, 24, 20, 0.82)',
+          'text-halo-color': 'rgba(245, 239, 227, 0.82)',
+          'text-halo-width': 1.2,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
+    updateMapSources();
+    fitMapToDestinations(latestDestinationsRef.current);
+    previousDestinationCountRef.current = latestDestinationsRef.current.length;
+  }, [fitMapToDestinations, updateMapSources]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -143,29 +428,39 @@ export function MapCanvas({
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    const syncOverlay = () => {
-      updateOverlayRef.current();
+    const handleLoad = () => {
+      addMapLayers();
+    };
+    const handleDestinationClick = (event: maplibregl.MapLayerMouseEvent) => {
+      const destinationId = event.features?.[0]?.properties?.id;
+
+      if (typeof destinationId === 'string') {
+        onSelectDestinationRef.current(destinationId);
+      }
+    };
+    const handleDestinationMouseEnter = () => {
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const handleDestinationMouseLeave = () => {
+      map.getCanvas().style.cursor = '';
     };
 
-    map.on('move', syncOverlay);
-    map.on('zoom', syncOverlay);
-    map.on('resize', syncOverlay);
+    map.on('load', handleLoad);
+    map.on('click', destinationPointsLayerId, handleDestinationClick);
+    map.on('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
+    map.on('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
 
     mapRef.current = map;
-    syncOverlay();
 
     return () => {
-      map.off('move', syncOverlay);
-      map.off('zoom', syncOverlay);
-      map.off('resize', syncOverlay);
+      map.off('load', handleLoad);
+      map.off('click', destinationPointsLayerId, handleDestinationClick);
+      map.off('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
+      map.off('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
       map.remove();
       mapRef.current = null;
     };
-  }, []);
-
-  useEffect(() => {
-    updateOverlayPositions();
-  }, [updateOverlayPositions]);
+  }, [addMapLayers]);
 
   const routeCount = useMemo(() => routeLegs.length, [routeLegs.length]);
 
@@ -173,49 +468,17 @@ export function MapCanvas({
     <section className="map-canvas" aria-label="Interactive world tour map">
       <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
       {destinations.length === 0 ? <div className="map-empty-label">Blank planning map</div> : null}
-      <svg className="route-layer" aria-label="Route legs">
-        {routePaths.map((path) => (
-          <polyline
-            key={path.id}
-            className={`route-line route-line-${path.type}`}
-            points={path.points}
-          />
-        ))}
-      </svg>
-      <div className="pin-layer" aria-label="Destination pins">
+      <div className="map-accessible-destination-list" aria-label="Destination pins">
         {destinations.map((destination) => (
           <button
             key={destination.id}
             type="button"
-            className={`map-pin ${destination.id === selectedDestinationId ? 'is-selected' : ''}`}
+            className={destination.id === selectedDestinationId ? 'is-selected' : ''}
             aria-label={`Select ${destination.name}`}
-            onClick={() => onSelectDestination(destination.id)}
-            style={{
-              left: `${pinPositions[destination.id]?.x ?? 0}px`,
-              top: `${pinPositions[destination.id]?.y ?? 0}px`,
-            }}
-          >
-            <span />
-          </button>
+            onClick={() => onSelectDestinationRef.current(destination.id)}
+          />
         ))}
       </div>
-      {showMajorCities ? (
-        <div className="major-city-layer" aria-label="Major cities">
-          {majorCities.map((city) => (
-            <span
-              key={city.id}
-              className="major-city-marker"
-              style={{
-                left: `${cityPositions[city.id]?.x ?? 0}px`,
-                top: `${cityPositions[city.id]?.y ?? 0}px`,
-              }}
-            >
-              <span className="major-city-dot" aria-hidden="true" />
-              <span className="major-city-label">{city.name}</span>
-            </span>
-          ))}
-        </div>
-      ) : null}
       <div className="map-route-count" aria-live="polite">
         {routeCount} route {routeCount === 1 ? 'leg' : 'legs'}
       </div>

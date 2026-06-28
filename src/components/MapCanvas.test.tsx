@@ -1,5 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Destination, RouteLeg } from '../domain/types';
@@ -15,13 +16,18 @@ type MockMap = {
   addSource: Mock;
   addLayer: Mock;
   getLayer: Mock;
-  setData: Mock;
+  getCanvas: Mock;
   fitBounds: Mock;
   project: Mock;
 };
 
+type MockGeoJsonSource = {
+  setData: Mock;
+};
+
 const maplibreMock = vi.hoisted(() => {
   const mapInstances: MockMap[] = [];
+  const sources = new globalThis.Map<string, MockGeoJsonSource>();
   let zoom = 1.4;
   const project = vi.fn(([lng, lat]: [number, number]) => ({ x: lng * 10 + 1000, y: lat * -10 + 500 }));
   const Map = vi.fn(function () {
@@ -31,11 +37,14 @@ const maplibreMock = vi.hoisted(() => {
       remove: vi.fn(),
       addControl: vi.fn(),
       getZoom: vi.fn(() => zoom),
-      getSource: vi.fn(),
-      addSource: vi.fn(),
+      getSource: vi.fn((sourceId: string) => sources.get(sourceId)),
+      addSource: vi.fn((sourceId: string) => {
+        const source = { setData: vi.fn() };
+        sources.set(sourceId, source);
+      }),
       addLayer: vi.fn(),
       getLayer: vi.fn(),
-      setData: vi.fn(),
+      getCanvas: vi.fn(() => ({ style: { cursor: '' } })),
       fitBounds: vi.fn(),
       project,
     };
@@ -48,8 +57,12 @@ const maplibreMock = vi.hoisted(() => {
   const setZoom = (nextZoom: number) => {
     zoom = nextZoom;
   };
+  const resetSources = () => {
+    sources.clear();
+  };
+  const getSource = (sourceId: string) => sources.get(sourceId);
 
-  return { Map, NavigationControl, mapInstances, project, setZoom };
+  return { Map, NavigationControl, mapInstances, project, setZoom, resetSources, getSource };
 });
 
 vi.mock('maplibre-gl', () => ({
@@ -93,6 +106,14 @@ describe('MapCanvas', () => {
     targetDestinationId: targetDestination.id,
     type: 'driving-auto',
     status: 'ready',
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [34.8289, 38.6431],
+        [39, 40],
+        [44.8271, 41.7151],
+      ],
+    },
     notes: '',
     createdAt: '2026-06-28T00:00:00.000Z',
     updatedAt: '2026-06-28T00:00:00.000Z',
@@ -102,6 +123,7 @@ describe('MapCanvas', () => {
     maplibreMock.Map.mockClear();
     maplibreMock.NavigationControl.mockClear();
     maplibreMock.mapInstances.length = 0;
+    maplibreMock.resetSources();
     maplibreMock.setZoom(1.4);
     maplibreMock.project.mockClear();
     maplibreMock.project.mockImplementation(([lng, lat]: [number, number]) => ({
@@ -166,65 +188,161 @@ describe('MapCanvas', () => {
     expect(screen.getByText('Blank planning map')).toBeInTheDocument();
   });
 
-  it('renders a route line and route count for a route leg', () => {
-    const { container } = render(
-      <MapCanvas
-        destinations={[destination, targetDestination]}
-        routeLegs={[routeLeg]}
-        selectedDestinationId={null}
-        onSelectDestination={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('1 route leg')).toBeInTheDocument();
-    expect(container.querySelector('.route-line-driving-auto')).toBeInTheDocument();
-  });
-
-  it('uses map projection for pin and route placement', () => {
-    maplibreMock.project.mockImplementation(([lng, lat]: [number, number]) => ({ x: lng, y: lat }));
-
-    const { container } = render(
-      <MapCanvas
-        destinations={[destination, targetDestination]}
-        routeLegs={[routeLeg]}
-        selectedDestinationId={null}
-        onSelectDestination={vi.fn()}
-      />,
-    );
-
-    const pin = screen.getByRole('button', { name: 'Select Cappadocia' });
-    const route = container.querySelector('.route-line-driving-auto');
-
-    expect(maplibreMock.project).toHaveBeenCalledWith([destination.coordinates.lng, destination.coordinates.lat]);
-    expect(pin).toHaveStyle({ left: '34.8289px', top: '38.6431px' });
-    expect(route).toHaveAttribute('points', '34.8289,38.6431 44.8271,41.7151');
-  });
-
-  it('reprojects overlay positions on map move, zoom, and resize events', () => {
+  it('adds MapLibre sources and layers for destinations, routes, and major cities', () => {
     render(
       <MapCanvas
-        destinations={[destination]}
-        routeLegs={[]}
+        destinations={[destination, targetDestination]}
+        routeLegs={[routeLeg]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
       />,
     );
 
     const map = maplibreMock.mapInstances[0];
-    const moveHandler = map.on.mock.calls.find(([eventName]) => eventName === 'move')?.[1];
-    const zoomHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoom')?.[1];
-    const resizeHandler = map.on.mock.calls.find(([eventName]) => eventName === 'resize')?.[1];
-
-    maplibreMock.project.mockReturnValue({ x: 222, y: 333 });
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
 
     act(() => {
-      moveHandler();
-      zoomHandler();
-      resizeHandler();
+      loadHandler();
     });
 
-    const pin = screen.getByRole('button', { name: 'Select Cappadocia' });
-    expect(pin).toHaveStyle({ left: '222px', top: '333px' });
+    expect(map.addSource).toHaveBeenCalledWith(
+      'world-tour-destinations',
+      expect.objectContaining({ type: 'geojson' }),
+    );
+    expect(map.addSource).toHaveBeenCalledWith(
+      'world-tour-routes',
+      expect.objectContaining({ type: 'geojson' }),
+    );
+    expect(map.addSource).toHaveBeenCalledWith(
+      'world-tour-major-cities',
+      expect.objectContaining({ type: 'geojson' }),
+    );
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-routes-line' }));
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-destination-points' }));
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-city-points' }));
+    expect(screen.getByText('1 route leg')).toBeInTheDocument();
+  });
+
+  it('stores destinations and real route geometry in MapLibre sources', () => {
+    render(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    const destinationSource = maplibreMock.getSource('world-tour-destinations');
+    const routeSource = maplibreMock.getSource('world-tour-routes');
+    const destinationData = destinationSource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<Point>;
+    const routeData = routeSource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<LineString>;
+
+    expect(destinationData.features).toHaveLength(2);
+    expect(destinationData.features[0]).toMatchObject({
+      id: destination.id,
+      geometry: { type: 'Point', coordinates: [34.8289, 38.6431] },
+      properties: { name: 'Cappadocia', selected: false },
+    });
+    expect(routeData.features).toHaveLength(1);
+    expect(routeData.features[0]).toMatchObject({
+      id: routeLeg.id,
+      geometry: routeLeg.geometry,
+      properties: { type: 'driving-auto', status: 'ready' },
+    });
+  });
+
+  it('selects destinations through the MapLibre destination layer', () => {
+    const onSelectDestination = vi.fn();
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={onSelectDestination}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const clickHandler = map.on.mock.calls.find(
+      ([eventName, layerId]) =>
+        eventName === 'click' && layerId === 'world-tour-destination-points',
+    )?.[2];
+
+    clickHandler({
+      features: [{ properties: { id: destination.id } }],
+    });
+
+    expect(onSelectDestination).toHaveBeenCalledWith(destination.id);
+  });
+
+  it('does not render pending driving legs as rough straight-line route geometry', () => {
+    const pendingLeg: RouteLeg = {
+      ...routeLeg,
+      id: 'route-pending',
+      status: 'pending',
+      geometry: undefined,
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[pendingLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    const routeSource = maplibreMock.getSource('world-tour-routes');
+    const routeData = routeSource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<LineString>;
+
+    expect(routeData.features).toEqual([]);
+  });
+
+  it('fits the map to destinations when new stops are added', () => {
+    const { rerender } = render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+    const map = maplibreMock.mapInstances[0];
+
+    rerender(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    expect(map.fitBounds).toHaveBeenCalledWith(
+      [
+        [34.8289, 38.6431],
+        [44.8271, 41.7151],
+      ],
+      expect.objectContaining({
+        padding: 92,
+        maxZoom: 6,
+      }),
+    );
   });
 
   it('does not intercept map double-clicks so MapLibre can zoom normally', () => {
@@ -242,7 +360,7 @@ describe('MapCanvas', () => {
     expect(map.on).not.toHaveBeenCalledWith('dblclick', expect.any(Function));
   });
 
-  it('shows major city labels after zooming in', () => {
+  it('keeps major cities in a MapLibre source with a minimum zoom layer', () => {
     render(
       <MapCanvas
         destinations={[]}
@@ -252,18 +370,23 @@ describe('MapCanvas', () => {
       />,
     );
 
-    expect(screen.queryByText('London')).not.toBeInTheDocument();
-
     const map = maplibreMock.mapInstances[0];
-    const zoomHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoom')?.[1];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
 
-    maplibreMock.setZoom(4);
     act(() => {
-      zoomHandler();
+      loadHandler();
     });
 
-    expect(screen.getByText('London')).toBeInTheDocument();
-    expect(screen.getByText('Istanbul')).toBeInTheDocument();
+    const citySource = maplibreMock.getSource('world-tour-major-cities');
+    const cityData = citySource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<Point>;
+
+    expect(cityData.features.some((feature) => feature.properties?.name === 'London')).toBe(true);
+    expect(map.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'world-tour-city-labels',
+        minzoom: 3,
+      }),
+    );
   });
 
   it('removes the map on unmount', () => {

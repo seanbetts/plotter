@@ -16,12 +16,18 @@ type MockMap = {
   off: Mock;
   remove: Mock;
   addControl: Mock;
+  getSource: Mock;
+  addSource: Mock;
+  getLayer: Mock;
+  addLayer: Mock;
+  getCanvas: Mock;
   getZoom: Mock;
   project: Mock;
 };
 
 const maplibreMock = vi.hoisted(() => {
   const mapInstances: MockMap[] = [];
+  const sources = new globalThis.Map<string, { setData: Mock }>();
   const project = vi.fn(([lng, lat]: [number, number]) => ({
     x: lng * 10 + 1000,
     y: lat * -10 + 500,
@@ -32,6 +38,13 @@ const maplibreMock = vi.hoisted(() => {
       off: vi.fn(),
       remove: vi.fn(),
       addControl: vi.fn(),
+      getSource: vi.fn((sourceId: string) => sources.get(sourceId)),
+      addSource: vi.fn((sourceId: string) => {
+        sources.set(sourceId, { setData: vi.fn() });
+      }),
+      getLayer: vi.fn(),
+      addLayer: vi.fn(),
+      getCanvas: vi.fn(() => ({ style: { cursor: '' } })),
       getZoom: vi.fn(() => 1.4),
       project,
     };
@@ -41,8 +54,11 @@ const maplibreMock = vi.hoisted(() => {
   const NavigationControl = vi.fn(function () {
     return {};
   });
+  const resetSources = () => {
+    sources.clear();
+  };
 
-  return { Map, NavigationControl, mapInstances, project };
+  return { Map, NavigationControl, mapInstances, project, resetSources };
 });
 
 const repositoryMock = vi.hoisted(() => {
@@ -113,6 +129,7 @@ describe('App', () => {
     maplibreMock.Map.mockClear();
     maplibreMock.NavigationControl.mockClear();
     maplibreMock.mapInstances.length = 0;
+    maplibreMock.resetSources();
     maplibreMock.project.mockClear();
     vi.unstubAllGlobals();
   });
