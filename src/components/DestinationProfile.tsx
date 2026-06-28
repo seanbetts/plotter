@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { formatLocationParts } from '../domain/locations';
 import type { Destination } from '../domain/types';
 
@@ -39,6 +40,10 @@ const normalizeExpectedStayDays = (value: string) => {
 };
 
 const destinationSourceKey = (destination: Destination) => `${destination.id}:${destination.updatedAt}`;
+const profileTitleControlStyle = {
+  '--profile-title-block-padding': '0px',
+  '--profile-title-inline-padding': '0px',
+} as CSSProperties;
 
 const createFormState = (destination: Destination): DestinationFormState => ({
   sourceKey: destinationSourceKey(destination),
@@ -125,10 +130,11 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
       <header className="profile-header" aria-label="Stop detail header">
         <div>
           {isEditingName ? (
-            <label className="profile-title-editor">
+            <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
               <span className="sr-only">Stop name</span>
               <input
                 ref={nameInputRef}
+                className="profile-title-input"
                 value={form.name}
                 onChange={(event) => updateForm({ name: event.target.value })}
                 onKeyDown={(event) => {
@@ -141,7 +147,8 @@ function DestinationProfileForm({ destination, onUpdate, onClose }: DestinationP
           ) : (
             <button
               type="button"
-              className="profile-title-button"
+              className="profile-title-button profile-title-control"
+              style={profileTitleControlStyle}
               aria-label={`Edit stop name ${form.name || destination.name}`}
               onClick={() => setIsEditingName(true)}
             >

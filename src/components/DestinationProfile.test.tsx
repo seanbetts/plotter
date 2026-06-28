@@ -91,6 +91,31 @@ describe('DestinationProfile', () => {
     );
   });
 
+  it('uses the same title control box when switching the stop name into edit mode', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    });
+
+    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    const titleButton = screen.getByRole('button', { name: 'Edit stop name Balcombe' });
+    expect(titleButton).toHaveClass('profile-title-control');
+    expect(titleButton).toHaveStyle('--profile-title-inline-padding: 0px');
+    expect(titleButton).toHaveStyle('--profile-title-block-padding: 0px');
+
+    await user.click(titleButton);
+
+    const nameInput = screen.getByLabelText('Stop name');
+    expect(nameInput).toHaveClass('profile-title-input');
+    const titleEditor = nameInput.closest('.profile-title-editor');
+    expect(titleEditor).toHaveClass('profile-title-control');
+    expect(titleEditor).toHaveStyle('--profile-title-inline-padding: 0px');
+    expect(titleEditor).toHaveStyle('--profile-title-block-padding: 0px');
+  });
+
   it('edits timing and tags without overwriting hidden detail fields', async () => {
     const user = userEvent.setup();
     const destination: Destination = {

@@ -394,6 +394,17 @@ select {
   line-height: 1.15;
 }
 
+.destination-profile .profile-title-control {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 30px;
+  align-items: center;
+  padding: var(--profile-title-block-padding, 0) var(--profile-title-inline-padding, 0);
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+}
+
 .profile-title-button,
 .profile-close-button,
 .primary-action {
@@ -405,10 +416,8 @@ select {
 }
 
 .profile-title-button {
-  display: block;
+  display: flex;
   max-width: 100%;
-  padding: 0;
-  border: 0;
   text-align: left;
   background: transparent;
 }
@@ -418,14 +427,28 @@ select {
   color: var(--color-accent);
 }
 
-.profile-title-editor {
+.destination-profile .profile-title-editor {
+  display: flex;
+  gap: 0;
   margin: 0;
+  color: var(--color-text);
+  font-size: inherit;
 }
 
-.profile-title-editor input {
-  font-size: 1.28rem;
+.destination-profile .profile-title-editor:focus-within {
+  border-bottom-color: var(--border-selected);
+}
+
+.destination-profile .profile-title-input {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: var(--color-text);
+  background: transparent;
+  font-size: 1.45rem;
   font-weight: 700;
   line-height: 1.15;
+  outline: 0;
 }
 
 .profile-close-button {
