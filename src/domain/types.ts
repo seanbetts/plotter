@@ -25,6 +25,11 @@ export type MediaItem = {
   url: string;
   caption: string;
   credit: string;
+  bucketId?: string;
+  objectPath?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  uploadedAt?: string;
 };
 
 export type ResearchLink = {

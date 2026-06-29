@@ -1224,6 +1224,8 @@ select {
   top: 76px;
   left: 16px;
   z-index: 13;
+  display: grid;
+  gap: 4px;
   max-width: min(360px, calc(100vw - 32px));
   padding: 9px 11px;
   border: 1px solid var(--border-subtle);
@@ -1235,6 +1237,15 @@ select {
   backdrop-filter: blur(var(--blur-overlay));
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   font-size: 0.86rem;
+}
+
+.app-status strong,
+.app-status span {
+  color: inherit;
+}
+
+.app-status strong {
+  font-size: 0.82rem;
 }
 
 .app-status-error {

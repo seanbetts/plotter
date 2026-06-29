@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDestination } from '../domain/destinations';
 import type { Destination, RouteLeg } from '../domain/types';
 import { createAppTripRepository, ensureAnonymousSession } from './appRepository';
 import type { TripRepository } from './tripRepository';
@@ -16,17 +15,8 @@ function createMockRepository(snapshot: {
     saveRouteLeg: vi.fn(),
     deleteRouteLeg: vi.fn(),
     replaceTripData: vi.fn(),
-  };
-}
-
-function createMockStorage() {
-  const values = new Map<string, string>();
-
-  return {
-    getItem: vi.fn((key: string) => values.get(key) ?? null),
-    setItem: vi.fn((key: string, value: string) => {
-      values.set(key, value);
-    }),
+    listDestinationMedia: vi.fn(),
+    uploadDestinationMedia: vi.fn(),
   };
 }
 
@@ -57,47 +47,53 @@ describe('app repository bootstrap', () => {
     expect(supabase.auth.signInAnonymously).not.toHaveBeenCalled();
   });
 
-  it('falls back to the local repository when Supabase is not configured', async () => {
+  it('requires Supabase configuration instead of falling back to local storage', async () => {
     const localRepository = createMockRepository();
 
-    const repository = await createAppTripRepository({
+    await expect(createAppTripRepository({
       isSupabaseConfigured: false,
       localRepository,
       createSupabaseClient: vi.fn(),
       createSupabaseRepository: vi.fn(),
-    });
+    })).rejects.toThrow('Supabase is not configured');
 
-    expect(repository).toBe(localRepository);
+    expect(localRepository.listDestinations).not.toHaveBeenCalled();
   });
 
-  it('uses the local repository when the storage mode is forced to local', async () => {
+  it('ignores the old local storage mode override', async () => {
     const localRepository = createMockRepository();
+    const cloudRepository = createMockRepository();
     const createSupabaseClient = vi.fn();
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({ data: { user: { id: crypto.randomUUID() } }, error: null })),
+        signInAnonymously: vi.fn(),
+      },
+    };
 
     const repository = await createAppTripRepository({
       isSupabaseConfigured: true,
       tripStorageMode: 'local',
       localRepository,
-      createSupabaseClient,
-      createSupabaseRepository: vi.fn(),
+      createSupabaseClient: () => {
+        createSupabaseClient();
+        return supabase;
+      },
+      createSupabaseRepository: () => cloudRepository,
     });
 
-    expect(repository).toBe(localRepository);
-    expect(createSupabaseClient).not.toHaveBeenCalled();
+    expect(repository).toBe(cloudRepository);
+    expect(createSupabaseClient).toHaveBeenCalledTimes(1);
+    expect(localRepository.listDestinations).not.toHaveBeenCalled();
   });
 
-  it('uploads existing local trip data once after anonymous Supabase bootstrap', async () => {
+  it('does not migrate local trip data during Supabase bootstrap', async () => {
     const user = { id: crypto.randomUUID() };
-    const localDestination = createDestination({
-      name: 'Oslo',
-      coordinates: { lat: 59.9139, lng: 10.7522 },
-    });
     const localRepository = createMockRepository({
-      destinations: [localDestination],
+      destinations: [{} as Destination],
       routeLegs: [],
     });
     const cloudRepository = createMockRepository();
-    const storage = createMockStorage();
     const supabase = {
       auth: {
         getUser: vi.fn(async () => ({ data: { user: null }, error: null })),
@@ -110,49 +106,11 @@ describe('app repository bootstrap', () => {
       localRepository,
       createSupabaseClient: () => supabase,
       createSupabaseRepository: () => cloudRepository,
-      storage,
     });
 
     expect(repository).toBe(cloudRepository);
-    expect(cloudRepository.replaceTripData).toHaveBeenCalledWith({
-      destinations: [localDestination],
-      routeLegs: [],
-    });
-    expect(storage.setItem).toHaveBeenCalledWith(`world-tour:supabase-migrated:${user.id}`, 'true');
-  });
-
-  it('does not overwrite existing Supabase trip data during local migration', async () => {
-    const user = { id: crypto.randomUUID() };
-    const localDestination = createDestination({
-      name: 'Local',
-      coordinates: { lat: 1, lng: 1 },
-    });
-    const cloudDestination = createDestination({
-      name: 'Cloud',
-      coordinates: { lat: 2, lng: 2 },
-    });
-    const localRepository = createMockRepository({
-      destinations: [localDestination],
-      routeLegs: [],
-    });
-    const cloudRepository = createMockRepository({
-      destinations: [cloudDestination],
-      routeLegs: [],
-    });
-
-    await createAppTripRepository({
-      isSupabaseConfigured: true,
-      localRepository,
-      createSupabaseClient: () => ({
-        auth: {
-          getUser: vi.fn(async () => ({ data: { user }, error: null })),
-          signInAnonymously: vi.fn(),
-        },
-      }),
-      createSupabaseRepository: () => cloudRepository,
-      storage: createMockStorage(),
-    });
-
+    expect(localRepository.listDestinations).not.toHaveBeenCalled();
+    expect(localRepository.listRouteLegs).not.toHaveBeenCalled();
     expect(cloudRepository.replaceTripData).not.toHaveBeenCalled();
   });
 });

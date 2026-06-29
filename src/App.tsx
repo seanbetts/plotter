@@ -13,9 +13,37 @@ import './styles.css';
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 
+type RepositoryError = {
+  title: string;
+  message: string;
+};
+
+function formatRepositoryError(caught: unknown): RepositoryError {
+  const message = caught instanceof Error ? caught.message : 'Unable to prepare trip storage';
+
+  if (message.includes('Supabase is not configured')) {
+    return {
+      title: 'Supabase is not configured',
+      message: 'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
+    };
+  }
+
+  if (message.includes('row-level security') || message.includes('permission denied')) {
+    return {
+      title: 'Supabase permission denied',
+      message,
+    };
+  }
+
+  return {
+    title: 'Trip storage unavailable',
+    message,
+  };
+}
+
 export default function App() {
   const [repository, setRepository] = useState<TripRepository | null>(null);
-  const [repositoryError, setRepositoryError] = useState<string | null>(null);
+  const [repositoryError, setRepositoryError] = useState<RepositoryError | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -29,7 +57,7 @@ export default function App() {
       .catch((caught) => {
         if (isCancelled) return;
 
-        setRepositoryError(caught instanceof Error ? caught.message : 'Unable to prepare trip storage');
+        setRepositoryError(formatRepositoryError(caught));
       });
 
     return () => {
@@ -47,8 +75,18 @@ export default function App() {
             selectedDestinationId={null}
             onSelectDestination={() => undefined}
           />
-          <div className={repositoryError ? 'app-status app-status-error' : 'app-status'} role={repositoryError ? 'alert' : 'status'}>
-            {repositoryError ?? 'Loading trip data'}
+          <div
+            className={repositoryError ? 'app-status app-status-error' : 'app-status'}
+            role={repositoryError ? 'alert' : 'status'}
+          >
+            {repositoryError ? (
+              <>
+                <strong>{repositoryError.title}</strong>
+                <span>{repositoryError.message}</span>
+              </>
+            ) : (
+              'Loading trip data'
+            )}
           </div>
         </section>
       </main>

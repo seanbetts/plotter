@@ -90,6 +90,8 @@ const repositoryMock = vi.hoisted(() => {
       repository.destinations = [...snapshot.destinations];
       repository.routeLegs = [...snapshot.routeLegs];
     }),
+    listDestinationMedia: vi.fn(async () => []),
+    uploadDestinationMedia: vi.fn(),
   };
 
   return repository;
@@ -124,6 +126,8 @@ describe('App', () => {
     repositoryMock.saveRouteLeg.mockClear();
     repositoryMock.deleteRouteLeg.mockClear();
     repositoryMock.replaceTripData.mockClear();
+    repositoryMock.listDestinationMedia.mockClear();
+    repositoryMock.uploadDestinationMedia.mockClear();
     vi.mocked(createAppTripRepository).mockResolvedValue(repositoryMock);
     vi.mocked(searchMapTilerPlaces).mockReset();
     vi.mocked(resolveMapTilerCoordinates).mockReset();
@@ -140,10 +144,24 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('alert')).toHaveTextContent('Trip storage unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent(
       'Unable to create an anonymous Supabase session.',
     );
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+  });
+
+  it('shows Supabase setup guidance when storage configuration is missing', async () => {
+    vi.mocked(createAppTripRepository).mockRejectedValue(
+      new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.'),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Supabase is not configured');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
+    );
   });
 
   it('adds a searched destination without opening its profile after trip data loads', async () => {

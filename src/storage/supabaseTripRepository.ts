@@ -4,6 +4,7 @@ import type {
   Destination,
   DestinationLocation,
   DestinationStatus,
+  MediaItem,
   Priority,
   RouteLeg,
   RouteLegStatus,
@@ -59,6 +60,21 @@ type SupabaseTripRow = {
   name: string;
 };
 
+type SupabaseMediaAssetRow = {
+  id: string;
+  trip_id: string;
+  destination_id: string | null;
+  bucket_id: string;
+  object_path: string;
+  caption: string;
+  credit: string;
+  content_type: string | null;
+  size_bytes: number | null;
+  uploaded_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
 type SupabaseResponse<T> = {
   data: T | null;
   error: { message: string } | null;
@@ -84,6 +100,19 @@ function assertSupabaseWriteSucceeded(response: SupabaseWriteResponse, fallbackM
   if (response.error) {
     throw new Error(response.error.message || fallbackMessage);
   }
+}
+
+function createStorageObjectName(fileName: string) {
+  const normalizedFileName = fileName.trim().toLowerCase();
+  const extensionMatch = normalizedFileName.match(/\.([a-z0-9]+)$/);
+  const extension = extensionMatch ? `.${extensionMatch[1]}` : '';
+  const baseName = normalizedFileName
+    .replace(/\.[a-z0-9]+$/, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 72) || 'image';
+
+  return `${crypto.randomUUID()}-${baseName}${extension}`;
 }
 
 export function destinationToSupabaseRow(destination: Destination, tripId: string): SupabaseDestinationRow {
@@ -178,6 +207,20 @@ export function routeLegFromSupabaseRow(row: SupabaseRouteLegRow): RouteLeg {
   };
 }
 
+export function mediaAssetFromSupabaseRow(row: SupabaseMediaAssetRow, signedUrl: string): MediaItem {
+  return {
+    id: row.id,
+    url: signedUrl,
+    caption: row.caption,
+    credit: row.credit,
+    bucketId: row.bucket_id,
+    objectPath: row.object_path,
+    contentType: row.content_type ?? undefined,
+    sizeBytes: row.size_bytes ?? undefined,
+    uploadedAt: row.created_at,
+  };
+}
+
 export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepository {
   let activeTripId: string | null = null;
 
@@ -257,6 +300,81 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .eq('id', destinationId),
         'Unable to delete destination.',
       );
+    },
+
+    async listDestinationMedia(destinationId) {
+      const tripId = await getActiveTripId();
+      const rows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
+        await supabase
+          .from('media_assets')
+          .select('*')
+          .eq('trip_id', tripId)
+          .eq('destination_id', destinationId)
+          .order('created_at', { ascending: true }),
+        'Unable to load destination media.',
+      );
+
+      return Promise.all(
+        rows.map(async (row) => {
+          const signedUrlResponse = await supabase.storage
+            .from(row.bucket_id)
+            .createSignedUrl(row.object_path, 60 * 60);
+          const signedUrl = assertNoSupabaseError(
+            signedUrlResponse,
+            'Unable to create media URL.',
+          ).signedUrl;
+
+          return mediaAssetFromSupabaseRow(row, signedUrl);
+        }),
+      );
+    },
+
+    async uploadDestinationMedia(input) {
+      const tripId = await getActiveTripId();
+      const userResponse = await supabase.auth.getUser();
+      const user = userResponse.data.user;
+      if (userResponse.error || !user) {
+        throw new Error(userResponse.error?.message || 'Sign in before uploading media.');
+      }
+
+      const bucketId = 'trip-media';
+      const objectPath = `${tripId}/${input.destinationId}/${createStorageObjectName(input.file.name)}`;
+      const uploadResponse = await supabase.storage
+        .from(bucketId)
+        .upload(objectPath, input.file, {
+          contentType: input.file.type || undefined,
+          upsert: false,
+        });
+
+      assertNoSupabaseError(uploadResponse, 'Unable to upload destination media.');
+
+      const row = assertNoSupabaseError<SupabaseMediaAssetRow>(
+        await supabase
+          .from('media_assets')
+          .insert({
+            trip_id: tripId,
+            destination_id: input.destinationId,
+            bucket_id: bucketId,
+            object_path: uploadResponse.data?.path ?? objectPath,
+            caption: input.caption ?? '',
+            credit: input.credit ?? '',
+            content_type: input.file.type || null,
+            size_bytes: input.file.size,
+            uploaded_by: user.id,
+          })
+          .select('*')
+          .single(),
+        'Unable to save media metadata.',
+      );
+      const signedUrlResponse = await supabase.storage
+        .from(bucketId)
+        .createSignedUrl(row.object_path, 60 * 60);
+      const signedUrl = assertNoSupabaseError(
+        signedUrlResponse,
+        'Unable to create media URL.',
+      ).signedUrl;
+
+      return mediaAssetFromSupabaseRow(row, signedUrl);
     },
 
     async listRouteLegs() {

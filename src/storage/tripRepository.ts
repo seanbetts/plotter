@@ -1,4 +1,4 @@
-import type { Destination, RouteLeg } from '../domain/types';
+import type { Destination, MediaItem, RouteLeg } from '../domain/types';
 import { createLegacyLocation } from '../domain/locations';
 import type { TripDb } from './tripDb';
 
@@ -6,6 +6,13 @@ export type TripRepository = {
   listDestinations(): Promise<Destination[]>;
   saveDestination(destination: Destination): Promise<void>;
   deleteDestination(destinationId: string): Promise<void>;
+  listDestinationMedia(destinationId: string): Promise<MediaItem[]>;
+  uploadDestinationMedia(input: {
+    destinationId: string;
+    file: File;
+    caption?: string;
+    credit?: string;
+  }): Promise<MediaItem>;
   listRouteLegs(): Promise<RouteLeg[]>;
   saveRouteLeg(routeLeg: RouteLeg): Promise<void>;
   deleteRouteLeg(routeLegId: string): Promise<void>;
@@ -73,6 +80,42 @@ export function createTripRepository(db: TripDb): TripRepository {
 
         await db.routeLegs.bulkDelete(attachedLegs.map((leg) => leg.id));
       });
+    },
+
+    async listDestinationMedia(destinationId: string): Promise<MediaItem[]> {
+      const destination = await db.destinations.get(destinationId);
+      return destination?.media ?? [];
+    },
+
+    async uploadDestinationMedia(input: {
+      destinationId: string;
+      file: File;
+      caption?: string;
+      credit?: string;
+    }): Promise<MediaItem> {
+      const destination = await db.destinations.get(input.destinationId);
+      if (!destination) {
+        throw new Error('Destination not found.');
+      }
+
+      const timestamp = new Date().toISOString();
+      const mediaItem: MediaItem = {
+        id: crypto.randomUUID(),
+        url: input.file.name,
+        caption: input.caption ?? '',
+        credit: input.credit ?? '',
+        contentType: input.file.type || undefined,
+        sizeBytes: input.file.size,
+        uploadedAt: timestamp,
+      };
+
+      await db.destinations.put({
+        ...destination,
+        media: [...destination.media, mediaItem],
+        updatedAt: timestamp,
+      });
+
+      return mediaItem;
     },
 
     async listRouteLegs(): Promise<RouteLeg[]> {

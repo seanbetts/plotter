@@ -4,6 +4,7 @@ import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs'
 import {
   destinationFromSupabaseRow,
   destinationToSupabaseRow,
+  mediaAssetFromSupabaseRow,
   routeLegFromSupabaseRow,
   routeLegToSupabaseRow,
   createSupabaseTripRepository,
@@ -131,5 +132,171 @@ describe('supabase trip repository mappers', () => {
       expect.objectContaining({ id: routeLeg.id, trip_id: tripId }),
       { onConflict: 'trip_id,id' },
     );
+  });
+
+  it('uploads destination media to trip-scoped Supabase Storage and records metadata', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const mediaAssetId = crypto.randomUUID();
+    const uploadedPath = `${tripId}/${destinationId}/asset-paris.jpg`;
+    const upload = vi.fn(async () => ({ data: { path: uploadedPath }, error: null }));
+    const createSignedUrl = vi.fn(async () => ({
+      data: { signedUrl: 'https://signed.example/paris.jpg' },
+      error: null,
+    }));
+    const mediaInsert = vi.fn((row) => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => ({
+          data: {
+            id: mediaAssetId,
+            ...row,
+            created_at: '2026-06-29T12:00:00.000Z',
+            updated_at: '2026-06-29T12:00:00.000Z',
+          },
+          error: null,
+        })),
+      })),
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: userId } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({
+          upload,
+          createSignedUrl,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return {
+            select: vi.fn(() => ({
+              order: vi.fn(() => ({
+                limit: vi.fn(async () => ({
+                  data: [{ id: tripId, owner_user_id: userId, name: 'World tour' }],
+                  error: null,
+                })),
+              })),
+            })),
+          };
+        }
+
+        if (tableName === 'media_assets') {
+          return { insert: mediaInsert };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+    const file = new File(['image-data'], 'Paris sunset.JPG', { type: 'image/jpeg' });
+
+    const mediaItem = await repository.uploadDestinationMedia({
+      destinationId,
+      file,
+      caption: 'Sunset',
+      credit: 'Example photographer',
+    });
+
+    expect(supabase.storage.from).toHaveBeenCalledWith('trip-media');
+    expect(upload).toHaveBeenCalledWith(
+      expect.stringMatching(new RegExp(`^${tripId}/${destinationId}/.+-paris-sunset\\.jpg$`)),
+      file,
+      { contentType: 'image/jpeg', upsert: false },
+    );
+    expect(mediaInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trip_id: tripId,
+        destination_id: destinationId,
+        bucket_id: 'trip-media',
+        caption: 'Sunset',
+        credit: 'Example photographer',
+        content_type: 'image/jpeg',
+        size_bytes: file.size,
+        uploaded_by: userId,
+      }),
+    );
+    expect(mediaItem).toEqual(
+      expect.objectContaining({
+        id: mediaAssetId,
+        url: 'https://signed.example/paris.jpg',
+        caption: 'Sunset',
+        credit: 'Example photographer',
+        bucketId: 'trip-media',
+      }),
+    );
+  });
+
+  it('lists destination media with signed URLs', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const objectPath = `${tripId}/${destinationId}/asset.webp`;
+    const row = {
+      id: crypto.randomUUID(),
+      trip_id: tripId,
+      destination_id: destinationId,
+      bucket_id: 'trip-media',
+      object_path: objectPath,
+      caption: 'Harbour',
+      credit: '',
+      content_type: 'image/webp',
+      size_bytes: 1234,
+      uploaded_by: crypto.randomUUID(),
+      created_at: '2026-06-29T12:00:00.000Z',
+      updated_at: '2026-06-29T12:00:00.000Z',
+    };
+    const createSignedUrl = vi.fn(async () => ({
+      data: { signedUrl: 'https://signed.example/asset.webp' },
+      error: null,
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({ createSignedUrl })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return {
+            select: vi.fn(() => ({
+              order: vi.fn(() => ({
+                limit: vi.fn(async () => ({
+                  data: [{ id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' }],
+                  error: null,
+                })),
+              })),
+            })),
+          };
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  order: vi.fn(async () => ({ data: [row], error: null })),
+                })),
+              })),
+            })),
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.listDestinationMedia(destinationId)).resolves.toEqual([
+      mediaAssetFromSupabaseRow(row, 'https://signed.example/asset.webp'),
+    ]);
+    expect(createSignedUrl).toHaveBeenCalledWith(objectPath, 60 * 60);
   });
 });

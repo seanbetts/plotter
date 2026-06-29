@@ -538,6 +538,14 @@ function createMemoryRepository(
 
     async deleteDestination() {},
 
+    async listDestinationMedia() {
+      return [];
+    },
+
+    async uploadDestinationMedia() {
+      throw new Error('Media uploads are not supported by this test repository.');
+    },
+
     async listRouteLegs() {
       return [];
     },
