@@ -1,7 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
 import type { Destination } from '../domain/types';
 import { DestinationProfile } from './DestinationProfile';
@@ -14,6 +14,37 @@ function deferred<T>() {
 
   return { promise, resolve };
 }
+
+const autosaveDelayMs = 700;
+const savedStatusVisibleMs = 2400;
+
+async function advanceAutosave(ms = autosaveDelayMs) {
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+  });
+}
+
+async function flushAutosave() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+function setupAutosaveTimers() {
+  vi.useFakeTimers();
+}
+
+function addTag(tag: string) {
+  const input = screen.getByLabelText('Add tag');
+
+  fireEvent.change(input, { target: { value: tag } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('DestinationProfile', () => {
   it('shows the stop name with the location below it', () => {
@@ -60,7 +91,8 @@ describe('DestinationProfile', () => {
     render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByLabelText('Expected stay days')).toBeInTheDocument();
-    expect(screen.getByLabelText('Tags')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Tags' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Add tag')).toBeInTheDocument();
     expect(screen.queryByLabelText('Why it matters')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Highlights')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Personal rationale')).not.toBeInTheDocument();
@@ -68,10 +100,11 @@ describe('DestinationProfile', () => {
     expect(screen.queryByLabelText('Research notes')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Activities')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Route notes')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save destination' })).not.toBeInTheDocument();
   });
 
-  it('saves an edited stop name without changing location fields', async () => {
-    const user = userEvent.setup();
+  it('autosaves an edited stop name after a debounce without changing location fields', async () => {
+    setupAutosaveTimers();
     const destination = createDestination({
       name: 'Balcombe',
       coordinates: { lat: 51.0576, lng: -0.1342 },
@@ -88,11 +121,16 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    await user.click(screen.getByRole('button', { name: 'Edit stop name Balcombe' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit stop name Balcombe' }));
     const input = screen.getByLabelText('Stop name');
-    await user.clear(input);
-    await user.type(input, 'Home');
-    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+    fireEvent.change(input, { target: { value: 'Home' } });
+
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    await advanceAutosave(autosaveDelayMs - 1);
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    await advanceAutosave(1);
 
     expect(onUpdate).toHaveBeenCalledWith(
       destination.id,
@@ -129,7 +167,7 @@ describe('DestinationProfile', () => {
   });
 
   it('edits timing and tags without overwriting hidden detail fields', async () => {
-    const user = userEvent.setup();
+    setupAutosaveTimers();
     const destination: Destination = {
       ...createDestination({
         name: 'Valparaiso',
@@ -167,11 +205,11 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    await user.clear(screen.getByLabelText('Expected stay days'));
-    await user.type(screen.getByLabelText('Expected stay days'), '5');
-    await user.clear(screen.getByLabelText('Tags'));
-    await user.type(screen.getByLabelText('Tags'), 'street-art, port-city');
-    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '5' } });
+    addTag('port-city');
+
+    expect(onUpdate).not.toHaveBeenCalled();
+    await advanceAutosave();
 
     expect(onUpdate).toHaveBeenCalledWith(
       destination.id,
@@ -189,7 +227,97 @@ describe('DestinationProfile', () => {
     expect(onUpdate.mock.calls[0][1]).not.toHaveProperty('routeContext');
   });
 
-  it('syncs same-id destination updates without wiping edits on same-version rerenders', async () => {
+  it('debounces rapid typing into one save with the final value', async () => {
+    setupAutosaveTimers();
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+    const onUpdate = vi.fn();
+
+    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    const tagsInput = screen.getByLabelText('Add tag');
+    fireEvent.change(tagsInput, { target: { value: 'silk' } });
+    fireEvent.change(tagsInput, { target: { value: 'silk-road' } });
+    fireEvent.keyDown(tagsInput, { key: 'Enter' });
+    fireEvent.change(tagsInput, { target: { value: 'tiles' } });
+    fireEvent.keyDown(tagsInput, { key: 'Enter' });
+
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    await advanceAutosave();
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).toHaveBeenCalledWith(
+      destination.id,
+      expect.objectContaining({
+        tags: ['silk-road', 'tiles'],
+      }),
+    );
+  });
+
+  it('renders tags as removable pills and deduplicates new tags', async () => {
+    setupAutosaveTimers();
+    const destination = {
+      ...createDestination({
+        name: 'Valparaiso',
+        countryRegion: 'Chile',
+        coordinates: { lat: -33.0472, lng: -71.6127 },
+      }),
+      tags: ['street-art'],
+    };
+    const onUpdate = vi.fn();
+
+    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Remove tag street-art' })).toBeInTheDocument();
+
+    addTag('Street-Art');
+    addTag('port-city');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag street-art' }));
+
+    await advanceAutosave();
+
+    expect(screen.queryByRole('button', { name: 'Remove tag street-art' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove tag port-city' })).toBeInTheDocument();
+    expect(onUpdate).toHaveBeenCalledWith(
+      destination.id,
+      expect.objectContaining({
+        tags: ['port-city'],
+      }),
+    );
+  });
+
+  it('removes the last tag with backspace when the tag input is empty', async () => {
+    setupAutosaveTimers();
+    const destination = {
+      ...createDestination({
+        name: 'Kyoto',
+        countryRegion: 'Japan',
+        coordinates: { lat: 35.0116, lng: 135.7681 },
+      }),
+      tags: ['temples', 'food'],
+    };
+    const onUpdate = vi.fn();
+
+    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    fireEvent.keyDown(screen.getByLabelText('Add tag'), { key: 'Backspace' });
+    await advanceAutosave();
+
+    expect(screen.getByRole('button', { name: 'Remove tag temples' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove tag food' })).not.toBeInTheDocument();
+    expect(onUpdate).toHaveBeenCalledWith(
+      destination.id,
+      expect.objectContaining({
+        tags: ['temples'],
+      }),
+    );
+  });
+
+  it('preserves active draft edits across same-id persisted rerenders', async () => {
     const user = userEvent.setup();
     const destination: Destination = {
       ...createDestination({
@@ -204,8 +332,8 @@ describe('DestinationProfile', () => {
 
     const { rerender } = render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    await user.clear(screen.getByLabelText('Tags'));
-    await user.type(screen.getByLabelText('Tags'), 'local-draft');
+    await user.click(screen.getByRole('button', { name: 'Remove tag silk-road' }));
+    await user.type(screen.getByLabelText('Add tag'), 'local-draft{Enter}');
 
     rerender(
       <DestinationProfile
@@ -221,7 +349,7 @@ describe('DestinationProfile', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Tags')).toHaveValue('local-draft');
+    expect(screen.getByRole('button', { name: 'Remove tag local-draft' })).toBeInTheDocument();
 
     rerender(
       <DestinationProfile
@@ -235,7 +363,35 @@ describe('DestinationProfile', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Tags')).toHaveValue('saved-tag');
+    expect(screen.getByRole('button', { name: 'Remove tag local-draft' })).toBeInTheDocument();
+  });
+
+  it('syncs persisted rerenders when there are no active draft edits', () => {
+    const destination: Destination = {
+      ...createDestination({
+        name: 'Samarkand',
+        countryRegion: 'Uzbekistan',
+        coordinates: { lat: 39.6542, lng: 66.9597 },
+      }),
+      tags: ['silk-road'],
+      updatedAt: '2026-06-28T09:00:00.000Z',
+    };
+
+    const { rerender } = render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    rerender(
+      <DestinationProfile
+        destination={{
+          ...destination,
+          tags: ['saved-tag'],
+          updatedAt: '2026-06-28T10:00:00.000Z',
+        }}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Remove tag saved-tag' })).toBeInTheDocument();
   });
 
   it('does not resurrect an unsaved draft when switching away and back to the same destination version', async () => {
@@ -263,18 +419,18 @@ describe('DestinationProfile', () => {
       <DestinationProfile destination={firstDestination} onUpdate={vi.fn()} onClose={vi.fn()} />,
     );
 
-    await user.clear(screen.getByLabelText('Tags'));
-    await user.type(screen.getByLabelText('Tags'), 'unsaved-draft');
+    await user.click(screen.getByRole('button', { name: 'Remove tag temples' }));
+    await user.type(screen.getByLabelText('Add tag'), 'unsaved-draft{Enter}');
 
     rerender(<DestinationProfile destination={secondDestination} onUpdate={vi.fn()} onClose={vi.fn()} />);
-    expect(screen.getByLabelText('Tags')).toHaveValue('silk-road');
+    expect(screen.getByRole('button', { name: 'Remove tag silk-road' })).toBeInTheDocument();
 
     rerender(<DestinationProfile destination={firstDestination} onUpdate={vi.fn()} onClose={vi.fn()} />);
-    expect(screen.getByLabelText('Tags')).toHaveValue('temples');
+    expect(screen.getByRole('button', { name: 'Remove tag temples' })).toBeInTheDocument();
   });
 
   it('normalizes expected stay days to a positive whole number', async () => {
-    const user = userEvent.setup();
+    setupAutosaveTimers();
     const destination = createDestination({
       name: 'Samarkand',
       countryRegion: 'Uzbekistan',
@@ -284,9 +440,8 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    await user.clear(screen.getByLabelText('Expected stay days'));
-    await user.type(screen.getByLabelText('Expected stay days'), '-2');
-    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '-2' } });
+    await advanceAutosave();
 
     expect(onUpdate).toHaveBeenLastCalledWith(
       destination.id,
@@ -295,9 +450,8 @@ describe('DestinationProfile', () => {
       }),
     );
 
-    await user.clear(screen.getByLabelText('Expected stay days'));
-    await user.type(screen.getByLabelText('Expected stay days'), '4.8');
-    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '4.8' } });
+    await advanceAutosave();
 
     expect(onUpdate).toHaveBeenLastCalledWith(
       destination.id,
@@ -307,8 +461,8 @@ describe('DestinationProfile', () => {
     );
   });
 
-  it('shows saving and saved feedback after saving destination changes', async () => {
-    const user = userEvent.setup();
+  it('shows saving and saved feedback after autosaving destination changes', async () => {
+    setupAutosaveTimers();
     const destination = createDestination({
       name: 'Samarkand',
       countryRegion: 'Uzbekistan',
@@ -319,20 +473,91 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    await user.clear(screen.getByLabelText('Tags'));
-    await user.type(screen.getByLabelText('Tags'), 'silk-road');
-    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+    addTag('silk-road');
+    await advanceAutosave();
 
-    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
+    expect(screen.getByRole('status', { name: 'Saving...' })).toHaveClass(
+      'profile-save-status',
+      'is-saving',
+    );
 
     save.resolve();
 
-    await waitFor(() => expect(screen.getByText('Destination saved')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Saved' })).toBeInTheDocument();
+    await flushAutosave();
+    expect(screen.getByRole('status', { name: 'Saved' })).toHaveClass(
+      'profile-save-status',
+      'is-saved',
+    );
+
+    await advanceAutosave(savedStatusVisibleMs);
+    expect(screen.queryByRole('status', { name: 'Saved' })).not.toBeInTheDocument();
+  });
+
+  it('shows unable to save feedback when autosave fails', async () => {
+    setupAutosaveTimers();
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+    const onUpdate = vi.fn().mockRejectedValue(new Error('network unavailable'));
+
+    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    addTag('silk-road');
+    await advanceAutosave();
+
+    await flushAutosave();
+    expect(screen.getByRole('status', { name: 'Unable to save' })).toHaveClass(
+      'profile-save-status',
+      'is-error',
+    );
+  });
+
+  it('ignores stale autosave responses after newer edits have started', async () => {
+    setupAutosaveTimers();
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+    const firstSave = deferred<void>();
+    const secondSave = deferred<void>();
+    const onUpdate = vi.fn()
+      .mockReturnValueOnce(firstSave.promise)
+      .mockReturnValueOnce(secondSave.promise);
+
+    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    addTag('first');
+    await advanceAutosave();
+    expect(screen.getByRole('status', { name: 'Saving...' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag first' }));
+    addTag('second');
+    firstSave.resolve();
+
+    await act(async () => {
+      await firstSave.promise;
+    });
+
+    expect(screen.queryByRole('status', { name: 'Saved' })).not.toBeInTheDocument();
+
+    await advanceAutosave();
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+
+    secondSave.resolve();
+    await flushAutosave();
+    expect(screen.getByRole('status', { name: 'Saved' })).toBeInTheDocument();
+    expect(onUpdate.mock.calls[1][1]).toEqual(
+      expect.objectContaining({
+        tags: ['second'],
+      }),
+    );
   });
 
   it('keeps saved feedback visible when the saved destination version updates', async () => {
-    const user = userEvent.setup();
+    setupAutosaveTimers();
     const destination = {
       ...createDestination({
         name: 'Samarkand',
@@ -362,11 +587,10 @@ describe('DestinationProfile', () => {
 
     render(<ProfileHarness />);
 
-    await user.clear(screen.getByLabelText('Tags'));
-    await user.type(screen.getByLabelText('Tags'), 'silk-road');
-    await user.click(screen.getByRole('button', { name: 'Save destination' }));
+    addTag('silk-road');
+    await advanceAutosave();
 
-    await waitFor(() => expect(screen.getByText('Destination saved')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Saved' })).toBeInTheDocument();
+    await flushAutosave();
+    expect(screen.getByRole('status', { name: 'Saved' })).toBeInTheDocument();
   });
 });

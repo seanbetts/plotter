@@ -674,6 +674,43 @@ select {
   place-items: center;
 }
 
+.profile-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.profile-save-status {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-action-subtle);
+}
+
+.profile-save-status.is-saving {
+  color: var(--text-soft);
+}
+
+.profile-save-status.is-saving svg {
+  animation: route-spin 900ms linear infinite;
+}
+
+.profile-save-status.is-saved {
+  border-color: rgb(var(--color-accent-rgb) / 0.38);
+  color: var(--color-accent);
+  background: rgb(var(--color-accent-rgb) / 0.12);
+}
+
+.profile-save-status.is-error {
+  border-color: rgb(var(--color-danger-rgb) / 0.42);
+  color: var(--color-danger);
+  background: var(--surface-danger-subtle);
+}
+
 .destination-profile label {
   display: grid;
   gap: 6px;
@@ -696,6 +733,70 @@ select {
   resize: vertical;
 }
 
+.tag-editor {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.tag-editor legend {
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.tag-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 40px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  padding: 6px;
+  background: var(--surface-control);
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  border: 1px solid rgb(var(--color-accent-rgb) / 0.3);
+  border-radius: 999px;
+  padding: 4px 7px 4px 9px;
+  color: var(--color-accent-strong);
+  background: rgb(var(--color-accent-rgb) / 0.11);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.tag-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-pill:hover,
+.tag-pill:focus-visible {
+  border-color: rgb(var(--color-accent-rgb) / 0.55);
+  background: rgb(var(--color-accent-rgb) / 0.17);
+}
+
+.destination-profile .tag-pill-input {
+  flex: 1 1 110px;
+  width: auto;
+  min-width: 92px;
+  border: 0;
+  padding: 4px 2px;
+  background: transparent;
+  outline: 0;
+}
+
 .primary-action {
   padding: 11px 12px;
   color: var(--color-text-inverse);
@@ -705,12 +806,6 @@ select {
 .primary-action:disabled {
   cursor: wait;
   opacity: 0.82;
-}
-
-.profile-save-status {
-  min-height: 1rem;
-  color: rgb(var(--color-text-rgb) / 0.66);
-  font-size: 0.78rem;
 }
 
 .itinerary-panel {

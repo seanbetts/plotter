@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const appDbName = 'world-tour-planner';
-const savedSummary = 'Gateway from Europe toward Asia.';
+const savedTags = ['gateway', 'asia'];
 const istanbulResult = [
   {
     id: 'place.istanbul',
@@ -48,15 +48,18 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   await expect(profile).toBeVisible();
 
-  const whyItMatters = profile.getByLabel('Why it matters');
+  const tagInput = profile.getByLabel('Add tag');
 
-  await whyItMatters.fill(savedSummary);
-  await profile.getByRole('button', { name: 'Save destination' }).click();
+  for (const tag of savedTags) {
+    await tagInput.fill(tag);
+    await tagInput.press('Enter');
+  }
+  await expect(profile.getByRole('status', { name: 'Saved' })).toBeVisible();
 
   await expect
     .poll(() =>
       page.evaluate(
-        ({ dbName, destinationSummary }) =>
+        ({ dbName, expectedTags }) =>
           new Promise<boolean>((resolve, reject) => {
             const request = indexedDB.open(dbName);
 
@@ -72,14 +75,14 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
                   getAllRequest.result.some(
                     (destination) =>
                       destination.name === 'Istanbul' &&
-                      destination.why?.summary === destinationSummary,
+                      JSON.stringify(destination.tags) === JSON.stringify(expectedTags),
                   ),
                 );
               };
               transaction.oncomplete = () => db.close();
             };
           }),
-        { dbName: appDbName, destinationSummary: savedSummary },
+        { dbName: appDbName, expectedTags: savedTags },
       ),
     )
     .toBe(true);
@@ -89,5 +92,7 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
   await page.getByRole('button', { name: 'Istanbul, Turkey' }).click();
 
   await expect(profile).toBeVisible();
-  await expect(whyItMatters).toHaveValue(savedSummary);
+  for (const tag of savedTags) {
+    await expect(profile.getByRole('button', { name: `Remove tag ${tag}` })).toBeVisible();
+  }
 });
