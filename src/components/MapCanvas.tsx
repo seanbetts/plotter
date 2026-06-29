@@ -1036,7 +1036,7 @@ export function MapCanvas({
   return (
     <section className="map-canvas" aria-label="Interactive world tour map">
       <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
-      {destinations.length === 0 ? <div className="map-empty-label">Blank planning map</div> : null}
+      {destinations.length === 0 ? <div className="map-empty-label is-prominent">Blank planning map</div> : null}
       <div className="map-destination-label-layer" aria-hidden="true">
         {projectedDestinationLabels.map((destinationLabel) => (
           <span

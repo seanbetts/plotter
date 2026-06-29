@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
 import {
@@ -6,6 +6,7 @@ import {
   destinationToSupabaseRow,
   routeLegFromSupabaseRow,
   routeLegToSupabaseRow,
+  createSupabaseTripRepository,
 } from './supabaseTripRepository';
 
 describe('supabase trip repository mappers', () => {
@@ -70,5 +71,65 @@ describe('supabase trip repository mappers', () => {
       route_key: 'route-key',
     });
     expect(routeLegFromSupabaseRow(row)).toEqual(routeLeg);
+  });
+
+  it('upserts destinations and route legs against the trip-scoped id', async () => {
+    const tripId = crypto.randomUUID();
+    const destination = createDestination({
+      name: 'Oslo',
+      coordinates: { lat: 59.9139, lng: 10.7522 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: destination.id,
+      targetDestinationId: crypto.randomUUID(),
+      type: 'driving-auto',
+    });
+    const destinationUpsert = vi.fn(() => ({ error: null }));
+    const routeLegUpsert = vi.fn(() => ({ error: null }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return {
+            select: vi.fn(() => ({
+              order: vi.fn(() => ({
+                limit: vi.fn(async () => ({
+                  data: [{ id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' }],
+                  error: null,
+                })),
+              })),
+            })),
+          };
+        }
+
+        if (tableName === 'destinations') {
+          return { upsert: destinationUpsert };
+        }
+
+        if (tableName === 'route_legs') {
+          return { upsert: routeLegUpsert };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await repository.saveDestination(destination);
+    await repository.saveRouteLeg(routeLeg);
+
+    expect(destinationUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: destination.id, trip_id: tripId }),
+      { onConflict: 'trip_id,id' },
+    );
+    expect(routeLegUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: routeLeg.id, trip_id: tripId }),
+      { onConflict: 'trip_id,id' },
+    );
   });
 });

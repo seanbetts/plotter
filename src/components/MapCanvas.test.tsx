@@ -223,7 +223,7 @@ describe('MapCanvas', () => {
       />,
     );
 
-    expect(screen.getByText('Blank planning map')).toBeInTheDocument();
+    expect(screen.getByText('Blank planning map')).toHaveClass('map-empty-label', 'is-prominent');
   });
 
   it('does not render the route leg count badge', () => {

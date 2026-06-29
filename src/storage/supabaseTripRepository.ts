@@ -241,7 +241,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       const row = destinationToSupabaseRow(destination, tripId);
 
       assertSupabaseWriteSucceeded(
-        await supabase.from('destinations').upsert(row),
+        await supabase.from('destinations').upsert(row, { onConflict: 'trip_id,id' }),
         'Unable to save destination.',
       );
     },
@@ -278,7 +278,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       const row = routeLegToSupabaseRow(routeLeg, tripId);
 
       assertSupabaseWriteSucceeded(
-        await supabase.from('route_legs').upsert(row),
+        await supabase.from('route_legs').upsert(row, { onConflict: 'trip_id,id' }),
         'Unable to save route leg.',
       );
     },
