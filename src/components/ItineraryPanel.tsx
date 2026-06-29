@@ -1,4 +1,4 @@
-import { Car, GripVertical, Ship, Trash2 } from 'lucide-react';
+import { Car, GripVertical, Ship, Signpost, Trash2 } from 'lucide-react';
 import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { formatDestinationLocation, formatLocationParts } from '../domain/locations';
@@ -48,6 +48,25 @@ function formatLegTime(routeLeg: RouteLeg) {
 
 function formatStayDays(days: number) {
   return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+function countryKey(destination: Destination) {
+  return (destination.location.countryCode || destination.location.countryName).trim().toLocaleLowerCase();
+}
+
+function countryLabel(destination: Destination) {
+  return destination.location.countryName || destination.location.countryCode || '';
+}
+
+function formatBorderCrossingLabel(origin: Destination, target: Destination) {
+  const originCountryKey = countryKey(origin);
+  const targetCountryKey = countryKey(target);
+
+  if (!originCountryKey || !targetCountryKey || originCountryKey === targetCountryKey) {
+    return null;
+  }
+
+  return `Border crossing from ${countryLabel(origin)} to ${countryLabel(target)}`;
 }
 
 function isRouteLegCalculating(routeLeg: RouteLeg) {
@@ -343,6 +362,9 @@ export function ItineraryPanel({
               ? routeLegsByPair.get(`${destination.id}:${nextDestination.id}`)
               : undefined;
             const isCalculatingRoute = routeLeg ? isRouteLegCalculating(routeLeg) : false;
+            const borderCrossingLabel = nextDestination
+              ? formatBorderCrossingLabel(destination, nextDestination)
+              : null;
             const activeDropPosition =
               dropPreview?.destinationId === destination.id ? dropPreview.position : null;
             const stopItemClassName = [
@@ -463,6 +485,16 @@ export function ItineraryPanel({
                       ) : null}
                       {formatLegTime(routeLeg) ? (
                         <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
+                      ) : null}
+                      {borderCrossingLabel ? (
+                        <span
+                          className="inline-route-border-crossing"
+                          role="img"
+                          aria-label={borderCrossingLabel}
+                          title={borderCrossingLabel}
+                        >
+                          <Signpost size={15} aria-hidden="true" />
+                        </span>
                       ) : null}
                     </span>
                   </div>

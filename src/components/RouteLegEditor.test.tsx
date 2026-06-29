@@ -243,6 +243,76 @@ describe('ItineraryPanel', () => {
     expect(screen.queryByText('pending')).not.toBeInTheDocument();
   });
 
+  it('shows a border crossing icon for route legs between countries', () => {
+    const origin = createDestination({
+      name: 'Istanbul',
+      countryRegion: 'Turkey',
+      coordinates: { lat: 41.0082, lng: 28.9784 },
+    });
+    const target = createDestination({
+      name: 'Tbilisi',
+      countryRegion: 'Georgia',
+      coordinates: { lat: 41.7151, lng: 44.8271 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 160,
+      travelTimeHours: 2.25,
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: 'Border crossing from Turkey to Georgia' })).toBeInTheDocument();
+  });
+
+  it('does not show a border crossing icon for route legs within one country', () => {
+    const origin = createDestination({
+      name: 'Lyon',
+      countryRegion: 'France',
+      coordinates: { lat: 45.764, lng: 4.8357 },
+    });
+    const target = createDestination({
+      name: 'Marseille',
+      countryRegion: 'France',
+      coordinates: { lat: 43.2965, lng: 5.3698 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 315,
+      travelTimeHours: 3.25,
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('img', { name: /Border crossing from/ })).not.toBeInTheDocument();
+  });
+
   it('defines base spacing between stops before route legs exist', () => {
     const origin = createDestination({
       name: 'Istanbul',
