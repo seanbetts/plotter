@@ -173,7 +173,7 @@ export function TopToolbar({ searchPlaces, resolveSearchResult, onAddDestination
             value={query}
             onChange={handleQueryChange}
             onKeyDown={handleSearchKeyDown}
-            placeholder="Search places or paste lat/lng"
+            placeholder="Find a city, landmark, or paste coordinates"
             role="combobox"
             aria-autocomplete="list"
             aria-expanded={results.length > 0}

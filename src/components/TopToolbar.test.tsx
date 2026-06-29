@@ -48,6 +48,18 @@ const parisResult = {
 } satisfies Extract<PlaceSearchResult, { kind: 'place' }>;
 
 describe('TopToolbar', () => {
+  it('describes destination and coordinate search in the placeholder', () => {
+    render(
+      <TopToolbar
+        onAddDestination={vi.fn()}
+        resolveSearchResult={vi.fn()}
+        searchPlaces={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByPlaceholderText('Find a city, landmark, or paste coordinates')).toBeInTheDocument();
+  });
+
   it('shows live search results and adds the selected result', async () => {
     const user = userEvent.setup();
     const onAddDestination = vi.fn();
