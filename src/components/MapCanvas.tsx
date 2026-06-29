@@ -1056,10 +1056,11 @@ export function MapCanvas({
     <section className="map-canvas" aria-label="Interactive world tour map">
       <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
       {destinations.length === 0 ? <div className="map-empty-label is-prominent">Blank planning map</div> : null}
-      <div className="map-destination-label-layer" aria-hidden="true">
+      <div className="map-destination-label-layer">
         {projectedDestinationLabels.map((destinationLabel) => (
-          <span
+          <button
             key={destinationLabel.id}
+            type="button"
             className={[
               'map-destination-label',
               destinationLabel.selected ? 'is-selected' : '',
@@ -1070,9 +1071,11 @@ export function MapCanvas({
               left: `${destinationLabel.x}px`,
               top: `${destinationLabel.y}px`,
             }}
+            aria-label={`Open ${destinationLabel.name} stop details`}
+            onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
           >
             {destinationLabel.order}. {destinationLabel.name}
-          </span>
+          </button>
         ))}
       </div>
       {showMapDetailDevTools ? (

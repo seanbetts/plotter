@@ -200,6 +200,30 @@ describe('MapCanvas', () => {
     expect(onSelectDestination).toHaveBeenCalledWith(destination.id);
   });
 
+  it('fires onSelectDestination when a visible stop label is clicked', async () => {
+    const onSelectDestination = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={onSelectDestination}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open Cappadocia stop details' }));
+
+    expect(onSelectDestination).toHaveBeenCalledWith(destination.id);
+  });
+
   it('marks the selected pin', () => {
     render(
       <MapCanvas

@@ -175,14 +175,28 @@ select {
   font-size: 0.72rem;
   font-weight: 800;
   line-height: 1;
+  pointer-events: auto;
   text-overflow: ellipsis;
   transform: translate(-50%, 14px);
   white-space: nowrap;
+  cursor: pointer;
+  appearance: none;
 }
 
 .map-destination-label.is-selected {
   border-color: rgb(var(--color-accent-rgb) / 0.44);
   background: rgb(255 255 255 / 0.9);
+}
+
+.map-destination-label:hover,
+.map-destination-label:focus-visible {
+  border-color: rgb(var(--color-accent-rgb) / 0.42);
+  background: rgb(255 255 255 / 0.92);
+}
+
+.map-destination-label:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .map-detail-dev-panel {
