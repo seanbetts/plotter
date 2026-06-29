@@ -442,6 +442,7 @@ const majorCities = [
 const destinationsSourceId = 'world-tour-destinations';
 const routesSourceId = 'world-tour-routes';
 const majorCitiesSourceId = 'world-tour-major-cities';
+const selectedDestinationHaloLayerId = 'world-tour-selected-destination-halo';
 const destinationPointsLayerId = 'world-tour-destination-points';
 const routeLineLayerId = 'world-tour-routes-line';
 const cityPointsLayerId = 'world-tour-city-points';
@@ -449,6 +450,7 @@ const cityLabelsLayerId = 'world-tour-city-labels';
 
 const mapColorTokenFallbacks = {
   '--color-accent': '#d9467a',
+  '--color-accent-rgb': '217 70 122',
   '--color-map-selected': '#f7f0d0',
   '--color-route-shipping': '#7ec8e3',
   '--color-text': '#f5efe3',
@@ -477,6 +479,7 @@ function readCssRgbToken(tokenName: keyof typeof mapColorTokenFallbacks, alpha: 
 function getMapLayerColors() {
   return {
     accent: readCssToken('--color-accent'),
+    accentHalo: readCssRgbToken('--color-accent-rgb', 0.22),
     selected: readCssToken('--color-map-selected'),
     shipping: readCssToken('--color-route-shipping'),
     text: readCssToken('--color-text'),
@@ -882,14 +885,30 @@ export function MapCanvas({
       } as maplibregl.LayerSpecification);
     }
 
+    if (!map.getLayer(selectedDestinationHaloLayerId)) {
+      map.addLayer({
+        id: selectedDestinationHaloLayerId,
+        type: 'circle',
+        source: destinationsSourceId,
+        filter: ['==', ['get', 'selected'], true],
+        paint: {
+          'circle-color': mapColors.accentHalo,
+          'circle-radius': 16,
+          'circle-stroke-color': mapColors.accent,
+          'circle-stroke-opacity': 0.34,
+          'circle-stroke-width': 1,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
     if (!map.getLayer(destinationPointsLayerId)) {
       map.addLayer({
         id: destinationPointsLayerId,
         type: 'circle',
         source: destinationsSourceId,
         paint: {
-          'circle-color': ['case', ['get', 'selected'], mapColors.selected, mapColors.accent],
-          'circle-radius': ['case', ['get', 'selected'], 9, 7],
+          'circle-color': mapColors.accent,
+          'circle-radius': ['case', ['get', 'selected'], 8, 7],
           'circle-stroke-color': mapColors.textInverse,
           'circle-stroke-width': 2,
         },

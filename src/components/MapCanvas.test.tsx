@@ -605,8 +605,46 @@ describe('MapCanvas', () => {
       expect.objectContaining({ type: 'geojson' }),
     );
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-routes-line' }));
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-selected-destination-halo' }));
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-destination-points' }));
     expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
+  });
+
+  it('uses an accent halo instead of changing the selected destination point color', () => {
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    const layers = map.addLayer.mock.calls.map(([layer]) => layer);
+    const selectedHaloLayer = layers.find((layer) => layer.id === 'world-tour-selected-destination-halo');
+    const destinationPointsLayer = layers.find((layer) => layer.id === 'world-tour-destination-points');
+
+    expect(layers.indexOf(selectedHaloLayer)).toBeLessThan(layers.indexOf(destinationPointsLayer));
+    expect(selectedHaloLayer).toMatchObject({
+      filter: ['==', ['get', 'selected'], true],
+      paint: {
+        'circle-color': 'rgba(217, 70, 122, 0.22)',
+        'circle-stroke-color': '#d9467a',
+      },
+    });
+    expect(destinationPointsLayer).toMatchObject({
+      paint: {
+        'circle-color': '#d9467a',
+        'circle-radius': ['case', ['get', 'selected'], 8, 7],
+      },
+    });
   });
 
   it('renders destination stop labels as positioned pill overlays', () => {
