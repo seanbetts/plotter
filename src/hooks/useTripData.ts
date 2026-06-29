@@ -3,9 +3,8 @@ import { createDestination, updateDestination as patchDestination } from '../dom
 import { findBestDestinationInsertionIndex, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
 import type { Coordinates, Destination, DestinationLocation, RouteLeg, RouteLegType } from '../domain/types';
-import type { createTripRepository } from '../storage/tripRepository';
+import type { TripRepository } from '../storage/tripRepository';
 
-type TripRepository = ReturnType<typeof createTripRepository>;
 
 type AddDestinationInput = {
   name: string;

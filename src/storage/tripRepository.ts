@@ -2,6 +2,19 @@ import type { Destination, RouteLeg } from '../domain/types';
 import { createLegacyLocation } from '../domain/locations';
 import type { TripDb } from './tripDb';
 
+export type TripRepository = {
+  listDestinations(): Promise<Destination[]>;
+  saveDestination(destination: Destination): Promise<void>;
+  deleteDestination(destinationId: string): Promise<void>;
+  listRouteLegs(): Promise<RouteLeg[]>;
+  saveRouteLeg(routeLeg: RouteLeg): Promise<void>;
+  deleteRouteLeg(routeLegId: string): Promise<void>;
+  replaceTripData(snapshot: {
+    destinations: Destination[];
+    routeLegs: RouteLeg[];
+  }): Promise<void>;
+};
+
 type LegacyRouteLeg = Omit<RouteLeg, 'type' | 'status'> & {
   type?: RouteLeg['type'] | 'driving' | 'ferry-shipping' | 'uncertain';
   status?: RouteLeg['status'];
@@ -34,7 +47,7 @@ function normalizeRouteLeg(routeLeg: LegacyRouteLeg): RouteLeg {
   };
 }
 
-export function createTripRepository(db: TripDb) {
+export function createTripRepository(db: TripDb): TripRepository {
   return {
     async listDestinations(): Promise<Destination[]> {
       const destinations = await db.destinations.toArray();

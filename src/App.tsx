@@ -6,15 +6,59 @@ import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
 import { useTripData } from './hooks/useTripData';
-import { tripDb } from './storage/tripDb';
-import { createTripRepository } from './storage/tripRepository';
+import { createAppTripRepository } from './storage/appRepository';
+import type { TripRepository } from './storage/tripRepository';
 import './styles.css';
 
-const repository = createTripRepository(tripDb);
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 
 export default function App() {
+  const [repository, setRepository] = useState<TripRepository | null>(null);
+  const [repositoryError, setRepositoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    createAppTripRepository()
+      .then((nextRepository) => {
+        if (isCancelled) return;
+
+        setRepository(nextRepository);
+      })
+      .catch((caught) => {
+        if (isCancelled) return;
+
+        setRepositoryError(caught instanceof Error ? caught.message : 'Unable to prepare trip storage');
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  if (!repository) {
+    return (
+      <main className="app-shell">
+        <section className="map-stage" aria-label="World tour map workspace">
+          <MapCanvas
+            destinations={[]}
+            routeLegs={[]}
+            selectedDestinationId={null}
+            onSelectDestination={() => undefined}
+          />
+          <div className={repositoryError ? 'app-status app-status-error' : 'app-status'} role={repositoryError ? 'alert' : 'status'}>
+            {repositoryError ?? 'Loading trip data'}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  return <TripWorkspace repository={repository} />;
+}
+
+function TripWorkspace({ repository }: { repository: TripRepository }) {
   const calculateRoute = useCallback(
     (input: Omit<Parameters<typeof calculateOpenRouteServiceRoute>[0], 'apiKey'>) =>
       calculateOpenRouteServiceRoute({

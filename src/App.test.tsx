@@ -6,6 +6,7 @@ import App from './App';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { createDestination } from './domain/destinations';
 import type { Destination, RouteLeg } from './domain/types';
+import { createAppTripRepository } from './storage/appRepository';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -94,12 +95,8 @@ const repositoryMock = vi.hoisted(() => {
   return repository;
 });
 
-vi.mock('./storage/tripDb', () => ({
-  tripDb: {},
-}));
-
-vi.mock('./storage/tripRepository', () => ({
-  createTripRepository: vi.fn(() => repositoryMock),
+vi.mock('./storage/appRepository', () => ({
+  createAppTripRepository: vi.fn(async () => repositoryMock),
 }));
 
 vi.mock('./adapters/geocoding', () => ({
@@ -127,6 +124,7 @@ describe('App', () => {
     repositoryMock.saveRouteLeg.mockClear();
     repositoryMock.deleteRouteLeg.mockClear();
     repositoryMock.replaceTripData.mockClear();
+    vi.mocked(createAppTripRepository).mockResolvedValue(repositoryMock);
     vi.mocked(searchMapTilerPlaces).mockReset();
     vi.mocked(resolveMapTilerCoordinates).mockReset();
     maplibreMock.Map.mockClear();
@@ -135,6 +133,17 @@ describe('App', () => {
     maplibreMock.resetSources();
     maplibreMock.project.mockClear();
     vi.unstubAllGlobals();
+  });
+
+  it('shows a storage bootstrap error when the app repository cannot be prepared', async () => {
+    vi.mocked(createAppTripRepository).mockRejectedValue(new Error('Unable to create an anonymous Supabase session.'));
+
+    render(<App />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Unable to create an anonymous Supabase session.',
+    );
+    expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
   });
 
   it('adds a searched destination without opening its profile after trip data loads', async () => {
