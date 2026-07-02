@@ -1,4 +1,4 @@
-import { Check, CircleAlert, LoaderCircle, X } from 'lucide-react';
+import { Check, CircleAlert, Copy, LoaderCircle, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { formatLocationParts } from '../domain/locations';
@@ -65,6 +65,7 @@ const profileTitleControlStyle = {
   '--profile-title-inline-padding': '0px',
 } as CSSProperties;
 const formatStopNumber = (stopNumber: number) => String(stopNumber).padStart(2, '0');
+const formatCoordinateValue = (coordinate: number) => String(coordinate);
 const listsMatch = (left: string[], right: string[]) =>
   left.length === right.length && left.every((item, index) => item === right[index]);
 
@@ -277,6 +278,13 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
   const saveStatusClassName = ['profile-save-status', saveStatus !== 'idle' ? `is-${saveStatus}` : '']
     .filter(Boolean)
     .join(' ');
+  const latitudeText = formatCoordinateValue(destination.coordinates.lat);
+  const longitudeText = formatCoordinateValue(destination.coordinates.lng);
+  const coordinatesText = `${latitudeText}, ${longitudeText}`;
+
+  function copyCoordinate(value: string) {
+    void navigator.clipboard?.writeText(value);
+  }
 
   return (
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
@@ -310,6 +318,25 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
             </button>
           )}
           <p>{formatLocationParts(destination.location) || 'Unassigned location'}</p>
+          <div className="profile-coordinates" aria-label="Coordinates">
+            <span className="profile-coordinate-pill">
+              <span className="profile-coordinate-label">Latitude</span>
+              <span className="profile-coordinate-value">{latitudeText}</span>
+            </span>
+            <span className="profile-coordinate-pill">
+              <span className="profile-coordinate-label">Longitude</span>
+              <span className="profile-coordinate-value">{longitudeText}</span>
+            </span>
+            <button
+              type="button"
+              className="profile-coordinate-copy"
+              aria-label={`Copy coordinates ${coordinatesText}`}
+              title="Copy coordinates"
+              onClick={() => copyCoordinate(coordinatesText)}
+            >
+              <Copy size={13} aria-hidden="true" />
+            </button>
+          </div>
         </div>
         <div className="profile-header-actions">
           {saveStatus !== 'idle' ? (

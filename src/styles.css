@@ -621,6 +621,58 @@ select {
   font-size: 0.78rem;
 }
 
+.profile-coordinates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.profile-coordinate-pill,
+.profile-coordinate-copy {
+  display: inline-grid;
+  align-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  padding: 4px 6px;
+  color: rgb(var(--color-text-rgb) / 0.78);
+  background: var(--surface-action-subtle);
+  line-height: 1.15;
+}
+
+.profile-coordinate-copy {
+  width: 32px;
+  min-height: 32px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.profile-coordinate-copy:hover,
+.profile-coordinate-copy:focus-visible {
+  border-color: rgb(var(--color-accent-rgb) / 0.46);
+  color: var(--color-accent);
+  background: rgb(var(--color-accent-rgb) / 0.1);
+}
+
+.profile-coordinate-pill {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
+
+.profile-coordinate-label {
+  color: var(--text-soft);
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.profile-coordinate-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+}
+
 .profile-stop-number {
   display: block;
   margin: 0 0 4px;

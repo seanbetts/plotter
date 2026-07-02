@@ -69,6 +69,44 @@ describe('DestinationProfile', () => {
     expect(screen.queryByLabelText('Stop name')).not.toBeInTheDocument();
   });
 
+  it('shows latitude and longitude as separate pills with a one-click copy button', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const destination = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+
+    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    const latitudeLabel = within(header).getByText('Latitude');
+    const longitudeLabel = within(header).getByText('Longitude');
+    expect(latitudeLabel).toBeInTheDocument();
+    expect(longitudeLabel).toBeInTheDocument();
+    expect(within(header).getByText('51.0576')).toBeInTheDocument();
+    expect(within(header).getByText('-0.1342')).toBeInTheDocument();
+    expect(latitudeLabel.closest('button')).toBeNull();
+    expect(longitudeLabel.closest('button')).toBeNull();
+
+    await user.click(within(header).getByRole('button', { name: 'Copy coordinates 51.0576, -0.1342' }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenLastCalledWith('51.0576, -0.1342');
+  });
+
   it('shows the stop number when one is provided', () => {
     const destination = createDestination({
       name: 'Trondheim',
