@@ -58,6 +58,11 @@ type SupabaseTripRow = {
   id: string;
   owner_user_id: string;
   name: string;
+  created_at?: string;
+};
+
+type SupabaseTripReferenceRow = {
+  trip_id: string;
 };
 
 type SupabaseMediaAssetRow = {
@@ -224,6 +229,37 @@ export function mediaAssetFromSupabaseRow(row: SupabaseMediaAssetRow, signedUrl:
 export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepository {
   let activeTripId: string | null = null;
 
+  async function chooseTripWithPlanningData(trips: SupabaseTripRow[]) {
+    if (trips.length <= 1) return trips[0];
+
+    const tripIds = trips.map((trip) => trip.id);
+    const [destinationRows, routeLegRows] = await Promise.all([
+      assertNoSupabaseError<SupabaseTripReferenceRow[]>(
+        await supabase.from('destinations').select('trip_id').in('trip_id', tripIds),
+        'Unable to load destination trip counts.',
+      ),
+      assertNoSupabaseError<SupabaseTripReferenceRow[]>(
+        await supabase.from('route_legs').select('trip_id').in('trip_id', tripIds),
+        'Unable to load route leg trip counts.',
+      ),
+    ]);
+    const planningCountsByTripId = new Map(tripIds.map((tripId) => [tripId, 0]));
+
+    for (const row of [...destinationRows, ...routeLegRows]) {
+      planningCountsByTripId.set(
+        row.trip_id,
+        (planningCountsByTripId.get(row.trip_id) ?? 0) + 1,
+      );
+    }
+
+    return trips.reduce((bestTrip, trip) => {
+      const bestCount = planningCountsByTripId.get(bestTrip.id) ?? 0;
+      const tripCount = planningCountsByTripId.get(trip.id) ?? 0;
+
+      return tripCount > bestCount ? trip : bestTrip;
+    });
+  }
+
   async function getActiveTripId() {
     if (activeTripId) return activeTripId;
 
@@ -236,14 +272,14 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     const existingTrip = assertNoSupabaseError<SupabaseTripRow[]>(
       await supabase
         .from('trips')
-        .select('id, owner_user_id, name')
-        .order('created_at', { ascending: true })
-        .limit(1),
+        .select('id, owner_user_id, name, created_at')
+        .order('created_at', { ascending: true }),
       'Unable to load trips.',
-    )[0];
+    );
+    const selectedTrip = await chooseTripWithPlanningData(existingTrip);
 
-    if (existingTrip) {
-      activeTripId = existingTrip.id;
+    if (selectedTrip) {
+      activeTripId = selectedTrip.id;
       return activeTripId;
     }
 

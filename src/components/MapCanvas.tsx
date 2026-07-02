@@ -61,6 +61,7 @@ const cityLabelFontStack = mapTilerApiKey
   : ['Open Sans Semibold'];
 const shouldRenderFallbackMajorCities = !mapTilerApiKey;
 const majorCityMinZoom = 5;
+const destinationLabelMinZoom = 4;
 const showMapDetailDevTools = import.meta.env.VITE_ENABLE_MAP_DETAIL_DEV_TOOLS === 'true';
 const minDetailZoom = 1;
 const maxDetailZoom = 18;
@@ -1030,6 +1031,7 @@ export function MapCanvas({
     (category) => selectedZoomSettings[category.id],
   ).length;
   const hiddenDetailCount = mapDetailCategories.length - visibleDetailCount;
+  const shouldShowDestinationLabels = currentMapZoom >= destinationLabelMinZoom;
 
   const setZoomStep = (nextZoom: number) => {
     const nextZoomStep = clampDetailZoomStep(nextZoom);
@@ -1056,28 +1058,30 @@ export function MapCanvas({
     <section className="map-canvas" aria-label="Interactive world tour map">
       <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
       {destinations.length === 0 ? <div className="map-empty-label is-prominent">Blank planning map</div> : null}
-      <div className="map-destination-label-layer">
-        {projectedDestinationLabels.map((destinationLabel) => (
-          <button
-            key={destinationLabel.id}
-            type="button"
-            className={[
-              'map-destination-label',
-              destinationLabel.selected ? 'is-selected' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            style={{
-              left: `${destinationLabel.x}px`,
-              top: `${destinationLabel.y}px`,
-            }}
-            aria-label={`Open ${destinationLabel.name} stop details`}
-            onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
-          >
-            {destinationLabel.order}. {destinationLabel.name}
-          </button>
-        ))}
-      </div>
+      {shouldShowDestinationLabels ? (
+        <div className="map-destination-label-layer">
+          {projectedDestinationLabels.map((destinationLabel) => (
+            <button
+              key={destinationLabel.id}
+              type="button"
+              className={[
+                'map-destination-label',
+                destinationLabel.selected ? 'is-selected' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              style={{
+                left: `${destinationLabel.x}px`,
+                top: `${destinationLabel.y}px`,
+              }}
+              aria-label={`Open ${destinationLabel.name} stop details`}
+              onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
+            >
+              {destinationLabel.order}. {destinationLabel.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {showMapDetailDevTools ? (
         <section className="map-detail-dev-panel" role="group" aria-label="Map detail by zoom">
           <div className="map-detail-dev-panel__header">

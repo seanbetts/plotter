@@ -64,9 +64,14 @@ describe('app repository bootstrap', () => {
     const localRepository = createMockRepository();
     const cloudRepository = createMockRepository();
     const createSupabaseClient = vi.fn();
+    const user = { id: crypto.randomUUID() };
+    const storage = {
+      getItem: vi.fn(() => 'true'),
+      setItem: vi.fn(),
+    };
     const supabase = {
       auth: {
-        getUser: vi.fn(async () => ({ data: { user: { id: crypto.randomUUID() } }, error: null })),
+        getUser: vi.fn(async () => ({ data: { user }, error: null })),
         signInAnonymously: vi.fn(),
       },
     };
@@ -75,6 +80,7 @@ describe('app repository bootstrap', () => {
       isSupabaseConfigured: true,
       tripStorageMode: 'local',
       localRepository,
+      storage,
       createSupabaseClient: () => {
         createSupabaseClient();
         return supabase;
@@ -87,13 +93,19 @@ describe('app repository bootstrap', () => {
     expect(localRepository.listDestinations).not.toHaveBeenCalled();
   });
 
-  it('does not migrate local trip data during Supabase bootstrap', async () => {
+  it('migrates local trip data into an empty Supabase trip during bootstrap', async () => {
     const user = { id: crypto.randomUUID() };
+    const destination = { id: crypto.randomUUID() } as Destination;
+    const routeLeg = { id: crypto.randomUUID() } as RouteLeg;
     const localRepository = createMockRepository({
-      destinations: [{} as Destination],
-      routeLegs: [],
+      destinations: [destination],
+      routeLegs: [routeLeg],
     });
     const cloudRepository = createMockRepository();
+    const storage = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+    };
     const supabase = {
       auth: {
         getUser: vi.fn(async () => ({ data: { user: null }, error: null })),
@@ -104,13 +116,19 @@ describe('app repository bootstrap', () => {
     const repository = await createAppTripRepository({
       isSupabaseConfigured: true,
       localRepository,
+      storage,
       createSupabaseClient: () => supabase,
       createSupabaseRepository: () => cloudRepository,
     });
 
     expect(repository).toBe(cloudRepository);
-    expect(localRepository.listDestinations).not.toHaveBeenCalled();
-    expect(localRepository.listRouteLegs).not.toHaveBeenCalled();
-    expect(cloudRepository.replaceTripData).not.toHaveBeenCalled();
+    expect(cloudRepository.replaceTripData).toHaveBeenCalledWith({
+      destinations: [destination],
+      routeLegs: [routeLeg],
+    });
+    expect(storage.setItem).toHaveBeenCalledWith(
+      `world-tour:supabase-migrated:${user.id}`,
+      'true',
+    );
   });
 });

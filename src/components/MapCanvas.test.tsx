@@ -214,9 +214,15 @@ describe('MapCanvas', () => {
 
     const map = maplibreMock.mapInstances[0];
     const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
 
     act(() => {
       loadHandler();
+    });
+
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomEndHandler();
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Open Cappadocia stop details' }));
@@ -683,9 +689,15 @@ describe('MapCanvas', () => {
 
     const map = maplibreMock.mapInstances[0];
     const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
 
     act(() => {
       loadHandler();
+    });
+
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomEndHandler();
     });
 
     const destinationLabelLayer = map.addLayer.mock.calls
@@ -697,6 +709,34 @@ describe('MapCanvas', () => {
     expect(stopLabel).toHaveClass('map-destination-label');
     expect(Number.parseFloat(stopLabel.style.left)).toBeCloseTo(1348.289);
     expect(Number.parseFloat(stopLabel.style.top)).toBeCloseTo(113.569);
+  });
+
+  it('hides destination stop labels until the map is zoomed into planning level', () => {
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    expect(screen.queryByRole('button', { name: 'Open Cappadocia stop details' })).not.toBeInTheDocument();
+
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomEndHandler();
+    });
+
+    expect(screen.getByRole('button', { name: 'Open Cappadocia stop details' })).toBeInTheDocument();
   });
 
   it('stores destinations and real route geometry in MapLibre sources', () => {

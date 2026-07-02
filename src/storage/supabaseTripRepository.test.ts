@@ -10,6 +10,17 @@ import {
   createSupabaseTripRepository,
 } from './supabaseTripRepository';
 
+function createTripsTableMock(rows: Array<{ id: string; owner_user_id: string; name: string }>) {
+  return {
+    select: vi.fn(() => ({
+      order: vi.fn(async () => ({
+        data: rows,
+        error: null,
+      })),
+    })),
+  };
+}
+
 describe('supabase trip repository mappers', () => {
   it('maps destinations to and from Supabase rows', () => {
     const destination = createDestination({
@@ -96,16 +107,9 @@ describe('supabase trip repository mappers', () => {
       },
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
-          return {
-            select: vi.fn(() => ({
-              order: vi.fn(() => ({
-                limit: vi.fn(async () => ({
-                  data: [{ id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' }],
-                  error: null,
-                })),
-              })),
-            })),
-          };
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
         }
 
         if (tableName === 'destinations') {
@@ -132,6 +136,69 @@ describe('supabase trip repository mappers', () => {
       expect.objectContaining({ id: routeLeg.id, trip_id: tripId }),
       { onConflict: 'trip_id,id' },
     );
+  });
+
+  it('uses the visible trip with planning data instead of a newer empty anonymous trip', async () => {
+    const emptyTripId = crypto.randomUUID();
+    const plannedTripId = crypto.randomUUID();
+    const destination = createDestination({
+      name: 'Kyoto',
+      coordinates: { lat: 35.6764, lng: 139.65 },
+    });
+    const destinationRow = destinationToSupabaseRow(destination, plannedTripId);
+    const destinationsByTrip = [{ trip_id: plannedTripId }, { trip_id: plannedTripId }];
+    const routeLegsByTrip = [{ trip_id: plannedTripId }];
+
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: emptyTripId, owner_user_id: crypto.randomUUID(), name: 'Empty trip' },
+            { id: plannedTripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'destinations') {
+          return {
+            select: vi.fn((columns: string) => {
+              if (columns === 'trip_id') {
+                return {
+                  in: vi.fn(async () => ({ data: destinationsByTrip, error: null })),
+                };
+              }
+
+              return {
+                eq: vi.fn(() => ({
+                  order: vi.fn(() => ({
+                    order: vi.fn(async () => ({ data: [destinationRow], error: null })),
+                  })),
+                })),
+              };
+            }),
+          };
+        }
+
+        if (tableName === 'route_legs') {
+          return {
+            select: vi.fn(() => ({
+              in: vi.fn(async () => ({ data: routeLegsByTrip, error: null })),
+            })),
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.listDestinations()).resolves.toEqual([destination]);
+    expect(supabase.from).toHaveBeenCalledWith('trips');
   });
 
   it('uploads destination media to trip-scoped Supabase Storage and records metadata', async () => {
@@ -173,16 +240,9 @@ describe('supabase trip repository mappers', () => {
       },
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
-          return {
-            select: vi.fn(() => ({
-              order: vi.fn(() => ({
-                limit: vi.fn(async () => ({
-                  data: [{ id: tripId, owner_user_id: userId, name: 'World tour' }],
-                  error: null,
-                })),
-              })),
-            })),
-          };
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: userId, name: 'World tour' },
+          ]);
         }
 
         if (tableName === 'media_assets') {
@@ -265,16 +325,9 @@ describe('supabase trip repository mappers', () => {
       },
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
-          return {
-            select: vi.fn(() => ({
-              order: vi.fn(() => ({
-                limit: vi.fn(async () => ({
-                  data: [{ id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' }],
-                  error: null,
-                })),
-              })),
-            })),
-          };
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
         }
 
         if (tableName === 'media_assets') {
