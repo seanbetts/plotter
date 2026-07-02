@@ -107,6 +107,46 @@ describe('DestinationProfile', () => {
     expect(writeText).toHaveBeenLastCalledWith('51.0576, -0.1342');
   });
 
+  it('shows temporary icon-only feedback after coordinates are copied', async () => {
+    setupAutosaveTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const destination = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+
+    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    const copyButton = within(header).getByRole('button', { name: 'Copy coordinates 51.0576, -0.1342' });
+    fireEvent.click(copyButton);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(copyButton).toHaveClass('is-copied');
+    expect(within(header).queryByText('Copied')).not.toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1600);
+    });
+
+    expect(copyButton).not.toHaveClass('is-copied');
+  });
+
   it('shows the stop number when one is provided', () => {
     const destination = createDestination({
       name: 'Trondheim',

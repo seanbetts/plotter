@@ -648,7 +648,8 @@ select {
 }
 
 .profile-coordinate-copy:hover,
-.profile-coordinate-copy:focus-visible {
+.profile-coordinate-copy:focus-visible,
+.profile-coordinate-copy.is-copied {
   border-color: rgb(var(--color-accent-rgb) / 0.46);
   color: var(--color-accent);
   background: rgb(var(--color-accent-rgb) / 0.1);

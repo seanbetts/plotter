@@ -25,6 +25,7 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const autosaveDelayMs = 700;
 const savedStatusVisibleMs = 2400;
+const copiedStatusVisibleMs = 1600;
 
 const splitTagInput = (value: string) =>
   value
@@ -127,9 +128,11 @@ export function DestinationProfile({ destination, stopNumber, onUpdate, onClose 
 function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: DestinationProfileProps) {
   const [draft, setDraft] = useState(() => createFormState(destination));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
   const [isEditingName, setIsEditingName] = useState(false);
   const autosaveTimerRef = useRef<number | null>(null);
   const savedStatusTimerRef = useRef<number | null>(null);
+  const copyFeedbackTimerRef = useRef<number | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const editRevisionRef = useRef(0);
   const savedRevisionRef = useRef(0);
@@ -147,6 +150,9 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
       }
       if (savedStatusTimerRef.current !== null) {
         window.clearTimeout(savedStatusTimerRef.current);
+      }
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current);
       }
       saveSequenceRef.current += 1;
     },
@@ -281,9 +287,26 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
   const latitudeText = formatCoordinateValue(destination.coordinates.lat);
   const longitudeText = formatCoordinateValue(destination.coordinates.lng);
   const coordinatesText = `${latitudeText}, ${longitudeText}`;
+  const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
+    .filter(Boolean)
+    .join(' ');
 
-  function copyCoordinate(value: string) {
-    void navigator.clipboard?.writeText(value);
+  async function copyCoordinate(value: string) {
+    if (!navigator.clipboard) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyStatus('copied');
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current);
+      }
+      copyFeedbackTimerRef.current = window.setTimeout(() => {
+        setCopyStatus('idle');
+        copyFeedbackTimerRef.current = null;
+      }, copiedStatusVisibleMs);
+    } catch {
+      setCopyStatus('idle');
+    }
   }
 
   return (
@@ -329,12 +352,12 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
             </span>
             <button
               type="button"
-              className="profile-coordinate-copy"
+              className={copyButtonClassName}
               aria-label={`Copy coordinates ${coordinatesText}`}
               title="Copy coordinates"
-              onClick={() => copyCoordinate(coordinatesText)}
+              onClick={() => void copyCoordinate(coordinatesText)}
             >
-              <Copy size={13} aria-hidden="true" />
+              {copyStatus === 'copied' ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
             </button>
           </div>
         </div>
