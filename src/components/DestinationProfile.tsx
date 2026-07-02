@@ -1,6 +1,6 @@
-import { Check, CircleAlert, Copy, LoaderCircle, X } from 'lucide-react';
+import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import { formatLocationParts } from '../domain/locations';
 import type { Destination } from '../domain/types';
 
@@ -22,6 +22,13 @@ type DestinationProfileProps = {
 };
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+type CoordinateDraft = {
+  lat: string;
+  lng: string;
+};
+type CoordinateDraftResult =
+  | { type: 'valid'; coordinates: { lat: number; lng: number } }
+  | { type: 'error'; error: string };
 
 const autosaveDelayMs = 700;
 const savedStatusVisibleMs = 2400;
@@ -65,10 +72,20 @@ const profileTitleControlStyle = {
   '--profile-title-block-padding': '0px',
   '--profile-title-inline-padding': '0px',
 } as CSSProperties;
+const coordinateDecimalPlaces = 5;
 const formatStopNumber = (stopNumber: number) => String(stopNumber).padStart(2, '0');
-const formatCoordinateValue = (coordinate: number) => String(coordinate);
+const normalizeCoordinateValue = (coordinate: number) => {
+  const rounded = Number(coordinate.toFixed(coordinateDecimalPlaces));
+
+  return Object.is(rounded, -0) ? 0 : rounded;
+};
+const formatCoordinateValue = (coordinate: number) => String(normalizeCoordinateValue(coordinate));
 const listsMatch = (left: string[], right: string[]) =>
   left.length === right.length && left.every((item, index) => item === right[index]);
+const createCoordinateDraft = (destination: Destination): CoordinateDraft => ({
+  lat: formatCoordinateValue(destination.coordinates.lat),
+  lng: formatCoordinateValue(destination.coordinates.lng),
+});
 
 const createFormState = (destination: Destination): DestinationFormState => ({
   sourceKey: destinationSourceKey(destination),
@@ -130,6 +147,9 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
   const [isEditingName, setIsEditingName] = useState(false);
+  const [isEditingCoordinates, setIsEditingCoordinates] = useState(false);
+  const [coordinateDraft, setCoordinateDraft] = useState(() => createCoordinateDraft(destination));
+  const [coordinateError, setCoordinateError] = useState('');
   const autosaveTimerRef = useRef<number | null>(null);
   const savedStatusTimerRef = useRef<number | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
@@ -280,6 +300,70 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
     updateForm({ tags: form.tags.filter((tag) => tag !== tagToRemove) });
   }
 
+  function startEditingCoordinates() {
+    setCoordinateDraft(createCoordinateDraft(destination));
+    setCoordinateError('');
+    setIsEditingCoordinates(true);
+  }
+
+  function cancelEditingCoordinates() {
+    setCoordinateDraft(createCoordinateDraft(destination));
+    setCoordinateError('');
+    setIsEditingCoordinates(false);
+  }
+
+  function parseCoordinateDraft(): CoordinateDraftResult {
+    const lat = Number(coordinateDraft.lat);
+    const lng = Number(coordinateDraft.lng);
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      return { type: 'error', error: 'Latitude must be a number between -90 and 90.' };
+    }
+
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+      return { type: 'error', error: 'Longitude must be a number between -180 and 180.' };
+    }
+
+    return {
+      type: 'valid',
+      coordinates: {
+        lat: normalizeCoordinateValue(lat),
+        lng: normalizeCoordinateValue(lng),
+      },
+    };
+  }
+
+  async function saveCoordinates() {
+    const result = parseCoordinateDraft();
+
+    if (result.type === 'error') {
+      setCoordinateError(result.error);
+      return;
+    }
+
+    setCoordinateError('');
+    if (
+      result.coordinates.lat !== destination.coordinates.lat ||
+      result.coordinates.lng !== destination.coordinates.lng
+    ) {
+      await Promise.resolve(onUpdate(destination.id, { coordinates: result.coordinates }));
+    }
+    setIsEditingCoordinates(false);
+  }
+
+  function handleCoordinateInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void saveCoordinates();
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelEditingCoordinates();
+    }
+  }
+
   const saveStatusText = statusTextForSaveStatus(saveStatus);
   const saveStatusClassName = ['profile-save-status', saveStatus !== 'idle' ? `is-${saveStatus}` : '']
     .filter(Boolean)
@@ -341,25 +425,90 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
             </button>
           )}
           <p>{formatLocationParts(destination.location) || 'Unassigned location'}</p>
-          <div className="profile-coordinates" aria-label="Coordinates">
-            <span className="profile-coordinate-pill">
-              <span className="profile-coordinate-label">Latitude</span>
-              <span className="profile-coordinate-value">{latitudeText}</span>
-            </span>
-            <span className="profile-coordinate-pill">
-              <span className="profile-coordinate-label">Longitude</span>
-              <span className="profile-coordinate-value">{longitudeText}</span>
-            </span>
-            <button
-              type="button"
-              className={copyButtonClassName}
-              aria-label={`Copy coordinates ${coordinatesText}`}
-              title="Copy coordinates"
-              onClick={() => void copyCoordinate(coordinatesText)}
-            >
-              {copyStatus === 'copied' ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
-            </button>
-          </div>
+          {isEditingCoordinates ? (
+            <div className="profile-coordinate-editor" aria-label="Edit coordinates">
+              <label className="profile-coordinate-input-pill">
+                <span className="profile-coordinate-label">Latitude</span>
+                <input
+                  aria-label="Latitude"
+                  inputMode="decimal"
+                  value={coordinateDraft.lat}
+                  onChange={(event) =>
+                    setCoordinateDraft((current) => ({ ...current, lat: event.target.value }))
+                  }
+                  onKeyDown={handleCoordinateInputKeyDown}
+                />
+              </label>
+              <label className="profile-coordinate-input-pill">
+                <span className="profile-coordinate-label">Longitude</span>
+                <input
+                  aria-label="Longitude"
+                  inputMode="decimal"
+                  value={coordinateDraft.lng}
+                  onChange={(event) =>
+                    setCoordinateDraft((current) => ({ ...current, lng: event.target.value }))
+                  }
+                  onKeyDown={handleCoordinateInputKeyDown}
+                />
+              </label>
+              <button
+                type="button"
+                className="profile-coordinate-action"
+                aria-label="Save coordinates"
+                title="Save coordinates"
+                onClick={() => void saveCoordinates()}
+              >
+                <Check size={13} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="profile-coordinate-action"
+                aria-label="Cancel coordinate edits"
+                title="Cancel coordinate edits"
+                onClick={cancelEditingCoordinates}
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+              {coordinateError ? (
+                <p className="profile-coordinate-error" role="alert">
+                  {coordinateError}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="profile-coordinates" aria-label="Coordinates">
+              <span className="profile-coordinate-pill">
+                <span className="profile-coordinate-label">Latitude</span>
+                <span className="profile-coordinate-value">{latitudeText}</span>
+              </span>
+              <span className="profile-coordinate-pill">
+                <span className="profile-coordinate-label">Longitude</span>
+                <span className="profile-coordinate-value">{longitudeText}</span>
+              </span>
+              <button
+                type="button"
+                className={copyButtonClassName}
+                aria-label={`Copy coordinates ${coordinatesText}`}
+                title="Copy coordinates"
+                onClick={() => void copyCoordinate(coordinatesText)}
+              >
+                {copyStatus === 'copied' ? (
+                  <Check size={13} aria-hidden="true" />
+                ) : (
+                  <Copy size={13} aria-hidden="true" />
+                )}
+              </button>
+              <button
+                type="button"
+                className="profile-coordinate-action"
+                aria-label="Edit coordinates"
+                title="Edit coordinates"
+                onClick={startEditingCoordinates}
+              >
+                <Pencil size={13} aria-hidden="true" />
+              </button>
+            </div>
+          )}
         </div>
         <div className="profile-header-actions">
           {saveStatus !== 'idle' ? (

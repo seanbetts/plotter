@@ -1,4 +1,4 @@
-import { createRouteKey, createRouteLeg } from './routeLegs';
+import { createRouteKey, createRouteLeg, createStraightLineGeometry } from './routeLegs';
 import type { Coordinates, Destination, RouteLeg } from './types';
 
 type ReconcileRouteLegsResult = {
@@ -17,6 +17,8 @@ function routePairKey(originDestinationId: string, targetDestinationId: string) 
   return `${originDestinationId}:${targetDestinationId}`;
 }
 
+const createTimestamp = () => new Date().toISOString();
+
 function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
 }
@@ -32,6 +34,67 @@ function distanceKm(left: Coordinates, right: Coordinates) {
     Math.cos(leftLat) * Math.cos(rightLat) * Math.sin(lngDelta / 2) ** 2;
 
   return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function routeGeometryMatchesCoordinates(routeLeg: RouteLeg, origin: Destination, target: Destination) {
+  const coordinates = routeLeg.geometry?.coordinates;
+
+  return (
+    coordinates?.[0]?.[0] === origin.coordinates.lng &&
+    coordinates?.[0]?.[1] === origin.coordinates.lat &&
+    coordinates?.[1]?.[0] === target.coordinates.lng &&
+    coordinates?.[1]?.[1] === target.coordinates.lat
+  );
+}
+
+function refreshRouteLegForDestinationCoordinates(
+  routeLeg: RouteLeg,
+  origin: Destination,
+  target: Destination,
+): RouteLeg {
+  if (routeLeg.type === 'shipping-manual') {
+    if (!routeLeg.geometry || routeGeometryMatchesCoordinates(routeLeg, origin, target)) {
+      return routeLeg;
+    }
+
+    return {
+      ...routeLeg,
+      status: 'manual',
+      geometry: createStraightLineGeometry(origin.coordinates, target.coordinates),
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      provider: undefined,
+      profile: undefined,
+      routeKey: undefined,
+      calculatedAt: undefined,
+      error: undefined,
+      updatedAt: createTimestamp(),
+    };
+  }
+
+  const routeKey = createRouteKey({
+    origin: origin.coordinates,
+    target: target.coordinates,
+    profile: routeLeg.profile,
+  });
+
+  if (routeLeg.routeKey === routeKey) {
+    return routeLeg;
+  }
+
+  return {
+    ...routeLeg,
+    status: 'pending',
+    distanceKm: undefined,
+    travelTimeHours: undefined,
+    geometry: undefined,
+    provider: undefined,
+    profile: routeLeg.profile ?? 'driving-car',
+    routeKey,
+    calculatedAt: undefined,
+    error: undefined,
+    updatedAt: createTimestamp(),
+  };
 }
 
 export function findBestDestinationInsertionIndex(
@@ -117,7 +180,7 @@ export function reconcileRouteLegsForDestinations(
 
     const existingRouteLeg = existingRouteLegsByPair.get(pairKey);
     if (existingRouteLeg) {
-      nextRouteLegs.push(existingRouteLeg);
+      nextRouteLegs.push(refreshRouteLegForDestinationCoordinates(existingRouteLeg, origin, target));
       continue;
     }
 

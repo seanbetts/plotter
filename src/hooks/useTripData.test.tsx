@@ -174,6 +174,80 @@ describe('useTripData', () => {
     ]);
   });
 
+  it('recalculates affected driving route legs after destination coordinates change', async () => {
+    const repository = createTestRepository();
+    const calculateRoute = vi
+      .fn()
+      .mockResolvedValueOnce({
+        distanceKm: 123.4,
+        travelTimeHours: 2.5,
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [19.0342, 43.1306],
+            [18.7712, 42.4247],
+          ],
+        },
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+      })
+      .mockResolvedValueOnce({
+        distanceKm: 125.6,
+        travelTimeHours: 2.7,
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [19.045, 43.14],
+            [18.7712, 42.4247],
+          ],
+        },
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+      });
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'Durmitor',
+        countryRegion: 'Montenegro',
+        coordinates: { lat: 43.1306, lng: 19.0342 },
+      });
+      await result.current.addDestination({
+        name: 'Kotor',
+        countryRegion: 'Montenegro',
+        coordinates: { lat: 42.4247, lng: 18.7712 },
+      });
+    });
+
+    const [origin] = result.current.destinations;
+
+    await act(async () => {
+      await result.current.updateDestination(origin.id, {
+        coordinates: { lat: 43.14, lng: 19.045 },
+      });
+    });
+
+    expect(calculateRoute).toHaveBeenLastCalledWith({
+      origin: { lat: 43.14, lng: 19.045 },
+      target: { lat: 42.4247, lng: 18.7712 },
+      profile: 'driving-car',
+    });
+    expect(result.current.routeLegs[0]).toMatchObject({
+      status: 'ready',
+      distanceKm: 125.6,
+      travelTimeHours: 2.7,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [19.045, 43.14],
+          [18.7712, 42.4247],
+        ],
+      },
+    });
+  });
+
   it('reorders destinations and recalculates adjacent route legs', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));

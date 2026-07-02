@@ -628,8 +628,17 @@ select {
   margin: 8px 0 0;
 }
 
+.profile-coordinate-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
 .profile-coordinate-pill,
-.profile-coordinate-copy {
+.profile-coordinate-copy,
+.profile-coordinate-action,
+.profile-coordinate-input-pill {
   display: inline-grid;
   align-items: center;
   border: 1px solid var(--border-subtle);
@@ -640,7 +649,8 @@ select {
   line-height: 1.15;
 }
 
-.profile-coordinate-copy {
+.profile-coordinate-copy,
+.profile-coordinate-action {
   width: 32px;
   min-height: 32px;
   place-items: center;
@@ -649,16 +659,43 @@ select {
 
 .profile-coordinate-copy:hover,
 .profile-coordinate-copy:focus-visible,
-.profile-coordinate-copy.is-copied {
+.profile-coordinate-copy.is-copied,
+.profile-coordinate-action:hover,
+.profile-coordinate-action:focus-visible {
   border-color: rgb(var(--color-accent-rgb) / 0.46);
   color: var(--color-accent);
   background: rgb(var(--color-accent-rgb) / 0.1);
 }
 
-.profile-coordinate-pill {
+.profile-coordinate-pill,
+.profile-coordinate-input-pill {
   display: grid;
   gap: 3px;
   text-align: left;
+}
+
+.destination-profile .profile-coordinate-input-pill {
+  color: rgb(var(--color-text-rgb) / 0.78);
+  font-size: inherit;
+}
+
+.destination-profile .profile-coordinate-input-pill input {
+  width: 76px;
+  border: 0;
+  padding: 0;
+  color: rgb(var(--color-text-rgb) / 0.78);
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1.15;
+  outline: 0;
+}
+
+.profile-coordinate-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 0.72rem;
 }
 
 .profile-coordinate-label {

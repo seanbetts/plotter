@@ -107,6 +107,37 @@ describe('DestinationProfile', () => {
     expect(writeText).toHaveBeenLastCalledWith('51.0576, -0.1342');
   });
 
+  it('limits displayed and copied coordinates to five decimal places', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const destination = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576123, lng: -0.1342987 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+
+    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    expect(within(header).getByText('51.05761')).toBeInTheDocument();
+    expect(within(header).getByText('-0.1343')).toBeInTheDocument();
+
+    await user.click(within(header).getByRole('button', { name: 'Copy coordinates 51.05761, -0.1343' }));
+
+    expect(writeText).toHaveBeenLastCalledWith('51.05761, -0.1343');
+  });
+
   it('shows temporary icon-only feedback after coordinates are copied', async () => {
     setupAutosaveTimers();
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -145,6 +176,34 @@ describe('DestinationProfile', () => {
     });
 
     expect(copyButton).not.toHaveClass('is-copied');
+  });
+
+  it('edits coordinates and saves them with Enter', async () => {
+    const destination = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+    const onUpdate = vi.fn();
+
+    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    fireEvent.click(within(header).getByRole('button', { name: 'Edit coordinates' }));
+    fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '51.0581123' } });
+    fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '-0.1339876' } });
+    fireEvent.keyDown(screen.getByLabelText('Longitude'), { key: 'Enter' });
+
+    expect(onUpdate).toHaveBeenCalledWith(destination.id, {
+      coordinates: { lat: 51.05811, lng: -0.13399 },
+    });
   });
 
   it('shows the stop number when one is provided', () => {
