@@ -1,5 +1,5 @@
 import { Image, LoaderCircle, Plus, Upload } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import type { MediaItem } from '../domain/types';
 
@@ -32,7 +32,7 @@ function isFileDrag(event: DragEvent<HTMLElement>) {
   return types.includes('Files') || event.dataTransfer.files.length > 0;
 }
 
-function reorderBefore(mediaItems: MediaItem[], draggedMediaId: string, targetMediaId: string) {
+function reorderAfter(mediaItems: MediaItem[], draggedMediaId: string, targetMediaId: string) {
   if (draggedMediaId === targetMediaId) {
     return mediaItems.map((mediaItem) => mediaItem.id);
   }
@@ -50,9 +50,9 @@ function reorderBefore(mediaItems: MediaItem[], draggedMediaId: string, targetMe
   }
 
   return [
-    ...withoutDragged.slice(0, targetIndex).map((mediaItem) => mediaItem.id),
+    ...withoutDragged.slice(0, targetIndex + 1).map((mediaItem) => mediaItem.id),
     draggedMediaItem.id,
-    ...withoutDragged.slice(targetIndex).map((mediaItem) => mediaItem.id),
+    ...withoutDragged.slice(targetIndex + 1).map((mediaItem) => mediaItem.id),
   ];
 }
 
@@ -67,6 +67,8 @@ export function DestinationImageStrip({
   onOpenPreview,
 }: DestinationImageStripProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileDragDepthRef = useRef(0);
+  const fileDragClearTimerRef = useRef<number | null>(null);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [draggedMediaId, setDraggedMediaId] = useState<string | null>(null);
   const [dragTargetMediaId, setDragTargetMediaId] = useState<string | null>(null);
@@ -76,6 +78,26 @@ export function DestinationImageStrip({
   const openFilePicker = () => {
     fileInputRef.current?.click();
   };
+
+  const clearPendingFileDragReset = () => {
+    if (fileDragClearTimerRef.current !== null) {
+      window.clearTimeout(fileDragClearTimerRef.current);
+      fileDragClearTimerRef.current = null;
+    }
+  };
+
+  const resetFileDragState = () => {
+    clearPendingFileDragReset();
+    fileDragDepthRef.current = 0;
+    setIsFileDragOver(false);
+  };
+
+  useEffect(
+    () => () => {
+      clearPendingFileDragReset();
+    },
+    [],
+  );
 
   const uploadFiles = (files: File[]) => {
     if (files.length === 0) return;
@@ -94,20 +116,28 @@ export function DestinationImageStrip({
 
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
+    clearPendingFileDragReset();
+    fileDragDepthRef.current = Math.max(1, fileDragDepthRef.current);
     setIsFileDragOver(true);
   };
 
   const handleStripDragLeave = (event: DragEvent<HTMLElement>) => {
+    if (!isFileDrag(event)) return;
+    if (event.relatedTarget === null && fileDragDepthRef.current > 0) {
+      clearPendingFileDragReset();
+      fileDragClearTimerRef.current = window.setTimeout(resetFileDragState, 80);
+      return;
+    }
     if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
 
-    setIsFileDragOver(false);
+    resetFileDragState();
   };
 
   const handleStripDrop = (event: DragEvent<HTMLElement>) => {
     if (!isFileDrag(event)) return;
 
     event.preventDefault();
-    setIsFileDragOver(false);
+    resetFileDragState();
     uploadFiles(Array.from(event.dataTransfer.files));
   };
 
@@ -135,7 +165,7 @@ export function DestinationImageStrip({
 
     event.preventDefault();
     event.stopPropagation();
-    const nextOrder = reorderBefore(mediaItems, draggedMediaId, targetMediaId);
+    const nextOrder = reorderAfter(mediaItems, draggedMediaId, targetMediaId);
     setDraggedMediaId(null);
     setDragTargetMediaId(null);
 

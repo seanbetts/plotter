@@ -116,7 +116,7 @@ describe('DestinationImageStrip', () => {
     expect(onOpenPreview).toHaveBeenCalledWith('media-3');
   });
 
-  it('drops image files onto the strip and prevents default browser handling', () => {
+  it('keeps the drag state stable during file drag movement and clears it on drop', () => {
     const onUploadFiles = vi.fn();
     render(<DestinationImageStrip {...createProps({ onUploadFiles })} />);
 
@@ -132,8 +132,15 @@ describe('DestinationImageStrip', () => {
     expect(dragOverEvent.defaultPrevented).toBe(true);
     expect(region).toHaveClass('is-drag-over');
 
-    fireEvent.dragLeave(region);
-    expect(region).not.toHaveClass('is-drag-over');
+    const nullTargetLeaveEvent = createEvent.dragLeave(region, {
+      dataTransfer: {
+        files: [],
+        types: ['Files'],
+      },
+    });
+    Object.defineProperty(nullTargetLeaveEvent, 'relatedTarget', { value: null });
+    fireEvent(region, nullTargetLeaveEvent);
+    expect(region).toHaveClass('is-drag-over');
 
     const file = createImageFile('drop.webp', 'image/webp');
     dropFiles(region, [file]);
@@ -142,7 +149,7 @@ describe('DestinationImageStrip', () => {
     expect(region).not.toHaveClass('is-drag-over');
   });
 
-  it('reorders thumbnails by inserting the dragged image before the drop target', () => {
+  it('reorders thumbnails by inserting the dragged image after the drop target', () => {
     const onReorder = vi.fn();
     render(<DestinationImageStrip {...createProps({ onReorder })} />);
 
@@ -150,7 +157,7 @@ describe('DestinationImageStrip', () => {
     fireEvent.dragOver(screen.getByRole('button', { name: 'Open image 3' }));
     fireEvent.drop(screen.getByRole('button', { name: 'Open image 3' }));
 
-    expect(onReorder).toHaveBeenCalledWith(['media-2', 'media-1', 'media-3']);
+    expect(onReorder).toHaveBeenCalledWith(['media-2', 'media-3', 'media-1']);
   });
 
   it('renders loading, uploading, and error feedback accessibly', () => {
