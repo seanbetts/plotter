@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { formatLocationParts } from '../domain/locations';
 import type { Destination } from '../domain/types';
+import { formatStopHeaderLabel } from './stopLabels';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
 
@@ -73,7 +74,6 @@ const profileTitleControlStyle = {
   '--profile-title-inline-padding': '0px',
 } as CSSProperties;
 const coordinateDecimalPlaces = 5;
-const formatStopNumber = (stopNumber: number) => String(stopNumber).padStart(2, '0');
 const normalizeCoordinateValue = (coordinate: number) => {
   const rounded = Number(coordinate.toFixed(coordinateDecimalPlaces));
 
@@ -397,7 +397,7 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
       <header className="profile-header" aria-label="Stop detail header">
         <div>
-          {stopNumber ? <span className="profile-stop-number">Stop {formatStopNumber(stopNumber)}</span> : null}
+          {stopNumber ? <span className="profile-stop-number">{formatStopHeaderLabel(stopNumber)}</span> : null}
           {isEditingName ? (
             <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
               <span className="sr-only">Stop name</span>

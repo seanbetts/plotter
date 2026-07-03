@@ -910,10 +910,10 @@ describe('MapCanvas', () => {
     });
   });
 
-  it('renders destination stop labels as positioned pill overlays', () => {
+  it('renders the first destination stop label as the start label', () => {
     render(
       <MapCanvas
-        destinations={[destination]}
+        destinations={[destination, targetDestination]}
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
@@ -936,12 +936,14 @@ describe('MapCanvas', () => {
     const destinationLabelLayer = map.addLayer.mock.calls
       .map(([layer]) => layer)
       .find((layer) => layer.id === 'world-tour-destination-labels');
-    const stopLabel = screen.getByText('1. Cappadocia');
+    const startLabel = screen.getByText('ST Cappadocia');
+    const nextStopLabel = screen.getByText('02 Tbilisi');
 
     expect(destinationLabelLayer).toBeUndefined();
-    expect(stopLabel).toHaveClass('map-destination-label');
-    expect(Number.parseFloat(stopLabel.style.left)).toBeCloseTo(1348.289);
-    expect(Number.parseFloat(stopLabel.style.top)).toBeCloseTo(113.569);
+    expect(startLabel).toHaveClass('map-destination-label');
+    expect(nextStopLabel).toHaveClass('map-destination-label');
+    expect(Number.parseFloat(startLabel.style.left)).toBeCloseTo(1348.289);
+    expect(Number.parseFloat(startLabel.style.top)).toBeCloseTo(113.569);
   });
 
   it('hides destination stop labels until the map is zoomed into planning level', () => {

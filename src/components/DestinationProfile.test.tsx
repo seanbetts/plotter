@@ -252,6 +252,18 @@ describe('DestinationProfile', () => {
     expect(screen.getByText('Stop 03')).toBeInTheDocument();
   });
 
+  it('labels the first stop as the start', () => {
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'England',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    });
+
+    render(<DestinationProfile destination={destination} stopNumber={1} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Start')).toBeInTheDocument();
+  });
+
   it('only shows editable fields for stay days and tags until the stop name is clicked', () => {
     const destination = createDestination({
       name: 'Samarkand',

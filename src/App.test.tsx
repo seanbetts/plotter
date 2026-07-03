@@ -252,7 +252,7 @@ describe('App', () => {
       { apiKey: expect.any(String) },
     );
     expect(await screen.findByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
-    expect(screen.getByText('Stop 01')).toBeInTheDocument();
+    expect(screen.getByText('Start')).toBeInTheDocument();
   });
 
   it('keeps the map stop confirmation inside the viewport near the bottom-right edge', async () => {
@@ -504,7 +504,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
     expect(screen.getByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
-    expect(screen.getByText('Stop 01')).toBeInTheDocument();
+    expect(screen.getByText('Start')).toBeInTheDocument();
 
     const wasNotCanceled = fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
 
