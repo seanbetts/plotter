@@ -89,12 +89,17 @@ async function migrateLocalTripDataOnce(input: {
 
 export async function createAppTripRepository(options: CreateAppTripRepositoryOptions = {}) {
   const isSupabaseConfigured = options.isSupabaseConfigured ?? defaultIsSupabaseConfigured;
+  const tripStorageMode = options.tripStorageMode ?? import.meta.env.VITE_TRIP_STORAGE;
+  const localRepository = options.localRepository ?? createTripRepository(tripDb);
+
+  if (tripStorageMode === 'e2e-local') {
+    return localRepository;
+  }
 
   if (!isSupabaseConfigured) {
     throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.');
   }
 
-  const localRepository = options.localRepository ?? createTripRepository(tripDb);
   const storage = options.storage ?? window.localStorage;
   const createSupabaseClient = options.createSupabaseClient ?? createBrowserSupabaseClient;
   const supabase = createSupabaseClient();

@@ -1,6 +1,5 @@
 import { expect, test } from '@playwright/test';
 
-const appDbName = 'world-tour-planner';
 const savedTags = ['gateway', 'asia'];
 const istanbulResult = [
   {
@@ -19,7 +18,7 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   await cdpSession.send('Storage.clearDataForOrigin', {
     origin,
-    storageTypes: 'indexeddb,local_storage',
+    storageTypes: 'indexeddb',
   });
 
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
@@ -43,7 +42,7 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
   const profile = page.getByLabel('Istanbul profile');
 
   if (!(await profile.isVisible())) {
-    await page.getByRole('button', { name: 'Istanbul, Turkey' }).click();
+    await page.getByRole('button', { name: 'Istanbul, Turkey' }).last().click();
   }
 
   await expect(profile).toBeVisible();
@@ -51,48 +50,71 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
   const tagInput = profile.getByLabel('Add tag');
 
   for (const tag of savedTags) {
+    const existingTag = profile.getByRole('button', { name: `Remove tag ${tag}` });
+    if (await existingTag.isVisible()) {
+      await existingTag.click();
+    }
+  }
+
+  for (const tag of savedTags) {
     await tagInput.fill(tag);
     await tagInput.press('Enter');
   }
   await expect(profile.getByRole('status', { name: 'Saved' })).toBeVisible();
-
-  await expect
-    .poll(() =>
-      page.evaluate(
-        ({ dbName, expectedTags }) =>
-          new Promise<boolean>((resolve, reject) => {
-            const request = indexedDB.open(dbName);
-
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-              const db = request.result;
-              const transaction = db.transaction('destinations', 'readonly');
-              const getAllRequest = transaction.objectStore('destinations').getAll();
-
-              getAllRequest.onerror = () => reject(getAllRequest.error);
-              getAllRequest.onsuccess = () => {
-                resolve(
-                  getAllRequest.result.some(
-                    (destination) =>
-                      destination.name === 'Istanbul' &&
-                      JSON.stringify(destination.tags) === JSON.stringify(expectedTags),
-                  ),
-                );
-              };
-              transaction.oncomplete = () => db.close();
-            };
-          }),
-        { dbName: appDbName, expectedTags: savedTags },
-      ),
-    )
-    .toBe(true);
+  for (const tag of savedTags) {
+    await expect(profile.getByRole('button', { name: `Remove tag ${tag}` })).toBeVisible();
+  }
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
-  await page.getByRole('button', { name: 'Istanbul, Turkey' }).click();
+  await page.getByRole('button', { name: 'Istanbul, Turkey' }).last().click();
 
   await expect(profile).toBeVisible();
   for (const tag of savedTags) {
     await expect(profile.getByRole('button', { name: `Remove tag ${tag}` })).toBeVisible();
   }
+});
+
+test('adds a stop from the map context menu', async ({ page }) => {
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        features: [
+          {
+            id: 'place-map-click',
+            text: 'Map stop',
+            place_name: 'Map stop, Test Region',
+            center: [0, 0],
+            context: [
+              { id: 'region.1', text: 'Test Region' },
+              { id: 'country.1', text: 'Test Country', short_code: 'tc' },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Search for a destination')).toBeVisible();
+  const mapContainer = page.getByTestId('map-container');
+  await expect(mapContainer).toBeVisible();
+  await mapContainer.click({
+    button: 'right',
+    position: { x: 360, y: 260 },
+  });
+  await page.getByRole('menuitem', { name: 'Add stop here' }).click();
+
+  const mapStopDialog = page.getByRole('dialog', { name: 'Add stop from map' });
+  await expect(mapStopDialog).toBeVisible();
+  await expect(mapStopDialog.getByRole('heading', { name: 'Map stop' })).toBeVisible();
+  await expect(mapStopDialog.getByText('Map stop, Test Region, Test Country')).toBeVisible();
+  const addStopButton = page.getByRole('button', { name: 'Add stop', exact: true });
+  await expect(addStopButton).toBeEnabled();
+  await addStopButton.click();
+
+  await expect(page.getByRole('complementary', { name: 'Map stop profile' })).toBeVisible();
 });

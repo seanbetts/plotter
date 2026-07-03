@@ -427,7 +427,7 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
           <p>{formatLocationParts(destination.location) || 'Unassigned location'}</p>
           {isEditingCoordinates ? (
             <div className="profile-coordinate-editor" aria-label="Edit coordinates">
-              <label className="profile-coordinate-input-pill">
+              <label className="profile-coordinate-input-pill profile-coordinate-field">
                 <span className="profile-coordinate-label">Latitude</span>
                 <input
                   aria-label="Latitude"
@@ -439,7 +439,7 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
                   onKeyDown={handleCoordinateInputKeyDown}
                 />
               </label>
-              <label className="profile-coordinate-input-pill">
+              <label className="profile-coordinate-input-pill profile-coordinate-field">
                 <span className="profile-coordinate-label">Longitude</span>
                 <input
                   aria-label="Longitude"
@@ -477,11 +477,11 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
             </div>
           ) : (
             <div className="profile-coordinates" aria-label="Coordinates">
-              <span className="profile-coordinate-pill">
+              <span className="profile-coordinate-pill profile-coordinate-field">
                 <span className="profile-coordinate-label">Latitude</span>
                 <span className="profile-coordinate-value">{latitudeText}</span>
               </span>
-              <span className="profile-coordinate-pill">
+              <span className="profile-coordinate-pill profile-coordinate-field">
                 <span className="profile-coordinate-label">Longitude</span>
                 <span className="profile-coordinate-value">{longitudeText}</span>
               </span>

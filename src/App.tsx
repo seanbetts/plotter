@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
 import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
+import type { MapAddStopRequest } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
+import { createLegacyLocation, formatLocationParts } from './domain/locations';
+import type { Coordinates, DestinationLocation } from './domain/types';
 import { useTripData } from './hooks/useTripData';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
@@ -16,6 +19,30 @@ const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 type RepositoryError = {
   title: string;
   message: string;
+};
+
+type PendingMapStop = {
+  id: number;
+  coordinates: Coordinates;
+  screenPosition: MapAddStopRequest['screenPosition'];
+  source: MapAddStopRequest['source'];
+  name: string;
+  location: DestinationLocation;
+  isResolving: boolean;
+  isSaving: boolean;
+  resolveError: string | null;
+  saveError: string | null;
+};
+
+type OverlayPosition = {
+  x: number;
+  y: number;
+};
+
+const overlayViewportPaddingPx = 16;
+const mapStopConfirmationApproxSize = {
+  width: 320,
+  height: 260,
 };
 
 function formatRepositoryError(caught: unknown): RepositoryError {
@@ -39,6 +66,53 @@ function formatRepositoryError(caught: unknown): RepositoryError {
     title: 'Trip storage unavailable',
     message,
   };
+}
+
+function formatCoordinate(value: number) {
+  return value.toFixed(4);
+}
+
+function formatCoordinatePair(coordinates: Coordinates) {
+  return `${formatCoordinate(coordinates.lat)}, ${formatCoordinate(coordinates.lng)}`;
+}
+
+function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, 'name' | 'location'> {
+  const name = 'Dropped pin';
+
+  return {
+    name,
+    location: createLegacyLocation({
+      name,
+      countryRegion: formatCoordinatePair(coordinates),
+    }),
+  };
+}
+
+function clampOverlayPosition(
+  position: OverlayPosition,
+  size: { width: number; height: number },
+): OverlayPosition {
+  if (typeof window === 'undefined') return position;
+
+  return {
+    x: Math.min(
+      Math.max(overlayViewportPaddingPx, position.x),
+      Math.max(overlayViewportPaddingPx, window.innerWidth - size.width - overlayViewportPaddingPx),
+    ),
+    y: Math.min(
+      Math.max(overlayViewportPaddingPx, position.y),
+      Math.max(overlayViewportPaddingPx, window.innerHeight - size.height - overlayViewportPaddingPx),
+    ),
+  };
+}
+
+function getAvailableOverlayHeight(position: OverlayPosition) {
+  if (typeof window === 'undefined') return `calc(100vh - ${overlayViewportPaddingPx * 2}px)`;
+
+  return `${Math.max(
+    overlayViewportPaddingPx,
+    window.innerHeight - position.y - overlayViewportPaddingPx,
+  )}px`;
 }
 
 export default function App() {
@@ -117,6 +191,12 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     updateRouteLeg,
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
+  const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
+  const [mapCenterCoordinates, setMapCenterCoordinates] = useState<Coordinates | null>(null);
+  const pendingMapStopRequestIdRef = useRef(0);
+  const activePendingMapStopIdRef = useRef<number | null>(null);
+  const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
+  const previouslyFocusedMapStopElementRef = useRef<HTMLElement | null>(null);
   const isInteractionLocked = isLoading;
 
   const selectedDestination = useMemo(
@@ -130,9 +210,51 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
 
     return selectedDestinationIndex === -1 ? undefined : selectedDestinationIndex + 1;
   }, [destinations, selectedDestinationId]);
+  const pendingMapStopPosition = pendingMapStop
+    ? clampOverlayPosition(pendingMapStop.screenPosition, mapStopConfirmationApproxSize)
+    : null;
+  const pendingMapStopMaxHeight = pendingMapStopPosition
+    ? getAvailableOverlayHeight(pendingMapStopPosition)
+    : undefined;
+
+  const restorePendingMapStopFocus = useCallback(() => {
+    const previouslyFocusedElement = previouslyFocusedMapStopElementRef.current;
+    previouslyFocusedMapStopElementRef.current = null;
+
+    if (previouslyFocusedElement && document.contains(previouslyFocusedElement)) {
+      previouslyFocusedElement.focus();
+    }
+  }, []);
 
   useEffect(() => {
-    if (!selectedDestination || isInteractionLocked) return undefined;
+    if (!pendingMapStop || isInteractionLocked) return undefined;
+
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+
+      event.preventDefault();
+      if (pendingMapStop.isSaving) return;
+
+      activePendingMapStopIdRef.current = null;
+      setPendingMapStop(null);
+      restorePendingMapStopFocus();
+    };
+
+    window.addEventListener('keydown', handleWindowKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleWindowKeyDown);
+    };
+  }, [isInteractionLocked, pendingMapStop, restorePendingMapStopFocus]);
+
+  const pendingMapStopId = pendingMapStop?.id;
+  useEffect(() => {
+    if (!pendingMapStopId || isInteractionLocked) return;
+
+    pendingMapStopDialogRef.current?.focus();
+  }, [isInteractionLocked, pendingMapStopId]);
+
+  useEffect(() => {
+    if (pendingMapStop || !selectedDestination || isInteractionLocked) return undefined;
 
     const handleWindowKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -145,16 +267,123 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-  }, [isInteractionLocked, selectedDestination]);
+  }, [isInteractionLocked, pendingMapStop, selectedDestination]);
 
   const handleAddDestination = useCallback(
     async (input: Parameters<typeof addDestination>[0]) => {
-      if (isInteractionLocked) return;
+      if (isInteractionLocked) return undefined;
 
-      await addDestination(input);
+      return addDestination(input);
     },
     [addDestination, isInteractionLocked],
   );
+
+  const openPendingMapStop = useCallback(
+    async (request: MapAddStopRequest) => {
+      if (isInteractionLocked || pendingMapStop?.isSaving) return;
+
+      const requestId = pendingMapStopRequestIdRef.current + 1;
+      pendingMapStopRequestIdRef.current = requestId;
+      activePendingMapStopIdRef.current = requestId;
+      const activeElement = document.activeElement;
+      previouslyFocusedMapStopElementRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+      const fallback = createFallbackMapStop(request.coordinates);
+      setPendingMapStop({
+        id: requestId,
+        coordinates: request.coordinates,
+        screenPosition: request.screenPosition,
+        source: request.source,
+        name: fallback.name,
+        location: fallback.location,
+        isResolving: true,
+        isSaving: false,
+        resolveError: null,
+        saveError: null,
+      });
+
+      try {
+        const resolvedResult = await resolveMapTilerCoordinates(request.coordinates, { apiKey: mapTilerApiKey });
+        setPendingMapStop((current) => {
+          if (!current || current.id !== requestId) return current;
+
+          return {
+            ...current,
+            name: resolvedResult.location.placeName,
+            location: resolvedResult.location,
+            isResolving: false,
+            resolveError: null,
+          };
+        });
+      } catch (caught) {
+        setPendingMapStop((current) => {
+          if (!current || current.id !== requestId) return current;
+
+          return {
+            ...current,
+            isResolving: false,
+            resolveError: caught instanceof Error ? caught.message : 'Coordinate lookup failed',
+          };
+        });
+      }
+    },
+    [isInteractionLocked, pendingMapStop?.isSaving],
+  );
+
+  const handleRequestAddAtMapCenter = useCallback(() => {
+    if (!mapCenterCoordinates) return;
+
+    void openPendingMapStop({
+      coordinates: mapCenterCoordinates,
+      screenPosition: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+      source: 'map-center',
+    });
+  }, [mapCenterCoordinates, openPendingMapStop]);
+
+  const closePendingMapStop = useCallback(() => {
+    if (pendingMapStop?.isSaving) return;
+
+    activePendingMapStopIdRef.current = null;
+    setPendingMapStop(null);
+    restorePendingMapStopFocus();
+  }, [pendingMapStop?.isSaving, restorePendingMapStopFocus]);
+
+  const confirmPendingMapStop = useCallback(async () => {
+    if (!pendingMapStop || pendingMapStop.isResolving || pendingMapStop.isSaving || isInteractionLocked) return;
+
+    const pendingMapStopId = pendingMapStop.id;
+    setPendingMapStop((current) =>
+      current && current.id === pendingMapStopId
+        ? { ...current, isSaving: true, saveError: null }
+        : current,
+    );
+    try {
+      const destination = await handleAddDestination({
+        name: pendingMapStop.name,
+        location: pendingMapStop.location,
+        coordinates: pendingMapStop.coordinates,
+      });
+      if (activePendingMapStopIdRef.current !== pendingMapStopId) return;
+
+      activePendingMapStopIdRef.current = null;
+      setPendingMapStop((current) => (current?.id === pendingMapStopId ? null : current));
+      if (destination) {
+        setSelectedDestinationId(destination.id);
+      }
+    } catch (caught) {
+      if (activePendingMapStopIdRef.current !== pendingMapStopId) return;
+
+      setPendingMapStop((current) =>
+        current && current.id === pendingMapStopId
+          ? {
+              ...current,
+              isSaving: false,
+              saveError: caught instanceof Error ? caught.message : 'Unable to add stop',
+            }
+          : current,
+      );
+    }
+  }, [handleAddDestination, isInteractionLocked, pendingMapStop]);
+
   const searchPlaces = useCallback(
     (query: string) => searchMapTilerPlaces(query, { apiKey: mapTilerApiKey }),
     [],
@@ -188,6 +417,8 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
           onSelectDestination={setSelectedDestinationId}
+          onRequestAddStop={openPendingMapStop}
+          onMapCenterCoordinatesChange={setMapCenterCoordinates}
         />
         {!isInteractionLocked ? (
           <>
@@ -195,6 +426,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               searchPlaces={searchPlaces}
               resolveSearchResult={resolveSearchResult}
               onAddDestination={handleAddDestination}
+              onRequestAddAtMapCenter={mapCenterCoordinates ? handleRequestAddAtMapCenter : undefined}
             />
             <ItineraryPanel
               destinations={destinations}
@@ -206,6 +438,48 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
             />
           </>
+        ) : null}
+        {!isInteractionLocked && pendingMapStop && pendingMapStopPosition ? (
+          <section
+            ref={pendingMapStopDialogRef}
+            className="map-stop-confirmation"
+            role="dialog"
+            aria-modal="false"
+            aria-label="Add stop from map"
+            tabIndex={-1}
+            style={{
+              left: `${pendingMapStopPosition.x}px`,
+              top: `${pendingMapStopPosition.y}px`,
+              maxHeight: pendingMapStopMaxHeight,
+            }}
+          >
+            <div>
+              <span className="map-stop-confirmation__eyebrow">
+                {pendingMapStop.isResolving ? 'Resolving map location' : 'Map stop'}
+              </span>
+              <h2>{pendingMapStop.name}</h2>
+              <p>{formatLocationParts(pendingMapStop.location) || formatCoordinatePair(pendingMapStop.coordinates)}</p>
+              <p>{formatCoordinatePair(pendingMapStop.coordinates)}</p>
+            </div>
+            {pendingMapStop.resolveError ? (
+              <p className="map-stop-confirmation__error">{pendingMapStop.resolveError}</p>
+            ) : null}
+            {pendingMapStop.saveError ? (
+              <p className="map-stop-confirmation__error">{pendingMapStop.saveError}</p>
+            ) : null}
+            <div className="map-stop-confirmation__actions">
+              <button type="button" disabled={pendingMapStop.isSaving} onClick={closePendingMapStop}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pendingMapStop.isResolving || pendingMapStop.isSaving}
+                onClick={() => void confirmPendingMapStop()}
+              >
+                Add stop
+              </button>
+            </div>
+          </section>
         ) : null}
         {!isInteractionLocked && selectedDestination ? (
           <DestinationProfile

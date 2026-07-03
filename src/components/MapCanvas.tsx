@@ -1,15 +1,26 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { FeatureCollection, LineString, Point } from 'geojson';
-import type { Destination, RouteLeg } from '../domain/types';
+import type { Coordinates, Destination, RouteLeg } from '../domain/types';
+
+export type MapAddStopRequest = {
+  coordinates: Coordinates;
+  screenPosition: {
+    x: number;
+    y: number;
+  };
+  source: 'context-menu' | 'long-press' | 'map-center';
+};
 
 type MapCanvasProps = {
   destinations: Destination[];
   routeLegs: RouteLeg[];
   selectedDestinationId: string | null;
   onSelectDestination: (destinationId: string) => void;
+  onRequestAddStop?: (request: MapAddStopRequest) => void;
+  onMapCenterCoordinatesChange?: (coordinates: Coordinates) => void;
 };
 
 type DestinationFeatureProperties = {
@@ -35,6 +46,11 @@ type ProjectedDestinationLabel = {
   name: string;
   order: number;
   selected: boolean;
+  x: number;
+  y: number;
+};
+
+type OverlayPosition = {
   x: number;
   y: number;
 };
@@ -448,6 +464,11 @@ const destinationPointsLayerId = 'world-tour-destination-points';
 const routeLineLayerId = 'world-tour-routes-line';
 const cityPointsLayerId = 'world-tour-city-points';
 const cityLabelsLayerId = 'world-tour-city-labels';
+const overlayViewportPaddingPx = 16;
+const addStopMenuApproxSize = {
+  width: 180,
+  height: 112,
+};
 
 const mapColorTokenFallbacks = {
   '--color-accent': '#d9467a',
@@ -701,11 +722,31 @@ function calmBasemapStyle(map: maplibregl.Map) {
   }
 }
 
+function clampOverlayPosition(
+  position: OverlayPosition,
+  size: { width: number; height: number },
+): OverlayPosition {
+  if (typeof window === 'undefined') return position;
+
+  return {
+    x: Math.min(
+      Math.max(overlayViewportPaddingPx, position.x),
+      Math.max(overlayViewportPaddingPx, window.innerWidth - size.width - overlayViewportPaddingPx),
+    ),
+    y: Math.min(
+      Math.max(overlayViewportPaddingPx, position.y),
+      Math.max(overlayViewportPaddingPx, window.innerHeight - size.height - overlayViewportPaddingPx),
+    ),
+  };
+}
+
 export function MapCanvas({
   destinations,
   routeLegs,
   selectedDestinationId,
   onSelectDestination,
+  onRequestAddStop,
+  onMapCenterCoordinatesChange,
 }: MapCanvasProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -713,11 +754,22 @@ export function MapCanvas({
   const latestRouteLegsRef = useRef(routeLegs);
   const latestSelectedDestinationIdRef = useRef(selectedDestinationId);
   const onSelectDestinationRef = useRef(onSelectDestination);
+  const onRequestAddStopRef = useRef(onRequestAddStop);
+  const onMapCenterCoordinatesChangeRef = useRef(onMapCenterCoordinatesChange);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressStartRef = useRef<{
+    pointerId: number;
+    screenX: number;
+    screenY: number;
+    mapX: number;
+    mapY: number;
+  } | null>(null);
   const previousDestinationCountRef = useRef(0);
   const [selectedZoomStep, setSelectedZoomStep] = useState(1);
   const [currentMapZoom, setCurrentMapZoom] = useState(1.4);
   const [mapDetailSettings, setMapDetailSettings] = useState(createDefaultMapDetailSettings);
   const [projectedDestinationLabels, setProjectedDestinationLabels] = useState<ProjectedDestinationLabel[]>([]);
+  const [addStopMenu, setAddStopMenu] = useState<MapAddStopRequest | null>(null);
   const selectedZoomStepRef = useRef(selectedZoomStep);
   const mapDetailSettingsRef = useRef(mapDetailSettings);
 
@@ -759,6 +811,74 @@ export function MapCanvas({
       }),
     );
   }, []);
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current === null) return;
+
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  }, []);
+
+  const closeAddStopMenu = useCallback(() => {
+    setAddStopMenu(null);
+  }, []);
+
+  const emitMapCenterCoordinates = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !onMapCenterCoordinatesChangeRef.current) return;
+
+    const center = map.getCenter();
+    onMapCenterCoordinatesChangeRef.current({ lat: center.lat, lng: center.lng });
+  }, []);
+
+  const requestAddStop = useCallback((request: MapAddStopRequest) => {
+    setAddStopMenu(null);
+    onRequestAddStopRef.current?.(request);
+  }, []);
+
+  const openAddStopMenu = useCallback((request: MapAddStopRequest) => {
+    setAddStopMenu(request);
+  }, []);
+
+  const openAddStopMenuAtClientPoint = useCallback(
+    (container: HTMLDivElement, clientX: number, clientY: number) => {
+      const map = mapRef.current;
+      if (!map || !onRequestAddStopRef.current) return false;
+
+      const containerRect = container.getBoundingClientRect();
+      const mapX = clientX - containerRect.left;
+      const mapY = clientY - containerRect.top;
+      const coordinates = map.unproject([mapX, mapY]);
+
+      openAddStopMenu({
+        coordinates: { lat: coordinates.lat, lng: coordinates.lng },
+        screenPosition: { x: mapX, y: mapY },
+        source: 'context-menu',
+      });
+
+      return true;
+    },
+    [openAddStopMenu],
+  );
+
+  const handleMapContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!openAddStopMenuAtClientPoint(event.currentTarget, event.clientX, event.clientY)) return;
+
+      event.preventDefault();
+    },
+    [openAddStopMenuAtClientPoint],
+  );
+
+  const handleMapPointerDownCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.pointerType !== 'mouse' || event.button !== 2) return;
+      if (!openAddStopMenuAtClientPoint(event.currentTarget, event.clientX, event.clientY)) return;
+
+      event.preventDefault();
+    },
+    [openAddStopMenuAtClientPoint],
+  );
 
   const updateMapSources = useCallback(() => {
     const map = mapRef.current;
@@ -809,6 +929,8 @@ export function MapCanvas({
     latestRouteLegsRef.current = routeLegs;
     latestSelectedDestinationIdRef.current = selectedDestinationId;
     onSelectDestinationRef.current = onSelectDestination;
+    onRequestAddStopRef.current = onRequestAddStop;
+    onMapCenterCoordinatesChangeRef.current = onMapCenterCoordinatesChange;
     updateMapSources();
 
     if (destinations.length > previousDestinationCount) {
@@ -822,6 +944,8 @@ export function MapCanvas({
     routeLegs,
     selectedDestinationId,
     onSelectDestination,
+    onRequestAddStop,
+    onMapCenterCoordinatesChange,
     fitMapToDestinations,
     updateMapSources,
   ]);
@@ -981,6 +1105,7 @@ export function MapCanvas({
     };
     const handleMapMove = () => {
       updateDestinationLabelPositions();
+      emitMapCenterCoordinates();
     };
     const handleZoomEnd = () => {
       const nextZoom = map.getZoom();
@@ -1000,6 +1125,16 @@ export function MapCanvas({
     const handleDestinationMouseLeave = () => {
       map.getCanvas().style.cursor = '';
     };
+    const handleContextMenu = (event: maplibregl.MapMouseEvent) => {
+      if (!onRequestAddStopRef.current) return;
+
+      event.preventDefault();
+      openAddStopMenu({
+        coordinates: { lat: event.lngLat.lat, lng: event.lngLat.lng },
+        screenPosition: { x: event.point.x, y: event.point.y },
+        source: 'context-menu',
+      });
+    };
 
     map.on('load', handleLoad);
     map.on('move', handleMapMove);
@@ -1009,8 +1144,10 @@ export function MapCanvas({
     map.on('click', destinationPointsLayerId, handleDestinationClick);
     map.on('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
     map.on('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
+    map.on('contextmenu', handleContextMenu);
 
     mapRef.current = map;
+    emitMapCenterCoordinates();
 
     return () => {
       map.off('load', handleLoad);
@@ -1021,10 +1158,20 @@ export function MapCanvas({
       map.off('click', destinationPointsLayerId, handleDestinationClick);
       map.off('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
       map.off('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
+      map.off('contextmenu', handleContextMenu);
+      longPressStartRef.current = null;
+      clearLongPressTimer();
       map.remove();
       mapRef.current = null;
     };
-  }, [addMapLayers, applyCurrentMapDetailSettings, updateDestinationLabelPositions]);
+  }, [
+    addMapLayers,
+    applyCurrentMapDetailSettings,
+    clearLongPressTimer,
+    emitMapCenterCoordinates,
+    openAddStopMenu,
+    updateDestinationLabelPositions,
+  ]);
 
   const selectedZoomSettings = mapDetailSettings[selectedZoomStep];
   const visibleDetailCount = mapDetailCategories.filter(
@@ -1032,6 +1179,9 @@ export function MapCanvas({
   ).length;
   const hiddenDetailCount = mapDetailCategories.length - visibleDetailCount;
   const shouldShowDestinationLabels = currentMapZoom >= destinationLabelMinZoom;
+  const addStopMenuPosition = addStopMenu
+    ? clampOverlayPosition(addStopMenu.screenPosition, addStopMenuApproxSize)
+    : null;
 
   const setZoomStep = (nextZoom: number) => {
     const nextZoomStep = clampDetailZoomStep(nextZoom);
@@ -1054,10 +1204,85 @@ export function MapCanvas({
     }));
   };
 
+  const handleMapPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!onRequestAddStopRef.current || event.pointerType === 'mouse') return;
+
+    clearLongPressTimer();
+    const containerRect = event.currentTarget.getBoundingClientRect();
+    longPressStartRef.current = {
+      pointerId: event.pointerId,
+      screenX: event.clientX,
+      screenY: event.clientY,
+      mapX: event.clientX - containerRect.left,
+      mapY: event.clientY - containerRect.top,
+    };
+    longPressTimerRef.current = window.setTimeout(() => {
+      const map = mapRef.current;
+      const longPressStart = longPressStartRef.current;
+      if (!map || !longPressStart) return;
+
+      const coordinates = map.unproject([longPressStart.mapX, longPressStart.mapY]);
+      requestAddStop({
+        coordinates: { lat: coordinates.lat, lng: coordinates.lng },
+        screenPosition: { x: longPressStart.mapX, y: longPressStart.mapY },
+        source: 'long-press',
+      });
+      longPressStartRef.current = null;
+      clearLongPressTimer();
+    }, 500);
+  };
+
+  const handleMapPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const longPressStart = longPressStartRef.current;
+    if (!longPressStart || longPressStart.pointerId !== event.pointerId) return;
+
+    const deltaX = Math.abs(event.clientX - longPressStart.screenX);
+    const deltaY = Math.abs(event.clientY - longPressStart.screenY);
+    if (deltaX > 10 || deltaY > 10) {
+      longPressStartRef.current = null;
+      clearLongPressTimer();
+    }
+  };
+
+  const handleMapPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const longPressStart = longPressStartRef.current;
+    if (!longPressStart || longPressStart.pointerId !== event.pointerId) return;
+
+    longPressStartRef.current = null;
+    clearLongPressTimer();
+  };
+
   return (
     <section className="map-canvas" aria-label="Interactive world tour map">
-      <div ref={mapContainerRef} className="maplibre-container" data-testid="map-container" />
+      <div
+        ref={mapContainerRef}
+        className="maplibre-container"
+        data-testid="map-container"
+        onPointerDownCapture={handleMapPointerDownCapture}
+        onPointerDown={handleMapPointerDown}
+        onPointerMove={handleMapPointerMove}
+        onPointerUp={handleMapPointerEnd}
+        onPointerCancel={handleMapPointerEnd}
+        onContextMenuCapture={handleMapContextMenu}
+      />
       {destinations.length === 0 ? <div className="map-empty-label is-prominent">Blank planning map</div> : null}
+      {addStopMenu && addStopMenuPosition ? (
+        <div
+          className="map-add-stop-menu"
+          role="menu"
+          style={{
+            left: `${addStopMenuPosition.x}px`,
+            top: `${addStopMenuPosition.y}px`,
+          }}
+        >
+          <button type="button" role="menuitem" onClick={() => requestAddStop(addStopMenu)}>
+            Add stop here
+          </button>
+          <button type="button" role="menuitem" onClick={closeAddStopMenu}>
+            Cancel
+          </button>
+        </div>
+      ) : null}
       {shouldShowDestinationLabels ? (
         <div className="map-destination-label-layer">
           {projectedDestinationLabels.map((destinationLabel) => (

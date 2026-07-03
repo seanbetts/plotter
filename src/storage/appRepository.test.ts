@@ -93,6 +93,22 @@ describe('app repository bootstrap', () => {
     expect(localRepository.listDestinations).not.toHaveBeenCalled();
   });
 
+  it('uses the local repository for the explicit e2e storage mode', async () => {
+    const localRepository = createMockRepository();
+    const createSupabaseClient = vi.fn();
+
+    const repository = await createAppTripRepository({
+      isSupabaseConfigured: false,
+      tripStorageMode: 'e2e-local',
+      localRepository,
+      createSupabaseClient,
+      createSupabaseRepository: vi.fn(),
+    });
+
+    expect(repository).toBe(localRepository);
+    expect(createSupabaseClient).not.toHaveBeenCalled();
+  });
+
   it('migrates local trip data into an empty Supabase trip during bootstrap', async () => {
     const user = { id: crypto.randomUUID() };
     const destination = { id: crypto.randomUUID() } as Destination;

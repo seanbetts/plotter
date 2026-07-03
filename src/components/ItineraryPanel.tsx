@@ -1,4 +1,4 @@
-import { Car, GripVertical, Ship, Signpost, Trash2 } from 'lucide-react';
+import { Car, GripVertical, RefreshCw, Ship, Signpost, Trash2 } from 'lucide-react';
 import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { formatDestinationLocation, formatLocationParts } from '../domain/locations';
@@ -71,6 +71,10 @@ function formatBorderCrossingLabel(origin: Destination, target: Destination) {
 
 function isRouteLegCalculating(routeLeg: RouteLeg) {
   return routeLeg.status === 'pending' || routeLeg.status === 'calculating';
+}
+
+function isRouteLegFailed(routeLeg: RouteLeg) {
+  return routeLeg.status === 'failed';
 }
 
 function nextRouteType(type: RouteLegType): RouteLegType {
@@ -362,6 +366,7 @@ export function ItineraryPanel({
               ? routeLegsByPair.get(`${destination.id}:${nextDestination.id}`)
               : undefined;
             const isCalculatingRoute = routeLeg ? isRouteLegCalculating(routeLeg) : false;
+            const isFailedRoute = routeLeg ? isRouteLegFailed(routeLeg) : false;
             const borderCrossingLabel = nextDestination
               ? formatBorderCrossingLabel(destination, nextDestination)
               : null;
@@ -469,8 +474,8 @@ export function ItineraryPanel({
                       {routeLeg.type === 'shipping-manual' ? <Ship size={15} /> : <Car size={15} />}
                     </button>
                     <span
-                      className={`inline-route-metrics ${
-                        isCalculatingRoute ? 'is-calculating-route' : ''
+                      className={`inline-route-metrics ${isCalculatingRoute ? 'is-calculating-route' : ''} ${
+                        isFailedRoute ? 'is-failed-route' : ''
                       }`}
                     >
                       {isCalculatingRoute ? (
@@ -482,6 +487,21 @@ export function ItineraryPanel({
                       ) : null}
                       {formatLegDistance(routeLeg) ? (
                         <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
+                      ) : null}
+                      {isFailedRoute ? (
+                        <button
+                          type="button"
+                          className="inline-route-retry"
+                          aria-label={`Retry ${destination.name} to ${nextDestination.name} route calculation`}
+                          title="Retry route calculation"
+                          onClick={() =>
+                            onUpdateRouteLeg(routeLeg.id, {
+                              type: 'driving-auto',
+                            })
+                          }
+                        >
+                          <RefreshCw size={15} aria-hidden="true" />
+                        </button>
                       ) : null}
                       {formatLegTime(routeLeg) ? (
                         <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>

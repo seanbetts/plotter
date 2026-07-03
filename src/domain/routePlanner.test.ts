@@ -179,6 +179,37 @@ describe('route planner helpers', () => {
     expect(result.removedRouteLegIds).toEqual([]);
   });
 
+  it('preserves manual shipping leg geometry with waypoints when endpoints still match', () => {
+    const origin = createDestination({
+      name: 'Singapore',
+      coordinates: { lat: 1.3521, lng: 103.8198 },
+      order: 0,
+    });
+    const target = createDestination({
+      name: 'Perth',
+      coordinates: { lat: -31.9523, lng: 115.8613 },
+      order: 1,
+    });
+    const shippingLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'shipping-manual',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [origin.coordinates.lng, origin.coordinates.lat],
+          [110.4, -12.2],
+          [target.coordinates.lng, target.coordinates.lat],
+        ],
+      },
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, target], [shippingLeg]);
+
+    expect(result.routeLegs).toEqual([shippingLeg]);
+    expect(result.removedRouteLegIds).toEqual([]);
+  });
+
   it('removes route legs that are no longer adjacent after a reorder', () => {
     const first = createDestination({
       name: 'First',
