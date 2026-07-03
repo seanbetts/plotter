@@ -16,6 +16,12 @@ export type DestinationImageStripProps = {
 
 const acceptedImageTypes = 'image/jpeg,image/png,image/webp,image/gif';
 
+type ThumbnailDropSide = 'before' | 'after';
+type ThumbnailDropTarget = {
+  mediaId: string;
+  side: ThumbnailDropSide;
+};
+
 function mediaLabel(mediaItem: MediaItem, index: number) {
   const caption = mediaItem.caption.trim();
   return caption || `Image ${index + 1}`;
@@ -32,7 +38,19 @@ function isFileDrag(event: DragEvent<HTMLElement>) {
   return types.includes('Files') || event.dataTransfer.files.length > 0;
 }
 
-function reorderAfter(mediaItems: MediaItem[], draggedMediaId: string, targetMediaId: string) {
+function getThumbnailDropSide(event: DragEvent<HTMLElement>): ThumbnailDropSide {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const midpoint = bounds.left + bounds.width / 2;
+
+  return event.clientX < midpoint ? 'before' : 'after';
+}
+
+function reorderAroundTarget(
+  mediaItems: MediaItem[],
+  draggedMediaId: string,
+  targetMediaId: string,
+  side: ThumbnailDropSide,
+) {
   if (draggedMediaId === targetMediaId) {
     return mediaItems.map((mediaItem) => mediaItem.id);
   }
@@ -49,10 +67,12 @@ function reorderAfter(mediaItems: MediaItem[], draggedMediaId: string, targetMed
     return mediaItems.map((mediaItem) => mediaItem.id);
   }
 
+  const insertionIndex = side === 'before' ? targetIndex : targetIndex + 1;
+
   return [
-    ...withoutDragged.slice(0, targetIndex + 1).map((mediaItem) => mediaItem.id),
+    ...withoutDragged.slice(0, insertionIndex).map((mediaItem) => mediaItem.id),
     draggedMediaItem.id,
-    ...withoutDragged.slice(targetIndex + 1).map((mediaItem) => mediaItem.id),
+    ...withoutDragged.slice(insertionIndex).map((mediaItem) => mediaItem.id),
   ];
 }
 
@@ -70,7 +90,7 @@ export function DestinationImageStrip({
   const fileDragDepthRef = useRef(0);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [draggedMediaId, setDraggedMediaId] = useState<string | null>(null);
-  const [dragTargetMediaId, setDragTargetMediaId] = useState<string | null>(null);
+  const [dragTarget, setDragTarget] = useState<ThumbnailDropTarget | null>(null);
   const heroMediaItem = mediaItems[0] ?? null;
   const stripClassName = `destination-image-strip${isFileDragOver ? ' is-drag-over' : ''}`;
 
@@ -146,7 +166,10 @@ export function DestinationImageStrip({
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'move';
     }
-    setDragTargetMediaId(mediaId);
+    setDragTarget({
+      mediaId,
+      side: getThumbnailDropSide(event),
+    });
   };
 
   const handleThumbnailDrop = (event: DragEvent<HTMLButtonElement>, targetMediaId: string) => {
@@ -154,9 +177,14 @@ export function DestinationImageStrip({
 
     event.preventDefault();
     event.stopPropagation();
-    const nextOrder = reorderAfter(mediaItems, draggedMediaId, targetMediaId);
+    const nextOrder = reorderAroundTarget(
+      mediaItems,
+      draggedMediaId,
+      targetMediaId,
+      getThumbnailDropSide(event),
+    );
     setDraggedMediaId(null);
-    setDragTargetMediaId(null);
+    setDragTarget(null);
 
     if (nextOrder.some((mediaId, index) => mediaId !== mediaItems[index]?.id)) {
       void Promise.resolve(onReorder(nextOrder)).catch(() => undefined);
@@ -165,7 +193,7 @@ export function DestinationImageStrip({
 
   const clearThumbnailDrag = () => {
     setDraggedMediaId(null);
-    setDragTargetMediaId(null);
+    setDragTarget(null);
   };
 
   return (
@@ -239,7 +267,9 @@ export function DestinationImageStrip({
           <button
             key={mediaItem.id}
             type="button"
-            className={`destination-image-thumbnail${dragTargetMediaId === mediaItem.id ? ' is-drag-target' : ''}`}
+            className={`destination-image-thumbnail${
+              dragTarget?.mediaId === mediaItem.id ? ` is-drop-${dragTarget.side}` : ''
+            }`}
             aria-label={openPreviewLabel(mediaItem, index)}
             draggable
             onClick={() => onOpenPreview(mediaItem.id)}

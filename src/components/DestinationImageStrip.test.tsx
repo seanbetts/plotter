@@ -76,6 +76,34 @@ function fileDragLeave(element: Element, relatedTarget: EventTarget | null = nul
   fireEvent(element, dragLeaveEvent);
 }
 
+function mockThumbnailBounds(element: Element) {
+  vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({
+    x: 100,
+    y: 0,
+    width: 80,
+    height: 60,
+    top: 0,
+    right: 180,
+    bottom: 60,
+    left: 100,
+    toJSON: () => ({}),
+  });
+}
+
+function dragOverThumbnail(element: Element, clientX: number) {
+  const dragOverEvent = createEvent.dragOver(element);
+
+  Object.defineProperty(dragOverEvent, 'clientX', { value: clientX });
+  fireEvent(element, dragOverEvent);
+}
+
+function dropThumbnail(element: Element, clientX: number) {
+  const dropEvent = createEvent.drop(element);
+
+  Object.defineProperty(dropEvent, 'clientX', { value: clientX });
+  fireEvent(element, dropEvent);
+}
+
 describe('DestinationImageStrip', () => {
   it('renders an accessible compact empty state and supports choosing files', () => {
     const onUploadFiles = vi.fn();
@@ -171,15 +199,32 @@ describe('DestinationImageStrip', () => {
     expect(region).not.toHaveClass('is-drag-over');
   });
 
-  it('reorders thumbnails by inserting the dragged image after the drop target', () => {
+  it('drops the dragged thumbnail after the target when hovering the right half', () => {
     const onReorder = vi.fn();
     render(<DestinationImageStrip {...createProps({ onReorder })} />);
+    const thirdThumbnail = screen.getByRole('button', { name: 'Open image 3' });
+    mockThumbnailBounds(thirdThumbnail);
 
     fireEvent.dragStart(screen.getByRole('button', { name: 'Open image 1: Sunset over the harbour' }));
-    fireEvent.dragOver(screen.getByRole('button', { name: 'Open image 3' }));
-    fireEvent.drop(screen.getByRole('button', { name: 'Open image 3' }));
+    dragOverThumbnail(thirdThumbnail, 170);
+    expect(thirdThumbnail).toHaveClass('is-drop-after');
+    dropThumbnail(thirdThumbnail, 170);
 
     expect(onReorder).toHaveBeenCalledWith(['media-2', 'media-3', 'media-1']);
+  });
+
+  it('drops the dragged thumbnail before the target when hovering the left half', () => {
+    const onReorder = vi.fn();
+    render(<DestinationImageStrip {...createProps({ onReorder })} />);
+    const firstThumbnail = screen.getByRole('button', { name: 'Open image 1: Sunset over the harbour' });
+    mockThumbnailBounds(firstThumbnail);
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Open image 3' }));
+    dragOverThumbnail(firstThumbnail, 110);
+    expect(firstThumbnail).toHaveClass('is-drop-before');
+    dropThumbnail(firstThumbnail, 110);
+
+    expect(onReorder).toHaveBeenCalledWith(['media-3', 'media-1', 'media-2']);
   });
 
   it('renders loading, uploading, and error feedback accessibly', () => {

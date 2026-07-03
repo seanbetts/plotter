@@ -2050,13 +2050,23 @@ select {
   background: rgb(var(--color-text-rgb) / 0.06);
 }
 
-.destination-image-thumbnail.is-drag-target::before {
+.destination-image-thumbnail.is-drop-before::before,
+.destination-image-thumbnail.is-drop-after::before {
   position: absolute;
-  inset: 4px auto 4px 4px;
+  top: 4px;
+  bottom: 4px;
   width: 3px;
   border-radius: 999px;
   background: var(--color-accent);
   content: "";
+}
+
+.destination-image-thumbnail.is-drop-before::before {
+  left: 4px;
+}
+
+.destination-image-thumbnail.is-drop-after::before {
+  right: 4px;
 }
 
 .destination-image-add-tile {
