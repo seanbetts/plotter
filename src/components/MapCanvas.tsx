@@ -50,6 +50,11 @@ type ProjectedDestinationLabel = {
   y: number;
 };
 
+type OverlayPosition = {
+  x: number;
+  y: number;
+};
+
 type GeoJsonSource = maplibregl.GeoJSONSource & {
   setData: (data: FeatureCollection) => void;
 };
@@ -459,6 +464,11 @@ const destinationPointsLayerId = 'world-tour-destination-points';
 const routeLineLayerId = 'world-tour-routes-line';
 const cityPointsLayerId = 'world-tour-city-points';
 const cityLabelsLayerId = 'world-tour-city-labels';
+const overlayViewportPaddingPx = 16;
+const addStopMenuApproxSize = {
+  width: 180,
+  height: 112,
+};
 
 const mapColorTokenFallbacks = {
   '--color-accent': '#d9467a',
@@ -710,6 +720,24 @@ function calmBasemapStyle(map: maplibregl.Map) {
       map.setPaintProperty(layer.id, 'line-opacity', 0.32);
     }
   }
+}
+
+function clampOverlayPosition(
+  position: OverlayPosition,
+  size: { width: number; height: number },
+): OverlayPosition {
+  if (typeof window === 'undefined') return position;
+
+  return {
+    x: Math.min(
+      Math.max(overlayViewportPaddingPx, position.x),
+      Math.max(overlayViewportPaddingPx, window.innerWidth - size.width - overlayViewportPaddingPx),
+    ),
+    y: Math.min(
+      Math.max(overlayViewportPaddingPx, position.y),
+      Math.max(overlayViewportPaddingPx, window.innerHeight - size.height - overlayViewportPaddingPx),
+    ),
+  };
 }
 
 export function MapCanvas({
@@ -1111,6 +1139,9 @@ export function MapCanvas({
   ).length;
   const hiddenDetailCount = mapDetailCategories.length - visibleDetailCount;
   const shouldShowDestinationLabels = currentMapZoom >= destinationLabelMinZoom;
+  const addStopMenuPosition = addStopMenu
+    ? clampOverlayPosition(addStopMenu.screenPosition, addStopMenuApproxSize)
+    : null;
 
   const setZoomStep = (nextZoom: number) => {
     const nextZoomStep = clampDetailZoomStep(nextZoom);
@@ -1193,13 +1224,13 @@ export function MapCanvas({
         onPointerCancel={handleMapPointerEnd}
       />
       {destinations.length === 0 ? <div className="map-empty-label is-prominent">Blank planning map</div> : null}
-      {addStopMenu ? (
+      {addStopMenu && addStopMenuPosition ? (
         <div
           className="map-add-stop-menu"
           role="menu"
           style={{
-            left: `${addStopMenu.screenPosition.x}px`,
-            top: `${addStopMenu.screenPosition.y}px`,
+            left: `${addStopMenuPosition.x}px`,
+            top: `${addStopMenuPosition.y}px`,
           }}
         >
           <button type="button" role="menuitem" onClick={() => requestAddStop(addStopMenu)}>

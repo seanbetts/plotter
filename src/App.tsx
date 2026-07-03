@@ -34,6 +34,17 @@ type PendingMapStop = {
   saveError: string | null;
 };
 
+type OverlayPosition = {
+  x: number;
+  y: number;
+};
+
+const overlayViewportPaddingPx = 16;
+const mapStopConfirmationApproxSize = {
+  width: 320,
+  height: 260,
+};
+
 function formatRepositoryError(caught: unknown): RepositoryError {
   const message = caught instanceof Error ? caught.message : 'Unable to prepare trip storage';
 
@@ -74,6 +85,24 @@ function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, '
       name,
       countryRegion: formatCoordinatePair(coordinates),
     }),
+  };
+}
+
+function clampOverlayPosition(
+  position: OverlayPosition,
+  size: { width: number; height: number },
+): OverlayPosition {
+  if (typeof window === 'undefined') return position;
+
+  return {
+    x: Math.min(
+      Math.max(overlayViewportPaddingPx, position.x),
+      Math.max(overlayViewportPaddingPx, window.innerWidth - size.width - overlayViewportPaddingPx),
+    ),
+    y: Math.min(
+      Math.max(overlayViewportPaddingPx, position.y),
+      Math.max(overlayViewportPaddingPx, window.innerHeight - size.height - overlayViewportPaddingPx),
+    ),
   };
 }
 
@@ -172,6 +201,9 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
 
     return selectedDestinationIndex === -1 ? undefined : selectedDestinationIndex + 1;
   }, [destinations, selectedDestinationId]);
+  const pendingMapStopPosition = pendingMapStop
+    ? clampOverlayPosition(pendingMapStop.screenPosition, mapStopConfirmationApproxSize)
+    : null;
 
   const restorePendingMapStopFocus = useCallback(() => {
     const previouslyFocusedElement = previouslyFocusedMapStopElementRef.current;
@@ -395,7 +427,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
             />
           </>
         ) : null}
-        {!isInteractionLocked && pendingMapStop ? (
+        {!isInteractionLocked && pendingMapStop && pendingMapStopPosition ? (
           <section
             ref={pendingMapStopDialogRef}
             className="map-stop-confirmation"
@@ -404,8 +436,8 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
             aria-label="Add stop from map"
             tabIndex={-1}
             style={{
-              left: `${pendingMapStop.screenPosition.x}px`,
-              top: `${pendingMapStop.screenPosition.y}px`,
+              left: `${pendingMapStopPosition.x}px`,
+              top: `${pendingMapStopPosition.y}px`,
             }}
           >
             <div>

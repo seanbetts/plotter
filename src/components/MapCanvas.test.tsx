@@ -267,6 +267,33 @@ describe('MapCanvas', () => {
     });
   });
 
+  it('keeps the add-stop context menu inside the viewport near the bottom-right edge', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onRequestAddStop={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const contextMenuHandler = map.on.mock.calls.find(([eventName]) => eventName === 'contextmenu')?.[1];
+
+    act(() => {
+      contextMenuHandler({
+        preventDefault: vi.fn(),
+        lngLat: { lat: 51.0576, lng: -0.1342 },
+        point: { x: 1000, y: 740 },
+      });
+    });
+
+    const menu = screen.getByRole('menu');
+
+    expect(menu).toHaveStyle({ left: '828px', top: '640px' });
+  });
+
   it('emits an add-stop request after a long press on the map', () => {
     vi.useFakeTimers();
     const onRequestAddStop = vi.fn();

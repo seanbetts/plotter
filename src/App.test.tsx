@@ -252,6 +252,39 @@ describe('App', () => {
     expect(screen.getByText('Stop 01')).toBeInTheDocument();
   });
 
+  it('keeps the map stop confirmation inside the viewport near the bottom-right edge', async () => {
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'place-balcombe',
+        label: 'Balcombe, United Kingdom',
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+
+    const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
+    act(() => {
+      contextMenuHandler({
+        preventDefault: vi.fn(),
+        lngLat: { lat: 51.0576, lng: -0.1342 },
+        point: { x: 1000, y: 740 },
+      });
+    });
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toHaveStyle({
+      left: '688px',
+      top: '492px',
+    });
+  });
+
   it('disables map stop confirmation while reverse geocoding is resolving', async () => {
     const coordinateLookup = createDeferred<Awaited<ReturnType<typeof resolveMapTilerCoordinates>>>();
     vi.mocked(resolveMapTilerCoordinates).mockReturnValue(coordinateLookup.promise);

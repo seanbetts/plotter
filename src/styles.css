@@ -390,6 +390,7 @@ select {
 
 .map-add-stop-menu {
   position: absolute;
+  box-sizing: border-box;
   z-index: 12;
   display: grid;
   min-width: 148px;
@@ -403,7 +404,6 @@ select {
   color: var(--color-text);
   background: var(--surface-overlay-menu);
   box-shadow: var(--shadow-panel);
-  transform: translate(calc(-100% - 8px), calc(-100% - 8px));
   -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
 }
@@ -643,6 +643,7 @@ select {
 
 .map-stop-confirmation {
   position: absolute;
+  box-sizing: border-box;
   z-index: 17;
   display: grid;
   width: min(320px, calc(100vw - 32px));
@@ -655,7 +656,6 @@ select {
   color: var(--color-text);
   background: var(--surface-overlay-profile);
   box-shadow: var(--shadow-panel);
-  transform: translate(calc(-100% - 12px), calc(-100% - 12px));
   -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
 }
