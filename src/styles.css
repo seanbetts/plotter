@@ -1454,7 +1454,7 @@ select {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
   color: var(--color-text-inverse);
-  background: var(--color-warning);
+  background: var(--color-accent-hover);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.34);
   cursor: pointer;
 }
