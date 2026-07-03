@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,6 +24,8 @@ type MockMap = {
   addLayer: Mock;
   getCanvas: Mock;
   getZoom: Mock;
+  getCenter: Mock;
+  unproject: Mock;
   project: Mock;
 };
 
@@ -48,6 +50,8 @@ const maplibreMock = vi.hoisted(() => {
       addLayer: vi.fn(),
       getCanvas: vi.fn(() => ({ style: { cursor: '' } })),
       getZoom: vi.fn(() => 1.4),
+      getCenter: vi.fn(() => ({ lat: 24, lng: 18 })),
+      unproject: vi.fn(([x, y]: [number, number]) => ({ lng: (x - 1000) / 10, lat: (500 - y) / 10 })),
       project,
     };
     mapInstances.push(map);
@@ -195,6 +199,105 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Select Kyoto' })).not.toHaveClass('is-selected');
   });
 
+  it('adds a right-clicked map stop after reverse-geocoded confirmation and opens its profile', async () => {
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue({
+      kind: 'place',
+      id: 'place-balcombe',
+      label: 'Balcombe, United Kingdom',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        sourceLabel: 'Balcombe, West Sussex, United Kingdom',
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'place-balcombe',
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+
+    const map = maplibreMock.mapInstances.at(-1)!;
+    const contextMenuHandler = map.on.mock.calls.find(([eventName]) => eventName === 'contextmenu')?.[1];
+    act(() => {
+      contextMenuHandler({
+        preventDefault: vi.fn(),
+        lngLat: { lat: 51.0576, lng: -0.1342 },
+        point: { x: 300, y: 220 },
+      });
+    });
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Balcombe');
+    await userEvent.click(screen.getByRole('button', { name: 'Add stop' }));
+
+    expect(resolveMapTilerCoordinates).toHaveBeenCalledWith(
+      { lat: 51.0576, lng: -0.1342 },
+      { apiKey: expect.any(String) },
+    );
+    expect(await screen.findByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
+    expect(screen.getByText('Stop 01')).toBeInTheDocument();
+  });
+
+  it('allows adding a map stop when reverse geocoding fails', async () => {
+    vi.mocked(resolveMapTilerCoordinates).mockRejectedValue(new Error('Coordinate lookup failed'));
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+
+    const map = maplibreMock.mapInstances.at(-1)!;
+    const contextMenuHandler = map.on.mock.calls.find(([eventName]) => eventName === 'contextmenu')?.[1];
+    act(() => {
+      contextMenuHandler({
+        preventDefault: vi.fn(),
+        lngLat: { lat: 12.345678, lng: 98.765432 },
+        point: { x: 300, y: 220 },
+      });
+    });
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Dropped pin');
+    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('12.3457, 98.7654');
+    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Coordinate lookup failed');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add stop' }));
+
+    expect(await screen.findByRole('complementary', { name: 'Dropped pin profile' })).toBeInTheDocument();
+  });
+
+  it('adds a stop from the map center toolbar action', async () => {
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue({
+      kind: 'place',
+      id: 'place-paris',
+      label: 'Paris, France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+      location: {
+        placeName: 'Paris',
+        regionName: 'Ile-de-France',
+        countryName: 'France',
+        sourceLabel: 'Paris, Ile-de-France, France',
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'place-paris',
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+    maplibreMock.mapInstances.at(-1)!.getCenter.mockReturnValue({ lat: 48.8566, lng: 2.3522 });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add stop at map center' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Add stop' }));
+
+    expect(await screen.findByRole('complementary', { name: 'Paris profile' })).toBeInTheDocument();
+  });
+
   it('closes the selected destination profile with Escape', async () => {
     const user = userEvent.setup();
     const destination = createDestination({
@@ -230,6 +333,7 @@ describe('App', () => {
 
     expect(screen.getByText('Loading trip data')).toBeInTheDocument();
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add stop at map center' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(maplibreMock.mapInstances).toHaveLength(1));
