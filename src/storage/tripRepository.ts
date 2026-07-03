@@ -60,6 +60,17 @@ function normalizeRouteLeg(routeLeg: LegacyRouteLeg): RouteLeg {
   };
 }
 
+async function createLocalMediaUrl(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return `data:${file.type || 'application/octet-stream'};base64,${btoa(binary)}`;
+}
+
 export function createTripRepository(db: TripDb): TripRepository {
   return {
     async listDestinations(): Promise<Destination[]> {
@@ -109,7 +120,7 @@ export function createTripRepository(db: TripDb): TripRepository {
       const timestamp = new Date().toISOString();
       const mediaItem: MediaItem = {
         id: crypto.randomUUID(),
-        url: input.file.name,
+        url: await createLocalMediaUrl(input.file),
         caption: input.caption ?? '',
         credit: input.credit ?? '',
         sortOrder:

@@ -271,6 +271,7 @@ describe('trip repository', () => {
     });
 
     expect(mediaItem.sortOrder).toBe(5);
+    expect(mediaItem.url).toBe('data:image/webp;base64,aW1hZ2UtZGF0YQ==');
   });
 
   it('normalizes legacy records without order or route status', async () => {
