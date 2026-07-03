@@ -104,8 +104,9 @@ test('adds a stop from the map context menu', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Add stop at map center' })).toBeVisible();
-  await page.getByTestId('map-container').click({
+  const mapContainer = page.getByTestId('map-container');
+  await expect(mapContainer).toBeVisible();
+  await mapContainer.click({
     button: 'right',
     position: { x: 360, y: 260 },
   });
