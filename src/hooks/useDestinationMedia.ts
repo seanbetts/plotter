@@ -208,7 +208,9 @@ export function useDestinationMedia(
       updateMediaItems((current) => current.filter((mediaItem) => mediaItem.id !== mediaId));
     } catch (caught) {
       if (isCurrentGeneration(generation)) {
-        setError(caught instanceof Error ? caught.message : 'Unable to delete image.');
+        const error = caught instanceof Error ? caught : new Error('Unable to delete image.');
+        setError(error.message);
+        throw error;
       }
     }
   }, [isCurrentGeneration, repository, updateMediaItems]);

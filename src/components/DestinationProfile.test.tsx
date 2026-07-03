@@ -396,6 +396,42 @@ describe('DestinationProfile', () => {
     expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
   });
 
+  it('keeps the image preview open and shows an error when delete fails', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Bodo',
+      countryRegion: 'Norway',
+      coordinates: { lat: 67.2804, lng: 14.4049 },
+    });
+    const onDeleteMedia = vi.fn().mockRejectedValue(new Error('Storage delete failed.'));
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        mediaItems={[
+          createMediaItem({
+            id: 'media-1',
+            url: '/bodo.jpg',
+            caption: 'Harbor view',
+          }),
+        ]}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+        onDeleteMedia={onDeleteMedia}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open hero image: Harbor view' }));
+    await user.click(screen.getByRole('button', { name: 'Delete image' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm delete image' }));
+
+    expect(onDeleteMedia).toHaveBeenCalledWith('media-1');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to delete image.');
+    expect(screen.getByRole('dialog', { name: 'Image preview' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open hero image: Harbor view' })).toBeInTheDocument();
+  });
+
   it('reorders media from the image preview move controls', async () => {
     const user = userEvent.setup();
     const destination = createDestination({

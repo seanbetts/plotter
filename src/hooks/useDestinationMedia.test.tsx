@@ -195,6 +195,29 @@ describe('useDestinationMedia', () => {
     expect(result.current.mediaItems).toEqual([existing[1]]);
   });
 
+  it('keeps media and rejects when repository delete fails', async () => {
+    const existing = [createMediaItem('media-1', 0), createMediaItem('media-2', 1)];
+    const repository = createMediaRepository({
+      listDestinationMedia: vi.fn().mockResolvedValue(existing),
+      deleteDestinationMedia: vi.fn().mockRejectedValue(new Error('Storage delete failed.')),
+    });
+
+    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let deletePromise!: Promise<void>;
+    act(() => {
+      deletePromise = result.current.deleteMedia('media-1');
+    });
+
+    await expect(deletePromise).rejects.toThrow('Storage delete failed.');
+
+    expect(repository.deleteDestinationMedia).toHaveBeenCalledWith('media-1');
+    expect(result.current.mediaItems).toEqual(existing);
+    await waitFor(() => expect(result.current.error).toBe('Storage delete failed.'));
+  });
+
   it('restores previous order and surfaces an error when reorder fails', async () => {
     const existing = [
       createMediaItem('media-1', 0),
