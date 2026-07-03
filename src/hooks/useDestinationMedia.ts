@@ -109,6 +109,7 @@ export function useDestinationMedia(
 
     const generation = generationRef.current + 1;
     generationRef.current = generation;
+    setUploadingCount(0);
     await loadMedia(generation, destinationId);
   }, [destinationId, loadMedia, replaceMediaItems]);
 

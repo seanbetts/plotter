@@ -316,6 +316,37 @@ describe('useDestinationMedia', () => {
     expect(result.current.isUploading).toBe(false);
   });
 
+  it('does not leave uploading stuck or append stale upload results after reload', async () => {
+    const upload = createDeferred(createMediaItem('stale-upload', 0));
+    const repository = createMediaRepository({
+      listDestinationMedia: vi.fn().mockResolvedValue([]),
+      uploadDestinationMedia: vi.fn().mockReturnValue(upload.promise),
+    });
+
+    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let uploadPromise!: Promise<void>;
+    act(() => {
+      uploadPromise = result.current.uploadFiles([createFile('stale.jpg', 'image/jpeg')]);
+    });
+
+    await waitFor(() => expect(result.current.isUploading).toBe(true));
+
+    await act(async () => {
+      await result.current.reload();
+    });
+
+    await act(async () => {
+      upload.resolve();
+      await uploadPromise;
+    });
+
+    expect(result.current.isUploading).toBe(false);
+    expect(result.current.mediaItems).toEqual([]);
+  });
+
   it('keeps uploaded media ordered by sort order after appending returned items', async () => {
     const existing = [createMediaItem('existing-media', 1)];
     const uploaded = createMediaItem('uploaded-media', 0);
