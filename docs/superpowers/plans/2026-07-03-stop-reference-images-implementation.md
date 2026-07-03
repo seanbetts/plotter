@@ -1306,7 +1306,7 @@ Run:
 npx supabase db query --linked "select column_name, data_type, column_default, is_nullable from information_schema.columns where table_schema = 'public' and table_name = 'media_assets' and column_name = 'sort_order';"
 ```
 
-Expected: one row with `sort_order`, `integer`, default `0`, and `NO` for nullable.
+Expected: one row with `sort_order`, `integer`, a null/empty `column_default`, and `NO` for nullable.
 
 Run:
 
