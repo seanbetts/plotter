@@ -236,7 +236,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
 
   const openPendingMapStop = useCallback(
     async (request: MapAddStopRequest) => {
-      if (isInteractionLocked) return;
+      if (isInteractionLocked || pendingMapStop?.isSaving) return;
 
       const requestId = pendingMapStopRequestIdRef.current + 1;
       pendingMapStopRequestIdRef.current = requestId;
@@ -282,7 +282,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         });
       }
     },
-    [isInteractionLocked],
+    [isInteractionLocked, pendingMapStop?.isSaving],
   );
 
   const handleRequestAddAtMapCenter = useCallback(() => {

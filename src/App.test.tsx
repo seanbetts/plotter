@@ -204,16 +204,27 @@ describe('App', () => {
   });
 
   it('adds a right-clicked map stop after reverse-geocoded confirmation and opens its profile', async () => {
-    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
-      createPlaceSearchResult({
-        id: 'place-balcombe',
-        label: 'Balcombe, United Kingdom',
-        placeName: 'Balcombe',
-        regionName: 'West Sussex',
-        countryName: 'United Kingdom',
-        coordinates: { lat: 51.0576, lng: -0.1342 },
-      }),
-    );
+    vi.mocked(resolveMapTilerCoordinates)
+      .mockResolvedValueOnce(
+        createPlaceSearchResult({
+          id: 'place-balcombe',
+          label: 'Balcombe, United Kingdom',
+          placeName: 'Balcombe',
+          regionName: 'West Sussex',
+          countryName: 'United Kingdom',
+          coordinates: { lat: 51.0576, lng: -0.1342 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        createPlaceSearchResult({
+          id: 'place-paris',
+          label: 'Paris, France',
+          placeName: 'Paris',
+          regionName: 'Ile-de-France',
+          countryName: 'France',
+          coordinates: { lat: 48.8566, lng: 2.3522 },
+        }),
+      );
 
     render(<App />);
 
@@ -320,6 +331,12 @@ describe('App', () => {
     const wasNotCanceled = fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
     expect(wasNotCanceled).toBe(false);
     expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Add stop at map center' }));
+
+    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Balcombe');
+    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).not.toHaveTextContent('Paris');
+    expect(resolveMapTilerCoordinates).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       saveDestination.resolve(undefined);
