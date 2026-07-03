@@ -11,7 +11,7 @@ export type MapAddStopRequest = {
     x: number;
     y: number;
   };
-  source: 'context-menu' | 'long-press' | 'map-center';
+  source: 'context-menu' | 'long-press';
 };
 
 type MapCanvasProps = {
@@ -20,7 +20,6 @@ type MapCanvasProps = {
   selectedDestinationId: string | null;
   onSelectDestination: (destinationId: string) => void;
   onRequestAddStop?: (request: MapAddStopRequest) => void;
-  onMapCenterCoordinatesChange?: (coordinates: Coordinates) => void;
 };
 
 type DestinationFeatureProperties = {
@@ -746,7 +745,6 @@ export function MapCanvas({
   selectedDestinationId,
   onSelectDestination,
   onRequestAddStop,
-  onMapCenterCoordinatesChange,
 }: MapCanvasProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -755,7 +753,6 @@ export function MapCanvas({
   const latestSelectedDestinationIdRef = useRef(selectedDestinationId);
   const onSelectDestinationRef = useRef(onSelectDestination);
   const onRequestAddStopRef = useRef(onRequestAddStop);
-  const onMapCenterCoordinatesChangeRef = useRef(onMapCenterCoordinatesChange);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{
     pointerId: number;
@@ -821,14 +818,6 @@ export function MapCanvas({
 
   const closeAddStopMenu = useCallback(() => {
     setAddStopMenu(null);
-  }, []);
-
-  const emitMapCenterCoordinates = useCallback(() => {
-    const map = mapRef.current;
-    if (!map || !onMapCenterCoordinatesChangeRef.current) return;
-
-    const center = map.getCenter();
-    onMapCenterCoordinatesChangeRef.current({ lat: center.lat, lng: center.lng });
   }, []);
 
   const requestAddStop = useCallback((request: MapAddStopRequest) => {
@@ -930,7 +919,6 @@ export function MapCanvas({
     latestSelectedDestinationIdRef.current = selectedDestinationId;
     onSelectDestinationRef.current = onSelectDestination;
     onRequestAddStopRef.current = onRequestAddStop;
-    onMapCenterCoordinatesChangeRef.current = onMapCenterCoordinatesChange;
     updateMapSources();
 
     if (destinations.length > previousDestinationCount) {
@@ -945,7 +933,6 @@ export function MapCanvas({
     selectedDestinationId,
     onSelectDestination,
     onRequestAddStop,
-    onMapCenterCoordinatesChange,
     fitMapToDestinations,
     updateMapSources,
   ]);
@@ -1105,7 +1092,6 @@ export function MapCanvas({
     };
     const handleMapMove = () => {
       updateDestinationLabelPositions();
-      emitMapCenterCoordinates();
     };
     const handleZoomEnd = () => {
       const nextZoom = map.getZoom();
@@ -1147,7 +1133,6 @@ export function MapCanvas({
     map.on('contextmenu', handleContextMenu);
 
     mapRef.current = map;
-    emitMapCenterCoordinates();
 
     return () => {
       map.off('load', handleLoad);
@@ -1168,7 +1153,6 @@ export function MapCanvas({
     addMapLayers,
     applyCurrentMapDetailSettings,
     clearLongPressTimer,
-    emitMapCenterCoordinates,
     openAddStopMenu,
     updateDestinationLabelPositions,
   ]);

@@ -192,7 +192,6 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
-  const [mapCenterCoordinates, setMapCenterCoordinates] = useState<Coordinates | null>(null);
   const pendingMapStopRequestIdRef = useRef(0);
   const activePendingMapStopIdRef = useRef<number | null>(null);
   const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
@@ -329,16 +328,6 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     [isInteractionLocked, pendingMapStop?.isSaving],
   );
 
-  const handleRequestAddAtMapCenter = useCallback(() => {
-    if (!mapCenterCoordinates) return;
-
-    void openPendingMapStop({
-      coordinates: mapCenterCoordinates,
-      screenPosition: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
-      source: 'map-center',
-    });
-  }, [mapCenterCoordinates, openPendingMapStop]);
-
   const closePendingMapStop = useCallback(() => {
     if (pendingMapStop?.isSaving) return;
 
@@ -418,7 +407,6 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
           selectedDestinationId={selectedDestinationId}
           onSelectDestination={setSelectedDestinationId}
           onRequestAddStop={openPendingMapStop}
-          onMapCenterCoordinatesChange={setMapCenterCoordinates}
         />
         {!isInteractionLocked ? (
           <>
@@ -426,7 +414,6 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               searchPlaces={searchPlaces}
               resolveSearchResult={resolveSearchResult}
               onAddDestination={handleAddDestination}
-              onRequestAddAtMapCenter={mapCenterCoordinates ? handleRequestAddAtMapCenter : undefined}
             />
             <ItineraryPanel
               destinations={destinations}

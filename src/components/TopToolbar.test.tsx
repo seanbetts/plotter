@@ -60,23 +60,6 @@ describe('TopToolbar', () => {
     expect(screen.getByPlaceholderText('Find a city, landmark, or paste coordinates')).toBeInTheDocument();
   });
 
-  it('calls the map-center add handler from the icon action', async () => {
-    const onRequestAddAtMapCenter = vi.fn();
-
-    render(
-      <TopToolbar
-        searchPlaces={vi.fn()}
-        resolveSearchResult={vi.fn()}
-        onAddDestination={vi.fn()}
-        onRequestAddAtMapCenter={onRequestAddAtMapCenter}
-      />,
-    );
-
-    await userEvent.click(screen.getByRole('button', { name: 'Add stop at map center' }));
-
-    expect(onRequestAddAtMapCenter).toHaveBeenCalledTimes(1);
-  });
-
   it('shows live search results and adds the selected result', async () => {
     const user = userEvent.setup();
     const onAddDestination = vi.fn();
