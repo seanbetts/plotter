@@ -209,7 +209,7 @@ describe('supabase trip repository mappers', () => {
     const uploadedPath = `${tripId}/${destinationId}/asset-paris.jpg`;
     const existingRows = [
       { id: crypto.randomUUID(), sort_order: 0 },
-      { id: crypto.randomUUID(), sort_order: 1 },
+      { id: crypto.randomUUID(), sort_order: 2 },
     ];
     const upload = vi.fn(async () => ({ data: { path: uploadedPath }, error: null }));
     const createSignedUrl = vi.fn(async () => ({
@@ -290,7 +290,7 @@ describe('supabase trip repository mappers', () => {
         content_type: 'image/jpeg',
         size_bytes: file.size,
         uploaded_by: userId,
-        sort_order: 2,
+        sort_order: 3,
       }),
     );
     expect(mediaItem).toEqual(
@@ -307,7 +307,7 @@ describe('supabase trip repository mappers', () => {
   it('lists destination media with signed URLs', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();
-const rows = [
+    const rows = [
       {
         id: crypto.randomUUID(),
         trip_id: tripId,
@@ -379,9 +379,25 @@ const rows = [
     };
     const repository = createSupabaseTripRepository(supabase as never);
 
+    expect(mediaAssetFromSupabaseRow(rows[0], 'https://signed.example/asset.webp')).toEqual(
+      expect.objectContaining({
+        id: rows[0].id,
+        url: 'https://signed.example/asset.webp',
+        sortOrder: rows[0].sort_order,
+      }),
+    );
+
     await expect(repository.listDestinationMedia(destinationId)).resolves.toEqual([
-mediaAssetFromSupabaseRow(rows[0], 'https://signed.example/asset.webp'),
-      mediaAssetFromSupabaseRow(rows[1], 'https://signed.example/asset.webp'),
+      expect.objectContaining({
+        id: rows[0].id,
+        url: 'https://signed.example/asset.webp',
+        sortOrder: rows[0].sort_order,
+      }),
+      expect.objectContaining({
+        id: rows[1].id,
+        url: 'https://signed.example/asset.webp',
+        sortOrder: rows[1].sort_order,
+      }),
     ]);
     expect(mediaSortOrderBy).toHaveBeenCalledWith('sort_order', { ascending: true });
     expect(mediaOrderBy).toHaveBeenCalledWith('created_at', { ascending: true });

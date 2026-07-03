@@ -375,15 +375,16 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       if (userResponse.error || !user) {
         throw new Error(userResponse.error?.message || 'Sign in before uploading media.');
       }
-      const existingRows = assertNoSupabaseError<Pick<SupabaseMediaAssetRow, 'id'>[]>(
+      const existingRows = assertNoSupabaseError<Pick<SupabaseMediaAssetRow, 'sort_order'>[]>(
         await supabase
           .from('media_assets')
-          .select('id')
+          .select('sort_order')
           .eq('trip_id', tripId)
           .eq('destination_id', input.destinationId),
         'Unable to load destination media order.',
       );
-      const nextSortOrder = existingRows.length;
+      const nextSortOrder =
+        existingRows.reduce((maxSortOrder, row) => Math.max(maxSortOrder, row.sort_order), -1) + 1;
 
       const bucketId = 'trip-media';
       const objectPath = `${tripId}/${input.destinationId}/${createStorageObjectName(input.file.name)}`;
