@@ -666,7 +666,7 @@ describe('supabase trip repository mappers', () => {
     expect(calls).toEqual(['storage', 'metadata']);
   });
 
-  it('reorders destination media with collision-safe temporary sort orders', async () => {
+  it('reorders destination media with collision-safe temporary sort orders when destructured', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();
     const firstId = crypto.randomUUID();
@@ -757,8 +757,9 @@ describe('supabase trip repository mappers', () => {
       }),
     };
     const repository = createSupabaseTripRepository(supabase as never);
+    const { reorderDestinationMedia } = repository;
 
-    await expect(repository.reorderDestinationMedia(destinationId, [secondId, firstId])).resolves.toEqual([
+    await expect(reorderDestinationMedia(destinationId, [secondId, firstId])).resolves.toEqual([
       expect.objectContaining({ id: secondId, sortOrder: 0 }),
       expect.objectContaining({ id: firstId, sortOrder: 1 }),
     ]);

@@ -402,6 +402,21 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     );
   }
 
+  async function listSignedDestinationMedia(tripId: string, destinationId: string) {
+    const rows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
+      await supabase
+        .from('media_assets')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('destination_id', destinationId)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true }),
+      'Unable to load destination media.',
+    );
+
+    return Promise.all(rows.map((row) => createSignedMediaItem(row)));
+  }
+
   async function updateDestinationMediaSortOrder(input: {
     tripId: string;
     destinationId: string;
@@ -460,20 +475,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
     async listDestinationMedia(destinationId) {
       const tripId = await getActiveTripId();
-      const rows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
-        await supabase
-          .from('media_assets')
-          .select('*')
-          .eq('trip_id', tripId)
-          .eq('destination_id', destinationId)
-          .order('sort_order', { ascending: true })
-          .order('created_at', { ascending: true }),
-        'Unable to load destination media.',
-      );
-
-      return Promise.all(
-        rows.map((row) => createSignedMediaItem(row)),
-      );
+      return listSignedDestinationMedia(tripId, destinationId);
     },
 
     async uploadDestinationMedia(input) {
@@ -603,7 +605,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         });
       }
 
-      return this.listDestinationMedia(destinationId);
+      return listSignedDestinationMedia(tripId, destinationId);
     },
 
     async listRouteLegs() {
