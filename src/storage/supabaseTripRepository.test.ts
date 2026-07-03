@@ -207,6 +207,10 @@ describe('supabase trip repository mappers', () => {
     const userId = crypto.randomUUID();
     const mediaAssetId = crypto.randomUUID();
     const uploadedPath = `${tripId}/${destinationId}/asset-paris.jpg`;
+    const existingRows = [
+      { id: crypto.randomUUID(), sort_order: 0 },
+      { id: crypto.randomUUID(), sort_order: 1 },
+    ];
     const upload = vi.fn(async () => ({ data: { path: uploadedPath }, error: null }));
     const createSignedUrl = vi.fn(async () => ({
       data: { signedUrl: 'https://signed.example/paris.jpg' },
@@ -218,6 +222,7 @@ describe('supabase trip repository mappers', () => {
           data: {
             id: mediaAssetId,
             ...row,
+            sort_order: row.sort_order,
             created_at: '2026-06-29T12:00:00.000Z',
             updated_at: '2026-06-29T12:00:00.000Z',
           },
@@ -246,7 +251,14 @@ describe('supabase trip repository mappers', () => {
         }
 
         if (tableName === 'media_assets') {
-          return { insert: mediaInsert };
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(async () => ({ data: existingRows, error: null })),
+              })),
+            })),
+            insert: mediaInsert,
+          };
         }
 
         throw new Error(`Unexpected table ${tableName}`);
@@ -278,6 +290,7 @@ describe('supabase trip repository mappers', () => {
         content_type: 'image/jpeg',
         size_bytes: file.size,
         uploaded_by: userId,
+        sort_order: 2,
       }),
     );
     expect(mediaItem).toEqual(
@@ -294,25 +307,44 @@ describe('supabase trip repository mappers', () => {
   it('lists destination media with signed URLs', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();
-    const objectPath = `${tripId}/${destinationId}/asset.webp`;
-    const row = {
-      id: crypto.randomUUID(),
-      trip_id: tripId,
-      destination_id: destinationId,
-      bucket_id: 'trip-media',
-      object_path: objectPath,
-      caption: 'Harbour',
-      credit: '',
-      content_type: 'image/webp',
-      size_bytes: 1234,
-      uploaded_by: crypto.randomUUID(),
-      created_at: '2026-06-29T12:00:00.000Z',
-      updated_at: '2026-06-29T12:00:00.000Z',
-    };
+    const rows = [
+      {
+        id: crypto.randomUUID(),
+        trip_id: tripId,
+        destination_id: destinationId,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/${destinationId}/asset-b.webp`,
+        caption: 'Later created but first sorted',
+        credit: '',
+        sort_order: 0,
+        content_type: 'image/webp',
+        size_bytes: 1200,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:05:00.000Z',
+        updated_at: '2026-06-29T12:05:00.000Z',
+      },
+      {
+        id: crypto.randomUUID(),
+        trip_id: tripId,
+        destination_id: destinationId,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/${destinationId}/asset-a.webp`,
+        caption: 'Earlier created but second sorted',
+        credit: '',
+        sort_order: 1,
+        content_type: 'image/webp',
+        size_bytes: 1234,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:00:00.000Z',
+        updated_at: '2026-06-29T12:00:00.000Z',
+      },
+    ];
     const createSignedUrl = vi.fn(async () => ({
       data: { signedUrl: 'https://signed.example/asset.webp' },
       error: null,
     }));
+    const mediaOrderBy = vi.fn(async () => ({ data: rows, error: null }));
+    const mediaSortOrderBy = vi.fn(() => ({ order: mediaOrderBy }));
     const supabase = {
       auth: {
         getUser: vi.fn(async () => ({
@@ -335,7 +367,7 @@ describe('supabase trip repository mappers', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 eq: vi.fn(() => ({
-                  order: vi.fn(async () => ({ data: [row], error: null })),
+                  order: mediaSortOrderBy,
                 })),
               })),
             })),
@@ -348,8 +380,12 @@ describe('supabase trip repository mappers', () => {
     const repository = createSupabaseTripRepository(supabase as never);
 
     await expect(repository.listDestinationMedia(destinationId)).resolves.toEqual([
-      mediaAssetFromSupabaseRow(row, 'https://signed.example/asset.webp'),
+      mediaAssetFromSupabaseRow(rows[0], 'https://signed.example/asset.webp'),
+      mediaAssetFromSupabaseRow(rows[1], 'https://signed.example/asset.webp'),
     ]);
-    expect(createSignedUrl).toHaveBeenCalledWith(objectPath, 60 * 60);
+    expect(mediaSortOrderBy).toHaveBeenCalledWith('sort_order', { ascending: true });
+    expect(mediaOrderBy).toHaveBeenCalledWith('created_at', { ascending: true });
+    expect(createSignedUrl).toHaveBeenNthCalledWith(1, rows[0].object_path, 60 * 60);
+    expect(createSignedUrl).toHaveBeenNthCalledWith(2, rows[1].object_path, 60 * 60);
   });
 });
