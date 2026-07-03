@@ -12,6 +12,8 @@ type MockMap = {
   remove: Mock;
   addControl: Mock;
   getZoom: Mock;
+  getCenter: Mock;
+  unproject: Mock;
   getSource: Mock;
   addSource: Mock;
   addLayer: Mock;
@@ -41,6 +43,8 @@ const maplibreMock = vi.hoisted(() => {
       remove: vi.fn(),
       addControl: vi.fn(),
       getZoom: vi.fn(() => zoom),
+      getCenter: vi.fn(() => ({ lat: 24, lng: 18 })),
+      unproject: vi.fn(([x, y]: [number, number]) => ({ lng: (x - 1000) / 10, lat: (500 - y) / 10 })),
       getSource: vi.fn((sourceId: string) => sources.get(sourceId)),
       addSource: vi.fn((sourceId: string) => {
         const source = { setData: vi.fn() };
@@ -228,6 +232,137 @@ describe('MapCanvas', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Open Cappadocia stop details' }));
 
     expect(onSelectDestination).toHaveBeenCalledWith(destination.id);
+  });
+
+  it('opens an add-stop context menu on right-click and emits clicked coordinates', async () => {
+    const onRequestAddStop = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onRequestAddStop={onRequestAddStop}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const contextMenuHandler = map.on.mock.calls.find(([eventName]) => eventName === 'contextmenu')?.[1];
+
+    act(() => {
+      contextMenuHandler({
+        preventDefault: vi.fn(),
+        lngLat: { lat: 51.0576, lng: -0.1342 },
+        point: { x: 320, y: 180 },
+      });
+    });
+
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+
+    expect(onRequestAddStop).toHaveBeenCalledWith({
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      screenPosition: { x: 320, y: 180 },
+      source: 'context-menu',
+    });
+  });
+
+  it('emits an add-stop request after a long press on the map', () => {
+    vi.useFakeTimers();
+    const onRequestAddStop = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onRequestAddStop={onRequestAddStop}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const container = screen.getByTestId('map-container');
+    map.unproject.mockReturnValue({ lat: 35.0116, lng: 135.7681 });
+
+    fireEvent.pointerDown(container, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 240,
+      clientY: 220,
+    });
+    act(() => {
+      vi.advanceTimersByTime(550);
+    });
+
+    expect(onRequestAddStop).toHaveBeenCalledWith({
+      coordinates: { lat: 35.0116, lng: 135.7681 },
+      screenPosition: { x: 240, y: 220 },
+      source: 'long-press',
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('cancels a pending long press when the pointer moves like a map drag', () => {
+    vi.useFakeTimers();
+    const onRequestAddStop = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onRequestAddStop={onRequestAddStop}
+      />,
+    );
+
+    const container = screen.getByTestId('map-container');
+
+    fireEvent.pointerDown(container, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 240,
+      clientY: 220,
+    });
+    fireEvent.pointerMove(container, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 260,
+      clientY: 242,
+    });
+    act(() => {
+      vi.advanceTimersByTime(550);
+    });
+
+    expect(onRequestAddStop).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it('provides current map center coordinates through the center callback', () => {
+    const onMapCenterCoordinatesChange = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onMapCenterCoordinatesChange={onMapCenterCoordinatesChange}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    map.getCenter.mockReturnValue({ lat: 48.8566, lng: 2.3522 });
+    const moveHandler = map.on.mock.calls.find(([eventName]) => eventName === 'move')?.[1];
+
+    act(() => {
+      moveHandler();
+    });
+
+    expect(onMapCenterCoordinatesChange).toHaveBeenLastCalledWith({ lat: 48.8566, lng: 2.3522 });
   });
 
   it('marks the selected pin', () => {
