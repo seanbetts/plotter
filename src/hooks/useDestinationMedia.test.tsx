@@ -138,6 +138,45 @@ describe('useDestinationMedia', () => {
     expect(result.current.mediaItems).toEqual([existing[0], updated]);
   });
 
+  it('does not let an older update response overwrite a newer update for the same media item', async () => {
+    const existing = [createMediaItem('media-1', 0)];
+    const olderUpdate = createDeferred({ ...existing[0], caption: 'Older caption' });
+    const newerUpdate = { ...existing[0], caption: 'Newer caption' };
+    const repository = createMediaRepository({
+      listDestinationMedia: vi.fn().mockResolvedValue(existing),
+      updateDestinationMedia: vi
+        .fn()
+        .mockReturnValueOnce(olderUpdate.promise)
+        .mockResolvedValueOnce(newerUpdate),
+    });
+
+    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let olderUpdatePromise!: Promise<MediaItem | undefined>;
+    act(() => {
+      olderUpdatePromise = result.current.updateMedia('media-1', {
+        caption: 'Older caption',
+      });
+    });
+
+    await act(async () => {
+      await result.current.updateMedia('media-1', {
+        caption: 'Newer caption',
+      });
+    });
+
+    expect(result.current.mediaItems).toEqual([newerUpdate]);
+
+    await act(async () => {
+      olderUpdate.resolve();
+      await olderUpdatePromise;
+    });
+
+    expect(result.current.mediaItems).toEqual([newerUpdate]);
+  });
+
   it('deletes one media item locally after repository delete succeeds', async () => {
     const existing = [createMediaItem('media-1', 0), createMediaItem('media-2', 1)];
     const repository = createMediaRepository({
@@ -234,6 +273,90 @@ describe('useDestinationMedia', () => {
 
     expect(result.current.mediaItems).toEqual(newerReorder);
     expect(result.current.error).toBeNull();
+  });
+
+  it('keeps uploading state true until overlapping upload batches settle', async () => {
+    const firstUpload = createDeferred(createMediaItem('first-upload', 0));
+    const secondUpload = createDeferred(createMediaItem('second-upload', 1));
+    const repository = createMediaRepository({
+      listDestinationMedia: vi.fn().mockResolvedValue([]),
+      uploadDestinationMedia: vi
+        .fn()
+        .mockReturnValueOnce(firstUpload.promise)
+        .mockReturnValueOnce(secondUpload.promise),
+    });
+
+    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let firstUploadPromise!: Promise<void>;
+    act(() => {
+      firstUploadPromise = result.current.uploadFiles([createFile('first.jpg', 'image/jpeg')]);
+    });
+    await waitFor(() => expect(result.current.isUploading).toBe(true));
+
+    let secondUploadPromise!: Promise<void>;
+    act(() => {
+      secondUploadPromise = result.current.uploadFiles([createFile('second.jpg', 'image/jpeg')]);
+    });
+
+    await act(async () => {
+      firstUpload.resolve();
+      await firstUploadPromise;
+    });
+
+    expect(result.current.isUploading).toBe(true);
+
+    await act(async () => {
+      secondUpload.resolve();
+      await secondUploadPromise;
+    });
+
+    expect(result.current.isUploading).toBe(false);
+  });
+
+  it('keeps uploaded media ordered by sort order after appending returned items', async () => {
+    const existing = [createMediaItem('existing-media', 1)];
+    const uploaded = createMediaItem('uploaded-media', 0);
+    const repository = createMediaRepository({
+      listDestinationMedia: vi.fn().mockResolvedValue(existing),
+      uploadDestinationMedia: vi.fn().mockResolvedValue(uploaded),
+    });
+
+    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.uploadFiles([createFile('upload.jpg', 'image/jpeg')]);
+    });
+
+    expect(result.current.mediaItems).toEqual([uploaded, existing[0]]);
+  });
+
+  it('does not mutate local media or call the repository for invalid reorder ids', async () => {
+    const existing = [
+      createMediaItem('media-1', 0),
+      createMediaItem('media-2', 1),
+    ];
+    const repository = createMediaRepository({
+      listDestinationMedia: vi.fn().mockResolvedValue(existing),
+    });
+
+    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.reorder(['media-2', 'unknown-media']);
+    });
+
+    expect(repository.reorderDestinationMedia).not.toHaveBeenCalled();
+    expect(result.current.mediaItems).toEqual(existing);
+    expect(result.current.error).toBe(
+      'Media order must include each destination media item exactly once. Missing media-1; extra unknown-media.',
+    );
   });
 });
 

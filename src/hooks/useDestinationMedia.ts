@@ -13,18 +13,43 @@ const VALID_IMAGE_TYPES = new Set([
 
 const imageTypeError = 'Choose a JPEG, PNG, WebP, or GIF image.';
 
+function sortMediaItems(mediaItems: MediaItem[]) {
+  return mediaItems
+    .map((mediaItem, index) => ({ mediaItem, index }))
+    .sort((left, right) => {
+      const leftSortOrder = left.mediaItem.sortOrder ?? Number.MAX_SAFE_INTEGER;
+      const rightSortOrder = right.mediaItem.sortOrder ?? Number.MAX_SAFE_INTEGER;
+
+      return leftSortOrder - rightSortOrder || left.index - right.index;
+    })
+    .map(({ mediaItem }) => mediaItem);
+}
+
+function validateMediaOrder(currentMediaIds: string[], orderedMediaIds: string[]) {
+  const requestedIds = new Set(orderedMediaIds);
+  const missingIds = currentMediaIds.filter((id) => !requestedIds.has(id));
+  const extraIds = orderedMediaIds.filter((id) => !currentMediaIds.includes(id));
+
+  if (requestedIds.size === orderedMediaIds.length && missingIds.length === 0 && extraIds.length === 0) {
+    return null;
+  }
+
+  return `Media order must include each destination media item exactly once. Missing ${missingIds.join(', ') || 'none'}; extra ${extraIds.join(', ') || 'none'}.`;
+}
+
 export function useDestinationMedia(
   repository: TripRepository,
   destinationId: string | null,
 ) {
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [isLoading, setIsLoading] = useState(destinationId !== null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [uploadingCount, setUploadingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const mediaItemsRef = useRef<MediaItem[]>([]);
   const isMountedRef = useRef(false);
   const generationRef = useRef(0);
   const reorderSequenceRef = useRef(0);
+  const updateSequencesRef = useRef(new Map<string, number>());
 
   const replaceMediaItems = useCallback((nextMediaItems: MediaItem[]) => {
     mediaItemsRef.current = nextMediaItems;
@@ -90,7 +115,7 @@ export function useDestinationMedia(
   useEffect(() => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
-    setIsUploading(false);
+    setUploadingCount(0);
 
     if (!destinationId) {
       replaceMediaItems([]);
@@ -113,7 +138,7 @@ export function useDestinationMedia(
     }
 
     const generation = generationRef.current;
-    setIsUploading(true);
+    setUploadingCount((count) => count + 1);
     setError(null);
 
     try {
@@ -128,14 +153,14 @@ export function useDestinationMedia(
 
       if (!isCurrentGeneration(generation)) return;
 
-      updateMediaItems((current) => [...current, ...uploadedMediaItems]);
+      updateMediaItems((current) => sortMediaItems([...current, ...uploadedMediaItems]));
     } catch (caught) {
       if (!isCurrentGeneration(generation)) return;
 
       setError(caught instanceof Error ? caught.message : 'Unable to upload image.');
     } finally {
       if (isCurrentGeneration(generation)) {
-        setIsUploading(false);
+        setUploadingCount((count) => Math.max(0, count - 1));
       }
     }
   }, [destinationId, isCurrentGeneration, repository, updateMediaItems]);
@@ -145,11 +170,17 @@ export function useDestinationMedia(
     patch: MediaPatch,
   ): Promise<MediaItem | undefined> => {
     const generation = generationRef.current;
+    const updateSequence = (updateSequencesRef.current.get(mediaId) ?? 0) + 1;
+    updateSequencesRef.current.set(mediaId, updateSequence);
+    const isCurrentUpdate = () =>
+      isCurrentGeneration(generation) &&
+      updateSequencesRef.current.get(mediaId) === updateSequence;
+
     setError(null);
 
     try {
       const updatedMediaItem = await repository.updateDestinationMedia(mediaId, patch);
-      if (!isCurrentGeneration(generation)) return undefined;
+      if (!isCurrentUpdate()) return undefined;
 
       updateMediaItems((current) =>
         current.map((mediaItem) =>
@@ -158,7 +189,7 @@ export function useDestinationMedia(
       );
       return updatedMediaItem;
     } catch (caught) {
-      if (isCurrentGeneration(generation)) {
+      if (isCurrentUpdate()) {
         setError(caught instanceof Error ? caught.message : 'Unable to update image.');
       }
       return undefined;
@@ -186,10 +217,20 @@ export function useDestinationMedia(
 
     const generation = generationRef.current;
     const reorderSequence = reorderSequenceRef.current + 1;
+    const previousMediaItems = mediaItemsRef.current;
+    const orderError = validateMediaOrder(
+      previousMediaItems.map((mediaItem) => mediaItem.id),
+      orderedMediaIds,
+    );
+
+    if (orderError) {
+      setError(orderError);
+      return;
+    }
+
     reorderSequenceRef.current = reorderSequence;
     const isCurrentReorder = () =>
       isCurrentGeneration(generation) && reorderSequenceRef.current === reorderSequence;
-    const previousMediaItems = mediaItemsRef.current;
     const mediaById = new Map(previousMediaItems.map((mediaItem) => [mediaItem.id, mediaItem]));
     const optimisticMediaItems = orderedMediaIds.reduce<MediaItem[]>((items, mediaId, index) => {
       const mediaItem = mediaById.get(mediaId);
@@ -220,7 +261,7 @@ export function useDestinationMedia(
   return {
     mediaItems,
     isLoading,
-    isUploading,
+    isUploading: uploadingCount > 0,
     error,
     uploadFiles,
     updateMedia,
