@@ -72,6 +72,7 @@ export function DestinationImagePreviewModal({
   const baselineRef = useRef(createDraft(mediaItem));
   const mediaIdRef = useRef(mediaItem.id);
   const isDeletingRef = useRef(false);
+  const autosaveRef = useRef<((mediaId: string, draftRevision: number, patch: MediaPatch) => void) | null>(null);
   const editRevisionRef = useRef(0);
   const savedRevisionRef = useRef(0);
   const saveSequenceRef = useRef(0);
@@ -148,7 +149,19 @@ export function DestinationImagePreviewModal({
           saveSequenceRef.current !== saveSequence ||
           editRevisionRef.current !== draftRevision
         ) {
-          if (mediaIdRef.current === mediaId && createPatch(draftRef.current, baselineRef.current) === null) {
+          const draftMatchedPreviousBaseline = createPatch(draftRef.current, baselineRef.current) === null;
+
+          if (mediaIdRef.current === mediaId && draftMatchedPreviousBaseline) {
+            const nextBaseline = createDraft(updatedMediaItem);
+            baselineRef.current = nextBaseline;
+            const followUpPatch = createPatch(draftRef.current, nextBaseline);
+
+            if (followUpPatch) {
+              clearSavedStatusTimer();
+              autosaveRef.current?.(mediaId, editRevisionRef.current, followUpPatch);
+              return;
+            }
+
             clearSavedStatusTimer();
             savedRevisionRef.current = Math.max(savedRevisionRef.current, editRevisionRef.current);
             setSaveStatus('idle');
@@ -183,6 +196,7 @@ export function DestinationImagePreviewModal({
     },
     [clearSavedStatusTimer, onUpdate],
   );
+  autosaveRef.current = autosave;
 
   useEffect(() => {
     clearAutosaveTimer();

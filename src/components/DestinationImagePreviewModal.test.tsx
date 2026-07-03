@@ -194,10 +194,13 @@ describe('DestinationImagePreviewModal', () => {
     expect(screen.getByRole('status', { name: 'Saved' })).toBeInTheDocument();
   });
 
-  it('does not leave saving feedback stuck when a pending edit is reverted to baseline', async () => {
+  it('reconciles a pending edit that is reverted before the first save resolves', async () => {
     vi.useFakeTimers();
-    const save = deferred<MediaItem>();
-    const onUpdate = vi.fn().mockReturnValue(save.promise);
+    const firstSave = deferred<MediaItem>();
+    const secondSave = deferred<MediaItem>();
+    const onUpdate = vi.fn()
+      .mockReturnValueOnce(firstSave.promise)
+      .mockReturnValueOnce(secondSave.promise);
 
     render(<DestinationImagePreviewModal {...createProps({ onUpdate })} />);
 
@@ -207,10 +210,18 @@ describe('DestinationImagePreviewModal', () => {
 
     fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Sunset over the harbour' } });
 
-    save.resolve(createMediaItem({ caption: 'Temporary caption' }));
+    firstSave.resolve(createMediaItem({ caption: 'Temporary caption' }));
     await flushPromises();
 
-    expect(screen.queryByRole('status', { name: 'Saving...' })).not.toBeInTheDocument();
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+    expect(onUpdate).toHaveBeenLastCalledWith('media-1', { caption: 'Sunset over the harbour' });
+    expect(screen.getByRole('status', { name: 'Saving...' })).toBeInTheDocument();
+
+    secondSave.resolve(createMediaItem({ caption: 'Sunset over the harbour' }));
+    await flushPromises();
+
+    expect(screen.getByRole('status', { name: 'Saved' })).toBeInTheDocument();
+    await advanceAutosave(savedStatusVisibleMs);
     expect(screen.queryByRole('status', { name: 'Saved' })).not.toBeInTheDocument();
   });
 
