@@ -98,10 +98,13 @@ test('adds a stop from the map context menu', async ({ page }) => {
   });
   await page.getByRole('menuitem', { name: 'Add stop here' }).click();
 
-  await expect(page.getByRole('dialog', { name: 'Add stop from map' })).toBeVisible();
+  const mapStopDialog = page.getByRole('dialog', { name: 'Add stop from map' });
+  await expect(mapStopDialog).toBeVisible();
+  await expect(mapStopDialog.getByRole('heading', { name: 'Map stop' })).toBeVisible();
+  await expect(mapStopDialog.getByText('Map stop, Test Region, Test Country')).toBeVisible();
   const addStopButton = page.getByRole('button', { name: 'Add stop', exact: true });
   await expect(addStopButton).toBeEnabled();
   await addStopButton.click();
 
-  await expect(page.getByRole('complementary', { name: /profile/ })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Map stop profile' })).toBeVisible();
 });
