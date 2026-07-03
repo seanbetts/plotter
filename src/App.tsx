@@ -189,6 +189,8 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
       if (event.key !== 'Escape') return;
 
       event.preventDefault();
+      if (pendingMapStop.isSaving) return;
+
       activePendingMapStopIdRef.current = null;
       setPendingMapStop(null);
       restorePendingMapStopFocus();
@@ -200,11 +202,12 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     };
   }, [isInteractionLocked, pendingMapStop, restorePendingMapStopFocus]);
 
+  const pendingMapStopId = pendingMapStop?.id;
   useEffect(() => {
-    if (!pendingMapStop || isInteractionLocked) return;
+    if (!pendingMapStopId || isInteractionLocked) return;
 
     pendingMapStopDialogRef.current?.focus();
-  }, [isInteractionLocked, pendingMapStop?.id]);
+  }, [isInteractionLocked, pendingMapStopId]);
 
   useEffect(() => {
     if (pendingMapStop || !selectedDestination || isInteractionLocked) return undefined;
@@ -293,10 +296,12 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   }, [mapCenterCoordinates, openPendingMapStop]);
 
   const closePendingMapStop = useCallback(() => {
+    if (pendingMapStop?.isSaving) return;
+
     activePendingMapStopIdRef.current = null;
     setPendingMapStop(null);
     restorePendingMapStopFocus();
-  }, [restorePendingMapStopFocus]);
+  }, [pendingMapStop?.isSaving, restorePendingMapStopFocus]);
 
   const confirmPendingMapStop = useCallback(async () => {
     if (!pendingMapStop || pendingMapStop.isResolving || pendingMapStop.isSaving || isInteractionLocked) return;
@@ -418,7 +423,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               <p className="map-stop-confirmation__error">{pendingMapStop.saveError}</p>
             ) : null}
             <div className="map-stop-confirmation__actions">
-              <button type="button" onClick={closePendingMapStop}>
+              <button type="button" disabled={pendingMapStop.isSaving} onClick={closePendingMapStop}>
                 Cancel
               </button>
               <button

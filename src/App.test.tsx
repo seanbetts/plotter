@@ -312,9 +312,14 @@ describe('App', () => {
     await waitFor(() => expect(addButton).toBeEnabled());
     await user.click(addButton);
     expect(addButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     await user.click(addButton);
 
     expect(repositoryMock.saveDestination).toHaveBeenCalledTimes(1);
+
+    const wasNotCanceled = fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    expect(wasNotCanceled).toBe(false);
+    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toBeInTheDocument();
 
     await act(async () => {
       saveDestination.resolve(undefined);
