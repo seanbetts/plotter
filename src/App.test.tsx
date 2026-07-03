@@ -398,7 +398,7 @@ describe('App', () => {
     expect(wasNotCanceled).toBe(false);
     expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Add stop at map center' }));
+    await openContextMenuMapStop({ lat: 48.8566, lng: 2.3522 });
 
     expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Balcombe');
     expect(screen.getByRole('dialog', { name: 'Add stop from map' })).not.toHaveTextContent('Paris');
@@ -423,8 +423,8 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add stop at map center' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Add stop at map center' }));
+    await openContextMenuMapStop({ lat: 51.0576, lng: -0.1342 });
+    await openContextMenuMapStop({ lat: 48.8566, lng: 2.3522 });
 
     await act(async () => {
       secondLookup.resolve(
@@ -473,18 +473,7 @@ describe('App', () => {
     coordinateLookup.reject(new Error('Coordinate lookup failed'));
   });
 
-  it('adds a stop from the updated map center toolbar action', async () => {
-    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
-      createPlaceSearchResult({
-        id: 'place-paris',
-        label: 'Paris, France',
-        placeName: 'Paris',
-        regionName: 'Ile-de-France',
-        countryName: 'France',
-        coordinates: { lat: 48.8566, lng: 2.3522 },
-      }),
-    );
-
+  it('does not render a toolbar action for adding a stop at the map center', async () => {
     render(<App />);
 
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
@@ -495,14 +484,7 @@ describe('App', () => {
       getMapEventHandler(map, 'move')();
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add stop at map center' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Add stop' }));
-
-    expect(resolveMapTilerCoordinates).toHaveBeenCalledWith(
-      { lat: 48.8566, lng: 2.3522 },
-      { apiKey: expect.any(String) },
-    );
-    expect(await screen.findByRole('complementary', { name: 'Paris profile' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add stop at map center' })).not.toBeInTheDocument();
   });
 
   it('closes the selected destination profile with Escape', async () => {

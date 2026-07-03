@@ -463,30 +463,6 @@ describe('MapCanvas', () => {
     vi.useRealTimers();
   });
 
-  it('provides current map center coordinates through the center callback', () => {
-    const onMapCenterCoordinatesChange = vi.fn();
-
-    render(
-      <MapCanvas
-        destinations={[]}
-        routeLegs={[]}
-        selectedDestinationId={null}
-        onSelectDestination={vi.fn()}
-        onMapCenterCoordinatesChange={onMapCenterCoordinatesChange}
-      />,
-    );
-
-    const map = maplibreMock.mapInstances[0];
-    map.getCenter.mockReturnValue({ lat: 48.8566, lng: 2.3522 });
-    const moveHandler = map.on.mock.calls.find(([eventName]) => eventName === 'move')?.[1];
-
-    act(() => {
-      moveHandler();
-    });
-
-    expect(onMapCenterCoordinatesChange).toHaveBeenLastCalledWith({ lat: 48.8566, lng: 2.3522 });
-  });
-
   it('marks the selected pin', () => {
     render(
       <MapCanvas

@@ -1,4 +1,4 @@
-import { MapPinPlus, Search, X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import type { Coordinates, DestinationLocation } from '../domain/types';
@@ -13,7 +13,6 @@ type TopToolbarProps = {
   searchPlaces: (query: string) => Promise<PlaceSearchResult[]>;
   resolveSearchResult: (result: PlaceSearchResult) => Promise<Extract<PlaceSearchResult, { kind: 'place' }>>;
   onAddDestination: (input: AddDestinationInput) => Promise<unknown> | unknown;
-  onRequestAddAtMapCenter?: () => void;
 };
 
 const liveSearchDelayMs = 300;
@@ -46,7 +45,6 @@ export function TopToolbar({
   searchPlaces,
   resolveSearchResult,
   onAddDestination,
-  onRequestAddAtMapCenter,
 }: TopToolbarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PlaceSearchResult[]>([]);
@@ -198,16 +196,6 @@ export function TopToolbar({
           ) : null}
         </div>
       </div>
-      {onRequestAddAtMapCenter ? (
-        <button
-          type="button"
-          className="toolbar-icon-action"
-          aria-label="Add stop at map center"
-          onClick={onRequestAddAtMapCenter}
-        >
-          <MapPinPlus size={18} aria-hidden="true" />
-        </button>
-      ) : null}
       {isSearching ? <div className="toolbar-status">Searching...</div> : null}
       {error ? <div className="toolbar-error">{error}</div> : null}
       {results.length > 0 ? (
