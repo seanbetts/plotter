@@ -388,6 +388,44 @@ select {
   opacity: 0;
 }
 
+.map-add-stop-menu {
+  position: absolute;
+  z-index: 12;
+  display: grid;
+  min-width: 148px;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel);
+  color: var(--color-text);
+  background: var(--surface-overlay-menu);
+  box-shadow: var(--shadow-panel);
+  transform: translate(8px, 8px);
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
+  backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
+}
+
+.map-add-stop-menu button {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  color: var(--color-text);
+  background: transparent;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.map-add-stop-menu button:hover,
+.map-add-stop-menu button:focus-visible {
+  background: var(--surface-action-subtle);
+  outline: 0;
+}
+
 .top-toolbar {
   position: absolute;
   top: 16px;
@@ -398,6 +436,28 @@ select {
   align-items: flex-start;
   gap: 8px;
   transform: translateX(-50%);
+}
+
+.toolbar-icon-action {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel);
+  color: var(--color-text);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-panel);
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
+  backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
+}
+
+.toolbar-icon-action:hover,
+.toolbar-icon-action:focus-visible {
+  border-color: var(--border-hover);
+  background: var(--surface-control-hover);
 }
 
 .search-group {
@@ -578,6 +638,78 @@ select {
   color: var(--color-danger);
 }
 
+.map-stop-confirmation {
+  position: absolute;
+  z-index: 17;
+  display: grid;
+  width: min(320px, calc(100vw - 32px));
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  color: var(--color-text);
+  background: var(--surface-overlay-profile);
+  box-shadow: var(--shadow-panel);
+  transform: translate(12px, 12px);
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
+  backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
+}
+
+.map-stop-confirmation h2 {
+  margin: 4px 0 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.map-stop-confirmation p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.map-stop-confirmation__eyebrow {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.map-stop-confirmation__error {
+  color: var(--color-danger);
+}
+
+.map-stop-confirmation__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.map-stop-confirmation__actions button {
+  min-height: 34px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  color: var(--color-text);
+  background: var(--surface-action-subtle);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.map-stop-confirmation__actions button:last-child {
+  border-color: rgb(var(--color-accent-rgb) / 0.42);
+  color: var(--color-text-inverse);
+  background: var(--color-accent);
+}
+
+.map-stop-confirmation__actions button:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+  opacity: 0.62;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -674,13 +806,20 @@ select {
   text-align: left;
 }
 
+.profile-coordinate-field {
+  box-sizing: border-box;
+  width: 88px;
+  min-height: 36px;
+}
+
 .destination-profile .profile-coordinate-input-pill {
   color: rgb(var(--color-text-rgb) / 0.78);
   font-size: inherit;
 }
 
 .destination-profile .profile-coordinate-input-pill input {
-  width: 76px;
+  width: 100%;
+  min-width: 0;
   border: 0;
   padding: 0;
   color: rgb(var(--color-text-rgb) / 0.78);
@@ -1418,6 +1557,14 @@ select {
 
   .search-results {
     width: 100%;
+  }
+
+  .map-stop-confirmation {
+    left: 16px !important;
+    right: 16px;
+    bottom: 16px;
+    top: auto !important;
+    transform: none;
   }
 
   .app-status {
