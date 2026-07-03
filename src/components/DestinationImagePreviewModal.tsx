@@ -64,10 +64,14 @@ export function DestinationImagePreviewModal({
   const [draft, setDraft] = useState(() => createDraft(mediaItem));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const autosaveTimerRef = useRef<number | null>(null);
   const savedStatusTimerRef = useRef<number | null>(null);
+  const draftRef = useRef(createDraft(mediaItem));
   const baselineRef = useRef(createDraft(mediaItem));
   const mediaIdRef = useRef(mediaItem.id);
+  const isDeletingRef = useRef(false);
   const editRevisionRef = useRef(0);
   const savedRevisionRef = useRef(0);
   const saveSequenceRef = useRef(0);
@@ -100,15 +104,20 @@ export function DestinationImagePreviewModal({
 
   useEffect(() => {
     mediaIdRef.current = mediaItem.id;
-    baselineRef.current = createDraft(mediaItem);
+    const nextDraft = createDraft(mediaItem);
+    draftRef.current = nextDraft;
+    baselineRef.current = nextDraft;
+    isDeletingRef.current = false;
     editRevisionRef.current = 0;
     savedRevisionRef.current = 0;
     saveSequenceRef.current += 1;
     clearAutosaveTimer();
     clearSavedStatusTimer();
-    setDraft(createDraft(mediaItem));
+    setDraft(nextDraft);
     setSaveStatus('idle');
     setIsConfirmingDelete(false);
+    setIsDeleting(false);
+    setDeleteError('');
   }, [clearAutosaveTimer, clearSavedStatusTimer, mediaItem.id]);
 
   useEffect(() => {
@@ -139,10 +148,16 @@ export function DestinationImagePreviewModal({
           saveSequenceRef.current !== saveSequence ||
           editRevisionRef.current !== draftRevision
         ) {
+          if (mediaIdRef.current === mediaId && createPatch(draftRef.current, baselineRef.current) === null) {
+            clearSavedStatusTimer();
+            savedRevisionRef.current = Math.max(savedRevisionRef.current, editRevisionRef.current);
+            setSaveStatus('idle');
+          }
           return;
         }
 
-        baselineRef.current = createDraft(updatedMediaItem);
+        const nextBaseline = createDraft(updatedMediaItem);
+        baselineRef.current = nextBaseline;
         savedRevisionRef.current = Math.max(savedRevisionRef.current, draftRevision);
         setSaveStatus('saved');
         savedStatusTimerRef.current = window.setTimeout(() => {
@@ -155,6 +170,11 @@ export function DestinationImagePreviewModal({
           saveSequenceRef.current !== saveSequence ||
           editRevisionRef.current !== draftRevision
         ) {
+          if (mediaIdRef.current === mediaId && createPatch(draftRef.current, baselineRef.current) === null) {
+            clearSavedStatusTimer();
+            savedRevisionRef.current = Math.max(savedRevisionRef.current, editRevisionRef.current);
+            setSaveStatus('idle');
+          }
           return;
         }
 
@@ -170,6 +190,12 @@ export function DestinationImagePreviewModal({
     const patch = createPatch(draft, baselineRef.current);
     const draftRevision = editRevisionRef.current;
     if (!patch || draftRevision <= savedRevisionRef.current) {
+      if (!patch && draftRevision > savedRevisionRef.current) {
+        saveSequenceRef.current += 1;
+        savedRevisionRef.current = draftRevision;
+        clearSavedStatusTimer();
+        setSaveStatus('idle');
+      }
       return undefined;
     }
 
@@ -184,7 +210,12 @@ export function DestinationImagePreviewModal({
   const updateDraft = (patch: Partial<DraftState>) => {
     editRevisionRef.current += 1;
     setIsConfirmingDelete(false);
-    setDraft((current) => ({ ...current, ...patch }));
+    setDeleteError('');
+    setDraft((current) => {
+      const nextDraft = { ...current, ...patch };
+      draftRef.current = nextDraft;
+      return nextDraft;
+    });
   };
 
   const handleInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -194,13 +225,27 @@ export function DestinationImagePreviewModal({
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!isConfirmingDelete) {
+      setDeleteError('');
       setIsConfirmingDelete(true);
       return;
     }
 
-    void onDelete(mediaItem.id);
+    if (isDeletingRef.current) return;
+
+    isDeletingRef.current = true;
+    setIsDeleting(true);
+    setDeleteError('');
+
+    try {
+      await onDelete(mediaItem.id);
+    } catch {
+      setDeleteError('Unable to delete image.');
+    } finally {
+      isDeletingRef.current = false;
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -272,12 +317,18 @@ export function DestinationImagePreviewModal({
             type="button"
             className="image-preview-delete-button"
             aria-label={isConfirmingDelete ? 'Confirm delete image' : 'Delete image'}
-            onClick={handleDelete}
+            disabled={isDeleting}
+            onClick={() => void handleDelete()}
           >
-            <Trash2 size={16} aria-hidden="true" />
+            {isDeleting ? <LoaderCircle size={16} aria-hidden="true" /> : <Trash2 size={16} aria-hidden="true" />}
             <span>{isConfirmingDelete ? 'Delete this image?' : 'Delete'}</span>
           </button>
         </div>
+        {deleteError ? (
+          <p className="image-preview-delete-error" role="alert">
+            {deleteError}
+          </p>
+        ) : null}
 
         <div className="image-preview-fields">
           <label>

@@ -194,6 +194,26 @@ describe('DestinationImagePreviewModal', () => {
     expect(screen.getByRole('status', { name: 'Saved' })).toBeInTheDocument();
   });
 
+  it('does not leave saving feedback stuck when a pending edit is reverted to baseline', async () => {
+    vi.useFakeTimers();
+    const save = deferred<MediaItem>();
+    const onUpdate = vi.fn().mockReturnValue(save.promise);
+
+    render(<DestinationImagePreviewModal {...createProps({ onUpdate })} />);
+
+    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Temporary caption' } });
+    await advanceAutosave();
+    expect(screen.getByRole('status', { name: 'Saving...' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Sunset over the harbour' } });
+
+    save.resolve(createMediaItem({ caption: 'Temporary caption' }));
+    await flushPromises();
+
+    expect(screen.queryByRole('status', { name: 'Saving...' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Saved' })).not.toBeInTheDocument();
+  });
+
   it('moves left and right while respecting disabled move controls', () => {
     const onMoveLeft = vi.fn();
     const onMoveRight = vi.fn();
@@ -245,6 +265,36 @@ describe('DestinationImagePreviewModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirm delete image' }));
     expect(onDelete).toHaveBeenCalledWith('media-1');
+  });
+
+  it('only calls delete once while a confirmed delete is pending', () => {
+    const deleteRequest = deferred<void>();
+    const onDelete = vi.fn().mockReturnValue(deleteRequest.promise);
+
+    render(<DestinationImagePreviewModal {...createProps({ onDelete })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete image' }));
+    const confirmButton = screen.getByRole('button', { name: 'Confirm delete image' });
+
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(confirmButton).toBeDisabled();
+  });
+
+  it('shows accessible delete error feedback when delete fails', async () => {
+    const onDelete = vi.fn().mockRejectedValue(new Error('storage unavailable'));
+
+    render(<DestinationImagePreviewModal {...createProps({ onDelete })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete image' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete image' }));
+
+    await flushPromises();
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Unable to delete image.');
+    expect(screen.getByRole('button', { name: 'Confirm delete image' })).not.toBeDisabled();
   });
 
   it('resets draft fields when the media item changes', () => {

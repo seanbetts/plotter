@@ -1765,6 +1765,15 @@ select {
   opacity: 0.62;
 }
 
+.image-preview-delete-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.image-preview-delete-button:disabled svg {
+  animation: route-spin 900ms linear infinite;
+}
+
 .image-preview-delete-button {
   display: inline-flex;
   min-height: 34px;
@@ -1782,6 +1791,13 @@ select {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
   gap: 12px;
+}
+
+.image-preview-delete-error {
+  margin: -4px 0 0;
+  color: var(--color-danger);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .image-preview-fields label {
