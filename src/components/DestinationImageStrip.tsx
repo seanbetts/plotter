@@ -1,5 +1,5 @@
 import { Image, LoaderCircle, Plus, Upload } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import type { MediaItem } from '../domain/types';
 
@@ -68,7 +68,6 @@ export function DestinationImageStrip({
 }: DestinationImageStripProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileDragDepthRef = useRef(0);
-  const fileDragClearTimerRef = useRef<number | null>(null);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [draggedMediaId, setDraggedMediaId] = useState<string | null>(null);
   const [dragTargetMediaId, setDragTargetMediaId] = useState<string | null>(null);
@@ -79,25 +78,10 @@ export function DestinationImageStrip({
     fileInputRef.current?.click();
   };
 
-  const clearPendingFileDragReset = () => {
-    if (fileDragClearTimerRef.current !== null) {
-      window.clearTimeout(fileDragClearTimerRef.current);
-      fileDragClearTimerRef.current = null;
-    }
-  };
-
   const resetFileDragState = () => {
-    clearPendingFileDragReset();
     fileDragDepthRef.current = 0;
     setIsFileDragOver(false);
   };
-
-  useEffect(
-    () => () => {
-      clearPendingFileDragReset();
-    },
-    [],
-  );
 
   const uploadFiles = (files: File[]) => {
     if (files.length === 0) return;
@@ -111,26 +95,31 @@ export function DestinationImageStrip({
     event.currentTarget.value = '';
   };
 
+  const handleStripDragEnter = (event: DragEvent<HTMLElement>) => {
+    if (!isFileDrag(event)) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    fileDragDepthRef.current += 1;
+    setIsFileDragOver(true);
+  };
+
   const handleStripDragOver = (event: DragEvent<HTMLElement>) => {
     if (!isFileDrag(event)) return;
 
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
-    clearPendingFileDragReset();
     fileDragDepthRef.current = Math.max(1, fileDragDepthRef.current);
     setIsFileDragOver(true);
   };
 
   const handleStripDragLeave = (event: DragEvent<HTMLElement>) => {
     if (!isFileDrag(event)) return;
-    if (event.relatedTarget === null && fileDragDepthRef.current > 0) {
-      clearPendingFileDragReset();
-      fileDragClearTimerRef.current = window.setTimeout(resetFileDragState, 80);
-      return;
-    }
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
 
-    resetFileDragState();
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) {
+      setIsFileDragOver(false);
+    }
   };
 
   const handleStripDrop = (event: DragEvent<HTMLElement>) => {
@@ -183,6 +172,7 @@ export function DestinationImageStrip({
     <section
       className={stripClassName}
       aria-label="Stop images"
+      onDragEnter={handleStripDragEnter}
       onDragOver={handleStripDragOver}
       onDragLeave={handleStripDragLeave}
       onDrop={handleStripDrop}

@@ -55,6 +55,27 @@ function dropFiles(element: Element, files: File[]) {
   });
 }
 
+function fileDragEnter(element: Element) {
+  fireEvent.dragEnter(element, {
+    dataTransfer: {
+      files: [],
+      types: ['Files'],
+    },
+  });
+}
+
+function fileDragLeave(element: Element, relatedTarget: EventTarget | null = null) {
+  const dragLeaveEvent = createEvent.dragLeave(element, {
+    dataTransfer: {
+      files: [],
+      types: ['Files'],
+    },
+  });
+
+  Object.defineProperty(dragLeaveEvent, 'relatedTarget', { value: relatedTarget });
+  fireEvent(element, dragLeaveEvent);
+}
+
 describe('DestinationImageStrip', () => {
   it('renders an accessible compact empty state and supports choosing files', () => {
     const onUploadFiles = vi.fn();
@@ -116,11 +137,22 @@ describe('DestinationImageStrip', () => {
     expect(onOpenPreview).toHaveBeenCalledWith('media-3');
   });
 
-  it('keeps the drag state stable during file drag movement and clears it on drop', () => {
+  it('keeps file drag state stable through nested movement and clears on final leave or drop', () => {
     const onUploadFiles = vi.fn();
     render(<DestinationImageStrip {...createProps({ onUploadFiles })} />);
 
     const region = screen.getByRole('region', { name: 'Stop images' });
+    const firstThumbnail = screen.getByRole('button', { name: 'Open image 1: Sunset over the harbour' });
+    fileDragEnter(region);
+    fileDragEnter(firstThumbnail);
+    expect(region).toHaveClass('is-drag-over');
+
+    fileDragLeave(firstThumbnail);
+    expect(region).toHaveClass('is-drag-over');
+
+    fileDragLeave(region);
+    expect(region).not.toHaveClass('is-drag-over');
+
     const dragOverEvent = createEvent.dragOver(region, {
       dataTransfer: {
         files: [],
@@ -130,16 +162,6 @@ describe('DestinationImageStrip', () => {
 
     fireEvent(region, dragOverEvent);
     expect(dragOverEvent.defaultPrevented).toBe(true);
-    expect(region).toHaveClass('is-drag-over');
-
-    const nullTargetLeaveEvent = createEvent.dragLeave(region, {
-      dataTransfer: {
-        files: [],
-        types: ['Files'],
-      },
-    });
-    Object.defineProperty(nullTargetLeaveEvent, 'relatedTarget', { value: null });
-    fireEvent(region, nullTargetLeaveEvent);
     expect(region).toHaveClass('is-drag-over');
 
     const file = createImageFile('drop.webp', 'image/webp');
