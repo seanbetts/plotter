@@ -106,6 +106,15 @@ function clampOverlayPosition(
   };
 }
 
+function getAvailableOverlayHeight(position: OverlayPosition) {
+  if (typeof window === 'undefined') return `calc(100vh - ${overlayViewportPaddingPx * 2}px)`;
+
+  return `${Math.max(
+    overlayViewportPaddingPx,
+    window.innerHeight - position.y - overlayViewportPaddingPx,
+  )}px`;
+}
+
 export default function App() {
   const [repository, setRepository] = useState<TripRepository | null>(null);
   const [repositoryError, setRepositoryError] = useState<RepositoryError | null>(null);
@@ -204,6 +213,9 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   const pendingMapStopPosition = pendingMapStop
     ? clampOverlayPosition(pendingMapStop.screenPosition, mapStopConfirmationApproxSize)
     : null;
+  const pendingMapStopMaxHeight = pendingMapStopPosition
+    ? getAvailableOverlayHeight(pendingMapStopPosition)
+    : undefined;
 
   const restorePendingMapStopFocus = useCallback(() => {
     const previouslyFocusedElement = previouslyFocusedMapStopElementRef.current;
@@ -438,6 +450,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
             style={{
               left: `${pendingMapStopPosition.x}px`,
               top: `${pendingMapStopPosition.y}px`,
+              maxHeight: pendingMapStopMaxHeight,
             }}
           >
             <div>

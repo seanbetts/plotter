@@ -267,6 +267,89 @@ describe('MapCanvas', () => {
     });
   });
 
+  it('opens the add-stop menu when the map container receives a browser context menu event', async () => {
+    const onRequestAddStop = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onRequestAddStop={onRequestAddStop}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const container = screen.getByTestId('map-container');
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 40,
+      left: 100,
+      top: 40,
+      right: 900,
+      bottom: 640,
+      width: 800,
+      height: 600,
+      toJSON: () => ({}),
+    });
+    map.unproject.mockReturnValue({ lat: 35.0116, lng: 135.7681 });
+
+    fireEvent.contextMenu(container, { clientX: 420, clientY: 220 });
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+
+    expect(map.unproject).toHaveBeenCalledWith([320, 180]);
+    expect(onRequestAddStop).toHaveBeenCalledWith({
+      coordinates: { lat: 35.0116, lng: 135.7681 },
+      screenPosition: { x: 320, y: 180 },
+      source: 'context-menu',
+    });
+  });
+
+  it('opens the add-stop menu from a secondary mouse pointer down on the map', async () => {
+    const onRequestAddStop = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onRequestAddStop={onRequestAddStop}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const container = screen.getByTestId('map-container');
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 40,
+      left: 100,
+      top: 40,
+      right: 900,
+      bottom: 640,
+      width: 800,
+      height: 600,
+      toJSON: () => ({}),
+    });
+    map.unproject.mockReturnValue({ lat: 35.0116, lng: 135.7681 });
+
+    fireEvent.pointerDown(container, {
+      button: 2,
+      clientX: 420,
+      clientY: 220,
+      pointerType: 'mouse',
+    });
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+
+    expect(map.unproject).toHaveBeenCalledWith([320, 180]);
+    expect(onRequestAddStop).toHaveBeenCalledWith({
+      coordinates: { lat: 35.0116, lng: 135.7681 },
+      screenPosition: { x: 320, y: 180 },
+      source: 'context-menu',
+    });
+  });
+
   it('keeps the add-stop context menu inside the viewport near the bottom-right edge', () => {
     render(
       <MapCanvas

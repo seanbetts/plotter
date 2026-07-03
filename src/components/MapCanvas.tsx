@@ -1,7 +1,7 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Coordinates, Destination, RouteLeg } from '../domain/types';
 
@@ -840,6 +840,46 @@ export function MapCanvas({
     setAddStopMenu(request);
   }, []);
 
+  const openAddStopMenuAtClientPoint = useCallback(
+    (container: HTMLDivElement, clientX: number, clientY: number) => {
+      const map = mapRef.current;
+      if (!map || !onRequestAddStopRef.current) return false;
+
+      const containerRect = container.getBoundingClientRect();
+      const mapX = clientX - containerRect.left;
+      const mapY = clientY - containerRect.top;
+      const coordinates = map.unproject([mapX, mapY]);
+
+      openAddStopMenu({
+        coordinates: { lat: coordinates.lat, lng: coordinates.lng },
+        screenPosition: { x: mapX, y: mapY },
+        source: 'context-menu',
+      });
+
+      return true;
+    },
+    [openAddStopMenu],
+  );
+
+  const handleMapContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!openAddStopMenuAtClientPoint(event.currentTarget, event.clientX, event.clientY)) return;
+
+      event.preventDefault();
+    },
+    [openAddStopMenuAtClientPoint],
+  );
+
+  const handleMapPointerDownCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.pointerType !== 'mouse' || event.button !== 2) return;
+      if (!openAddStopMenuAtClientPoint(event.currentTarget, event.clientX, event.clientY)) return;
+
+      event.preventDefault();
+    },
+    [openAddStopMenuAtClientPoint],
+  );
+
   const updateMapSources = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -1218,10 +1258,12 @@ export function MapCanvas({
         ref={mapContainerRef}
         className="maplibre-container"
         data-testid="map-container"
+        onPointerDownCapture={handleMapPointerDownCapture}
         onPointerDown={handleMapPointerDown}
         onPointerMove={handleMapPointerMove}
         onPointerUp={handleMapPointerEnd}
         onPointerCancel={handleMapPointerEnd}
+        onContextMenuCapture={handleMapContextMenu}
       />
       {destinations.length === 0 ? <div className="map-empty-label is-prominent">Blank planning map</div> : null}
       {addStopMenu && addStopMenuPosition ? (

@@ -285,6 +285,39 @@ describe('App', () => {
     });
   });
 
+  it('caps the map stop confirmation height from its clamped top edge', async () => {
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'place-long-name',
+        label:
+          'A very long map stop name that wraps repeatedly, West Sussex with an equally long region name, United Kingdom',
+        placeName: 'A very long map stop name that wraps repeatedly',
+        regionName: 'West Sussex with an equally long region name',
+        countryName: 'United Kingdom',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+
+    const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
+    act(() => {
+      contextMenuHandler({
+        preventDefault: vi.fn(),
+        lngLat: { lat: 51.0576, lng: -0.1342 },
+        point: { x: 1000, y: 740 },
+      });
+    });
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toHaveStyle({
+      maxHeight: '260px',
+    });
+  });
+
   it('disables map stop confirmation while reverse geocoding is resolving', async () => {
     const coordinateLookup = createDeferred<Awaited<ReturnType<typeof resolveMapTilerCoordinates>>>();
     vi.mocked(resolveMapTilerCoordinates).mockReturnValue(coordinateLookup.promise);

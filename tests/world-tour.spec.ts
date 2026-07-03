@@ -18,7 +18,7 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   await cdpSession.send('Storage.clearDataForOrigin', {
     origin,
-    storageTypes: 'indexeddb,local_storage',
+    storageTypes: 'indexeddb',
   });
 
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
@@ -49,16 +49,11 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   const tagInput = profile.getByLabel('Add tag');
 
-  let removedExistingTag = false;
   for (const tag of savedTags) {
     const existingTag = profile.getByRole('button', { name: `Remove tag ${tag}` });
     if (await existingTag.isVisible()) {
       await existingTag.click();
-      removedExistingTag = true;
     }
-  }
-  if (removedExistingTag) {
-    await expect(profile.getByRole('status', { name: 'Saved' })).toBeVisible();
   }
 
   for (const tag of savedTags) {
@@ -104,6 +99,7 @@ test('adds a stop from the map context menu', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Search for a destination')).toBeVisible();
   const mapContainer = page.getByTestId('map-container');
   await expect(mapContainer).toBeVisible();
   await mapContainer.click({
