@@ -303,6 +303,7 @@ describe('supabase trip repository mappers', () => {
       object_path: objectPath,
       caption: 'Harbour',
       credit: '',
+      sort_order: 2,
       content_type: 'image/webp',
       size_bytes: 1234,
       uploaded_by: crypto.randomUUID(),
@@ -348,7 +349,10 @@ describe('supabase trip repository mappers', () => {
     const repository = createSupabaseTripRepository(supabase as never);
 
     await expect(repository.listDestinationMedia(destinationId)).resolves.toEqual([
-      mediaAssetFromSupabaseRow(row, 'https://signed.example/asset.webp'),
+      expect.objectContaining({
+        ...mediaAssetFromSupabaseRow(row, 'https://signed.example/asset.webp'),
+        sortOrder: 2,
+      }),
     ]);
     expect(createSignedUrl).toHaveBeenCalledWith(objectPath, 60 * 60);
   });

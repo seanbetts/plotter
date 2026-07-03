@@ -73,6 +73,7 @@ type SupabaseMediaAssetRow = {
   object_path: string;
   caption: string;
   credit: string;
+  sort_order: number;
   content_type: string | null;
   size_bytes: number | null;
   uploaded_by: string;
@@ -218,6 +219,7 @@ export function mediaAssetFromSupabaseRow(row: SupabaseMediaAssetRow, signedUrl:
     url: signedUrl,
     caption: row.caption,
     credit: row.credit,
+    sortOrder: row.sort_order,
     bucketId: row.bucket_id,
     objectPath: row.object_path,
     contentType: row.content_type ?? undefined,

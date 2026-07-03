@@ -25,6 +25,7 @@ export type MediaItem = {
   url: string;
   caption: string;
   credit: string;
+  sortOrder?: number;
   bucketId?: string;
   objectPath?: string;
   contentType?: string;
