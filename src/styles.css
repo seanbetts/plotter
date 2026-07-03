@@ -818,6 +818,7 @@ select {
 }
 
 .destination-profile .profile-coordinate-input-pill {
+  gap: 3px;
   color: rgb(var(--color-text-rgb) / 0.78);
   font-size: inherit;
 }
@@ -1416,6 +1417,10 @@ select {
   align-items: center;
 }
 
+.inline-route-metrics.is-failed-route {
+  grid-template-columns: max-content 32px minmax(12px, 1fr) 32px;
+}
+
 .inline-route-spinner {
   grid-column: 1;
   grid-row: 1 / span 2;
@@ -1436,6 +1441,31 @@ select {
   grid-column: 2;
 }
 
+.inline-route-retry {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--color-text-inverse);
+  background: var(--color-warning);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.34);
+  cursor: pointer;
+}
+
+.inline-route-retry:hover,
+.inline-route-retry:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.inline-route-retry svg {
+  display: block;
+}
+
 .inline-route-border-crossing {
   display: grid;
   grid-column: 3;
@@ -1451,6 +1481,10 @@ select {
 }
 
 .inline-route-metrics.is-calculating-route .inline-route-border-crossing {
+  grid-column: 4;
+}
+
+.inline-route-metrics.is-failed-route .inline-route-border-crossing {
   grid-column: 4;
 }
 

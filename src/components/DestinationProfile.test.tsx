@@ -206,6 +206,40 @@ describe('DestinationProfile', () => {
     });
   });
 
+  it('uses the same coordinate field sizing in view and edit modes', () => {
+    const destination = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+
+    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    expect(within(header).getByText('Latitude').closest('.profile-coordinate-pill')).toHaveClass(
+      'profile-coordinate-field',
+    );
+    expect(within(header).getByText('Longitude').closest('.profile-coordinate-pill')).toHaveClass(
+      'profile-coordinate-field',
+    );
+
+    fireEvent.click(within(header).getByRole('button', { name: 'Edit coordinates' }));
+
+    expect(screen.getByLabelText('Latitude').closest('.profile-coordinate-input-pill')).toHaveClass(
+      'profile-coordinate-field',
+    );
+    expect(screen.getByLabelText('Longitude').closest('.profile-coordinate-input-pill')).toHaveClass(
+      'profile-coordinate-field',
+    );
+  });
+
   it('shows the stop number when one is provided', () => {
     const destination = createDestination({
       name: 'Trondheim',
