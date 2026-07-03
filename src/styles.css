@@ -393,6 +393,9 @@ select {
   z-index: 12;
   display: grid;
   min-width: 148px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
   gap: 4px;
   padding: 6px;
   border: 1px solid var(--border-subtle);
@@ -400,7 +403,7 @@ select {
   color: var(--color-text);
   background: var(--surface-overlay-menu);
   box-shadow: var(--shadow-panel);
-  transform: translate(8px, 8px);
+  transform: translate(calc(-100% - 8px), calc(-100% - 8px));
   -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
 }
@@ -643,6 +646,8 @@ select {
   z-index: 17;
   display: grid;
   width: min(320px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
   gap: 12px;
   padding: 14px;
   border: 1px solid var(--border-strong);
@@ -650,7 +655,7 @@ select {
   color: var(--color-text);
   background: var(--surface-overlay-profile);
   box-shadow: var(--shadow-panel);
-  transform: translate(12px, 12px);
+  transform: translate(calc(-100% - 12px), calc(-100% - 12px));
   -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.2);
 }

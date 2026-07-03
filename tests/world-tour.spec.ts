@@ -49,10 +49,23 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   const tagInput = profile.getByLabel('Add tag');
 
+  let removedExistingTag = false;
+  for (const tag of savedTags) {
+    const existingTag = profile.getByRole('button', { name: `Remove tag ${tag}` });
+    if (await existingTag.isVisible()) {
+      await existingTag.click();
+      removedExistingTag = true;
+    }
+  }
+  if (removedExistingTag) {
+    await expect(profile.getByRole('status', { name: 'Saved' })).toBeVisible();
+  }
+
   for (const tag of savedTags) {
     await tagInput.fill(tag);
     await tagInput.press('Enter');
   }
+  await expect(profile.getByRole('status', { name: 'Saved' })).toBeVisible();
   for (const tag of savedTags) {
     await expect(profile.getByRole('button', { name: `Remove tag ${tag}` })).toBeVisible();
   }
