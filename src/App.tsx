@@ -8,6 +8,7 @@ import type { MapAddStopRequest } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
 import type { Coordinates, DestinationLocation } from './domain/types';
+import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
@@ -209,6 +210,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
 
     return selectedDestinationIndex === -1 ? undefined : selectedDestinationIndex + 1;
   }, [destinations, selectedDestinationId]);
+  const destinationMedia = useDestinationMedia(repository, selectedDestinationId);
   const pendingMapStopPosition = pendingMapStop
     ? clampOverlayPosition(pendingMapStop.screenPosition, mapStopConfirmationApproxSize)
     : null;
@@ -472,7 +474,15 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
           <DestinationProfile
             destination={selectedDestination}
             stopNumber={selectedDestinationNumber}
+            mediaItems={destinationMedia.mediaItems}
+            isMediaLoading={destinationMedia.isLoading}
+            isMediaUploading={destinationMedia.isUploading}
+            mediaError={destinationMedia.error}
             onUpdate={updateDestination}
+            onUploadMedia={destinationMedia.uploadFiles}
+            onUpdateMedia={destinationMedia.updateMedia}
+            onDeleteMedia={destinationMedia.deleteMedia}
+            onReorderMedia={destinationMedia.reorder}
             onClose={() => setSelectedDestinationId(null)}
           />
         ) : null}

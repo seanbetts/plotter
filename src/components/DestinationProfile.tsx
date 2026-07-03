@@ -2,10 +2,13 @@ import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { formatLocationParts } from '../domain/locations';
-import type { Destination } from '../domain/types';
+import type { Destination, MediaItem } from '../domain/types';
+import { DestinationImagePreviewModal } from './DestinationImagePreviewModal';
+import { DestinationImageStrip } from './DestinationImageStrip';
 import { formatStopHeaderLabel } from './stopLabels';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
+type MediaPatch = Pick<Partial<MediaItem>, 'caption' | 'credit'>;
 
 type DestinationFormState = {
   sourceKey: string;
@@ -18,7 +21,15 @@ type DestinationFormState = {
 type DestinationProfileProps = {
   destination: Destination;
   stopNumber?: number;
+  mediaItems: MediaItem[];
+  isMediaLoading: boolean;
+  isMediaUploading: boolean;
+  mediaError: string | null;
   onUpdate: (destinationId: string, patch: DestinationPatch) => Promise<void> | void;
+  onUploadMedia: (files: File[]) => Promise<void> | void;
+  onUpdateMedia: (mediaId: string, patch: MediaPatch) => Promise<MediaItem | undefined> | MediaItem | undefined;
+  onDeleteMedia: (mediaId: string) => Promise<void> | void;
+  onReorderMedia: (orderedMediaIds: string[]) => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -130,24 +141,35 @@ const createPatchFromForm = (
   };
 };
 
-export function DestinationProfile({ destination, stopNumber, onUpdate, onClose }: DestinationProfileProps) {
+export function DestinationProfile(props: DestinationProfileProps) {
   return (
     <DestinationProfileForm
-      key={destination.id}
-      destination={destination}
-      stopNumber={stopNumber}
-      onUpdate={onUpdate}
-      onClose={onClose}
+      key={props.destination.id}
+      {...props}
     />
   );
 }
 
-function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: DestinationProfileProps) {
+function DestinationProfileForm({
+  destination,
+  stopNumber,
+  mediaItems,
+  isMediaLoading,
+  isMediaUploading,
+  mediaError,
+  onUpdate,
+  onUploadMedia,
+  onUpdateMedia,
+  onDeleteMedia,
+  onReorderMedia,
+  onClose,
+}: DestinationProfileProps) {
   const [draft, setDraft] = useState(() => createFormState(destination));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingCoordinates, setIsEditingCoordinates] = useState(false);
+  const [previewMediaId, setPreviewMediaId] = useState<string | null>(null);
   const [coordinateDraft, setCoordinateDraft] = useState(() => createCoordinateDraft(destination));
   const [coordinateError, setCoordinateError] = useState('');
   const autosaveTimerRef = useRef<number | null>(null);
@@ -162,6 +184,9 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
   const sourceKeyRef = useRef(destinationSourceKey(destination));
   const sourceKey = destinationSourceKey(destination);
   const form = draft;
+  const previewMediaIndex =
+    previewMediaId === null ? -1 : mediaItems.findIndex((mediaItem) => mediaItem.id === previewMediaId);
+  const previewMediaItem = previewMediaIndex === -1 ? null : mediaItems[previewMediaIndex];
 
   useEffect(
     () => () => {
@@ -182,6 +207,13 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
   useEffect(() => {
     latestDestinationIdRef.current = destination.id;
   }, [destination.id]);
+
+  useEffect(() => {
+    if (previewMediaId === null) return;
+    if (mediaItems.some((mediaItem) => mediaItem.id === previewMediaId)) return;
+
+    setPreviewMediaId(null);
+  }, [mediaItems, previewMediaId]);
 
   useEffect(() => {
     if (sourceKeyRef.current === sourceKey) return;
@@ -349,6 +381,23 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
       await Promise.resolve(onUpdate(destination.id, { coordinates: result.coordinates }));
     }
     setIsEditingCoordinates(false);
+  }
+
+  function reorderPreviewMedia(mediaId: string, direction: -1 | 1) {
+    const currentIndex = mediaItems.findIndex((mediaItem) => mediaItem.id === mediaId);
+    const targetIndex = currentIndex + direction;
+
+    if (currentIndex === -1 || targetIndex < 0 || targetIndex >= mediaItems.length) return;
+
+    const nextOrder = mediaItems.map((mediaItem) => mediaItem.id);
+    const [movedMediaId] = nextOrder.splice(currentIndex, 1);
+    nextOrder.splice(targetIndex, 0, movedMediaId);
+    void Promise.resolve(onReorderMedia(nextOrder)).catch(() => undefined);
+  }
+
+  async function deletePreviewMedia(mediaId: string) {
+    await Promise.resolve(onDeleteMedia(mediaId));
+    setPreviewMediaId((currentMediaId) => (currentMediaId === mediaId ? null : currentMediaId));
   }
 
   function handleCoordinateInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -536,6 +585,17 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
         </div>
       </header>
 
+      <DestinationImageStrip
+        destinationName={form.name || destination.name}
+        mediaItems={mediaItems}
+        isLoading={isMediaLoading}
+        isUploading={isMediaUploading}
+        error={mediaError}
+        onUploadFiles={onUploadMedia}
+        onReorder={onReorderMedia}
+        onOpenPreview={setPreviewMediaId}
+      />
+
       <label>
         Expected stay days
         <input
@@ -582,6 +642,18 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
           />
         </div>
       </fieldset>
+      {previewMediaItem ? (
+        <DestinationImagePreviewModal
+          mediaItem={previewMediaItem}
+          canMoveLeft={previewMediaIndex > 0}
+          canMoveRight={previewMediaIndex < mediaItems.length - 1}
+          onUpdate={onUpdateMedia}
+          onDelete={deletePreviewMedia}
+          onMoveLeft={(mediaId) => reorderPreviewMedia(mediaId, -1)}
+          onMoveRight={(mediaId) => reorderPreviewMedia(mediaId, 1)}
+          onClose={() => setPreviewMediaId(null)}
+        />
+      ) : null}
     </aside>
   );
 }

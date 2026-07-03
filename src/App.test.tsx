@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { createDestination } from './domain/destinations';
-import type { Destination, RouteLeg } from './domain/types';
+import type { Destination, MediaItem, RouteLeg } from './domain/types';
 import { createAppTripRepository } from './storage/appRepository';
 
 type Deferred<T> = {
@@ -95,7 +95,7 @@ const repositoryMock = vi.hoisted(() => {
       repository.destinations = [...snapshot.destinations];
       repository.routeLegs = [...snapshot.routeLegs];
     }),
-    listDestinationMedia: vi.fn(async () => []),
+    listDestinationMedia: vi.fn(async (): Promise<MediaItem[]> => []),
     uploadDestinationMedia: vi.fn(),
     updateDestinationMedia: vi.fn(),
     deleteDestinationMedia: vi.fn(),
@@ -139,6 +139,9 @@ describe('App', () => {
     repositoryMock.replaceTripData.mockClear();
     repositoryMock.listDestinationMedia.mockClear();
     repositoryMock.uploadDestinationMedia.mockClear();
+    repositoryMock.updateDestinationMedia.mockClear();
+    repositoryMock.deleteDestinationMedia.mockClear();
+    repositoryMock.reorderDestinationMedia.mockClear();
     vi.mocked(createAppTripRepository).mockResolvedValue(repositoryMock);
     vi.mocked(searchMapTilerPlaces).mockReset();
     vi.mocked(resolveMapTilerCoordinates).mockReset();
@@ -515,6 +518,41 @@ describe('App', () => {
     );
   });
 
+  it('loads destination media after opening a profile without blocking the pane', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    });
+    const mediaLoad = createDeferred<MediaItem[]>();
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listDestinationMedia.mockReturnValue(mediaLoad.promise);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
+
+    expect(await screen.findByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
+    expect(repositoryMock.listDestinationMedia).toHaveBeenCalledWith(destination.id);
+    expect(screen.getByRole('region', { name: 'Stop images' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading images' })).toBeInTheDocument();
+
+    await act(async () => {
+      mediaLoad.resolve([
+        createMediaItem({
+          id: 'media-1',
+          url: '/balcombe.jpg',
+          caption: 'Balcombe lane',
+        }),
+      ]);
+      await mediaLoad.promise;
+    });
+
+    expect(screen.getByRole('button', { name: 'Open hero image: Balcombe lane' })).toBeInTheDocument();
+  });
+
   it('keeps mutation actions unavailable while trip data is loading', async () => {
     const initialDestinations = createDeferred<Destination[]>();
     const initialRouteLegs = createDeferred<RouteLeg[]>();
@@ -577,6 +615,15 @@ function createPlaceSearchResult(input: {
       sourceProvider: 'maptiler',
       sourceFeatureId: input.id,
     },
+  };
+}
+
+function createMediaItem(input: Partial<MediaItem> & Pick<MediaItem, 'id' | 'url'>): MediaItem {
+  return {
+    caption: '',
+    credit: '',
+    sortOrder: 0,
+    ...input,
   };
 }
 

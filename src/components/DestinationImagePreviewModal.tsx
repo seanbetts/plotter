@@ -9,7 +9,7 @@ type DestinationImagePreviewModalProps = {
   mediaItem: MediaItem;
   canMoveLeft: boolean;
   canMoveRight: boolean;
-  onUpdate: (mediaId: string, patch: MediaPatch) => Promise<MediaItem> | MediaItem;
+  onUpdate: (mediaId: string, patch: MediaPatch) => Promise<MediaItem | undefined> | MediaItem | undefined;
   onDelete: (mediaId: string) => Promise<void> | void;
   onMoveLeft: (mediaId: string) => Promise<void> | void;
   onMoveRight: (mediaId: string) => Promise<void> | void;
@@ -144,6 +144,10 @@ export function DestinationImagePreviewModal({
 
       try {
         const updatedMediaItem = await onUpdate(mediaId, patch);
+        if (!updatedMediaItem) {
+          throw new Error('Unable to update image.');
+        }
+
         if (
           mediaIdRef.current !== mediaId ||
           saveSequenceRef.current !== saveSequence ||
