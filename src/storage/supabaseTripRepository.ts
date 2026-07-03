@@ -108,6 +108,15 @@ function assertSupabaseWriteSucceeded(response: SupabaseWriteResponse, fallbackM
   }
 }
 
+function isDestinationMediaSortOrderConflict(errorMessage: string | undefined) {
+  if (!errorMessage) return false;
+
+  return (
+    errorMessage.includes('media_assets_trip_destination_sort_order_key') ||
+    errorMessage.includes('duplicate key value')
+  );
+}
+
 function createStorageObjectName(fileName: string) {
   const normalizedFileName = fileName.trim().toLowerCase();
   const extensionMatch = normalizedFileName.match(/\.([a-z0-9]+)$/);
@@ -301,6 +310,64 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     return activeTripId;
   }
 
+  async function listExistingDestinationMediaSortOrders(tripId: string, destinationId: string) {
+    return assertNoSupabaseError<Pick<SupabaseMediaAssetRow, 'sort_order'>[]>(
+      await supabase
+        .from('media_assets')
+        .select('sort_order')
+        .eq('trip_id', tripId)
+        .eq('destination_id', destinationId),
+      'Unable to load destination media order.',
+    );
+  }
+
+  async function insertDestinationMediaMetadata(input: {
+    tripId: string;
+    destinationId: string;
+    bucketId: string;
+    objectPath: string;
+    caption: string;
+    credit: string;
+    contentType: string | null;
+    sizeBytes: number;
+    uploadedBy: string;
+  }) {
+    let existingRows = await listExistingDestinationMediaSortOrders(input.tripId, input.destinationId);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const nextSortOrder =
+        existingRows.reduce((maxSortOrder, row) => Math.max(maxSortOrder, row.sort_order), -1) + 1;
+      const response = await supabase
+        .from('media_assets')
+        .insert({
+          trip_id: input.tripId,
+          destination_id: input.destinationId,
+          bucket_id: input.bucketId,
+          object_path: input.objectPath,
+          caption: input.caption,
+          credit: input.credit,
+          sort_order: nextSortOrder,
+          content_type: input.contentType,
+          size_bytes: input.sizeBytes,
+          uploaded_by: input.uploadedBy,
+        })
+        .select('*')
+        .single();
+
+      if (!response.error && response.data) {
+        return response.data;
+      }
+
+      if (!isDestinationMediaSortOrderConflict(response.error?.message) || attempt === 2) {
+        throw new Error(response.error?.message || 'Unable to save media metadata.');
+      }
+
+      existingRows = await listExistingDestinationMediaSortOrders(input.tripId, input.destinationId);
+    }
+
+    throw new Error('Unable to save media metadata.');
+  }
+
   return {
     async listDestinations() {
       const tripId = await getActiveTripId();
@@ -375,16 +442,6 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       if (userResponse.error || !user) {
         throw new Error(userResponse.error?.message || 'Sign in before uploading media.');
       }
-      const existingRows = assertNoSupabaseError<Pick<SupabaseMediaAssetRow, 'sort_order'>[]>(
-        await supabase
-          .from('media_assets')
-          .select('sort_order')
-          .eq('trip_id', tripId)
-          .eq('destination_id', input.destinationId),
-        'Unable to load destination media order.',
-      );
-      const nextSortOrder =
-        existingRows.reduce((maxSortOrder, row) => Math.max(maxSortOrder, row.sort_order), -1) + 1;
 
       const bucketId = 'trip-media';
       const objectPath = `${tripId}/${input.destinationId}/${createStorageObjectName(input.file.name)}`;
@@ -397,25 +454,17 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
       assertNoSupabaseError(uploadResponse, 'Unable to upload destination media.');
 
-      const row = assertNoSupabaseError<SupabaseMediaAssetRow>(
-        await supabase
-          .from('media_assets')
-          .insert({
-            trip_id: tripId,
-            destination_id: input.destinationId,
-            bucket_id: bucketId,
-            object_path: uploadResponse.data?.path ?? objectPath,
-            caption: input.caption ?? '',
-            credit: input.credit ?? '',
-            sort_order: nextSortOrder,
-            content_type: input.file.type || null,
-            size_bytes: input.file.size,
-            uploaded_by: user.id,
-          })
-          .select('*')
-          .single(),
-        'Unable to save media metadata.',
-      );
+      const row = await insertDestinationMediaMetadata({
+        tripId,
+        destinationId: input.destinationId,
+        bucketId,
+        objectPath: uploadResponse.data?.path ?? objectPath,
+        caption: input.caption ?? '',
+        credit: input.credit ?? '',
+        contentType: input.file.type || null,
+        sizeBytes: input.file.size,
+        uploadedBy: user.id,
+      });
       const signedUrlResponse = await supabase.storage
         .from(bucketId)
         .createSignedUrl(row.object_path, 60 * 60);

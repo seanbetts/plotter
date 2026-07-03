@@ -73,13 +73,14 @@ where public.media_assets.id = ranked_media.id
   and public.media_assets.sort_order is null;
 
 alter table public.media_assets
-alter column sort_order set default 0;
-
-alter table public.media_assets
 alter column sort_order set not null;
 
-create index if not exists media_assets_trip_destination_order_idx
-on public.media_assets(trip_id, destination_id, sort_order, created_at);
+alter table public.media_assets
+alter column sort_order drop default;
+
+create unique index if not exists media_assets_trip_destination_sort_order_key
+on public.media_assets(trip_id, destination_id, sort_order)
+where destination_id is not null;
 ```
 
 - [ ] **Step 3: Write the failing mapper test**

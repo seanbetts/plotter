@@ -304,6 +304,126 @@ describe('supabase trip repository mappers', () => {
     );
   });
 
+  it('retries metadata insert with a later sort order when the first insert hits a duplicate', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const mediaAssetId = crypto.randomUUID();
+    const uploadedPath = `${tripId}/${destinationId}/asset-aurora.jpg`;
+    const existingRowsResponses = [
+      [
+        { sort_order: 0 },
+        { sort_order: 2 },
+      ],
+      [
+        { sort_order: 0 },
+        { sort_order: 2 },
+        { sort_order: 3 },
+      ],
+    ];
+    const upload = vi.fn(async () => ({ data: { path: uploadedPath }, error: null }));
+    const createSignedUrl = vi.fn(async () => ({
+      data: { signedUrl: 'https://signed.example/aurora.jpg' },
+      error: null,
+    }));
+    const mediaInsert = vi
+      .fn()
+      .mockImplementationOnce((row) => ({
+        select: vi.fn(() => ({
+          single: vi.fn(async () => ({
+            data: null,
+            error: {
+              message:
+                'duplicate key value violates unique constraint "media_assets_trip_destination_sort_order_key"',
+            },
+          })),
+        })),
+      }))
+      .mockImplementationOnce((row) => ({
+        select: vi.fn(() => ({
+          single: vi.fn(async () => ({
+            data: {
+              id: mediaAssetId,
+              ...row,
+              created_at: '2026-06-29T12:00:00.000Z',
+              updated_at: '2026-06-29T12:00:00.000Z',
+            },
+            error: null,
+          })),
+        })),
+      }));
+    const mediaSelect = vi
+      .fn()
+      .mockImplementationOnce(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(async () => ({ data: existingRowsResponses[0], error: null })),
+        })),
+      }))
+      .mockImplementationOnce(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(async () => ({ data: existingRowsResponses[1], error: null })),
+        })),
+      }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: userId } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({
+          upload,
+          createSignedUrl,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: userId, name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: mediaSelect,
+            insert: mediaInsert,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+    const file = new File(['image-data'], 'Aurora.JPG', { type: 'image/jpeg' });
+
+    const mediaItem = await repository.uploadDestinationMedia({
+      destinationId,
+      file,
+      caption: 'Aurora',
+      credit: 'Example photographer',
+    });
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(mediaSelect).toHaveBeenCalledTimes(2);
+    expect(mediaInsert).toHaveBeenCalledTimes(2);
+    expect(mediaInsert).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ sort_order: 3 }),
+    );
+    expect(mediaInsert).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ sort_order: 4 }),
+    );
+    expect(mediaItem).toEqual(
+      expect.objectContaining({
+        id: mediaAssetId,
+        url: 'https://signed.example/aurora.jpg',
+        sortOrder: 4,
+      }),
+    );
+  });
+
   it('lists destination media with signed URLs', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();

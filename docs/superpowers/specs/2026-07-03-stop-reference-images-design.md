@@ -60,8 +60,10 @@ Caption and credit edits should autosave with the same save-status feedback patt
 The existing `media_assets` table needs an ordering field:
 
 ```sql
-sort_order integer not null default 0
+sort_order integer not null
 ```
+
+The migration should backfill `sort_order` from existing creation order, enforce `not null`, leave no default on the final schema, and enforce uniqueness per destination with a partial unique index on `(trip_id, destination_id, sort_order)` where `destination_id is not null`.
 
 The repository should treat `media_assets.sort_order` as the image order for each destination.
 
