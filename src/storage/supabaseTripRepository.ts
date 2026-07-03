@@ -130,6 +130,17 @@ function createStorageObjectName(fileName: string) {
   return `${crypto.randomUUID()}-${baseName}${extension}`;
 }
 
+function createMediaOrderMismatchError(currentIds: string[], orderedIds: string[]) {
+  const requestedIds = new Set(orderedIds);
+  const missingIds = currentIds.filter((id) => !requestedIds.has(id));
+  const extraIds = orderedIds.filter((id) => !currentIds.includes(id));
+  const duplicateIds = orderedIds.filter((id, index) => orderedIds.indexOf(id) !== index);
+
+  return new Error(
+    `Media order must include each destination media item exactly once: missing ${missingIds.join(', ') || 'none'}; extra ${extraIds.join(', ') || 'none'}; duplicate ${duplicateIds.join(', ') || 'none'}.`,
+  );
+}
+
 export function destinationToSupabaseRow(destination: Destination, tripId: string): SupabaseDestinationRow {
   return {
     id: destination.id,
@@ -368,6 +379,46 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     throw new Error('Unable to save media metadata.');
   }
 
+  async function createSignedMediaItem(row: SupabaseMediaAssetRow) {
+    const signedUrlResponse = await supabase.storage
+      .from(row.bucket_id)
+      .createSignedUrl(row.object_path, 60 * 60);
+    const signedUrl = assertNoSupabaseError(
+      signedUrlResponse,
+      'Unable to create media URL.',
+    ).signedUrl;
+
+    return mediaAssetFromSupabaseRow(row, signedUrl);
+  }
+
+  async function loadDestinationMediaRows(tripId: string, destinationId: string) {
+    return assertNoSupabaseError<SupabaseMediaAssetRow[]>(
+      await supabase
+        .from('media_assets')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('destination_id', destinationId),
+      'Unable to load destination media.',
+    );
+  }
+
+  async function updateDestinationMediaSortOrder(input: {
+    tripId: string;
+    destinationId: string;
+    mediaId: string;
+    sortOrder: number;
+  }) {
+    assertSupabaseWriteSucceeded(
+      await supabase
+        .from('media_assets')
+        .update({ sort_order: input.sortOrder })
+        .eq('trip_id', input.tripId)
+        .eq('destination_id', input.destinationId)
+        .eq('id', input.mediaId),
+      'Unable to update media order.',
+    );
+  }
+
   return {
     async listDestinations() {
       const tripId = await getActiveTripId();
@@ -421,17 +472,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       );
 
       return Promise.all(
-        rows.map(async (row) => {
-          const signedUrlResponse = await supabase.storage
-            .from(row.bucket_id)
-            .createSignedUrl(row.object_path, 60 * 60);
-          const signedUrl = assertNoSupabaseError(
-            signedUrlResponse,
-            'Unable to create media URL.',
-          ).signedUrl;
-
-          return mediaAssetFromSupabaseRow(row, signedUrl);
-        }),
+        rows.map((row) => createSignedMediaItem(row)),
       );
     },
 
@@ -474,6 +515,95 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       ).signedUrl;
 
       return mediaAssetFromSupabaseRow(row, signedUrl);
+    },
+
+    async updateDestinationMedia(mediaId, patch) {
+      const tripId = await getActiveTripId();
+      const rowPatch: Pick<Partial<SupabaseMediaAssetRow>, 'caption' | 'credit'> = {};
+
+      if (patch.caption !== undefined) {
+        rowPatch.caption = patch.caption;
+      }
+
+      if (patch.credit !== undefined) {
+        rowPatch.credit = patch.credit;
+      }
+
+      const row = assertNoSupabaseError<SupabaseMediaAssetRow>(
+        await supabase
+          .from('media_assets')
+          .update(rowPatch)
+          .eq('trip_id', tripId)
+          .eq('id', mediaId)
+          .select('*')
+          .single(),
+        'Unable to update destination media.',
+      );
+
+      return createSignedMediaItem(row);
+    },
+
+    async deleteDestinationMedia(mediaId) {
+      const tripId = await getActiveTripId();
+      const row = assertNoSupabaseError<SupabaseMediaAssetRow>(
+        await supabase
+          .from('media_assets')
+          .select('*')
+          .eq('trip_id', tripId)
+          .eq('id', mediaId)
+          .single(),
+        'Unable to load destination media before deletion.',
+      );
+
+      assertSupabaseWriteSucceeded(
+        await supabase.storage.from(row.bucket_id).remove([row.object_path]),
+        'Unable to remove destination media file.',
+      );
+      assertSupabaseWriteSucceeded(
+        await supabase
+          .from('media_assets')
+          .delete()
+          .eq('trip_id', tripId)
+          .eq('id', mediaId),
+        'Unable to delete destination media metadata.',
+      );
+    },
+
+    async reorderDestinationMedia(destinationId, orderedMediaIds) {
+      const tripId = await getActiveTripId();
+      const rows = await loadDestinationMediaRows(tripId, destinationId);
+      const currentIds = rows.map((row) => row.id);
+      const requestedIds = new Set(orderedMediaIds);
+      const hasDuplicateIds = requestedIds.size !== orderedMediaIds.length;
+      const hasMissingIds = currentIds.some((id) => !requestedIds.has(id));
+      const hasExtraIds = orderedMediaIds.some((id) => !currentIds.includes(id));
+
+      if (hasDuplicateIds || hasMissingIds || hasExtraIds) {
+        throw createMediaOrderMismatchError(currentIds, orderedMediaIds);
+      }
+
+      const minSortOrder = Math.min(0, ...rows.map((row) => row.sort_order));
+      const temporarySortOrderBase = minSortOrder - orderedMediaIds.length - 1;
+
+      for (const [index, mediaId] of orderedMediaIds.entries()) {
+        await updateDestinationMediaSortOrder({
+          tripId,
+          destinationId,
+          mediaId,
+          sortOrder: temporarySortOrderBase - index,
+        });
+      }
+
+      for (const [index, mediaId] of orderedMediaIds.entries()) {
+        await updateDestinationMediaSortOrder({
+          tripId,
+          destinationId,
+          mediaId,
+          sortOrder: index,
+        });
+      }
+
+      return this.listDestinationMedia(destinationId);
     },
 
     async listRouteLegs() {

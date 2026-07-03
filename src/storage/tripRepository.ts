@@ -13,6 +13,12 @@ export type TripRepository = {
     caption?: string;
     credit?: string;
   }): Promise<MediaItem>;
+  updateDestinationMedia(
+    mediaId: string,
+    patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>,
+  ): Promise<MediaItem>;
+  deleteDestinationMedia(mediaId: string): Promise<void>;
+  reorderDestinationMedia(destinationId: string, orderedMediaIds: string[]): Promise<MediaItem[]>;
   listRouteLegs(): Promise<RouteLeg[]>;
   saveRouteLeg(routeLeg: RouteLeg): Promise<void>;
   deleteRouteLeg(routeLegId: string): Promise<void>;
@@ -84,7 +90,9 @@ export function createTripRepository(db: TripDb): TripRepository {
 
     async listDestinationMedia(destinationId: string): Promise<MediaItem[]> {
       const destination = await db.destinations.get(destinationId);
-      return destination?.media ?? [];
+      return [...(destination?.media ?? [])].sort(
+        (left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0),
+      );
     },
 
     async uploadDestinationMedia(input: {
@@ -104,6 +112,11 @@ export function createTripRepository(db: TripDb): TripRepository {
         url: input.file.name,
         caption: input.caption ?? '',
         credit: input.credit ?? '',
+        sortOrder:
+          destination.media.reduce(
+            (maxSortOrder, item, index) => Math.max(maxSortOrder, item.sortOrder ?? index),
+            -1,
+          ) + 1,
         contentType: input.file.type || undefined,
         sizeBytes: input.file.size,
         uploadedAt: timestamp,
@@ -116,6 +129,99 @@ export function createTripRepository(db: TripDb): TripRepository {
       });
 
       return mediaItem;
+    },
+
+    async updateDestinationMedia(
+      mediaId: string,
+      patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>,
+    ): Promise<MediaItem> {
+      const timestamp = new Date().toISOString();
+      const destinations = await db.destinations.toArray();
+      const destination = destinations.find((item) =>
+        item.media.some((mediaItem) => mediaItem.id === mediaId),
+      );
+
+      if (!destination) {
+        throw new Error('Media item not found.');
+      }
+
+      let updatedMediaItem: MediaItem | undefined;
+      const media = destination.media.map((mediaItem) => {
+        if (mediaItem.id !== mediaId) return mediaItem;
+
+        updatedMediaItem = {
+          ...mediaItem,
+          ...(patch.caption !== undefined ? { caption: patch.caption } : {}),
+          ...(patch.credit !== undefined ? { credit: patch.credit } : {}),
+        };
+
+        return updatedMediaItem;
+      });
+
+      await db.destinations.put({
+        ...destination,
+        media,
+        updatedAt: timestamp,
+      });
+
+      if (!updatedMediaItem) {
+        throw new Error('Media item not found.');
+      }
+
+      return updatedMediaItem;
+    },
+
+    async deleteDestinationMedia(mediaId: string): Promise<void> {
+      const timestamp = new Date().toISOString();
+      const destinations = await db.destinations.toArray();
+      const destination = destinations.find((item) =>
+        item.media.some((mediaItem) => mediaItem.id === mediaId),
+      );
+
+      if (!destination) {
+        throw new Error('Media item not found.');
+      }
+
+      await db.destinations.put({
+        ...destination,
+        media: destination.media.filter((mediaItem) => mediaItem.id !== mediaId),
+        updatedAt: timestamp,
+      });
+    },
+
+    async reorderDestinationMedia(
+      destinationId: string,
+      orderedMediaIds: string[],
+    ): Promise<MediaItem[]> {
+      const destination = await db.destinations.get(destinationId);
+      if (!destination) {
+        throw new Error('Destination not found.');
+      }
+
+      const currentMediaIds = destination.media.map((mediaItem) => mediaItem.id);
+      const requestedIds = new Set(orderedMediaIds);
+      const missingIds = currentMediaIds.filter((id) => !requestedIds.has(id));
+      const extraIds = orderedMediaIds.filter((id) => !currentMediaIds.includes(id));
+
+      if (requestedIds.size !== orderedMediaIds.length || missingIds.length > 0 || extraIds.length > 0) {
+        throw new Error(
+          `Media order must include each destination media item exactly once. Missing ${missingIds.join(', ') || 'none'}; extra ${extraIds.join(', ') || 'none'}.`,
+        );
+      }
+
+      const mediaById = new Map(destination.media.map((mediaItem) => [mediaItem.id, mediaItem]));
+      const media = orderedMediaIds.map((id, index) => ({
+        ...mediaById.get(id)!,
+        sortOrder: index,
+      }));
+
+      await db.destinations.put({
+        ...destination,
+        media,
+        updatedAt: new Date().toISOString(),
+      });
+
+      return media;
     },
 
     async listRouteLegs(): Promise<RouteLeg[]> {

@@ -524,4 +524,325 @@ describe('supabase trip repository mappers', () => {
     expect(createSignedUrl).toHaveBeenNthCalledWith(1, rows[0].object_path, 60 * 60);
     expect(createSignedUrl).toHaveBeenNthCalledWith(2, rows[1].object_path, 60 * 60);
   });
+
+  it('updates destination media caption and credit in the active trip and returns a fresh signed URL', async () => {
+    const tripId = crypto.randomUUID();
+    const mediaId = crypto.randomUUID();
+    const row = {
+      id: mediaId,
+      trip_id: tripId,
+      destination_id: crypto.randomUUID(),
+      bucket_id: 'trip-media',
+      object_path: `${tripId}/destination/asset.webp`,
+      caption: 'New caption',
+      credit: 'Example photographer',
+      sort_order: 2,
+      content_type: 'image/webp',
+      size_bytes: 2048,
+      uploaded_by: crypto.randomUUID(),
+      created_at: '2026-06-29T12:00:00.000Z',
+      updated_at: '2026-06-29T12:10:00.000Z',
+    };
+    const createSignedUrl = vi.fn(async () => ({
+      data: { signedUrl: 'https://signed.example/updated.webp' },
+      error: null,
+    }));
+    const updateSingle = vi.fn(async () => ({ data: row, error: null }));
+    const updateSelect = vi.fn(() => ({ single: updateSingle }));
+    const mediaIdFilter = vi.fn(() => ({ select: updateSelect }));
+    const tripFilter = vi.fn(() => ({ eq: mediaIdFilter }));
+    const update = vi.fn(() => ({ eq: tripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({ createSignedUrl })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return { update };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.updateDestinationMedia(mediaId, {
+      caption: 'New caption',
+      credit: 'Example photographer',
+    })).resolves.toEqual(expect.objectContaining({
+      id: mediaId,
+      url: 'https://signed.example/updated.webp',
+      caption: 'New caption',
+      credit: 'Example photographer',
+      sortOrder: 2,
+    }));
+
+    expect(update).toHaveBeenCalledWith({ caption: 'New caption', credit: 'Example photographer' });
+    expect(tripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(mediaIdFilter).toHaveBeenCalledWith('id', mediaId);
+    expect(createSignedUrl).toHaveBeenCalledWith(row.object_path, 60 * 60);
+  });
+
+  it('deletes destination media storage before deleting active-trip metadata', async () => {
+    const tripId = crypto.randomUUID();
+    const mediaId = crypto.randomUUID();
+    const row = {
+      id: mediaId,
+      trip_id: tripId,
+      destination_id: crypto.randomUUID(),
+      bucket_id: 'trip-media',
+      object_path: `${tripId}/destination/asset.webp`,
+      caption: '',
+      credit: '',
+      sort_order: 0,
+      content_type: 'image/webp',
+      size_bytes: 2048,
+      uploaded_by: crypto.randomUUID(),
+      created_at: '2026-06-29T12:00:00.000Z',
+      updated_at: '2026-06-29T12:00:00.000Z',
+    };
+    const calls: string[] = [];
+    const remove = vi.fn(async () => {
+      calls.push('storage');
+      return { data: [{ name: 'asset.webp' }], error: null };
+    });
+    const loadSingle = vi.fn(async () => ({ data: row, error: null }));
+    const loadMediaIdFilter = vi.fn(() => ({ single: loadSingle }));
+    const loadTripFilter = vi.fn(() => ({ eq: loadMediaIdFilter }));
+    const deleteMediaIdFilter = vi.fn(async () => {
+      calls.push('metadata');
+      return { error: null };
+    });
+    const deleteTripFilter = vi.fn(() => ({ eq: deleteMediaIdFilter }));
+    const deleteRows = vi.fn(() => ({ eq: deleteTripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({ remove })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: loadTripFilter })),
+            delete: deleteRows,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await repository.deleteDestinationMedia(mediaId);
+
+    expect(loadTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(loadMediaIdFilter).toHaveBeenCalledWith('id', mediaId);
+    expect(remove).toHaveBeenCalledWith([row.object_path]);
+    expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(deleteMediaIdFilter).toHaveBeenCalledWith('id', mediaId);
+    expect(calls).toEqual(['storage', 'metadata']);
+  });
+
+  it('reorders destination media with collision-safe temporary sort orders', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const firstId = crypto.randomUUID();
+    const secondId = crypto.randomUUID();
+    const rows = [
+      {
+        id: firstId,
+        trip_id: tripId,
+        destination_id: destinationId,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/${destinationId}/first.webp`,
+        caption: 'First',
+        credit: '',
+        sort_order: 0,
+        content_type: 'image/webp',
+        size_bytes: 1000,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:00:00.000Z',
+        updated_at: '2026-06-29T12:00:00.000Z',
+      },
+      {
+        id: secondId,
+        trip_id: tripId,
+        destination_id: destinationId,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/${destinationId}/second.webp`,
+        caption: 'Second',
+        credit: '',
+        sort_order: 1,
+        content_type: 'image/webp',
+        size_bytes: 1000,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:01:00.000Z',
+        updated_at: '2026-06-29T12:01:00.000Z',
+      },
+    ];
+    const reorderedRows = [
+      { ...rows[1], sort_order: 0 },
+      { ...rows[0], sort_order: 1 },
+    ];
+    const updates: Array<{ id: string; sortOrder: number }> = [];
+    const createSignedUrl = vi.fn(async () => ({
+      data: { signedUrl: 'https://signed.example/reordered.webp' },
+      error: null,
+    }));
+    const selectOrderFinal = vi.fn(async () => ({ data: reorderedRows, error: null }));
+    const selectOrderFirst = vi.fn(() => ({ order: selectOrderFinal }));
+    const selectDestinationFilter = vi
+      .fn()
+      .mockImplementationOnce(async () => ({ data: rows, error: null }))
+      .mockImplementationOnce(() => ({ order: selectOrderFirst }));
+    const selectTripFilter = vi.fn(() => ({ eq: selectDestinationFilter }));
+    const update = vi.fn((patch: { sort_order: number }) => ({
+      eq: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(async (_column: string, id: string) => {
+            updates.push({ id, sortOrder: patch.sort_order });
+            return { error: null };
+          }),
+        })),
+      })),
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({ createSignedUrl })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: selectTripFilter })),
+            update,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.reorderDestinationMedia(destinationId, [secondId, firstId])).resolves.toEqual([
+      expect.objectContaining({ id: secondId, sortOrder: 0 }),
+      expect.objectContaining({ id: firstId, sortOrder: 1 }),
+    ]);
+
+    expect(updates).toEqual([
+      { id: secondId, sortOrder: -3 },
+      { id: firstId, sortOrder: -4 },
+      { id: secondId, sortOrder: 0 },
+      { id: firstId, sortOrder: 1 },
+    ]);
+  });
+
+  it('rejects destination media reorders with missing or foreign ids before updating rows', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const firstId = crypto.randomUUID();
+    const secondId = crypto.randomUUID();
+    const foreignId = crypto.randomUUID();
+    const rows = [
+      {
+        id: firstId,
+        trip_id: tripId,
+        destination_id: destinationId,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/${destinationId}/first.webp`,
+        caption: '',
+        credit: '',
+        sort_order: 0,
+        content_type: 'image/webp',
+        size_bytes: 1000,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:00:00.000Z',
+        updated_at: '2026-06-29T12:00:00.000Z',
+      },
+      {
+        id: secondId,
+        trip_id: tripId,
+        destination_id: destinationId,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/${destinationId}/second.webp`,
+        caption: '',
+        credit: '',
+        sort_order: 1,
+        content_type: 'image/webp',
+        size_bytes: 1000,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:01:00.000Z',
+        updated_at: '2026-06-29T12:01:00.000Z',
+      },
+    ];
+    const update = vi.fn();
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(async () => ({ data: rows, error: null })),
+              })),
+            })),
+            update,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.reorderDestinationMedia(destinationId, [firstId, foreignId]))
+      .rejects.toThrow(`missing ${secondId}`);
+
+    expect(update).not.toHaveBeenCalled();
+  });
 });

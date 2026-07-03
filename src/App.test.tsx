@@ -97,6 +97,9 @@ const repositoryMock = vi.hoisted(() => {
     }),
     listDestinationMedia: vi.fn(async () => []),
     uploadDestinationMedia: vi.fn(),
+    updateDestinationMedia: vi.fn(),
+    deleteDestinationMedia: vi.fn(),
+    reorderDestinationMedia: vi.fn(),
   };
 
   return repository;

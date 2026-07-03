@@ -620,6 +620,18 @@ function createMemoryRepository(
       throw new Error('Media uploads are not supported by this test repository.');
     },
 
+    async updateDestinationMedia() {
+      throw new Error('Media updates are not supported by this test repository.');
+    },
+
+    async deleteDestinationMedia() {
+      throw new Error('Media deletes are not supported by this test repository.');
+    },
+
+    async reorderDestinationMedia() {
+      throw new Error('Media reordering is not supported by this test repository.');
+    },
+
     async listRouteLegs() {
       return [];
     },

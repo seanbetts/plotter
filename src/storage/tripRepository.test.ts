@@ -188,6 +188,91 @@ describe('trip repository', () => {
     ]);
   });
 
+  it('updates, deletes, and reorders destination media locally', async () => {
+    const repository = createTestRepository();
+    const destination = {
+      ...createDestination({
+        name: 'Paris',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      }),
+      media: [
+        {
+          id: crypto.randomUUID(),
+          url: 'first.webp',
+          caption: 'First',
+          credit: '',
+          sortOrder: 0,
+        },
+        {
+          id: crypto.randomUUID(),
+          url: 'second.webp',
+          caption: 'Second',
+          credit: '',
+          sortOrder: 1,
+        },
+      ],
+    };
+    const [firstMedia, secondMedia] = destination.media;
+
+    await repository.saveDestination(destination);
+
+    await expect(repository.updateDestinationMedia(secondMedia.id, {
+      caption: 'Hero image',
+      credit: 'Example photographer',
+    })).resolves.toEqual(expect.objectContaining({
+      id: secondMedia.id,
+      caption: 'Hero image',
+      credit: 'Example photographer',
+      url: 'second.webp',
+    }));
+
+    await expect(repository.reorderDestinationMedia(destination.id, [
+      secondMedia.id,
+      firstMedia.id,
+    ])).resolves.toEqual([
+      expect.objectContaining({ id: secondMedia.id, sortOrder: 0 }),
+      expect.objectContaining({ id: firstMedia.id, sortOrder: 1 }),
+    ]);
+
+    await repository.deleteDestinationMedia(firstMedia.id);
+
+    expect(await repository.listDestinationMedia(destination.id)).toEqual([
+      expect.objectContaining({
+        id: secondMedia.id,
+        caption: 'Hero image',
+        sortOrder: 0,
+      }),
+    ]);
+  });
+
+  it('assigns local uploads after the existing max media sort order', async () => {
+    const repository = createTestRepository();
+    const destination = {
+      ...createDestination({
+        name: 'Bergen',
+        coordinates: { lat: 60.3913, lng: 5.3221 },
+      }),
+      media: [
+        {
+          id: crypto.randomUUID(),
+          url: 'existing.webp',
+          caption: '',
+          credit: '',
+          sortOrder: 4,
+        },
+      ],
+    };
+
+    await repository.saveDestination(destination);
+
+    const mediaItem = await repository.uploadDestinationMedia({
+      destinationId: destination.id,
+      file: new File(['image-data'], 'bergen.webp', { type: 'image/webp' }),
+    });
+
+    expect(mediaItem.sortOrder).toBe(5);
+  });
+
   it('normalizes legacy records without order or route status', async () => {
     const repository = createTestRepository();
     const legacyDestination = {
