@@ -38,12 +38,14 @@ function distanceKm(left: Coordinates, right: Coordinates) {
 
 function routeGeometryMatchesCoordinates(routeLeg: RouteLeg, origin: Destination, target: Destination) {
   const coordinates = routeLeg.geometry?.coordinates;
+  const firstCoordinate = coordinates?.[0];
+  const lastCoordinate = coordinates?.at(-1);
 
   return (
-    coordinates?.[0]?.[0] === origin.coordinates.lng &&
-    coordinates?.[0]?.[1] === origin.coordinates.lat &&
-    coordinates?.[1]?.[0] === target.coordinates.lng &&
-    coordinates?.[1]?.[1] === target.coordinates.lat
+    firstCoordinate?.[0] === origin.coordinates.lng &&
+    firstCoordinate?.[1] === origin.coordinates.lat &&
+    lastCoordinate?.[0] === target.coordinates.lng &&
+    lastCoordinate?.[1] === target.coordinates.lat
   );
 }
 
