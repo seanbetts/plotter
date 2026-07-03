@@ -99,34 +99,38 @@ export function useDestinationMedia(
     }
   }, [isCurrentGeneration, replaceMediaItems, repository]);
 
-  const reload = useCallback(async () => {
-    if (!destinationId) {
+  const startMediaGeneration = useCallback(async (nextDestinationId: string | null) => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    setUploadingCount(0);
+
+    if (!nextDestinationId) {
       replaceMediaItems([]);
       setIsLoading(false);
       setError(null);
       return;
     }
 
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    setUploadingCount(0);
-    await loadMedia(generation, destinationId);
-  }, [destinationId, loadMedia, replaceMediaItems]);
+    await loadMedia(generation, nextDestinationId);
+  }, [loadMedia, replaceMediaItems]);
+
+  const reload = useCallback(async () => {
+    await startMediaGeneration(destinationId);
+  }, [destinationId, startMediaGeneration]);
 
   useEffect(() => {
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    setUploadingCount(0);
+    let isCancelled = false;
 
-    if (!destinationId) {
-      replaceMediaItems([]);
-      setIsLoading(false);
-      setError(null);
-      return;
-    }
+    queueMicrotask(() => {
+      if (isCancelled) return;
 
-    void loadMedia(generation, destinationId);
-  }, [destinationId, loadMedia, replaceMediaItems]);
+      void startMediaGeneration(destinationId);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [destinationId, startMediaGeneration]);
 
   const uploadFiles = useCallback(async (files: File[] | FileList) => {
     if (!destinationId) return;

@@ -209,13 +209,6 @@ function DestinationProfileForm({
   }, [destination.id]);
 
   useEffect(() => {
-    if (previewMediaId === null) return;
-    if (mediaItems.some((mediaItem) => mediaItem.id === previewMediaId)) return;
-
-    setPreviewMediaId(null);
-  }, [mediaItems, previewMediaId]);
-
-  useEffect(() => {
     if (sourceKeyRef.current === sourceKey) return;
 
     sourceKeyRef.current = sourceKey;

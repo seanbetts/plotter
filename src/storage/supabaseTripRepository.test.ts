@@ -328,7 +328,7 @@ describe('supabase trip repository mappers', () => {
     }));
     const mediaInsert = vi
       .fn()
-      .mockImplementationOnce((row) => ({
+      .mockImplementationOnce(() => ({
         select: vi.fn(() => ({
           single: vi.fn(async () => ({
             data: null,

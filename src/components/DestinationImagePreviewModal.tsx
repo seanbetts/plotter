@@ -61,6 +61,31 @@ export function DestinationImagePreviewModal({
   onMoveRight,
   onClose,
 }: DestinationImagePreviewModalProps) {
+  return (
+    <DestinationImagePreviewModalForm
+      key={mediaItem.id}
+      mediaItem={mediaItem}
+      canMoveLeft={canMoveLeft}
+      canMoveRight={canMoveRight}
+      onUpdate={onUpdate}
+      onDelete={onDelete}
+      onMoveLeft={onMoveLeft}
+      onMoveRight={onMoveRight}
+      onClose={onClose}
+    />
+  );
+}
+
+function DestinationImagePreviewModalForm({
+  mediaItem,
+  canMoveLeft,
+  canMoveRight,
+  onUpdate,
+  onDelete,
+  onMoveLeft,
+  onMoveRight,
+  onClose,
+}: DestinationImagePreviewModalProps) {
   const [draft, setDraft] = useState(() => createDraft(mediaItem));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -72,7 +97,6 @@ export function DestinationImagePreviewModal({
   const baselineRef = useRef(createDraft(mediaItem));
   const mediaIdRef = useRef(mediaItem.id);
   const isDeletingRef = useRef(false);
-  const autosaveRef = useRef<((mediaId: string, draftRevision: number, patch: MediaPatch) => void) | null>(null);
   const editRevisionRef = useRef(0);
   const savedRevisionRef = useRef(0);
   const saveSequenceRef = useRef(0);
@@ -104,24 +128,6 @@ export function DestinationImagePreviewModal({
   );
 
   useEffect(() => {
-    mediaIdRef.current = mediaItem.id;
-    const nextDraft = createDraft(mediaItem);
-    draftRef.current = nextDraft;
-    baselineRef.current = nextDraft;
-    isDeletingRef.current = false;
-    editRevisionRef.current = 0;
-    savedRevisionRef.current = 0;
-    saveSequenceRef.current += 1;
-    clearAutosaveTimer();
-    clearSavedStatusTimer();
-    setDraft(nextDraft);
-    setSaveStatus('idle');
-    setIsConfirmingDelete(false);
-    setIsDeleting(false);
-    setDeleteError('');
-  }, [clearAutosaveTimer, clearSavedStatusTimer, mediaItem.id]);
-
-  useEffect(() => {
     const handleDocumentKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing) return;
 
@@ -136,7 +142,7 @@ export function DestinationImagePreviewModal({
   }, [onClose]);
 
   const autosave = useCallback(
-    async (mediaId: string, draftRevision: number, patch: MediaPatch) => {
+    async function runAutosave(mediaId: string, draftRevision: number, patch: MediaPatch) {
       const saveSequence = saveSequenceRef.current + 1;
       saveSequenceRef.current = saveSequence;
       clearSavedStatusTimer();
@@ -162,7 +168,7 @@ export function DestinationImagePreviewModal({
 
             if (followUpPatch) {
               clearSavedStatusTimer();
-              autosaveRef.current?.(mediaId, editRevisionRef.current, followUpPatch);
+              void runAutosave(mediaId, editRevisionRef.current, followUpPatch);
               return;
             }
 
@@ -200,7 +206,6 @@ export function DestinationImagePreviewModal({
     },
     [clearSavedStatusTimer, onUpdate],
   );
-  autosaveRef.current = autosave;
 
   useEffect(() => {
     clearAutosaveTimer();
@@ -223,7 +228,7 @@ export function DestinationImagePreviewModal({
     }, autosaveDelayMs);
 
     return clearAutosaveTimer;
-  }, [autosave, clearAutosaveTimer, draft, mediaItem.id]);
+  }, [autosave, clearAutosaveTimer, clearSavedStatusTimer, draft, mediaItem.id]);
 
   const updateDraft = (patch: Partial<DraftState>) => {
     editRevisionRef.current += 1;
