@@ -11,6 +11,7 @@ import { createAppTripRepository } from './storage/appRepository';
 type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
 };
 
 type MockMap = {
@@ -125,6 +126,9 @@ describe('App', () => {
     repositoryMock.initialRouteLegs = Promise.resolve([]);
     repositoryMock.listDestinations.mockClear();
     repositoryMock.saveDestination.mockClear();
+    repositoryMock.saveDestination.mockImplementation(async (destination: Destination) => {
+      repositoryMock.destinations.push(destination);
+    });
     repositoryMock.deleteDestination.mockClear();
     repositoryMock.listRouteLegs.mockClear();
     repositoryMock.saveRouteLeg.mockClear();
@@ -200,28 +204,23 @@ describe('App', () => {
   });
 
   it('adds a right-clicked map stop after reverse-geocoded confirmation and opens its profile', async () => {
-    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue({
-      kind: 'place',
-      id: 'place-balcombe',
-      label: 'Balcombe, United Kingdom',
-      coordinates: { lat: 51.0576, lng: -0.1342 },
-      location: {
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'place-balcombe',
+        label: 'Balcombe, United Kingdom',
         placeName: 'Balcombe',
         regionName: 'West Sussex',
         countryName: 'United Kingdom',
-        sourceLabel: 'Balcombe, West Sussex, United Kingdom',
-        sourceProvider: 'maptiler',
-        sourceFeatureId: 'place-balcombe',
-      },
-    });
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      }),
+    );
 
     render(<App />);
 
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
 
-    const map = maplibreMock.mapInstances.at(-1)!;
-    const contextMenuHandler = map.on.mock.calls.find(([eventName]) => eventName === 'contextmenu')?.[1];
+    const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
     act(() => {
       contextMenuHandler({
         preventDefault: vi.fn(),
@@ -242,59 +241,179 @@ describe('App', () => {
     expect(screen.getByText('Stop 01')).toBeInTheDocument();
   });
 
+  it('disables map stop confirmation while reverse geocoding is resolving', async () => {
+    const coordinateLookup = createDeferred<Awaited<ReturnType<typeof resolveMapTilerCoordinates>>>();
+    vi.mocked(resolveMapTilerCoordinates).mockReturnValue(coordinateLookup.promise);
+
+    render(<App />);
+
+    await openContextMenuMapStop({ lat: 51.0576, lng: -0.1342 });
+
+    const addButton = await screen.findByRole('button', { name: 'Add stop' });
+    expect(addButton).toBeDisabled();
+
+    await act(async () => {
+      coordinateLookup.resolve(
+        createPlaceSearchResult({
+          id: 'place-balcombe',
+          label: 'Balcombe, United Kingdom',
+          placeName: 'Balcombe',
+          regionName: 'West Sussex',
+          countryName: 'United Kingdom',
+          coordinates: { lat: 51.0576, lng: -0.1342 },
+        }),
+      );
+      await coordinateLookup.promise;
+    });
+
+    expect(await screen.findByRole('button', { name: 'Add stop' })).toBeEnabled();
+  });
+
   it('allows adding a map stop when reverse geocoding fails', async () => {
     vi.mocked(resolveMapTilerCoordinates).mockRejectedValue(new Error('Coordinate lookup failed'));
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
-    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
-
-    const map = maplibreMock.mapInstances.at(-1)!;
-    const contextMenuHandler = map.on.mock.calls.find(([eventName]) => eventName === 'contextmenu')?.[1];
-    act(() => {
-      contextMenuHandler({
-        preventDefault: vi.fn(),
-        lngLat: { lat: 12.345678, lng: 98.765432 },
-        point: { x: 300, y: 220 },
-      });
-    });
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+    await openContextMenuMapStop({ lat: 12.345678, lng: 98.765432 });
 
     expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Dropped pin');
     expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('12.3457, 98.7654');
     expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Coordinate lookup failed');
+    expect(screen.getByRole('button', { name: 'Add stop' })).toBeEnabled();
 
     await userEvent.click(screen.getByRole('button', { name: 'Add stop' }));
 
     expect(await screen.findByRole('complementary', { name: 'Dropped pin profile' })).toBeInTheDocument();
   });
 
-  it('adds a stop from the map center toolbar action', async () => {
-    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue({
-      kind: 'place',
-      id: 'place-paris',
-      label: 'Paris, France',
-      coordinates: { lat: 48.8566, lng: 2.3522 },
-      location: {
-        placeName: 'Paris',
-        regionName: 'Ile-de-France',
-        countryName: 'France',
-        sourceLabel: 'Paris, Ile-de-France, France',
-        sourceProvider: 'maptiler',
-        sourceFeatureId: 'place-paris',
-      },
+  it('does not create duplicate map stops from rapid Add stop clicks', async () => {
+    const user = userEvent.setup();
+    const saveDestination = createDeferred<void>();
+    repositoryMock.saveDestination.mockImplementation(async (destination: Destination) => {
+      repositoryMock.destinations.push(destination);
+      await saveDestination.promise;
     });
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'place-balcombe',
+        label: 'Balcombe, United Kingdom',
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      }),
+    );
+
+    render(<App />);
+
+    await openContextMenuMapStop({ lat: 51.0576, lng: -0.1342 });
+
+    const addButton = await screen.findByRole('button', { name: 'Add stop' });
+    await waitFor(() => expect(addButton).toBeEnabled());
+    await user.click(addButton);
+    expect(addButton).toBeDisabled();
+    await user.click(addButton);
+
+    expect(repositoryMock.saveDestination).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      saveDestination.resolve(undefined);
+      await saveDestination.promise;
+    });
+    expect(await screen.findByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
+  });
+
+  it('keeps stale reverse geocode responses from replacing a newer pending map stop', async () => {
+    const firstLookup = createDeferred<Awaited<ReturnType<typeof resolveMapTilerCoordinates>>>();
+    const secondLookup = createDeferred<Awaited<ReturnType<typeof resolveMapTilerCoordinates>>>();
+    vi.mocked(resolveMapTilerCoordinates)
+      .mockReturnValueOnce(firstLookup.promise)
+      .mockReturnValueOnce(secondLookup.promise);
 
     render(<App />);
 
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
-    maplibreMock.mapInstances.at(-1)!.getCenter.mockReturnValue({ lat: 48.8566, lng: 2.3522 });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add stop at map center' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add stop at map center' }));
+
+    await act(async () => {
+      secondLookup.resolve(
+        createPlaceSearchResult({
+          id: 'place-paris',
+          label: 'Paris, France',
+          placeName: 'Paris',
+          regionName: 'Ile-de-France',
+          countryName: 'France',
+          coordinates: { lat: 24, lng: 18 },
+        }),
+      );
+      await secondLookup.promise;
+    });
+
+    expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Paris');
+
+    await act(async () => {
+      firstLookup.resolve(
+        createPlaceSearchResult({
+          id: 'place-stale',
+          label: 'Stale place, France',
+          placeName: 'Stale place',
+          regionName: 'Ile-de-France',
+          countryName: 'France',
+          coordinates: { lat: 24, lng: 18 },
+        }),
+      );
+      await firstLookup.promise;
+    });
+
+    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Paris');
+    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).not.toHaveTextContent('Stale place');
+  });
+
+  it('moves focus into the map stop confirmation when it opens', async () => {
+    const coordinateLookup = createDeferred<Awaited<ReturnType<typeof resolveMapTilerCoordinates>>>();
+    vi.mocked(resolveMapTilerCoordinates).mockReturnValue(coordinateLookup.promise);
+
+    render(<App />);
+
+    await openContextMenuMapStop({ lat: 51.0576, lng: -0.1342 });
+
+    expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toHaveFocus();
+
+    coordinateLookup.reject(new Error('Coordinate lookup failed'));
+  });
+
+  it('adds a stop from the updated map center toolbar action', async () => {
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'place-paris',
+        label: 'Paris, France',
+        placeName: 'Paris',
+        regionName: 'Ile-de-France',
+        countryName: 'France',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+    const map = maplibreMock.mapInstances.at(-1)!;
+    map.getCenter.mockReturnValue({ lat: 48.8566, lng: 2.3522 });
+    act(() => {
+      getMapEventHandler(map, 'move')();
+    });
 
     await userEvent.click(screen.getByRole('button', { name: 'Add stop at map center' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Add stop' }));
 
+    expect(resolveMapTilerCoordinates).toHaveBeenCalledWith(
+      { lat: 48.8566, lng: 2.3522 },
+      { apiKey: expect.any(String) },
+    );
     expect(await screen.findByRole('complementary', { name: 'Paris profile' })).toBeInTheDocument();
   });
 
@@ -355,9 +474,57 @@ describe('App', () => {
 
 function createDeferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((promiseResolve) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
     resolve = promiseResolve;
+    reject = promiseReject;
   });
 
-  return { promise, resolve };
+  return { promise, resolve, reject };
+}
+
+function createPlaceSearchResult(input: {
+  id: string;
+  label: string;
+  placeName: string;
+  regionName: string;
+  countryName: string;
+  coordinates: Destination['coordinates'];
+}): Awaited<ReturnType<typeof resolveMapTilerCoordinates>> {
+  return {
+    kind: 'place',
+    id: input.id,
+    label: input.label,
+    coordinates: input.coordinates,
+    location: {
+      placeName: input.placeName,
+      regionName: input.regionName,
+      countryName: input.countryName,
+      sourceLabel: [input.placeName, input.regionName, input.countryName].filter(Boolean).join(', '),
+      sourceProvider: 'maptiler',
+      sourceFeatureId: input.id,
+    },
+  };
+}
+
+function getMapEventHandler(map: MockMap, eventName: string): (...args: unknown[]) => void {
+  const handler = map.on.mock.calls.find(([calledEventName]) => calledEventName === eventName)?.[1];
+  expect(handler).toEqual(expect.any(Function));
+
+  return handler as (...args: unknown[]) => void;
+}
+
+async function openContextMenuMapStop(coordinates: Destination['coordinates']) {
+  await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+  await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+
+  const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
+  act(() => {
+    contextMenuHandler({
+      preventDefault: vi.fn(),
+      lngLat: coordinates,
+      point: { x: 300, y: 220 },
+    });
+  });
+  await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
 }

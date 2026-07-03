@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
 import { DestinationProfile } from './components/DestinationProfile';
@@ -22,12 +22,14 @@ type RepositoryError = {
 };
 
 type PendingMapStop = {
+  id: number;
   coordinates: Coordinates;
   screenPosition: MapAddStopRequest['screenPosition'];
   source: MapAddStopRequest['source'];
   name: string;
   location: DestinationLocation;
   isResolving: boolean;
+  isSaving: boolean;
   resolveError: string | null;
   saveError: string | null;
 };
@@ -153,6 +155,10 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
   const [mapCenterCoordinates, setMapCenterCoordinates] = useState<Coordinates | null>(null);
+  const pendingMapStopRequestIdRef = useRef(0);
+  const activePendingMapStopIdRef = useRef<number | null>(null);
+  const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
+  const previouslyFocusedMapStopElementRef = useRef<HTMLElement | null>(null);
   const isInteractionLocked = isLoading;
 
   const selectedDestination = useMemo(
@@ -167,6 +173,15 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     return selectedDestinationIndex === -1 ? undefined : selectedDestinationIndex + 1;
   }, [destinations, selectedDestinationId]);
 
+  const restorePendingMapStopFocus = useCallback(() => {
+    const previouslyFocusedElement = previouslyFocusedMapStopElementRef.current;
+    previouslyFocusedMapStopElementRef.current = null;
+
+    if (previouslyFocusedElement && document.contains(previouslyFocusedElement)) {
+      previouslyFocusedElement.focus();
+    }
+  }, []);
+
   useEffect(() => {
     if (!pendingMapStop || isInteractionLocked) return undefined;
 
@@ -174,14 +189,22 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
       if (event.key !== 'Escape') return;
 
       event.preventDefault();
+      activePendingMapStopIdRef.current = null;
       setPendingMapStop(null);
+      restorePendingMapStopFocus();
     };
 
     window.addEventListener('keydown', handleWindowKeyDown);
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-  }, [isInteractionLocked, pendingMapStop]);
+  }, [isInteractionLocked, pendingMapStop, restorePendingMapStopFocus]);
+
+  useEffect(() => {
+    if (!pendingMapStop || isInteractionLocked) return;
+
+    pendingMapStopDialogRef.current?.focus();
+  }, [isInteractionLocked, pendingMapStop?.id]);
 
   useEffect(() => {
     if (pendingMapStop || !selectedDestination || isInteractionLocked) return undefined;
@@ -212,14 +235,21 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     async (request: MapAddStopRequest) => {
       if (isInteractionLocked) return;
 
+      const requestId = pendingMapStopRequestIdRef.current + 1;
+      pendingMapStopRequestIdRef.current = requestId;
+      activePendingMapStopIdRef.current = requestId;
+      const activeElement = document.activeElement;
+      previouslyFocusedMapStopElementRef.current = activeElement instanceof HTMLElement ? activeElement : null;
       const fallback = createFallbackMapStop(request.coordinates);
       setPendingMapStop({
+        id: requestId,
         coordinates: request.coordinates,
         screenPosition: request.screenPosition,
         source: request.source,
         name: fallback.name,
         location: fallback.location,
         isResolving: true,
+        isSaving: false,
         resolveError: null,
         saveError: null,
       });
@@ -227,7 +257,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
       try {
         const resolvedResult = await resolveMapTilerCoordinates(request.coordinates, { apiKey: mapTilerApiKey });
         setPendingMapStop((current) => {
-          if (!current || current.coordinates !== request.coordinates) return current;
+          if (!current || current.id !== requestId) return current;
 
           return {
             ...current,
@@ -239,7 +269,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         });
       } catch (caught) {
         setPendingMapStop((current) => {
-          if (!current || current.coordinates !== request.coordinates) return current;
+          if (!current || current.id !== requestId) return current;
 
           return {
             ...current,
@@ -263,28 +293,41 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   }, [mapCenterCoordinates, openPendingMapStop]);
 
   const closePendingMapStop = useCallback(() => {
+    activePendingMapStopIdRef.current = null;
     setPendingMapStop(null);
-  }, []);
+    restorePendingMapStopFocus();
+  }, [restorePendingMapStopFocus]);
 
   const confirmPendingMapStop = useCallback(async () => {
-    if (!pendingMapStop || isInteractionLocked) return;
+    if (!pendingMapStop || pendingMapStop.isResolving || pendingMapStop.isSaving || isInteractionLocked) return;
 
-    setPendingMapStop((current) => (current ? { ...current, saveError: null } : current));
+    const pendingMapStopId = pendingMapStop.id;
+    setPendingMapStop((current) =>
+      current && current.id === pendingMapStopId
+        ? { ...current, isSaving: true, saveError: null }
+        : current,
+    );
     try {
       const destination = await handleAddDestination({
         name: pendingMapStop.name,
         location: pendingMapStop.location,
         coordinates: pendingMapStop.coordinates,
       });
-      setPendingMapStop(null);
+      if (activePendingMapStopIdRef.current !== pendingMapStopId) return;
+
+      activePendingMapStopIdRef.current = null;
+      setPendingMapStop((current) => (current?.id === pendingMapStopId ? null : current));
       if (destination) {
         setSelectedDestinationId(destination.id);
       }
     } catch (caught) {
+      if (activePendingMapStopIdRef.current !== pendingMapStopId) return;
+
       setPendingMapStop((current) =>
-        current
+        current && current.id === pendingMapStopId
           ? {
               ...current,
+              isSaving: false,
               saveError: caught instanceof Error ? caught.message : 'Unable to add stop',
             }
           : current,
@@ -349,10 +392,12 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         ) : null}
         {!isInteractionLocked && pendingMapStop ? (
           <section
+            ref={pendingMapStopDialogRef}
             className="map-stop-confirmation"
             role="dialog"
             aria-modal="false"
             aria-label="Add stop from map"
+            tabIndex={-1}
             style={{
               left: `${pendingMapStop.screenPosition.x}px`,
               top: `${pendingMapStop.screenPosition.y}px`,
@@ -376,7 +421,11 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               <button type="button" onClick={closePendingMapStop}>
                 Cancel
               </button>
-              <button type="button" onClick={() => void confirmPendingMapStop()}>
+              <button
+                type="button"
+                disabled={pendingMapStop.isResolving || pendingMapStop.isSaving}
+                onClick={() => void confirmPendingMapStop()}
+              >
                 Add stop
               </button>
             </div>
