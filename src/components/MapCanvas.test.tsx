@@ -283,6 +283,17 @@ describe('MapCanvas', () => {
 
     const map = maplibreMock.mapInstances[0];
     const container = screen.getByTestId('map-container');
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 40,
+      left: 100,
+      top: 40,
+      right: 900,
+      bottom: 640,
+      width: 800,
+      height: 600,
+      toJSON: () => ({}),
+    } as DOMRect);
     map.unproject.mockReturnValue({ lat: 35.0116, lng: 135.7681 });
 
     fireEvent.pointerDown(container, {
@@ -295,9 +306,10 @@ describe('MapCanvas', () => {
       vi.advanceTimersByTime(550);
     });
 
+    expect(map.unproject).toHaveBeenCalledWith([140, 180]);
     expect(onRequestAddStop).toHaveBeenCalledWith({
       coordinates: { lat: 35.0116, lng: 135.7681 },
-      screenPosition: { x: 240, y: 220 },
+      screenPosition: { x: 140, y: 180 },
       source: 'long-press',
     });
 

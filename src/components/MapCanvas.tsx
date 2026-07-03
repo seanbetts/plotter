@@ -729,7 +729,13 @@ export function MapCanvas({
   const onRequestAddStopRef = useRef(onRequestAddStop);
   const onMapCenterCoordinatesChangeRef = useRef(onMapCenterCoordinatesChange);
   const longPressTimerRef = useRef<number | null>(null);
-  const longPressStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const longPressStartRef = useRef<{
+    pointerId: number;
+    screenX: number;
+    screenY: number;
+    mapX: number;
+    mapY: number;
+  } | null>(null);
   const previousDestinationCountRef = useRef(0);
   const [selectedZoomStep, setSelectedZoomStep] = useState(1);
   const [currentMapZoom, setCurrentMapZoom] = useState(1.4);
@@ -1131,20 +1137,23 @@ export function MapCanvas({
     if (!onRequestAddStopRef.current || event.pointerType === 'mouse') return;
 
     clearLongPressTimer();
+    const containerRect = event.currentTarget.getBoundingClientRect();
     longPressStartRef.current = {
       pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
+      screenX: event.clientX,
+      screenY: event.clientY,
+      mapX: event.clientX - containerRect.left,
+      mapY: event.clientY - containerRect.top,
     };
     longPressTimerRef.current = window.setTimeout(() => {
       const map = mapRef.current;
       const longPressStart = longPressStartRef.current;
       if (!map || !longPressStart) return;
 
-      const coordinates = map.unproject([longPressStart.x, longPressStart.y]);
+      const coordinates = map.unproject([longPressStart.mapX, longPressStart.mapY]);
       requestAddStop({
         coordinates: { lat: coordinates.lat, lng: coordinates.lng },
-        screenPosition: { x: longPressStart.x, y: longPressStart.y },
+        screenPosition: { x: longPressStart.mapX, y: longPressStart.mapY },
         source: 'long-press',
       });
       longPressStartRef.current = null;
@@ -1156,8 +1165,8 @@ export function MapCanvas({
     const longPressStart = longPressStartRef.current;
     if (!longPressStart || longPressStart.pointerId !== event.pointerId) return;
 
-    const deltaX = Math.abs(event.clientX - longPressStart.x);
-    const deltaY = Math.abs(event.clientY - longPressStart.y);
+    const deltaX = Math.abs(event.clientX - longPressStart.screenX);
+    const deltaY = Math.abs(event.clientY - longPressStart.screenY);
     if (deltaX > 10 || deltaY > 10) {
       longPressStartRef.current = null;
       clearLongPressTimer();
