@@ -807,6 +807,8 @@ select {
 .profile-coordinate-pill,
 .profile-coordinate-input-pill {
   display: grid;
+  grid-template-rows: 0.66rem 0.82rem;
+  align-content: center;
   gap: 3px;
   text-align: left;
 }
@@ -832,7 +834,7 @@ select {
   background: transparent;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 0.72rem;
-  line-height: 1.15;
+  line-height: 1;
   outline: 0;
 }
 
@@ -854,6 +856,7 @@ select {
 .profile-coordinate-value {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 0.72rem;
+  line-height: 1;
 }
 
 .profile-stop-number {
