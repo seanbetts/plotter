@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Image, LoaderCircle } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ChangeEvent, DragEvent } from 'react';
 import type { MediaItem } from '../domain/types';
 import { preloadImageUrls } from '../media/imagePreloading';
 
@@ -39,6 +39,17 @@ function getHeroImageUrl(mediaItem: MediaItem) {
 
 function getThumbnailImageUrl(mediaItem: MediaItem) {
   return mediaItem.thumbnailUrl ?? mediaItem.previewUrl ?? mediaItem.url;
+}
+
+function isEditableKeyboardTarget(element: Element | null) {
+  if (!(element instanceof HTMLElement)) return false;
+
+  return (
+    element.isContentEditable ||
+    element.tagName === 'INPUT' ||
+    element.tagName === 'SELECT' ||
+    element.tagName === 'TEXTAREA'
+  );
 }
 
 function isFileDrag(event: DragEvent<HTMLElement>) {
@@ -234,7 +245,7 @@ export function DestinationImageStrip({
     setDragTarget(null);
   };
 
-  const selectAdjacentPreview = (direction: -1 | 1) => {
+  const selectAdjacentPreview = useCallback((direction: -1 | 1) => {
     if (mediaItems.length === 0) return;
 
     const nextMediaItem =
@@ -242,22 +253,32 @@ export function DestinationImageStrip({
     if (!nextMediaItem) return;
 
     setPreviewMediaId(nextMediaItem.id);
-  };
+  }, [mediaItems, safePreviewMediaIndex]);
 
-  const handleStripKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-    if (mediaItems.length < 2) return;
+  useEffect(() => {
+    if (mediaItems.length < 2) return undefined;
 
-    event.preventDefault();
-    event.stopPropagation();
-    selectAdjacentPreview(event.key === 'ArrowLeft' ? -1 : 1);
-  };
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (isEditableKeyboardTarget(document.activeElement)) return;
+
+      event.preventDefault();
+      selectAdjacentPreview(event.key === 'ArrowLeft' ? -1 : 1);
+    };
+
+    window.addEventListener('keydown', handleWindowKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleWindowKeyDown);
+    };
+  }, [mediaItems.length, selectAdjacentPreview]);
 
   return (
     <section
       className={stripClassName}
       aria-label="Stop images"
-      onKeyDown={handleStripKeyDown}
       onDragEnter={handleStripDragEnter}
       onDragOver={handleStripDragOver}
       onDragLeave={handleStripDragLeave}

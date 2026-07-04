@@ -223,6 +223,34 @@ describe('DestinationImageStrip', () => {
     expect(screen.getByRole('button', { name: 'Open full image' })).toBeInTheDocument();
   });
 
+  it('responds to left and right arrow keys while focus is elsewhere in the stop pane', () => {
+    render(<DestinationImageStrip {...createProps()} />);
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+
+    expect(screen.getByRole('button', { name: 'Open full image: Mountain trail' })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+
+    expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
+  });
+
+  it('does not hijack left and right arrow keys from editable controls', () => {
+    const textInput = document.createElement('input');
+    document.body.append(textInput);
+
+    try {
+      render(<DestinationImageStrip {...createProps()} />);
+      textInput.focus();
+
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+
+      expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
+    } finally {
+      textInput.remove();
+    }
+  });
+
   it('preloads the previous and next preview images into the browser cache', () => {
     const preloadedUrls: string[] = [];
     class FakeImage {
