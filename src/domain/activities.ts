@@ -12,12 +12,13 @@ const nowIso = () => new Date().toISOString();
 const createId = () => crypto.randomUUID();
 const nextIsoAfter = (timestamp: string) => {
   const now = nowIso();
+  const previousTime = Date.parse(timestamp);
 
-  if (now !== timestamp) {
+  if (Date.parse(now) > previousTime) {
     return now;
   }
 
-  return new Date(Date.parse(timestamp) + 1).toISOString();
+  return new Date(previousTime + 1).toISOString();
 };
 
 export function createActivity(input: CreateActivityInput): Activity {
