@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
+import {
+  createBoundingBoxAroundCoordinates,
+  resolveMapTilerCoordinates,
+  searchMapTilerPlaces,
+} from './adapters/geocoding';
+import type { PlaceSearchResult } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
 import { ActivityPanel } from './components/ActivityPanel';
 import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
@@ -9,7 +14,14 @@ import { MapCanvas } from './components/MapCanvas';
 import type { MapAddStopRequest } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
-import type { Activity, ActivityLocation, Coordinates, DestinationLocation, MediaRollupItem } from './domain/types';
+import type {
+  Activity,
+  ActivityLocation,
+  Coordinates,
+  Destination,
+  DestinationLocation,
+  MediaRollupItem,
+} from './domain/types';
 import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
@@ -23,6 +35,7 @@ import './styles.css';
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 const mobileWorkspacePanelsQuery = '(max-width: 760px)';
+const stopsPanelCollapsedStorageKey = 'world-tour:stops-panel-collapsed';
 
 type RepositoryError = {
   title: string;
@@ -54,6 +67,7 @@ type PreviewMediaSelection = {
 };
 
 const overlayViewportPaddingPx = 16;
+const activitySearchRadiusKm = 100;
 const mapStopConfirmationApproxSize = {
   width: 320,
   height: 260,
@@ -94,6 +108,16 @@ function getFullMediaImageUrl(mediaItem: { fullUrl?: string; previewUrl?: string
   return mediaItem.fullUrl ?? mediaItem.previewUrl ?? mediaItem.url;
 }
 
+function readStopsPanelCollapsedPreference() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(stopsPanelCollapsedStorageKey) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, 'name' | 'location'> {
   const name = 'Dropped pin';
 
@@ -104,6 +128,33 @@ function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, '
       countryRegion: formatCoordinatePair(coordinates),
     }),
   };
+}
+
+function createActivityLocationFromPlaceResult(
+  result: Extract<PlaceSearchResult, { kind: 'place' }>,
+): ActivityLocation {
+  return {
+    name: result.location.placeName,
+    address: result.address ?? result.location.sourceLabel,
+    coordinates: result.coordinates,
+    sourceProvider: 'maptiler',
+    sourceFeatureId: result.location.sourceFeatureId,
+  };
+}
+
+function createDestinationLocationFromPlaceResult(
+  result: Extract<PlaceSearchResult, { kind: 'place' }>,
+): DestinationLocation {
+  return {
+    ...result.location,
+    sourceProvider: 'maptiler',
+  };
+}
+
+function shouldResolveActivityLocation(location: ActivityLocation | undefined): location is ActivityLocation & {
+  coordinates: Coordinates;
+} {
+  return Boolean(location?.coordinates);
 }
 
 function clampOverlayPosition(
@@ -231,6 +282,7 @@ function TripWorkspace({
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [isStopsPanelCollapsed, setIsStopsPanelCollapsed] = useState(readStopsPanelCollapsedPreference);
   const [previewMedia, setPreviewMedia] = useState<PreviewMediaSelection | null>(null);
   const [destinationMediaRollupItems, setDestinationMediaRollupItems] = useState<MediaRollupItem[]>([]);
   const [isDestinationMediaRollupLoading, setIsDestinationMediaRollupLoading] = useState(false);
@@ -338,6 +390,14 @@ function TripWorkspace({
   useEffect(() => {
     selectedDestinationIdRef.current = selectedDestinationId;
   }, [selectedDestinationId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(stopsPanelCollapsedStorageKey, String(isStopsPanelCollapsed));
+    } catch {
+      // Ignore private-mode or quota failures; the toggle should still work in-memory.
+    }
+  }, [isStopsPanelCollapsed]);
 
   useEffect(() => {
     setPreviewMedia(null);
@@ -571,6 +631,15 @@ function TripWorkspace({
         apiKey: mapTilerApiKey,
         profile: 'activity',
         proximity: selectedDestination?.coordinates,
+        ...(selectedDestination?.coordinates
+          ? {
+              bbox: createBoundingBoxAroundCoordinates(
+                selectedDestination.coordinates,
+                activitySearchRadiusKm,
+              ),
+              fallbackWithoutBbox: true,
+            }
+          : {}),
       }),
     [selectedDestination?.coordinates],
   );
@@ -601,6 +670,35 @@ function TripWorkspace({
     setSelectedActivityId(null);
   }, []);
 
+  const handleUpdateDestinationPanel = useCallback(
+    async (
+      destinationId: string,
+      patch: Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>,
+    ) => {
+      let nextPatch = patch;
+
+      if (patch.coordinates) {
+        try {
+          const resolvedLocation = await resolveMapTilerCoordinates(patch.coordinates, {
+            apiKey: mapTilerApiKey,
+            profile: 'stop',
+          });
+          nextPatch = {
+            ...patch,
+            countryRegion: resolvedLocation.location.countryName,
+            coordinates: resolvedLocation.coordinates,
+            location: createDestinationLocationFromPlaceResult(resolvedLocation),
+          };
+        } catch {
+          nextPatch = patch;
+        }
+      }
+
+      await updateDestination(destinationId, nextPatch);
+    },
+    [updateDestination],
+  );
+
   const handleCreateActivity = useCallback(
     async (destinationId: string, input: { title: string; location?: ActivityLocation }) => {
       const activity = await createActivity({
@@ -626,9 +724,28 @@ function TripWorkspace({
   const handleUpdateActivityPanel = useCallback(
     async (
       activityId: string,
-      patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority' | 'tags' | 'links'>>,
+      patch: Partial<
+        Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority' | 'tags' | 'links' | 'location'>
+      >,
     ) => {
-      await updateActivity(activityId, patch);
+      let nextPatch = patch;
+
+      if (shouldResolveActivityLocation(patch.location)) {
+        try {
+          const resolvedLocation = await resolveMapTilerCoordinates(patch.location.coordinates, {
+            apiKey: mapTilerApiKey,
+            profile: 'activity',
+          });
+          nextPatch = {
+            ...patch,
+            location: createActivityLocationFromPlaceResult(resolvedLocation),
+          };
+        } catch {
+          nextPatch = patch;
+        }
+      }
+
+      await updateActivity(activityId, nextPatch);
     },
     [updateActivity],
   );
@@ -698,7 +815,10 @@ function TripWorkspace({
           destinations={destinations}
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
+          focusedActivities={selectedDestinationActivities}
+          selectedActivityId={selectedActivityId}
           onSelectDestination={handleSelectDestination}
+          onSelectActivity={setSelectedActivityId}
           onRequestAddStop={openPendingMapStop}
         />
         {!isInteractionLocked ? (
@@ -712,6 +832,8 @@ function TripWorkspace({
               destinations={destinations}
               routeLegs={routeLegs}
               selectedDestinationId={selectedDestinationId}
+              isCollapsed={isStopsPanelCollapsed}
+              onToggleCollapsed={() => setIsStopsPanelCollapsed((isCollapsed) => !isCollapsed)}
               onSelectDestination={handleSelectDestination}
               onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
               onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
@@ -796,7 +918,7 @@ function TripWorkspace({
               searchActivities={searchActivityPlaces}
               onDeleteActivity={handleDeleteActivity}
               onReorderActivities={reorderActivities}
-              onUpdate={updateDestination}
+              onUpdate={handleUpdateDestinationPanel}
               onUploadMedia={handleDestinationMediaUpload}
               onReorderMedia={handleDestinationMediaReorder}
               onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'destination-rollup' })}

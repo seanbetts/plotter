@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createBoundingBoxAroundCoordinates,
   parseCoordinateQuery,
   resolveMapTilerCoordinates,
   searchMapTilerPlaces,
@@ -101,6 +102,7 @@ describe('geocoding adapter', () => {
         'county',
         'subregion',
         'region',
+        'postal_code',
       ].join(','),
     );
     expect(requestedUrl.searchParams.get('types')).not.toContain('country');
@@ -123,9 +125,62 @@ describe('geocoding adapter', () => {
     const requestedUrl = new URL(fetchMock.mock.calls[0][0]);
     expect(requestedUrl.searchParams.get('limit')).toBe('10');
     expect(requestedUrl.searchParams.get('types')).toBe(
-      ['poi', 'address', 'road', 'neighbourhood', 'place', 'locality'].join(','),
+      ['poi', 'address', 'road', 'neighbourhood', 'place', 'locality', 'postal_code'].join(','),
     );
     expect(requestedUrl.searchParams.get('proximity')).toBe('2.3522,48.8566');
+  });
+
+  it('builds a stop-centered bounding box for nearby activity search', () => {
+    expect(createBoundingBoxAroundCoordinates({ lat: 48.8566, lng: 2.3522 }, 100)).toEqual([
+      0.9869,
+      47.9583,
+      3.7175,
+      49.7549,
+    ]);
+  });
+
+  it('sends a bounding box and retries activity search without it when no bounded results are found', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ features: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          features: [
+            {
+              id: 'poi.fallback',
+              text: 'K2',
+              place_name: 'K2, Xinjiang, Pakistan',
+              center: [76.5133, 35.8808],
+              place_type: ['poi'],
+            },
+          ],
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const results = await searchMapTilerPlaces('K2', {
+      apiKey: 'test-key',
+      profile: 'activity',
+      proximity: { lat: 48.8566, lng: 2.3522 },
+      bbox: [0.984, 47.9583, 3.7204, 49.7549],
+      fallbackWithoutBbox: true,
+    });
+
+    const boundedUrl = new URL(fetchMock.mock.calls[0][0]);
+    const fallbackUrl = new URL(fetchMock.mock.calls[1][0]);
+    expect(boundedUrl.searchParams.get('bbox')).toBe('0.984,47.9583,3.7204,49.7549');
+    expect(fallbackUrl.searchParams.has('bbox')).toBe(false);
+    expect(fallbackUrl.searchParams.get('proximity')).toBe('2.3522,48.8566');
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      kind: 'place',
+      id: 'poi.fallback',
+      label: 'K2, Xinjiang, Pakistan',
+    });
   });
 
   it('preserves MapTiler metadata and computes distance from proximity', async () => {

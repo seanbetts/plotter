@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MediaItem } from '../domain/types';
 import { MediaImageStrip } from './MediaImageStrip';
@@ -118,13 +118,17 @@ afterEach(() => {
 describe('MediaImageStrip', () => {
   it('renders an accessible compact empty state and supports choosing files', () => {
     const onUploadFiles = vi.fn();
-    render(<MediaImageStrip {...createProps({ items: [], onUploadFiles })} />);
+    const { container } = render(<MediaImageStrip {...createProps({ items: [], onUploadFiles })} />);
 
     const region = screen.getByRole('region', { name: 'Stop images' });
     expect(region).toHaveTextContent('No images yet');
     expect(region).toHaveTextContent('Drop images here or click to add.');
     expect(screen.queryByRole('heading', { name: 'Stop images' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
+    expect(container.querySelector('.destination-image-empty-graphic')).toBeInTheDocument();
+    const placeholderCarousel = container.querySelector('.destination-image-carousel.is-empty');
+    expect(placeholderCarousel).toHaveAttribute('aria-hidden', 'true');
+    expect(placeholderCarousel?.querySelector('.destination-image-thumbnail-placeholder')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Choose stop images' }));
 
@@ -152,6 +156,34 @@ describe('MediaImageStrip', () => {
     fireEvent.click(hero);
 
     expect(onOpenPreview).toHaveBeenCalledWith('media-1');
+  });
+
+  it('keeps the loading shell visible until the hero image is ready to display', () => {
+    const imageInstances: Array<{ onload: (() => void) | null; onerror: (() => void) | null; src: string }> = [];
+    class FakeImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      src = '';
+
+      constructor() {
+        imageInstances.push(this);
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
+
+    render(<MediaImageStrip {...createProps({ items: [{ mediaItem: createMediaItem(), canReorder: true }] })} />);
+
+    expect(screen.getByRole('status', { name: 'Loading images' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open full image: Sunset over the harbour' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show image 1: Sunset over the harbour' })).not.toBeInTheDocument();
+
+    act(() => {
+      imageInstances[0]?.onload?.();
+    });
+
+    expect(screen.queryByRole('status', { name: 'Loading images' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show image 1: Sunset over the harbour' })).toBeInTheDocument();
   });
 
   it('selects thumbnails into the preview without opening the full image', () => {
@@ -250,8 +282,18 @@ describe('MediaImageStrip', () => {
   it('preloads adjacent preview images and uses optimized preview and thumbnail URLs', () => {
     const preloadedUrls: string[] = [];
     class FakeImage {
+      onload: (() => void) | null = null;
+      complete = true;
+      #src = '';
+
+      get src() {
+        return this.#src;
+      }
+
       set src(value: string) {
+        this.#src = value;
         preloadedUrls.push(value);
+        this.onload?.();
       }
     }
     vi.stubGlobal('Image', FakeImage);
@@ -446,7 +488,11 @@ describe('MediaImageStrip', () => {
   it('renders loading, upload, and error feedback accessibly', () => {
     const { container, rerender } = render(<MediaImageStrip {...createProps({ isLoading: true })} />);
 
-    expect(screen.getByRole('status', { name: 'Loading images' })).toBeInTheDocument();
+    const loadingStatus = screen.getByRole('status', { name: 'Loading images' });
+    expect(loadingStatus).toHaveClass('destination-image-empty', 'is-loading');
+    expect(container.querySelector('.destination-image-loading-spinner')).toBeInTheDocument();
+    expect(container.querySelector('.destination-image-carousel.is-empty')).toHaveAttribute('aria-hidden', 'true');
+    expect(container.querySelector('.destination-image-thumbnail-placeholder')).toBeInTheDocument();
 
     rerender(<MediaImageStrip {...createProps({ items: [], isUploading: true })} />);
     const uploadTarget = screen.getByRole('button', { name: 'Uploading stop images' });

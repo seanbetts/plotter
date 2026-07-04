@@ -105,8 +105,84 @@ describe('DestinationProfile', () => {
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     expect(within(header).getByRole('button', { name: 'Edit stop name Balcombe' })).toBeInTheDocument();
-    expect(within(header).getByText('Balcombe, West Sussex, United Kingdom')).toBeInTheDocument();
+    expect(within(header).getByText('West Sussex, United Kingdom')).toHaveClass(
+      'profile-location-address',
+    );
+    expect(within(header).queryByText('Balcombe, West Sussex, United Kingdom')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Stop name')).not.toBeInTheDocument();
+  });
+
+  it('keeps the place name in the address when the stop has been renamed', () => {
+    const destination = createDestination({
+      name: 'Home',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    expect(within(header).getByRole('button', { name: 'Edit stop name Home' })).toBeInTheDocument();
+    expect(within(header).getByText('Balcombe, West Sussex, United Kingdom')).toBeInTheDocument();
+  });
+
+  it('labels the tags group with the stop name', () => {
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const profile = screen.getByRole('complementary', { name: 'Samarkand profile' });
+    const tagsGroup = within(profile).getByRole('group', { name: 'Samarkand Tags' });
+
+    expect(within(tagsGroup).getByText('Samarkand Tags')).toBeInTheDocument();
+  });
+
+  it('places the tags group at the bottom after the activities section', () => {
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const profile = screen.getByRole('complementary', { name: 'Samarkand profile' });
+    const activitiesHeading = within(profile).getByRole('heading', { name: 'Samarkand Activities' });
+    const tagsGroup = within(profile).getByRole('group', { name: 'Samarkand Tags' });
+
+    expect(activitiesHeading.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows latitude and longitude as separate pills with a one-click copy button', async () => {
@@ -270,9 +346,51 @@ describe('DestinationProfile', () => {
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     fireEvent.click(within(header).getByRole('button', { name: 'Edit coordinates' }));
+    expect(screen.getByLabelText('Latitude')).toHaveFocus();
     fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '51.0581123' } });
     fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '-0.1339876' } });
     fireEvent.keyDown(screen.getByLabelText('Longitude'), { key: 'Enter' });
+
+    expect(onUpdate).toHaveBeenCalledWith(destination.id, {
+      coordinates: { lat: 51.05811, lng: -0.13399 },
+    });
+  });
+
+  it('fills both coordinate fields from a pasted coordinate pair', async () => {
+    const destination = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+    const onUpdate = vi.fn();
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={onUpdate}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    fireEvent.click(within(header).getByRole('button', { name: 'Edit coordinates' }));
+    fireEvent.paste(screen.getByLabelText('Latitude'), {
+      clipboardData: {
+        getData: () => '51.0581123, -0.1339876',
+      },
+    });
+    expect(screen.getByLabelText('Latitude')).toHaveValue('51.0581123');
+    expect(screen.getByLabelText('Longitude')).toHaveValue('-0.1339876');
+
+    fireEvent.keyDown(screen.getByLabelText('Latitude'), { key: 'Enter' });
 
     expect(onUpdate).toHaveBeenCalledWith(destination.id, {
       coordinates: { lat: 51.05811, lng: -0.13399 },
@@ -393,7 +511,7 @@ describe('DestinationProfile', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Paris Activities' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select activity Louvre' })).toHaveTextContent('Louvre');
     expect(screen.queryByDisplayValue('Louvre')).not.toBeInTheDocument();
   });
@@ -529,10 +647,16 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
 
-    expect(screen.getByLabelText('Expected stay days')).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Tags' })).toBeInTheDocument();
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    const stayDays = within(header).getByRole('group', { name: 'Expected stay days' });
+    expect(within(stayDays).getByText('3')).toBeInTheDocument();
+    expect(within(stayDays).getByText('Days')).toBeInTheDocument();
+    expect(within(stayDays).getByRole('button', { name: 'Increase expected stay days' })).toBeInTheDocument();
+    expect(within(stayDays).getByRole('button', { name: 'Decrease expected stay days' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Expected stay days' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Samarkand Tags' })).toBeInTheDocument();
     expect(screen.getByLabelText('Add tag')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Samarkand Activities' })).toBeInTheDocument();
     expect(screen.getByLabelText('Search for an activity')).toBeInTheDocument();
     expect(screen.queryByLabelText('Why it matters')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Highlights')).not.toBeInTheDocument();
@@ -645,7 +769,7 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Increase expected stay days' }));
     addTag('port-city');
 
     expect(onUpdate).not.toHaveBeenCalled();
@@ -950,34 +1074,44 @@ describe('DestinationProfile', () => {
     expect(screen.getByRole('button', { name: 'Remove tag temples' })).toBeInTheDocument();
   });
 
-  it('normalizes expected stay days to a positive whole number', async () => {
+  it('changes expected stay days from the header stepper and keeps the value above zero', async () => {
     setupAutosaveTimers();
-    const destination = createDestination({
-      name: 'Samarkand',
-      countryRegion: 'Uzbekistan',
-      coordinates: { lat: 39.6542, lng: 66.9597 },
-    });
+    const destination: Destination = {
+      ...createDestination({
+        name: 'Samarkand',
+        countryRegion: 'Uzbekistan',
+        coordinates: { lat: 39.6542, lng: 66.9597 },
+      }),
+      timing: {
+        idealMonths: [],
+        expectedStayDays: 1,
+        provisionalStartDate: '',
+        provisionalEndDate: '',
+      },
+    };
     const onUpdate = vi.fn();
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '-2' } });
+    const stayDays = screen.getByRole('group', { name: 'Expected stay days' });
+    expect(within(stayDays).getByText('Day')).toBeInTheDocument();
+    expect(within(stayDays).queryByText('Days')).not.toBeInTheDocument();
+
+    const decrement = screen.getByRole('button', { name: 'Decrease expected stay days' });
+    expect(decrement).toBeDisabled();
+    fireEvent.click(decrement);
+    await advanceAutosave();
+
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase expected stay days' }));
+    expect(within(stayDays).getByText('Days')).toBeInTheDocument();
     await advanceAutosave();
 
     expect(onUpdate).toHaveBeenLastCalledWith(
       destination.id,
       expect.objectContaining({
-        timing: expect.objectContaining({ expectedStayDays: 1 }),
-      }),
-    );
-
-    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '4.8' } });
-    await advanceAutosave();
-
-    expect(onUpdate).toHaveBeenLastCalledWith(
-      destination.id,
-      expect.objectContaining({
-        timing: expect.objectContaining({ expectedStayDays: 4 }),
+        timing: expect.objectContaining({ expectedStayDays: 2 }),
       }),
     );
   });

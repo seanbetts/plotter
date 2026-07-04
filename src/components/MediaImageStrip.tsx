@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Image, LoaderCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Image as ImageIcon, LoaderCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
 import type { MediaItem } from '../domain/types';
@@ -138,7 +138,57 @@ export function MediaImageStrip({
   const safePreviewMediaIndex = previewMediaIndex === -1 ? 0 : previewMediaIndex;
   const heroItem = items[safePreviewMediaIndex] ?? null;
   const heroMediaItem = heroItem?.mediaItem ?? null;
+  const heroImageUrl = heroMediaItem ? getHeroImageUrl(heroMediaItem) : null;
+  const [readyHeroImageUrl, setReadyHeroImageUrl] = useState<string | null>(null);
+  const isHeroImageReady = heroImageUrl === null || readyHeroImageUrl === heroImageUrl;
+  const isImageDisplayLoading = isLoading || (heroMediaItem !== null && !isHeroImageReady);
   const stripClassName = `destination-image-strip${isFileDragOver ? ' is-drag-over' : ''}`;
+
+  useEffect(() => {
+    if (heroImageUrl === null) {
+      return;
+    }
+
+    let isCurrent = true;
+
+    if (typeof globalThis.Image !== 'function') {
+      queueMicrotask(() => {
+        if (isCurrent) {
+          setReadyHeroImageUrl(heroImageUrl);
+        }
+      });
+      return;
+    }
+
+    const image = new globalThis.Image();
+    const markReady = () => {
+      if (isCurrent) {
+        setReadyHeroImageUrl(heroImageUrl);
+      }
+    };
+    const decodeImage = () => {
+      const maybeDecode = 'decode' in image ? image.decode : undefined;
+
+      if (typeof maybeDecode === 'function') {
+        void maybeDecode.call(image).then(markReady, markReady);
+        return;
+      }
+
+      markReady();
+    };
+
+    image.onload = decodeImage;
+    image.onerror = markReady;
+    image.src = heroImageUrl;
+
+    if (image.complete) {
+      decodeImage();
+    }
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [heroImageUrl]);
 
   useEffect(() => {
     if (items.length < 2) return;
@@ -314,14 +364,15 @@ export function MediaImageStrip({
         onChange={handleFileInputChange}
       />
 
-      {isLoading ? (
-        <div className="destination-image-state" role="status" aria-label="Loading images">
-          <LoaderCircle size={16} aria-hidden="true" />
+      {isImageDisplayLoading ? (
+        <div className="destination-image-empty is-loading" role="status" aria-label="Loading images">
+          <LoaderCircle className="destination-image-loading-spinner" size={28} aria-hidden="true" />
           <span>Loading images</span>
+          <small>Preparing image gallery.</small>
         </div>
       ) : null}
 
-      {!isLoading && !heroMediaItem ? (
+      {!isImageDisplayLoading && !heroMediaItem ? (
         <button
           type="button"
           className={`destination-image-empty${isUploading ? ' is-uploading' : ''}`}
@@ -341,7 +392,7 @@ export function MediaImageStrip({
             </>
           ) : (
             <>
-              <Image size={20} aria-hidden="true" />
+              <ImageIcon className="destination-image-empty-graphic" size={42} aria-hidden="true" />
               <span>{emptyLabel}</span>
               <small>{emptyHint}</small>
             </>
@@ -349,7 +400,15 @@ export function MediaImageStrip({
         </button>
       ) : null}
 
-      {!isLoading && heroMediaItem ? (
+      {isImageDisplayLoading || !heroMediaItem ? (
+        <div className="destination-image-carousel is-empty" aria-hidden="true">
+          <span className="destination-image-thumbnail destination-image-thumbnail-placeholder">
+            <ImageIcon size={16} aria-hidden="true" />
+          </span>
+        </div>
+      ) : null}
+
+      {!isImageDisplayLoading && heroMediaItem ? (
         <div className="destination-image-hero" role="group" aria-label="Image preview">
           <button
             type="button"
@@ -357,7 +416,7 @@ export function MediaImageStrip({
             aria-label={`Open full image${heroMediaItem.caption.trim() ? `: ${heroMediaItem.caption.trim()}` : ''}`}
             onClick={() => onOpenPreview(heroMediaItem.id)}
           >
-            <img src={getHeroImageUrl(heroMediaItem)} alt={mediaLabel(heroMediaItem, safePreviewMediaIndex)} />
+            <img src={heroImageUrl ?? undefined} alt={mediaLabel(heroMediaItem, safePreviewMediaIndex)} />
           </button>
           <button
             type="button"
@@ -395,7 +454,7 @@ export function MediaImageStrip({
         </div>
       ) : null}
 
-      {items.length > 0 ? (
+      {!isImageDisplayLoading && items.length > 0 ? (
         <div className="destination-image-carousel" aria-label="Image thumbnails">
           {items.map((item, index) => {
             const thumbnailAttribution =

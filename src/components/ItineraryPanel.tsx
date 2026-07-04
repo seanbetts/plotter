@@ -1,7 +1,7 @@
-import { Car, GripVertical, RefreshCw, Ship, Signpost, Trash2 } from 'lucide-react';
+import { Car, ChevronDown, ChevronUp, GripVertical, RefreshCw, Ship, Signpost, Trash2 } from 'lucide-react';
 import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { formatDestinationLocation, formatLocationParts } from '../domain/locations';
+import { formatDestinationLocation, formatLocationContext, formatLocationParts } from '../domain/locations';
 import type { Destination, RouteLeg, RouteLegType } from '../domain/types';
 import { formatStopAccessibleLabel, formatStopMarker } from './stopLabels';
 
@@ -9,6 +9,8 @@ type ItineraryPanelProps = {
   destinations: Destination[];
   routeLegs: RouteLeg[];
   selectedDestinationId: string | null;
+  isCollapsed?: boolean;
+  onToggleCollapsed?: () => void;
   onSelectDestination: (destinationId: string) => void;
   onDeleteDestination: (destinationId: string) => void;
   onReorderDestinations: (destinationIds: string[]) => void;
@@ -31,7 +33,7 @@ type PointerCoordinates = {
 };
 
 const kmToMiles = 0.621371;
-const stopListStyle = { '--stop-list-gap': '8px' } as CSSProperties;
+const stopListStyle = { '--stop-list-gap': '6px' } as CSSProperties;
 
 function formatLegDistance(routeLeg: RouteLeg) {
   if (isRouteLegCalculating(routeLeg)) return null;
@@ -43,11 +45,42 @@ function formatLegDistance(routeLeg: RouteLeg) {
 function formatLegTime(routeLeg: RouteLeg) {
   if (routeLeg.travelTimeHours === undefined) return null;
 
-  return `${routeLeg.travelTimeHours.toFixed(1)} hr`;
+  const displayHours = Number(routeLeg.travelTimeHours.toFixed(1));
+  const unit = displayHours >= 2 ? 'hrs' : 'hr';
+
+  return `${displayHours.toFixed(1)} ${unit}`;
 }
 
 function formatStayDays(days: number) {
   return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+function formatStopAddress(destination: Destination) {
+  const locationParts = formatLocationParts(destination.location);
+
+  if (!locationParts) return 'Unassigned location';
+
+  return formatLocationContext(locationParts, destination.name);
+}
+
+function formatTotalTravelTime(hours: number) {
+  const roundedHours = Math.round(hours);
+  if (roundedHours < 24) {
+    const unit = roundedHours === 1 ? 'hr' : 'hrs';
+
+    return `${roundedHours.toLocaleString()} ${unit} travel`;
+  }
+
+  const days = Math.floor(roundedHours / 24);
+  const remainingHours = roundedHours % 24;
+  const parts = [formatStayDays(days)];
+
+  if (remainingHours > 0) {
+    const unit = remainingHours === 1 ? 'hr' : 'hrs';
+    parts.push(`${remainingHours} ${unit}`);
+  }
+
+  return `${parts.join(' ')} travel`;
 }
 
 function countryKey(destination: Destination) {
@@ -131,6 +164,8 @@ export function ItineraryPanel({
   destinations,
   routeLegs,
   selectedDestinationId,
+  isCollapsed = false,
+  onToggleCollapsed = () => undefined,
   onSelectDestination,
   onDeleteDestination,
   onReorderDestinations,
@@ -151,6 +186,23 @@ export function ItineraryPanel({
   const stopListClassName = ['stop-list', draggedDestinationId ? 'is-reordering' : '']
     .filter(Boolean)
     .join(' ');
+  const panelClassName = ['itinerary-panel', isCollapsed ? 'is-collapsed' : '']
+    .filter(Boolean)
+    .join(' ');
+  const stopCountLabel = `${destinations.length} ${destinations.length === 1 ? 'stop' : 'stops'}`;
+  const totalStayDays = destinations.reduce(
+    (totalDays, destination) => totalDays + destination.timing.expectedStayDays,
+    0,
+  );
+  const totalTravelTimeHours = routeLegs.reduce(
+    (totalHours, routeLeg) => totalHours + (routeLeg.travelTimeHours ?? 0),
+    0,
+  );
+  const itineraryStats = [
+    stopCountLabel,
+    formatStayDays(totalStayDays),
+    formatTotalTravelTime(totalTravelTimeHours),
+  ];
   const displayedDestinations = draggedDestinationId
     ? destinations.filter((destination) => destination.id !== draggedDestinationId)
     : destinations;
@@ -351,37 +403,65 @@ export function ItineraryPanel({
 
   return (
     <>
-      <aside className="itinerary-panel" aria-label="Itinerary">
-        <h2>Stops</h2>
-        <div className={stopListClassName} style={stopListStyle}>
-          {destinations.length === 0 ? <p>Add your first destination from the map search.</p> : null}
-          {displayedDestinations.map((destination, index) => {
-            const locationLabel = formatDestinationLocation(destination);
-            const locationParts = formatLocationParts(destination.location) || 'Unassigned location';
-            const stopNumber =
-              destinations.findIndex((orderedDestination) => orderedDestination.id === destination.id) + 1;
-            const isSelected = destination.id === selectedDestinationId;
-            const nextDestination = displayedDestinations[index + 1];
-            const routeLeg = nextDestination
-              ? routeLegsByPair.get(`${destination.id}:${nextDestination.id}`)
-              : undefined;
-            const isCalculatingRoute = routeLeg ? isRouteLegCalculating(routeLeg) : false;
-            const isFailedRoute = routeLeg ? isRouteLegFailed(routeLeg) : false;
-            const borderCrossingLabel = nextDestination
-              ? formatBorderCrossingLabel(destination, nextDestination)
-              : null;
-            const activeDropPosition =
-              dropPreview?.destinationId === destination.id ? dropPreview.position : null;
-            const stopItemClassName = [
-              'stop-item',
-              isSelected ? 'is-selected' : '',
-              activeDropPosition ? 'is-drop-target' : '',
-            ]
-              .filter(Boolean)
-              .join(' ');
+      <aside className={panelClassName} aria-label="Itinerary">
+        <div className="itinerary-panel-header">
+          <div className="itinerary-panel-title">
+            <h2>Itinerary</h2>
+          </div>
+          <div className="itinerary-panel-actions">
+            <span className="itinerary-panel-stats" aria-label="Itinerary summary">
+              {itineraryStats.map((stat) => (
+                <span key={stat} className="itinerary-panel-stat">
+                  {stat}
+                </span>
+              ))}
+            </span>
+            <button
+              type="button"
+              className="itinerary-panel-toggle"
+              aria-label={isCollapsed ? 'Expand itinerary panel' : 'Collapse itinerary panel'}
+              aria-expanded={!isCollapsed}
+              title={isCollapsed ? 'Expand itinerary panel' : 'Collapse itinerary panel'}
+              onClick={onToggleCollapsed}
+            >
+              {isCollapsed ? (
+                <ChevronUp size={16} aria-hidden="true" />
+              ) : (
+                <ChevronDown size={16} aria-hidden="true" />
+              )}
+            </button>
+          </div>
+        </div>
+        {!isCollapsed ? (
+          <div className={stopListClassName} style={stopListStyle}>
+            {destinations.length === 0 ? <p>Add your first destination from the map search.</p> : null}
+            {displayedDestinations.map((destination, index) => {
+              const locationLabel = formatDestinationLocation(destination);
+              const locationParts = formatStopAddress(destination);
+              const stopNumber =
+                destinations.findIndex((orderedDestination) => orderedDestination.id === destination.id) + 1;
+              const isSelected = destination.id === selectedDestinationId;
+              const nextDestination = displayedDestinations[index + 1];
+              const routeLeg = nextDestination
+                ? routeLegsByPair.get(`${destination.id}:${nextDestination.id}`)
+                : undefined;
+              const isCalculatingRoute = routeLeg ? isRouteLegCalculating(routeLeg) : false;
+              const isFailedRoute = routeLeg ? isRouteLegFailed(routeLeg) : false;
+              const borderCrossingLabel = nextDestination
+                ? formatBorderCrossingLabel(destination, nextDestination)
+                : null;
+              const activeDropPosition =
+                dropPreview?.destinationId === destination.id ? dropPreview.position : null;
+              const stopItemClassName = [
+                'stop-item',
+                isSelected ? 'is-selected' : '',
+                activeDropPosition ? 'is-drop-target' : '',
+              ]
+                .filter(Boolean)
+                .join(' ');
 
-            return (
-              <div key={destination.id} className="stop-sequence-item">
+              return (
+                <div key={destination.id} className="stop-sequence-item">
                 {activeDropPosition === 'before' ? (
                   <div
                     className="stop-drop-indicator"
@@ -520,9 +600,10 @@ export function ItineraryPanel({
                   </div>
                 ) : null}
               </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        ) : null}
       </aside>
       {draggedDestination && dragPreviewPosition ? (
         <div
@@ -540,7 +621,7 @@ export function ItineraryPanel({
             </span>
             <span className="stop-drag-preview-copy">
               <strong>{draggedDestination.name}</strong>
-              <small>{formatLocationParts(draggedDestination.location) || 'Unassigned location'}</small>
+              <small>{formatStopAddress(draggedDestination)}</small>
             </span>
             <span className="stop-stay-days">
               {formatStayDays(draggedDestination.timing.expectedStayDays)}

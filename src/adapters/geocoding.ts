@@ -39,6 +39,8 @@ type SearchOptions = {
   apiKey: string;
   profile?: SearchProfile;
   proximity?: Coordinates;
+  bbox?: [number, number, number, number];
+  fallbackWithoutBbox?: boolean;
   signal?: AbortSignal;
 };
 
@@ -83,8 +85,9 @@ const placeTypesByProfile: Record<SearchProfile, string[]> = {
     'county',
     'subregion',
     'region',
+    'postal_code',
   ],
-  activity: ['poi', 'address', 'road', 'neighbourhood', 'place', 'locality'],
+  activity: ['poi', 'address', 'road', 'neighbourhood', 'place', 'locality', 'postal_code'],
 };
 
 const resultLimitByProfile: Record<SearchProfile, number> = {
@@ -135,13 +138,30 @@ export async function searchMapTilerPlaces(
   }
 
   const profile = getSearchProfile(options);
-  const url = new URL(`${mapTilerBaseUrl}/${encodeURIComponent(trimmed)}.json`);
+  const results = await fetchMapTilerPlaces(trimmed, profile, options, options.bbox);
+  if (results.length > 0 || !options.bbox || !options.fallbackWithoutBbox) {
+    return results;
+  }
+
+  return fetchMapTilerPlaces(trimmed, profile, options);
+}
+
+async function fetchMapTilerPlaces(
+  query: string,
+  profile: SearchProfile,
+  options: SearchOptions,
+  bbox?: [number, number, number, number],
+): Promise<PlaceSearchResult[]> {
+  const url = new URL(`${mapTilerBaseUrl}/${encodeURIComponent(query)}.json`);
   url.searchParams.set('key', options.apiKey);
   url.searchParams.set('limit', String(resultLimitByProfile[profile]));
   url.searchParams.set('autocomplete', 'true');
   url.searchParams.set('types', placeTypesByProfile[profile].join(','));
   if (options.proximity) {
     url.searchParams.set('proximity', `${options.proximity.lng},${options.proximity.lat}`);
+  }
+  if (bbox) {
+    url.searchParams.set('bbox', bbox.join(','));
   }
 
   const response = await fetch(url.toString(), { signal: options.signal });
@@ -150,6 +170,23 @@ export async function searchMapTilerPlaces(
   }
 
   return mapMapTilerFeatures(await response.json(), options.proximity);
+}
+
+export function createBoundingBoxAroundCoordinates(
+  coordinates: Coordinates,
+  radiusKm: number,
+): [number, number, number, number] {
+  const kilometersPerLatitudeDegree = 111.32;
+  const latitudeDelta = radiusKm / kilometersPerLatitudeDegree;
+  const longitudeDelta =
+    radiusKm / (kilometersPerLatitudeDegree * Math.cos(degreesToRadians(coordinates.lat)));
+
+  return [
+    roundCoordinate(coordinates.lng - longitudeDelta),
+    roundCoordinate(coordinates.lat - latitudeDelta),
+    roundCoordinate(coordinates.lng + longitudeDelta),
+    roundCoordinate(coordinates.lat + latitudeDelta),
+  ];
 }
 
 export async function resolveMapTilerCoordinates(
@@ -262,4 +299,8 @@ function calculateDistanceKm(from: Coordinates, to: Coordinates): number {
 
 function degreesToRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
+}
+
+function roundCoordinate(value: number): number {
+  return Math.round(value * 10000) / 10000;
 }

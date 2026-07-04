@@ -3,7 +3,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { FeatureCollection, LineString, Point } from 'geojson';
-import type { Coordinates, Destination, RouteLeg } from '../domain/types';
+import type { Activity, Coordinates, Destination, RouteLeg } from '../domain/types';
 import { formatStopMarker } from './stopLabels';
 
 export type MapAddStopRequest = {
@@ -19,7 +19,10 @@ type MapCanvasProps = {
   destinations: Destination[];
   routeLegs: RouteLeg[];
   selectedDestinationId: string | null;
+  focusedActivities?: Activity[];
+  selectedActivityId?: string | null;
   onSelectDestination: (destinationId: string) => void;
+  onSelectActivity?: (activityId: string) => void;
   onRequestAddStop?: (request: MapAddStopRequest) => void;
 };
 
@@ -28,6 +31,13 @@ type DestinationFeatureProperties = {
   name: string;
   order: number;
   label: string;
+  selected: boolean;
+};
+
+type ActivityFeatureProperties = {
+  id: string;
+  title: string;
+  order: number;
   selected: boolean;
 };
 
@@ -51,9 +61,43 @@ type ProjectedDestinationLabel = {
   y: number;
 };
 
+type ProjectedActivityLabel = {
+  id: string;
+  title: string;
+  selected: boolean;
+  position: ActivityLabelPosition;
+  x: number;
+  y: number;
+};
+
+type ActivityLabelPosition = 'below' | 'above';
+
+type LabelBounds = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+type ActivityLabelCandidate = ProjectedActivityLabel & {
+  order: number;
+  bounds: LabelBounds;
+};
+
+type ActivityLabelCandidateGroup = {
+  order: number;
+  selected: boolean;
+  placements: ActivityLabelCandidate[];
+};
+
 type OverlayPosition = {
   x: number;
   y: number;
+};
+
+type MapViewport = {
+  center: [number, number];
+  zoom: number;
 };
 
 type GeoJsonSource = maplibregl.GeoJSONSource & {
@@ -458,9 +502,12 @@ const majorCities = [
 ];
 
 const destinationsSourceId = 'world-tour-destinations';
+const focusedActivitiesSourceId = 'world-tour-focused-activities';
 const routesSourceId = 'world-tour-routes';
 const majorCitiesSourceId = 'world-tour-major-cities';
 const selectedDestinationHaloLayerId = 'world-tour-selected-destination-halo';
+const activityPointsLayerId = 'world-tour-activity-points';
+const selectedActivityHaloLayerId = 'world-tour-selected-activity-halo';
 const destinationPointsLayerId = 'world-tour-destination-points';
 const routeLineLayerId = 'world-tour-routes-line';
 const cityPointsLayerId = 'world-tour-city-points';
@@ -470,6 +517,22 @@ const addStopMenuApproxSize = {
   width: 180,
   height: 112,
 };
+const stopFocusPreferredPadding = {
+  top: 96,
+  right: 760,
+  bottom: 96,
+  left: 96,
+};
+const stopFocusMinimumViewportPx = 48;
+const stopFocusMaxZoom = 13;
+const mapViewportTransitionMs = 700;
+const defaultFocusedActivities: Activity[] = [];
+const activityLabelMaxWidthPx = 190;
+const activityLabelHeightPx = 24;
+const activityLabelVerticalOffsetPx = 14;
+const activityLabelCollisionPaddingPx = 6;
+const activityLabelApproxCharacterWidthPx = 7.2;
+const activityLabelHorizontalChromePx = 18;
 
 const mapColorTokenFallbacks = {
   '--color-accent': '#d9467a',
@@ -491,6 +554,33 @@ function readCssToken(tokenName: keyof typeof mapColorTokenFallbacks) {
     window.getComputedStyle(document.documentElement).getPropertyValue(tokenName).trim() ||
     mapColorTokenFallbacks[tokenName]
   );
+}
+
+function clampPaddingPair(leading: number, trailing: number, viewportSize: number): [number, number] {
+  if (!Number.isFinite(viewportSize) || viewportSize <= 0) {
+    return [leading, trailing];
+  }
+
+  const preferredTotal = leading + trailing;
+  const maxTotal = Math.max(0, Math.floor(viewportSize - stopFocusMinimumViewportPx));
+  if (preferredTotal <= maxTotal) {
+    return [leading, trailing];
+  }
+
+  const scale = maxTotal / preferredTotal;
+  const nextLeading = Math.floor(leading * scale);
+  return [nextLeading, maxTotal - nextLeading];
+}
+
+function stopFocusPaddingForMap(map: Pick<maplibregl.Map, 'getContainer'>) {
+  const container = map.getContainer();
+  const bounds = container.getBoundingClientRect();
+  const width = container.clientWidth || bounds.width;
+  const height = container.clientHeight || bounds.height;
+  const [left, right] = clampPaddingPair(stopFocusPreferredPadding.left, stopFocusPreferredPadding.right, width);
+  const [top, bottom] = clampPaddingPair(stopFocusPreferredPadding.top, stopFocusPreferredPadding.bottom, height);
+
+  return { top, right, bottom, left };
 }
 
 function readCssRgbToken(tokenName: keyof typeof mapColorTokenFallbacks, alpha: number) {
@@ -546,6 +636,43 @@ function buildDestinationFeatures(
   };
 }
 
+function buildFocusedActivityFeatures(
+  selectedDestinationId: string | null,
+  focusedActivities: Activity[],
+  selectedActivityId: string | null,
+): FeatureCollection<Point, ActivityFeatureProperties> {
+  if (!selectedDestinationId) {
+    return emptyFeatureCollection<Point, ActivityFeatureProperties>();
+  }
+
+  return {
+    type: 'FeatureCollection',
+    features: focusedActivities.flatMap((activity, index) => {
+      if (activity.destinationId !== selectedDestinationId) return [];
+
+      const coordinates = activity.location?.coordinates;
+      if (!coordinates) return [];
+
+      return [
+        {
+          type: 'Feature' as const,
+          id: activity.id,
+          geometry: {
+            type: 'Point' as const,
+            coordinates: [coordinates.lng, coordinates.lat],
+          },
+          properties: {
+            id: activity.id,
+            title: activity.title,
+            order: index + 1,
+            selected: activity.id === selectedActivityId,
+          },
+        },
+      ];
+    }),
+  };
+}
+
 function buildMajorCityFeatures(): FeatureCollection<Point, CityFeatureProperties> {
   return {
     type: 'FeatureCollection',
@@ -564,8 +691,89 @@ function buildMajorCityFeatures(): FeatureCollection<Point, CityFeaturePropertie
   };
 }
 
+function estimateActivityLabelWidth(title: string) {
+  return Math.min(
+    activityLabelMaxWidthPx,
+    Math.max(activityLabelHeightPx, title.length * activityLabelApproxCharacterWidthPx + activityLabelHorizontalChromePx),
+  );
+}
+
+function labelCandidateBounds(input: { title: string; x: number; y: number }, position: ActivityLabelPosition) {
+  const width = estimateActivityLabelWidth(input.title);
+  const left = input.x - width / 2 - activityLabelCollisionPaddingPx;
+  const top =
+    position === 'above'
+      ? input.y - activityLabelVerticalOffsetPx - activityLabelHeightPx - activityLabelCollisionPaddingPx
+      : input.y + activityLabelVerticalOffsetPx - activityLabelCollisionPaddingPx;
+
+  return {
+    left,
+    right: left + width + activityLabelCollisionPaddingPx * 2,
+    top,
+    bottom: top + activityLabelHeightPx + activityLabelCollisionPaddingPx * 2,
+  };
+}
+
+function destinationLabelBounds(label: ProjectedDestinationLabel) {
+  return labelCandidateBounds(
+    {
+      title: `${label.label} - ${label.name}`,
+      x: label.x,
+      y: label.y,
+    },
+    'below',
+  );
+}
+
+function activityLabelBoundsOverlap(left: LabelBounds, right: LabelBounds) {
+  return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+}
+
+function visibleActivityLabels(
+  candidateGroups: ActivityLabelCandidateGroup[],
+  reservedBounds: LabelBounds[],
+): ProjectedActivityLabel[] {
+  const occupiedBounds = [...reservedBounds];
+  const visibleCandidates: ActivityLabelCandidate[] = [];
+
+  const prioritizedCandidates = [...candidateGroups].sort((left, right) => {
+    if (left.selected !== right.selected) return left.selected ? -1 : 1;
+    return left.order - right.order;
+  });
+
+  for (const candidateGroup of prioritizedCandidates) {
+    const visiblePlacement = candidateGroup.placements.find(
+      (placement) => !occupiedBounds.some((bounds) => activityLabelBoundsOverlap(placement.bounds, bounds)),
+    );
+    if (!visiblePlacement) continue;
+
+    visibleCandidates.push(visiblePlacement);
+    occupiedBounds.push(visiblePlacement.bounds);
+  }
+
+  return visibleCandidates
+    .sort((left, right) => left.order - right.order)
+    .map((candidate) => ({
+      id: candidate.id,
+      title: candidate.title,
+      selected: candidate.selected,
+      position: candidate.position,
+      x: candidate.x,
+      y: candidate.y,
+    }));
+}
+
 function findDestination(destinations: Destination[], destinationId: string) {
   return destinations.find((destination) => destination.id === destinationId);
+}
+
+function selectedDestinationForFocus(
+  destinations: Destination[],
+  selectedDestinationId: string | null,
+) {
+  return selectedDestinationId
+    ? destinations.find((candidate) => candidate.id === selectedDestinationId) ?? null
+    : null;
 }
 
 function straightLineGeometry(origin: Destination, target: Destination): LineString {
@@ -638,6 +846,48 @@ function getGeoJsonSource(map: maplibregl.Map, sourceId: string) {
 
 function setSourceData(map: maplibregl.Map, sourceId: string, data: FeatureCollection) {
   getGeoJsonSource(map, sourceId)?.setData(data);
+}
+
+function mapViewport(map: maplibregl.Map): MapViewport {
+  const center = map.getCenter();
+
+  return {
+    center: [center.lng, center.lat],
+    zoom: map.getZoom(),
+  };
+}
+
+function focusedCoordinatesForDestination(destination: Destination, focusedActivities: Activity[]): Coordinates[] {
+  return [
+    destination.coordinates,
+    ...focusedActivities.flatMap((activity) =>
+      activity.destinationId === destination.id && activity.location?.coordinates
+        ? [activity.location.coordinates]
+        : [],
+    ),
+  ];
+}
+
+function coordinateKey(coordinates: Coordinates) {
+  return `${coordinates.lng},${coordinates.lat}`;
+}
+
+function stopFocusKeyForDestination(destination: Destination, focusedActivities: Activity[]) {
+  const activityCoordinateKeys = Array.from(
+    new Set(
+      focusedActivities.flatMap((activity) =>
+        activity.destinationId === destination.id && activity.location?.coordinates
+          ? [coordinateKey(activity.location.coordinates)]
+          : [],
+      ),
+    ),
+  ).sort();
+
+  return [
+    destination.id,
+    coordinateKey(destination.coordinates),
+    ...activityCoordinateKeys,
+  ].join('|');
 }
 
 function layerMatchesPattern(layerId: string, patterns: string[]) {
@@ -746,15 +996,21 @@ export function MapCanvas({
   destinations,
   routeLegs,
   selectedDestinationId,
+  focusedActivities = defaultFocusedActivities,
+  selectedActivityId = null,
   onSelectDestination,
+  onSelectActivity,
   onRequestAddStop,
 }: MapCanvasProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const latestDestinationsRef = useRef(destinations);
   const latestRouteLegsRef = useRef(routeLegs);
+  const latestFocusedActivitiesRef = useRef(focusedActivities);
+  const latestSelectedActivityIdRef = useRef(selectedActivityId);
   const latestSelectedDestinationIdRef = useRef(selectedDestinationId);
   const onSelectDestinationRef = useRef(onSelectDestination);
+  const onSelectActivityRef = useRef(onSelectActivity);
   const onRequestAddStopRef = useRef(onRequestAddStop);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{
@@ -765,10 +1021,14 @@ export function MapCanvas({
     mapY: number;
   } | null>(null);
   const previousDestinationCountRef = useRef(0);
+  const previousSelectedDestinationIdRef = useRef(selectedDestinationId);
+  const routeViewportBeforeFocusRef = useRef<MapViewport | null>(null);
+  const appliedStopFocusKeyRef = useRef<string | null>(null);
   const [selectedZoomStep, setSelectedZoomStep] = useState(1);
   const [currentMapZoom, setCurrentMapZoom] = useState(1.4);
   const [mapDetailSettings, setMapDetailSettings] = useState(createDefaultMapDetailSettings);
   const [projectedDestinationLabels, setProjectedDestinationLabels] = useState<ProjectedDestinationLabel[]>([]);
+  const [projectedActivityLabels, setProjectedActivityLabels] = useState<ProjectedActivityLabel[]>([]);
   const [addStopMenu, setAddStopMenu] = useState<MapAddStopRequest | null>(null);
   const selectedZoomStepRef = useRef(selectedZoomStep);
   const mapDetailSettingsRef = useRef(mapDetailSettings);
@@ -811,6 +1071,67 @@ export function MapCanvas({
       }),
     );
   }, []);
+
+  const updateActivityLabelPositions = useCallback(() => {
+    const map = mapRef.current;
+    const selectedDestinationId = latestSelectedDestinationIdRef.current;
+    if (!map || !selectedDestinationId) {
+      setProjectedActivityLabels([]);
+      return;
+    }
+
+    const reservedDestinationLabelBounds = latestDestinationsRef.current.map((destination, index) => {
+      const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
+
+      return destinationLabelBounds({
+        id: destination.id,
+        name: destination.name,
+        label: formatStopMarker(index + 1),
+        selected: destination.id === latestSelectedDestinationIdRef.current,
+        x: point.x,
+        y: point.y,
+      });
+    });
+
+    setProjectedActivityLabels(
+      visibleActivityLabels(
+        latestFocusedActivitiesRef.current.flatMap((activity, index) => {
+          if (activity.destinationId !== selectedDestinationId) return [];
+
+          const coordinates = activity.location?.coordinates;
+          if (!coordinates) return [];
+
+          const point = map.project([coordinates.lng, coordinates.lat]);
+          const label = {
+            id: activity.id,
+            title: activity.title,
+            selected: activity.id === latestSelectedActivityIdRef.current,
+            x: point.x,
+            y: point.y,
+          };
+
+          return [
+            {
+              order: index,
+              selected: label.selected,
+              placements: (['below', 'above'] satisfies ActivityLabelPosition[]).map((position) => ({
+                ...label,
+                position,
+                order: index,
+                bounds: labelCandidateBounds(label, position),
+              })),
+            },
+          ];
+        }),
+        reservedDestinationLabelBounds,
+      ),
+    );
+  }, []);
+
+  const updateMapLabelPositions = useCallback(() => {
+    updateDestinationLabelPositions();
+    updateActivityLabelPositions();
+  }, [updateActivityLabelPositions, updateDestinationLabelPositions]);
 
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current === null) return;
@@ -886,14 +1207,23 @@ export function MapCanvas({
     );
     setSourceData(
       map,
+      focusedActivitiesSourceId,
+      buildFocusedActivityFeatures(
+        latestSelectedDestinationIdRef.current,
+        latestFocusedActivitiesRef.current,
+        latestSelectedActivityIdRef.current,
+      ),
+    );
+    setSourceData(
+      map,
       routesSourceId,
       buildRouteFeatures(latestDestinationsRef.current, latestRouteLegsRef.current),
     );
     if (shouldRenderFallbackMajorCities) {
       setSourceData(map, majorCitiesSourceId, buildMajorCityFeatures());
     }
-    updateDestinationLabelPositions();
-  }, [updateDestinationLabelPositions]);
+    updateMapLabelPositions();
+  }, [updateMapLabelPositions]);
 
   const fitMapToDestinations = useCallback((nextDestinations: Destination[]) => {
     const map = mapRef.current;
@@ -915,28 +1245,100 @@ export function MapCanvas({
     );
   }, []);
 
+  const fitMapToStopFocus = useCallback((destination: Destination, activities: Activity[]) => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const coordinates = focusedCoordinatesForDestination(destination, activities);
+    const lngs = coordinates.map((coordinate) => coordinate.lng);
+    const lats = coordinates.map((coordinate) => coordinate.lat);
+
+    map.fitBounds(
+      [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ],
+      {
+        padding: stopFocusPaddingForMap(map),
+        maxZoom: stopFocusMaxZoom,
+        duration: mapViewportTransitionMs,
+      },
+    );
+  }, []);
+
+  const syncStopFocusViewport = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const selectedDestination = selectedDestinationForFocus(
+      latestDestinationsRef.current,
+      latestSelectedDestinationIdRef.current,
+    );
+    const nextStopFocusKey = selectedDestination
+      ? stopFocusKeyForDestination(selectedDestination, latestFocusedActivitiesRef.current)
+      : null;
+
+    if (selectedDestination && nextStopFocusKey) {
+      if (!appliedStopFocusKeyRef.current && !routeViewportBeforeFocusRef.current) {
+        if (previousSelectedDestinationIdRef.current === null) {
+          routeViewportBeforeFocusRef.current = mapViewport(map);
+        }
+      }
+      if (appliedStopFocusKeyRef.current !== nextStopFocusKey) {
+        fitMapToStopFocus(selectedDestination, latestFocusedActivitiesRef.current);
+        appliedStopFocusKeyRef.current = nextStopFocusKey;
+      }
+      return;
+    }
+
+    if (appliedStopFocusKeyRef.current) {
+      if (routeViewportBeforeFocusRef.current) {
+        map.easeTo({
+          center: routeViewportBeforeFocusRef.current.center,
+          zoom: routeViewportBeforeFocusRef.current.zoom,
+          duration: mapViewportTransitionMs,
+        });
+      } else {
+        fitMapToDestinations(latestDestinationsRef.current);
+      }
+    }
+
+    routeViewportBeforeFocusRef.current = null;
+    appliedStopFocusKeyRef.current = null;
+  }, [fitMapToDestinations, fitMapToStopFocus]);
+
   useEffect(() => {
     const previousDestinationCount = previousDestinationCountRef.current;
     latestDestinationsRef.current = destinations;
     latestRouteLegsRef.current = routeLegs;
+    latestFocusedActivitiesRef.current = focusedActivities;
+    latestSelectedActivityIdRef.current = selectedActivityId;
     latestSelectedDestinationIdRef.current = selectedDestinationId;
     onSelectDestinationRef.current = onSelectDestination;
+    onSelectActivityRef.current = onSelectActivity;
     onRequestAddStopRef.current = onRequestAddStop;
     updateMapSources();
 
-    if (destinations.length > previousDestinationCount) {
+    const selectedDestination = selectedDestinationForFocus(destinations, selectedDestinationId);
+    if (!selectedDestination && destinations.length > previousDestinationCount) {
       fitMapToDestinations(destinations);
     }
+    syncStopFocusViewport();
     if (mapRef.current) {
       previousDestinationCountRef.current = destinations.length;
     }
+    previousSelectedDestinationIdRef.current = selectedDestinationId;
   }, [
     destinations,
     routeLegs,
     selectedDestinationId,
+    focusedActivities,
+    selectedActivityId,
     onSelectDestination,
+    onSelectActivity,
     onRequestAddStop,
     fitMapToDestinations,
+    syncStopFocusViewport,
     updateMapSources,
   ]);
 
@@ -949,6 +1351,13 @@ export function MapCanvas({
       map.addSource(destinationsSourceId, {
         type: 'geojson',
         data: emptyFeatureCollection<Point, DestinationFeatureProperties>(),
+      });
+    }
+
+    if (!map.getSource(focusedActivitiesSourceId)) {
+      map.addSource(focusedActivitiesSourceId, {
+        type: 'geojson',
+        data: emptyFeatureCollection<Point, ActivityFeatureProperties>(),
       });
     }
 
@@ -1016,6 +1425,36 @@ export function MapCanvas({
       } as maplibregl.LayerSpecification);
     }
 
+    if (!map.getLayer(selectedActivityHaloLayerId)) {
+      map.addLayer({
+        id: selectedActivityHaloLayerId,
+        type: 'circle',
+        source: focusedActivitiesSourceId,
+        filter: ['==', ['get', 'selected'], true],
+        paint: {
+          'circle-color': mapColors.accentHalo,
+          'circle-radius': 16,
+          'circle-stroke-color': mapColors.accent,
+          'circle-stroke-opacity': 0.34,
+          'circle-stroke-width': 1,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
+    if (!map.getLayer(activityPointsLayerId)) {
+      map.addLayer({
+        id: activityPointsLayerId,
+        type: 'circle',
+        source: focusedActivitiesSourceId,
+        paint: {
+          'circle-color': mapColors.accent,
+          'circle-radius': ['case', ['get', 'selected'], 8, 7],
+          'circle-stroke-color': mapColors.textInverse,
+          'circle-stroke-width': 2,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
     if (!map.getLayer(destinationPointsLayerId)) {
       map.addLayer({
         id: destinationPointsLayerId,
@@ -1067,10 +1506,13 @@ export function MapCanvas({
     }
 
     updateMapSources();
-    updateDestinationLabelPositions();
-    fitMapToDestinations(latestDestinationsRef.current);
+    updateMapLabelPositions();
+    if (!selectedDestinationForFocus(latestDestinationsRef.current, latestSelectedDestinationIdRef.current)) {
+      fitMapToDestinations(latestDestinationsRef.current);
+    }
+    syncStopFocusViewport();
     previousDestinationCountRef.current = latestDestinationsRef.current.length;
-  }, [fitMapToDestinations, updateDestinationLabelPositions, updateMapSources]);
+  }, [fitMapToDestinations, syncStopFocusViewport, updateMapLabelPositions, updateMapSources]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -1091,10 +1533,10 @@ export function MapCanvas({
         calmBasemapStyle(map);
       }
       addMapLayers();
-      updateDestinationLabelPositions();
+      updateMapLabelPositions();
     };
     const handleMapMove = () => {
-      updateDestinationLabelPositions();
+      updateMapLabelPositions();
     };
     const handleZoomEnd = () => {
       const nextZoom = map.getZoom();
@@ -1112,6 +1554,19 @@ export function MapCanvas({
       map.getCanvas().style.cursor = 'pointer';
     };
     const handleDestinationMouseLeave = () => {
+      map.getCanvas().style.cursor = '';
+    };
+    const handleActivityClick = (event: maplibregl.MapLayerMouseEvent) => {
+      const activityId = event.features?.[0]?.properties?.id;
+
+      if (typeof activityId === 'string') {
+        onSelectActivityRef.current?.(activityId);
+      }
+    };
+    const handleActivityMouseEnter = () => {
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const handleActivityMouseLeave = () => {
       map.getCanvas().style.cursor = '';
     };
     const handleContextMenu = (event: maplibregl.MapMouseEvent) => {
@@ -1133,6 +1588,9 @@ export function MapCanvas({
     map.on('click', destinationPointsLayerId, handleDestinationClick);
     map.on('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
     map.on('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
+    map.on('click', activityPointsLayerId, handleActivityClick);
+    map.on('mouseenter', activityPointsLayerId, handleActivityMouseEnter);
+    map.on('mouseleave', activityPointsLayerId, handleActivityMouseLeave);
     map.on('contextmenu', handleContextMenu);
 
     mapRef.current = map;
@@ -1146,6 +1604,9 @@ export function MapCanvas({
       map.off('click', destinationPointsLayerId, handleDestinationClick);
       map.off('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
       map.off('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
+      map.off('click', activityPointsLayerId, handleActivityClick);
+      map.off('mouseenter', activityPointsLayerId, handleActivityMouseEnter);
+      map.off('mouseleave', activityPointsLayerId, handleActivityMouseLeave);
       map.off('contextmenu', handleContextMenu);
       longPressStartRef.current = null;
       clearLongPressTimer();
@@ -1157,7 +1618,7 @@ export function MapCanvas({
     applyCurrentMapDetailSettings,
     clearLongPressTimer,
     openAddStopMenu,
-    updateDestinationLabelPositions,
+    updateMapLabelPositions,
   ]);
 
   const selectedZoomSettings = mapDetailSettings[selectedZoomStep];
@@ -1290,6 +1751,28 @@ export function MapCanvas({
               onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
             >
               {destinationLabel.label} - {destinationLabel.name}
+            </button>
+          ))}
+          {projectedActivityLabels.map((activityLabel) => (
+            <button
+              key={activityLabel.id}
+              type="button"
+              className={[
+                'map-destination-label',
+                'map-activity-label',
+                activityLabel.position === 'above' ? 'map-label-position-above' : '',
+                activityLabel.selected ? 'is-selected' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              style={{
+                left: `${activityLabel.x}px`,
+                top: `${activityLabel.y}px`,
+              }}
+              aria-label={`Open ${activityLabel.title} activity details`}
+              onClick={() => onSelectActivityRef.current?.(activityLabel.id)}
+            >
+              {activityLabel.title}
             </button>
           ))}
         </div>

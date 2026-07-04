@@ -1,8 +1,8 @@
-import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react';
+import { Check, CircleAlert, Copy, LoaderCircle, Minus, Pencil, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent } from 'react';
+import type { ClipboardEvent, CSSProperties, KeyboardEvent } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
-import { formatLocationParts } from '../domain/locations';
+import { formatLocationContext, formatLocationParts } from '../domain/locations';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, ResearchLink } from '../domain/types';
 import type { LinkPreviewClient } from '../services/linkPreviewClient';
 import { ActivityList } from './ActivityList';
@@ -134,6 +134,22 @@ const createCoordinateDraft = (destination: Destination): CoordinateDraft => ({
   lng: formatCoordinateValue(destination.coordinates.lng),
 });
 
+function parsePastedCoordinatePair(value: string): CoordinateDraft | null {
+  const parts = value
+    .trim()
+    .split(',')
+    .map((part) => part.trim());
+
+  if (parts.length !== 2 || parts.some((part) => part === '')) return null;
+
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null;
+
+  return { lat: parts[0], lng: parts[1] };
+}
+
 const createFormState = (destination: Destination): DestinationFormState => ({
   sourceKey: destinationSourceKey(destination),
   name: destination.name,
@@ -232,6 +248,7 @@ function DestinationProfileForm({
   const savedStatusTimerRef = useRef<number | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const latitudeInputRef = useRef<HTMLInputElement | null>(null);
   const editRevisionRef = useRef(0);
   const savedRevisionRef = useRef(0);
   const saveSequenceRef = useRef(0);
@@ -276,6 +293,13 @@ function DestinationProfileForm({
       nameInputRef.current?.select();
     }
   }, [isEditingName]);
+
+  useEffect(() => {
+    if (isEditingCoordinates) {
+      latitudeInputRef.current?.focus();
+      latitudeInputRef.current?.select();
+    }
+  }, [isEditingCoordinates]);
 
   const autosave = useCallback(
     async (
@@ -378,6 +402,15 @@ function DestinationProfileForm({
     updateForm({ tags: form.tags.filter((tag) => tag !== tagToRemove) });
   }
 
+  function changeExpectedStayDays(delta: -1 | 1) {
+    const currentDays = normalizeExpectedStayDays(form.expectedStayDays);
+    const nextDays = Math.max(1, currentDays + delta);
+
+    if (nextDays === currentDays) return;
+
+    updateForm({ expectedStayDays: String(nextDays) });
+  }
+
   function startEditingCoordinates() {
     setCoordinateDraft(createCoordinateDraft(destination));
     setCoordinateError('');
@@ -442,6 +475,15 @@ function DestinationProfileForm({
     }
   }
 
+  function handleCoordinatePaste(event: ClipboardEvent<HTMLInputElement>) {
+    const pastedPair = parsePastedCoordinatePair(event.clipboardData.getData('text'));
+    if (!pastedPair) return;
+
+    event.preventDefault();
+    setCoordinateError('');
+    setCoordinateDraft(pastedPair);
+  }
+
   const saveStatusText = statusTextForSaveStatus(saveStatus);
   const saveStatusClassName = ['profile-save-status', saveStatus !== 'idle' ? `is-${saveStatus}` : '']
     .filter(Boolean)
@@ -449,6 +491,15 @@ function DestinationProfileForm({
   const latitudeText = formatCoordinateValue(destination.coordinates.lat);
   const longitudeText = formatCoordinateValue(destination.coordinates.lng);
   const coordinatesText = `${latitudeText}, ${longitudeText}`;
+  const destinationTitle = form.name || destination.name;
+  const destinationLocationLabel = formatLocationParts(destination.location);
+  const destinationLocationContext = destinationLocationLabel
+    ? formatLocationContext(destinationLocationLabel, destinationTitle)
+    : '';
+  const tagsLabel = `${destinationTitle.trim() || destination.name} Tags`;
+  const activitiesLabel = `${destinationTitle.trim() || destination.name} Activities`;
+  const expectedStayDays = normalizeExpectedStayDays(form.expectedStayDays);
+  const expectedStayDaysLabel = expectedStayDays === 1 ? 'Day' : 'Days';
   const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
     .filter(Boolean)
     .join(' ');
@@ -488,7 +539,7 @@ function DestinationProfileForm({
   return (
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
       <header className="profile-header" aria-label="Stop detail header">
-        <div>
+        <div className="profile-header-main">
           {stopNumber ? <span className="profile-stop-number">{formatStopHeaderLabel(stopNumber)}</span> : null}
           {isEditingName ? (
             <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
@@ -510,24 +561,28 @@ function DestinationProfileForm({
               type="button"
               className="profile-title-button profile-title-control"
               style={profileTitleControlStyle}
-              aria-label={`Edit stop name ${form.name || destination.name}`}
+              aria-label={`Edit stop name ${destinationTitle}`}
               onClick={() => setIsEditingName(true)}
             >
-              <h1>{form.name || destination.name}</h1>
+              <h1>{destinationTitle}</h1>
             </button>
           )}
-          <p>{formatLocationParts(destination.location) || 'Unassigned location'}</p>
+          <p className="profile-location-address">
+            {destinationLocationLabel ? destinationLocationContext : 'Unassigned location'}
+          </p>
           {isEditingCoordinates ? (
             <div className="profile-coordinate-editor" aria-label="Edit coordinates">
               <label className="profile-coordinate-input-pill profile-coordinate-field">
                 <span className="profile-coordinate-label">Latitude</span>
                 <input
+                  ref={latitudeInputRef}
                   aria-label="Latitude"
                   inputMode="decimal"
                   value={coordinateDraft.lat}
                   onChange={(event) =>
                     setCoordinateDraft((current) => ({ ...current, lat: event.target.value }))
                   }
+                  onPaste={handleCoordinatePaste}
                   onKeyDown={handleCoordinateInputKeyDown}
                 />
               </label>
@@ -540,6 +595,7 @@ function DestinationProfileForm({
                   onChange={(event) =>
                     setCoordinateDraft((current) => ({ ...current, lng: event.target.value }))
                   }
+                  onPaste={handleCoordinatePaste}
                   onKeyDown={handleCoordinateInputKeyDown}
                 />
               </label>
@@ -603,28 +659,55 @@ function DestinationProfileForm({
           )}
         </div>
         <div className="profile-header-actions">
-          {saveStatus !== 'idle' ? (
-            <div
-              className={saveStatusClassName}
-              role="status"
-              aria-live="polite"
-              aria-label={saveStatusText}
-              title={saveStatusText}
+          <div className="profile-header-action-row">
+            {saveStatus !== 'idle' ? (
+              <div
+                className={saveStatusClassName}
+                role="status"
+                aria-live="polite"
+                aria-label={saveStatusText}
+                title={saveStatusText}
+              >
+                {saveStatus === 'saving' ? <LoaderCircle size={16} aria-hidden="true" /> : null}
+                {saveStatus === 'saved' ? <Check size={16} aria-hidden="true" /> : null}
+                {saveStatus === 'error' ? <CircleAlert size={16} aria-hidden="true" /> : null}
+                <span className="sr-only">{saveStatusText}</span>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="profile-close-button"
+              onClick={onClose}
+              aria-label="Close destination profile"
             >
-              {saveStatus === 'saving' ? <LoaderCircle size={16} aria-hidden="true" /> : null}
-              {saveStatus === 'saved' ? <Check size={16} aria-hidden="true" /> : null}
-              {saveStatus === 'error' ? <CircleAlert size={16} aria-hidden="true" /> : null}
-              <span className="sr-only">{saveStatusText}</span>
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="profile-stay-days" role="group" aria-label="Expected stay days">
+            <div className="profile-stay-days-readout" aria-live="polite">
+              <span className="profile-stay-days-number">{expectedStayDays}</span>
+              <span className="profile-stay-days-label">{expectedStayDaysLabel}</span>
             </div>
-          ) : null}
-          <button
-            type="button"
-            className="profile-close-button"
-            onClick={onClose}
-            aria-label="Close destination profile"
-          >
-            <X size={18} aria-hidden="true" />
-          </button>
+            <div className="profile-stay-days-controls">
+              <button
+                type="button"
+                className="profile-stay-days-step"
+                aria-label="Increase expected stay days"
+                onClick={() => changeExpectedStayDays(1)}
+              >
+                <Plus size={12} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="profile-stay-days-step"
+                aria-label="Decrease expected stay days"
+                disabled={expectedStayDays <= 1}
+                onClick={() => changeExpectedStayDays(-1)}
+              >
+                <Minus size={12} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -640,17 +723,21 @@ function DestinationProfileForm({
         onOpenPreview={onOpenMediaPreview}
       />
 
-      <label>
-        Expected stay days
-        <input
-          type="number"
-          min="1"
-          value={form.expectedStayDays}
-          onChange={(event) => updateForm({ expectedStayDays: event.target.value })}
-        />
-      </label>
-      <fieldset className="tag-editor" aria-label="Tags">
-        <legend>Tags</legend>
+      <ActivityList
+        title={activitiesLabel}
+        activities={activities}
+        selectedActivityId={selectedActivityId}
+        onSelectActivity={onSelectActivity}
+        onCreateActivity={createProfileActivity}
+        searchActivities={searchActivities ?? emptyActivitySearch}
+        onDeleteActivity={(activityId) => onDeleteActivity(activityId)}
+        onReorderActivities={(orderedActivityIds) =>
+          onReorderActivities(destination.id, orderedActivityIds)
+        }
+      />
+
+      <fieldset className="tag-editor" aria-label={tagsLabel}>
+        <legend>{tagsLabel}</legend>
         <div className="tag-pill-list">
           {form.tags.map((tag) => (
             <button
@@ -692,18 +779,6 @@ function DestinationProfileForm({
         links={form.links}
         previewClient={linkPreviewClient}
         onChange={(links) => updateForm({ links })}
-      />
-
-      <ActivityList
-        activities={activities}
-        selectedActivityId={selectedActivityId}
-        onSelectActivity={onSelectActivity}
-        onCreateActivity={createProfileActivity}
-        searchActivities={searchActivities ?? emptyActivitySearch}
-        onDeleteActivity={(activityId) => onDeleteActivity(activityId)}
-        onReorderActivities={(orderedActivityIds) =>
-          onReorderActivities(destination.id, orderedActivityIds)
-        }
       />
     </aside>
   );
