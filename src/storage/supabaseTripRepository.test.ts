@@ -107,7 +107,15 @@ describe('supabase trip repository mappers', () => {
         coordinates: { lat: 37.5638, lng: 126.985 },
         sourceProvider: 'manual',
       },
-      links: [{ id: crypto.randomUUID(), title: 'Menu', url: 'https://example.com/menu' }],
+      links: [
+        {
+          id: crypto.randomUUID(),
+          title: 'Menu',
+          url: 'https://example.com/menu',
+          domain: 'example.com',
+          sortOrder: 0,
+        },
+      ],
       notes: 'Go hungry.',
       tags: ['food', 'evening'],
     };

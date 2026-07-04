@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createFallbackResearchLink,
   deriveLinkDomain,
@@ -10,6 +10,10 @@ import {
 import type { ResearchLink } from './types';
 
 describe('researchLinks', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('normalizes pasted URLs and derives display domains', () => {
     expect(normalizeResearchLinkUrl(' example.com/menu ')).toBe('https://example.com/menu');
     expect(normalizeResearchLinkUrl('http://example.com/a b')).toBe('http://example.com/a%20b');
