@@ -597,6 +597,9 @@ select {
 
 .search-results button {
   display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   gap: 3px;
   padding: 11px 14px;
   border-width: 0 0 1px;
@@ -605,6 +608,11 @@ select {
   transition:
     background 140ms ease,
     color 140ms ease;
+}
+
+.activity-search-group .search-results button {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 10px 12px;
 }
 
 .search-results button:hover {
@@ -643,6 +651,26 @@ select {
   font-size: 0.8rem;
 }
 
+.activity-search-result {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+}
+
+.activity-search-result__primary,
+.activity-search-result__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.activity-search-result__primary .search-result-title,
+.activity-search-result__meta .search-result-subtitle {
+  flex: 1 1 auto;
+}
+
 .activity-search-badge,
 .activity-search-group .search-result-badge {
   flex: 0 0 auto;
@@ -658,6 +686,8 @@ select {
 .activity-search-group .search-result-distance {
   flex: 0 0 auto;
   color: var(--color-text-muted, var(--text-muted));
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 .search-results button.is-highlighted .search-result-subtitle,
@@ -1231,7 +1261,7 @@ select {
 
 .activity-select,
 .activity-row > button:not(.activity-select),
-.activity-add-row button {
+.activity-add-row > button {
   display: grid;
   width: 32px;
   min-width: 32px;
@@ -1284,8 +1314,8 @@ select {
 .activity-select:focus-visible,
 .activity-row > button:not(.activity-select):hover:not(:disabled),
 .activity-row > button:not(.activity-select):focus-visible:not(:disabled),
-.activity-add-row button:hover,
-.activity-add-row button:focus-visible {
+.activity-add-row > button:hover,
+.activity-add-row > button:focus-visible {
   border-color: rgb(var(--color-accent-rgb) / 0.46);
   color: var(--color-accent);
   background: rgb(var(--color-accent-rgb) / 0.1);

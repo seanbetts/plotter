@@ -236,14 +236,18 @@ export function ActivityList({
             const distance = formatDistance(result.distanceFromProximityKm);
 
             return (
-              <>
-                <span className="search-result-title">
-                  {result.kind === 'coordinates' ? 'Use coordinates' : result.location.placeName}
+              <span className="activity-search-result">
+                <span className="activity-search-result__primary">
+                  <span className="search-result-title">
+                    {result.kind === 'coordinates' ? 'Use coordinates' : result.location.placeName}
+                  </span>
+                  <span className="search-result-badge">{formatTypeBadge(result)}</span>
                 </span>
-                <span className="search-result-badge">{formatTypeBadge(result)}</span>
-                {context ? <span className="search-result-subtitle">{context}</span> : null}
-                {distance ? <span className="search-result-distance">{distance}</span> : null}
-              </>
+                <span className="activity-search-result__meta">
+                  {context ? <span className="search-result-subtitle">{context}</span> : null}
+                  {distance ? <span className="search-result-distance">{distance}</span> : null}
+                </span>
+              </span>
             );
           }}
         />
