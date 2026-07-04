@@ -94,4 +94,23 @@ describe('researchLinks', () => {
       { id: 'second', sortOrder: 2 },
     ]);
   });
+
+  it('sorts links with the same explicit sortOrder by title', () => {
+    const zulu: ResearchLink = {
+      id: 'zulu',
+      title: 'Zulu',
+      url: 'https://zulu.example',
+      domain: 'zulu.example',
+      sortOrder: 1,
+    };
+    const alpha: ResearchLink = {
+      id: 'alpha',
+      title: 'Alpha',
+      url: 'https://alpha.example',
+      domain: 'alpha.example',
+      sortOrder: 1,
+    };
+
+    expect(sortResearchLinks([zulu, alpha]).map((link) => link.id)).toEqual(['alpha', 'zulu']);
+  });
 });

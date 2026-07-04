@@ -68,7 +68,12 @@ export function normalizeResearchLink(link: LegacyResearchLink, index: number): 
 export function sortResearchLinks(links: LegacyResearchLink[]) {
   return links
     .map((link, index) => ({ link: normalizeResearchLink(link, index), index }))
-    .sort((left, right) => left.link.sortOrder - right.link.sortOrder || left.index - right.index)
+    .sort(
+      (left, right) =>
+        left.link.sortOrder - right.link.sortOrder ||
+        left.link.title.localeCompare(right.link.title) ||
+        left.index - right.index,
+    )
     .map(({ link }) => link);
 }
 
