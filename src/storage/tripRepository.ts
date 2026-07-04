@@ -125,10 +125,17 @@ export function createTripRepository(db: TripDb): TripRepository {
       title: string;
       order?: number;
     }): Promise<Activity> {
+      const destination = await db.destinations.get(input.destinationId);
+      if (!destination) {
+        throw new Error('Destination not found.');
+      }
+
       const existingActivities = await this.listActivities(input.destinationId);
+      const nextOrder =
+        existingActivities.reduce((maxOrder, activity) => Math.max(maxOrder, activity.order), -1) + 1;
       const activity = createActivity({
         ...input,
-        order: input.order ?? existingActivities.length,
+        order: input.order ?? nextOrder,
       });
 
       await db.activities.put(activity);
