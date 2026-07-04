@@ -469,7 +469,10 @@ describe('supabase trip repository mappers', () => {
       activityToSupabaseRow({ ...second, order: 0 }, tripId),
       activityToSupabaseRow({ ...first, order: 1 }, tripId),
     ];
-    const updates: Array<{ id: string; order: number }> = [];
+    const updateCalls: Array<{
+      order: number;
+      filters: Array<{ column: string; value: string }>;
+    }> = [];
     const listCreatedOrder = vi
       .fn()
       .mockResolvedValueOnce({ data: listedRows, error: null })
@@ -477,16 +480,25 @@ describe('supabase trip repository mappers', () => {
     const listActivityOrder = vi.fn(() => ({ order: listCreatedOrder }));
     const listDestinationFilter = vi.fn(() => ({ order: listActivityOrder }));
     const listTripFilter = vi.fn(() => ({ eq: listDestinationFilter }));
-    const update = vi.fn((patch: { activity_order: number }) => ({
-      eq: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          eq: vi.fn(async (_column: string, id: string) => {
-            updates.push({ id, order: patch.activity_order });
-            return { error: null };
-          }),
-        })),
-      })),
-    }));
+    const update = vi.fn((patch: { activity_order: number }) => {
+      const filters: Array<{ column: string; value: string }> = [];
+      updateCalls.push({ order: patch.activity_order, filters });
+
+      const idFilter = vi.fn(async (column: string, value: string) => {
+        filters.push({ column, value });
+        return { error: null };
+      });
+      const destinationFilter = vi.fn((column: string, value: string) => {
+        filters.push({ column, value });
+        return { eq: idFilter };
+      });
+      const tripFilter = vi.fn((column: string, value: string) => {
+        filters.push({ column, value });
+        return { eq: destinationFilter };
+      });
+
+      return { eq: tripFilter };
+    });
     const supabase = {
       auth: {
         getUser: vi.fn(async () => ({
@@ -518,9 +530,23 @@ describe('supabase trip repository mappers', () => {
       expect.objectContaining({ id: first.id, order: 1 }),
     ]);
 
-    expect(updates).toEqual([
-      { id: second.id, order: 0 },
-      { id: first.id, order: 1 },
+    expect(updateCalls).toEqual([
+      {
+        order: 0,
+        filters: [
+          { column: 'trip_id', value: tripId },
+          { column: 'destination_id', value: destinationId },
+          { column: 'id', value: second.id },
+        ],
+      },
+      {
+        order: 1,
+        filters: [
+          { column: 'trip_id', value: tripId },
+          { column: 'destination_id', value: destinationId },
+          { column: 'id', value: first.id },
+        ],
+      },
     ]);
   });
 

@@ -55,37 +55,67 @@ alter table public.activities enable row level security;
 grant select, insert, update, delete on table public.activities to authenticated;
 grant select, insert, update, delete on table public.activities to service_role;
 
-create policy "Personal app can view canonical activities"
+create policy "Trip owners can view activities"
 on public.activities
 for select
 to authenticated
 using (
-  trip_id = '66ba131d-378f-4547-aac2-224b3d24d04a'::uuid
+  (select auth.uid()) is not null
+  and exists (
+    select 1
+    from public.trips
+    where trips.id = activities.trip_id
+      and trips.owner_user_id = (select auth.uid())
+  )
 );
 
-create policy "Personal app can create canonical activities"
+create policy "Trip owners can create activities"
 on public.activities
 for insert
 to authenticated
 with check (
-  trip_id = '66ba131d-378f-4547-aac2-224b3d24d04a'::uuid
+  (select auth.uid()) is not null
+  and exists (
+    select 1
+    from public.trips
+    where trips.id = activities.trip_id
+      and trips.owner_user_id = (select auth.uid())
+  )
 );
 
-create policy "Personal app can update canonical activities"
+create policy "Trip owners can update activities"
 on public.activities
 for update
 to authenticated
 using (
-  trip_id = '66ba131d-378f-4547-aac2-224b3d24d04a'::uuid
+  (select auth.uid()) is not null
+  and exists (
+    select 1
+    from public.trips
+    where trips.id = activities.trip_id
+      and trips.owner_user_id = (select auth.uid())
+  )
 )
 with check (
-  trip_id = '66ba131d-378f-4547-aac2-224b3d24d04a'::uuid
+  (select auth.uid()) is not null
+  and exists (
+    select 1
+    from public.trips
+    where trips.id = activities.trip_id
+      and trips.owner_user_id = (select auth.uid())
+  )
 );
 
-create policy "Personal app can delete canonical activities"
+create policy "Trip owners can delete activities"
 on public.activities
 for delete
 to authenticated
 using (
-  trip_id = '66ba131d-378f-4547-aac2-224b3d24d04a'::uuid
+  (select auth.uid()) is not null
+  and exists (
+    select 1
+    from public.trips
+    where trips.id = activities.trip_id
+      and trips.owner_user_id = (select auth.uid())
+  )
 );
