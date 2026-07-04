@@ -3,14 +3,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MediaItem } from '../domain/types';
 import { normalizeImageFile } from '../media/imageOptimization';
 import type { TripRepository } from '../storage/tripRepository';
-import { useDestinationMedia } from './useDestinationMedia';
+import { useActivityMedia } from './useActivityMedia';
 
 vi.mock('../media/imageOptimization', () => ({
   normalizeImageFile: vi.fn(async (file: File) => file),
 }));
 
-describe('useDestinationMedia', () => {
-  it('calls destination media repository methods through the owned media hook', async () => {
+describe('useActivityMedia', () => {
+  it('calls activity media repository methods through the owned media hook', async () => {
     const existing = [
       createMediaItem('media-1', 0),
       createMediaItem('media-2', 1),
@@ -18,12 +18,14 @@ describe('useDestinationMedia', () => {
     const originalFile = createFile('full-size.jpg', 'image/jpeg');
     const normalizedFile = createFile('full-size-normalized.jpg', 'image/jpeg');
     const repository = createTripRepository({
-      listDestinationMedia: vi.fn().mockResolvedValue(existing),
-      uploadDestinationMedia: vi.fn().mockResolvedValue(createMediaItem('uploaded-media', 2)),
+      listActivityMedia: vi.fn().mockResolvedValue(existing),
+      uploadActivityMedia: vi.fn().mockResolvedValue(createMediaItem('uploaded-media', 2)),
     });
     vi.mocked(normalizeImageFile).mockResolvedValueOnce(normalizedFile);
 
-    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+    const { result } = renderHook(() =>
+      useActivityMedia(repository, 'destination-1', 'activity-1'),
+    );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -34,12 +36,13 @@ describe('useDestinationMedia', () => {
       await result.current.reorder(['media-2', 'media-1', 'uploaded-media']);
     });
 
-    expect(repository.listDestinationMedia).toHaveBeenCalledWith('destination-1');
-    expect(repository.uploadDestinationMedia).toHaveBeenCalledWith({
+    expect(repository.listActivityMedia).toHaveBeenCalledWith('activity-1');
+    expect(repository.uploadActivityMedia).toHaveBeenCalledWith({
       destinationId: 'destination-1',
+      activityId: 'activity-1',
       file: normalizedFile,
     });
-    expect(repository.reorderDestinationMedia).toHaveBeenCalledWith('destination-1', [
+    expect(repository.reorderActivityMedia).toHaveBeenCalledWith('activity-1', [
       'media-2',
       'media-1',
       'uploaded-media',
