@@ -13,6 +13,7 @@ import type {
   RouteLegStatus,
   RouteLegType,
 } from '../domain/types';
+import { sortResearchLinks } from '../domain/researchLinks';
 import { mediaImageVariants } from '../media/imageOptimization';
 import type { TripRepository } from './tripRepository';
 
@@ -198,6 +199,8 @@ export function destinationToSupabaseRow(destination: Destination, tripId: strin
 }
 
 export function destinationFromSupabaseRow(row: SupabaseDestinationRow): Destination {
+  const research = row.research ?? {};
+
   return {
     id: row.id,
     name: row.name,
@@ -213,7 +216,12 @@ export function destinationFromSupabaseRow(row: SupabaseDestinationRow): Destina
     timing: row.timing,
     why: row.why,
     media: row.media,
-    research: row.research,
+    research: {
+      ...research,
+      links: sortResearchLinks(research.links ?? []),
+      bookReferences: research.bookReferences ?? [],
+      notes: research.notes ?? '',
+    },
     activities: row.activities,
     routeContext: row.route_context,
     tags: row.tags,
@@ -253,7 +261,7 @@ export function activityFromSupabaseRow(row: SupabaseActivityRow): Activity {
     status: row.status,
     priority: row.priority,
     location: row.location ?? undefined,
-    links: row.links,
+    links: sortResearchLinks(row.links ?? []),
     notes: row.notes,
     tags: row.tags,
     createdAt: row.created_at,

@@ -8,6 +8,7 @@ import type {
   RouteLeg,
 } from '../domain/types';
 import { createLegacyLocation } from '../domain/locations';
+import { sortResearchLinks } from '../domain/researchLinks';
 import type { TripDb } from './tripDb';
 
 export type TripRepository = {
@@ -81,6 +82,19 @@ function normalizeDestination(destination: Destination, index = 0): Destination 
         countryRegion: destination.countryRegion,
       }),
     order: Number.isFinite(destination.order) ? destination.order : index,
+    research: {
+      ...destination.research,
+      links: sortResearchLinks(destination.research?.links ?? []),
+      bookReferences: destination.research?.bookReferences ?? [],
+      notes: destination.research?.notes ?? '',
+    },
+  };
+}
+
+function normalizeActivity(activity: Activity): Activity {
+  return {
+    ...activity,
+    links: sortResearchLinks(activity.links ?? []),
   };
 }
 
@@ -172,9 +186,9 @@ export function createTripRepository(db: TripDb): TripRepository {
     },
 
     async listActivities(destinationId: string): Promise<Activity[]> {
-      return (await db.activities.where('destinationId').equals(destinationId).toArray()).sort(
-        (left, right) => left.order - right.order || left.createdAt.localeCompare(right.createdAt),
-      );
+      return (await db.activities.where('destinationId').equals(destinationId).toArray())
+        .map(normalizeActivity)
+        .sort((left, right) => left.order - right.order || left.createdAt.localeCompare(right.createdAt));
     },
 
     async createActivity(input: {

@@ -51,6 +51,51 @@ describe('supabase trip repository mappers', () => {
     expect(destinationFromSupabaseRow(row)).toEqual(destination);
   });
 
+  it('normalizes legacy destination research links from Supabase rows', () => {
+    const destination = createDestination({
+      name: 'Kyoto',
+      coordinates: { lat: 35.6764, lng: 139.65 },
+    });
+    const row = {
+      ...destinationToSupabaseRow(destination, crypto.randomUUID()),
+      research: {
+        notes: null,
+        links: [
+          {
+            id: 'wiki-link',
+            title: '',
+            url: 'www.wikipedia.org/wiki/Kyoto',
+          },
+          {
+            id: 'official-link',
+            title: 'Official',
+            url: 'https://kyoto.example/official',
+            sortOrder: 0,
+          },
+        ],
+      },
+    };
+
+    expect(destinationFromSupabaseRow(row as never).research).toEqual({
+      notes: '',
+      bookReferences: [],
+      links: [
+        expect.objectContaining({
+          id: 'official-link',
+          domain: 'kyoto.example',
+          sortOrder: 0,
+        }),
+        expect.objectContaining({
+          id: 'wiki-link',
+          title: 'wikipedia.org',
+          url: 'https://www.wikipedia.org/wiki/Kyoto',
+          domain: 'wikipedia.org',
+          sortOrder: 0,
+        }),
+      ],
+    });
+  });
+
   it('maps route legs to and from Supabase rows', () => {
     const origin = createDestination({
       name: 'Oslo',
@@ -137,6 +182,45 @@ describe('supabase trip repository mappers', () => {
     });
     expect(row.location).toEqual(activity.location);
     expect(activityFromSupabaseRow(row)).toEqual(activity);
+  });
+
+  it('normalizes legacy activity links from Supabase rows', () => {
+    const activity = createActivityModel({
+      destinationId: crypto.randomUUID(),
+      title: 'Night market',
+      order: 3,
+    });
+    const row = {
+      ...activityToSupabaseRow(activity, crypto.randomUUID()),
+      links: [
+        {
+          id: 'official-link',
+          title: 'Official',
+          url: 'https://market.example',
+          sortOrder: 0,
+        },
+        {
+          id: 'wiki-link',
+          title: '',
+          url: 'www.wikipedia.org/wiki/Night_market',
+        },
+      ],
+    };
+
+    expect(activityFromSupabaseRow(row as never).links).toEqual([
+      expect.objectContaining({
+        id: 'official-link',
+        domain: 'market.example',
+        sortOrder: 0,
+      }),
+      expect.objectContaining({
+        id: 'wiki-link',
+        title: 'wikipedia.org',
+        url: 'https://www.wikipedia.org/wiki/Night_market',
+        domain: 'wikipedia.org',
+        sortOrder: 1,
+      }),
+    ]);
   });
 
   it('upserts destinations and route legs against the trip-scoped id', async () => {
@@ -607,6 +691,66 @@ describe('supabase trip repository mappers', () => {
     expect(mediaActivityFilter).toHaveBeenCalledWith('activity_id', activityId);
     expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
     expect(deleteIdFilter).toHaveBeenCalledWith('id', activityId);
+  });
+
+  it('updates activity links with rich metadata as-is', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const activityId = crypto.randomUUID();
+    const links = [
+      {
+        id: crypto.randomUUID(),
+        title: 'Official guide',
+        url: 'https://louvre.example/guide',
+        domain: 'louvre.example',
+        imageUrl: 'https://louvre.example/guide.jpg',
+        sortOrder: 2,
+        previewFetchedAt: '2026-07-01T10:00:00.000Z',
+      },
+    ];
+    const updatedRow = activityToSupabaseRow(
+      {
+        ...createActivityModel({ destinationId, title: 'Louvre', order: 0 }),
+        id: activityId,
+        links,
+      },
+      tripId,
+    );
+    const updateSingle = vi.fn(async () => ({ data: updatedRow, error: null }));
+    const updateSelect = vi.fn(() => ({ single: updateSingle }));
+    const updateIdFilter = vi.fn(() => ({ select: updateSelect }));
+    const updateTripFilter = vi.fn(() => ({ eq: updateIdFilter }));
+    const update = vi.fn(() => ({ eq: updateTripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return { update };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.updateActivity(activityId, { links })).resolves.toEqual(
+      expect.objectContaining({ id: activityId, links }),
+    );
+
+    expect(update).toHaveBeenCalledWith({ links });
+    expect(updateTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(updateIdFilter).toHaveBeenCalledWith('id', activityId);
   });
 
   it('removes activity media storage objects after deleting an activity', async () => {

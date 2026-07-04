@@ -189,6 +189,49 @@ describe('trip repository', () => {
     ]);
   });
 
+  it('preserves rich research link metadata when listing saved destinations', async () => {
+    const repository = createTestRepository();
+    const destination = {
+      ...createDestination({
+        name: 'Kyoto',
+        coordinates: { lat: 35.6764, lng: 139.65 },
+      }),
+      research: {
+        notes: 'Temple notes',
+        bookReferences: [],
+        links: [
+          {
+            id: crypto.randomUUID(),
+            title: 'Official guide',
+            url: 'https://kyoto.example/guide',
+            domain: 'kyoto.example',
+            imageUrl: 'https://kyoto.example/guide.jpg',
+            sortOrder: 2,
+            previewFetchedAt: '2026-07-01T10:00:00.000Z',
+          },
+          {
+            id: crypto.randomUUID(),
+            title: 'Travel notes',
+            url: 'https://notes.example/kyoto',
+            domain: 'notes.example',
+            imageUrl: 'https://notes.example/kyoto.jpg',
+            sortOrder: 1,
+            previewFetchedAt: '2026-07-01T11:00:00.000Z',
+          },
+        ],
+      },
+    };
+
+    await repository.saveDestination(destination);
+
+    const [listed] = await repository.listDestinations();
+
+    expect(listed.research.links).toEqual([
+      destination.research.links[1],
+      destination.research.links[0],
+    ]);
+  });
+
   it('updates, deletes, and reorders destination media locally', async () => {
     const repository = createTestRepository();
     const destination = {
@@ -366,6 +409,60 @@ describe('trip repository', () => {
     expect(routeLeg.status).toBe('pending');
   });
 
+  it('normalizes legacy research links on destination reads', async () => {
+    const repository = createTestRepository();
+    const destination = {
+      ...createDestination({
+        name: 'Legacy research stop',
+        coordinates: { lat: 1, lng: 1 },
+      }),
+      research: {
+        notes: undefined,
+        bookReferences: undefined,
+        links: [
+          {
+            id: 'wiki-link',
+            title: '',
+            url: 'www.wikipedia.org/wiki/Kyoto',
+          },
+          {
+            id: 'official-link',
+            title: 'Official',
+            url: 'https://kyoto.example/official',
+            sortOrder: 0,
+          },
+        ],
+      },
+    };
+
+    await repository.saveDestination(destination as never);
+
+    await expect(repository.listDestinations()).resolves.toEqual([
+      expect.objectContaining({
+        research: {
+          notes: '',
+          bookReferences: [],
+          links: [
+            expect.objectContaining({
+              id: 'official-link',
+              title: 'Official',
+              url: 'https://kyoto.example/official',
+              domain: 'kyoto.example',
+              sortOrder: 0,
+            }),
+            expect.objectContaining({
+              id: 'wiki-link',
+              title: 'wikipedia.org',
+              url: 'https://www.wikipedia.org/wiki/Kyoto',
+              domain: 'wikipedia.org',
+              sortOrder: 0,
+            }),
+          ],
+        },
+      }),
+    ]);
+  });
+
   it('creates, lists, updates, reorders, and deletes activities for a destination', async () => {
     const repository = createTestRepository();
     const destination = createDestination({
@@ -428,6 +525,55 @@ describe('trip repository', () => {
     expect(activity.location).toEqual(location);
     await expect(repository.listActivities(destination.id)).resolves.toEqual([
       expect.objectContaining({ id: activity.id, location }),
+    ]);
+  });
+
+  it('normalizes legacy activity links on reads', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    const activity = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+    await repository.updateActivity(activity.id, {
+      links: [
+        {
+          id: 'official-link',
+          title: 'Official',
+          url: 'https://louvre.example',
+          sortOrder: 0,
+        },
+        {
+          id: 'wiki-link',
+          title: '',
+          url: 'www.wikipedia.org/wiki/Louvre',
+        },
+      ] as never,
+    });
+
+    await expect(repository.listActivities(destination.id)).resolves.toEqual([
+      expect.objectContaining({
+        id: activity.id,
+        links: [
+          expect.objectContaining({
+            id: 'official-link',
+            domain: 'louvre.example',
+            sortOrder: 0,
+          }),
+          expect.objectContaining({
+            id: 'wiki-link',
+            title: 'wikipedia.org',
+            url: 'https://www.wikipedia.org/wiki/Louvre',
+            domain: 'wikipedia.org',
+            sortOrder: 1,
+          }),
+        ],
+      }),
     ]);
   });
 
