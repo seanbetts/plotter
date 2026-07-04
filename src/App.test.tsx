@@ -799,6 +799,45 @@ describe('App', () => {
     expect(repositoryMock.listActivityMedia).toHaveBeenCalledWith(louvre.id);
   });
 
+  it('scrolls the selected activity panel into view on mobile', async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(max-width: 760px)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const louvre = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listActivities.mockResolvedValue([louvre] satisfies Activity[]);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
+
+    expect(await screen.findByRole('complementary', { name: 'Louvre activity' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', inline: 'nearest' }),
+    );
+  });
+
   it('uploads activity panel media through activity-owned storage', async () => {
     const user = userEvent.setup();
     const destination = createDestination({

@@ -1,5 +1,6 @@
 import { CircleAlert, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useRef, useState } from 'react';
+import type { Ref } from 'react';
 import type { Activity, MediaItem } from '../domain/types';
 import { ActivityImageStrip } from './ActivityImageStrip';
 
@@ -51,7 +52,7 @@ function activitySourceKey(activity: Activity) {
   return `${activity.id}:${activity.updatedAt}`;
 }
 
-export function ActivityPanel({
+export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(function ActivityPanel({
   activity,
   mediaItems,
   mediaError,
@@ -62,10 +63,11 @@ export function ActivityPanel({
   onUploadMedia,
   onReorderMedia,
   onOpenMediaPreview,
-}: ActivityPanelProps) {
+}: ActivityPanelProps, ref) {
   return (
     <ActivityPanelForm
       key={activity.id}
+      panelRef={ref}
       activity={activity}
       mediaItems={mediaItems}
       mediaError={mediaError}
@@ -78,9 +80,10 @@ export function ActivityPanel({
       onOpenMediaPreview={onOpenMediaPreview}
     />
   );
-}
+});
 
 function ActivityPanelForm({
+  panelRef,
   activity,
   mediaItems,
   mediaError,
@@ -91,7 +94,7 @@ function ActivityPanelForm({
   onUploadMedia,
   onReorderMedia,
   onOpenMediaPreview,
-}: ActivityPanelProps) {
+}: ActivityPanelProps & { panelRef: Ref<HTMLElement> }) {
   const [draft, setDraft] = useState(() => createActivityDraft(activity));
   const [saveError, setSaveError] = useState('');
   const latestDraftRef = useRef(createActivityDraft(activity));
@@ -207,7 +210,7 @@ function ActivityPanelForm({
   }
 
   return (
-    <aside className="activity-panel" aria-label={`${activity.title} activity`}>
+    <aside ref={panelRef} className="activity-panel" aria-label={`${activity.title} activity`}>
       <header className="profile-header" aria-label="Activity detail header">
         <div>
           <span className="profile-stop-number">Activity</span>

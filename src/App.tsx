@@ -20,6 +20,7 @@ import './styles.css';
 
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
+const mobileWorkspacePanelsQuery = '(max-width: 760px)';
 
 type RepositoryError = {
   title: string;
@@ -218,6 +219,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   const [destinationMediaRollupError, setDestinationMediaRollupError] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
   const selectedDestinationIdRef = useRef<string | null>(null);
+  const activityPanelRef = useRef<HTMLElement | null>(null);
   const rollupLoadSequenceRef = useRef(0);
   const pendingMapStopRequestIdRef = useRef(0);
   const activePendingMapStopIdRef = useRef<number | null>(null);
@@ -248,6 +250,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         : selectedDestinationActivities.find((activity) => activity.id === selectedActivityId) ?? null,
     [selectedActivityId, selectedDestinationActivities],
   );
+  const selectedActivityPanelId = selectedActivity?.id ?? null;
   const activityMedia = useActivityMedia(
     repository,
     selectedDestination?.id ?? null,
@@ -393,6 +396,13 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
       setSelectedActivityId(null);
     }
   }, [selectedActivityId, selectedDestinationActivities, selectedDestinationId]);
+
+  useEffect(() => {
+    if (!selectedActivityPanelId) return;
+    if (!window.matchMedia?.(mobileWorkspacePanelsQuery).matches) return;
+
+    activityPanelRef.current?.scrollIntoView({ block: 'start', inline: 'nearest' });
+  }, [selectedActivityPanelId]);
 
   useEffect(() => {
     if (pendingMapStop || previewMediaItem || !selectedDestination || isInteractionLocked) return undefined;
@@ -711,6 +721,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
           <div className="workspace-panels">
             {selectedActivity ? (
               <ActivityPanel
+                ref={activityPanelRef}
                 activity={selectedActivity}
                 mediaItems={activityMedia.mediaItems}
                 mediaError={activityMedia.error}
