@@ -44,7 +44,7 @@ type OverlayPosition = {
   y: number;
 };
 
-type PreviewMediaSource = 'destination-rollup' | 'activity' | 'destination';
+type PreviewMediaSource = 'destination-rollup' | 'activity';
 type PreviewMediaSelection = {
   mediaId: string;
   source: PreviewMediaSource;
@@ -338,6 +338,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
 
     setIsDestinationMediaRollupLoading(true);
     setDestinationMediaRollupError(null);
+    setDestinationMediaRollupItems([]);
 
     try {
       const rollupItems = await repository.listDestinationMediaRollup(destinationId);
@@ -347,6 +348,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     } catch (caught) {
       if (!isCurrentLoad()) return;
 
+      setDestinationMediaRollupItems([]);
       setDestinationMediaRollupError(
         caught instanceof Error ? caught.message : 'Unable to load images.',
       );

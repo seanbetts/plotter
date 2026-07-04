@@ -1,8 +1,17 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createActivity } from '../domain/activities';
 import type { MediaItem } from '../domain/types';
 import { ActivityPanel } from './ActivityPanel';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return { promise, resolve };
+}
 
 function createMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
   return {
@@ -97,5 +106,46 @@ describe('ActivityPanel', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Unable to update activity.');
     expect(screen.getByLabelText('Activity title')).toHaveValue('Louvre');
+  });
+
+  it('preserves an unsaved notes draft when a title save rerender arrives', async () => {
+    const activity = createActivity({
+      destinationId: 'destination-1',
+      title: 'Louvre',
+      order: 0,
+    });
+    const titleSave = deferred<void>();
+    const onUpdateActivity = vi.fn(() => titleSave.promise);
+
+    const { rerender } = render(
+      <ActivityPanel {...createProps({ activity, onUpdateActivity })} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
+    fireEvent.blur(screen.getByLabelText('Activity title'));
+    fireEvent.change(screen.getByLabelText('Activity notes'), {
+      target: { value: 'Check Friday late opening.' },
+    });
+
+    await act(async () => {
+      titleSave.resolve(undefined);
+      await titleSave.promise;
+    });
+
+    rerender(
+      <ActivityPanel
+        {...createProps({
+          activity: {
+            ...activity,
+            title: 'Morning Louvre',
+            updatedAt: '2026-07-04T12:00:00.000Z',
+          },
+          onUpdateActivity,
+        })}
+      />,
+    );
+
+    expect(screen.getByLabelText('Activity title')).toHaveValue('Morning Louvre');
+    expect(screen.getByLabelText('Activity notes')).toHaveValue('Check Friday late opening.');
   });
 });

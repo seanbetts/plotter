@@ -1,5 +1,5 @@
 import { CircleAlert, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Activity, MediaItem } from '../domain/types';
 import { ActivityImageStrip } from './ActivityImageStrip';
 
@@ -94,10 +94,38 @@ function ActivityPanelForm({
 }: ActivityPanelProps) {
   const [draft, setDraft] = useState(() => createActivityDraft(activity));
   const [saveError, setSaveError] = useState('');
+  const dirtyFieldsRef = useRef(new Set<ActivityDraftField>());
+  const fieldSaveRevisionRef = useRef<Record<ActivityDraftField, number>>({
+    title: 0,
+    description: 0,
+    notes: 0,
+    status: 0,
+    priority: 0,
+  });
   const sourceKey = activitySourceKey(activity);
 
   useEffect(() => {
-    setDraft(createActivityDraft(activity));
+    setDraft((current) => {
+      const shouldPreserveDraft = (field: ActivityDraftField) =>
+        dirtyFieldsRef.current.has(field) && current[field] !== activity[field];
+      const usePersistedField = (field: ActivityDraftField) => {
+        dirtyFieldsRef.current.delete(field);
+      };
+
+      if (!shouldPreserveDraft('title')) usePersistedField('title');
+      if (!shouldPreserveDraft('description')) usePersistedField('description');
+      if (!shouldPreserveDraft('notes')) usePersistedField('notes');
+      if (!shouldPreserveDraft('status')) usePersistedField('status');
+      if (!shouldPreserveDraft('priority')) usePersistedField('priority');
+
+      return {
+        title: dirtyFieldsRef.current.has('title') ? current.title : activity.title,
+        description: dirtyFieldsRef.current.has('description') ? current.description : activity.description,
+        notes: dirtyFieldsRef.current.has('notes') ? current.notes : activity.notes,
+        status: dirtyFieldsRef.current.has('status') ? current.status : activity.status,
+        priority: dirtyFieldsRef.current.has('priority') ? current.priority : activity.priority,
+      };
+    });
     setSaveError('');
   }, [
     activity.description,
@@ -110,6 +138,7 @@ function ActivityPanelForm({
 
   function updateDraft<Field extends ActivityDraftField>(field: Field, value: ActivityDraft[Field]) {
     setSaveError('');
+    dirtyFieldsRef.current.add(field);
     setDraft((current) => ({
       ...current,
       [field]: value,
@@ -118,16 +147,27 @@ function ActivityPanelForm({
 
   async function commitDraft<Field extends ActivityDraftField>(field: Field) {
     const nextValue = draft[field];
-    if (nextValue === activity[field]) return;
+    if (nextValue === activity[field]) {
+      dirtyFieldsRef.current.delete(field);
+      return;
+    }
 
+    const saveRevision = fieldSaveRevisionRef.current[field] + 1;
+    fieldSaveRevisionRef.current[field] = saveRevision;
     setSaveError('');
     try {
       await Promise.resolve(onUpdateActivity(activity.id, { [field]: nextValue }));
+      if (fieldSaveRevisionRef.current[field] === saveRevision) {
+        dirtyFieldsRef.current.delete(field);
+      }
     } catch {
-      setDraft((current) => ({
-        ...current,
-        [field]: activity[field],
-      }));
+      if (fieldSaveRevisionRef.current[field] === saveRevision) {
+        dirtyFieldsRef.current.delete(field);
+        setDraft((current) => ({
+          ...current,
+          [field]: activity[field],
+        }));
+      }
       setSaveError('Unable to update activity.');
     }
   }

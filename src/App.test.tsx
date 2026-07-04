@@ -1168,6 +1168,53 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Open full image: Paris stale' })).not.toBeInTheDocument();
   });
 
+  it('clears old stop rollup media when the newly selected stop rollup fails to load', async () => {
+    const user = userEvent.setup();
+    const paris = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+      order: 0,
+    });
+    const rome = createDestination({
+      name: 'Rome',
+      countryRegion: 'Italy',
+      coordinates: { lat: 41.9028, lng: 12.4964 },
+      order: 1,
+    });
+    repositoryMock.initialDestinations = Promise.resolve([paris, rome]);
+    repositoryMock.listDestinationMediaRollup.mockImplementation(async (destinationId: string) => {
+      if (destinationId === rome.id) {
+        throw new Error('Rome rollup failed');
+      }
+
+      return [
+        {
+          mediaItem: createMediaItem({
+            id: 'paris-media',
+            url: '/paris.jpg',
+            caption: 'Paris street',
+          }),
+          ownerType: 'destination',
+          destinationId: paris.id,
+          canReorderInStopCarousel: true,
+        },
+      ];
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    expect(await screen.findByRole('button', { name: 'Open full image: Paris street' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Rome, Italy' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Rome rollup failed');
+    expect(screen.queryByRole('button', { name: 'Open full image: Paris street' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show image 1: Paris street' })).not.toBeInTheDocument();
+  });
+
   it('keeps mutation actions unavailable while trip data is loading', async () => {
     const initialDestinations = createDeferred<Destination[]>();
     const initialRouteLegs = createDeferred<RouteLeg[]>();
