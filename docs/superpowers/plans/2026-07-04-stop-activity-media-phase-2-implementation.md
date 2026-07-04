@@ -75,7 +75,7 @@ Deferred:
 - Modify: `src/domain/types.ts`
 - Test: `src/storage/supabaseTripRepository.test.ts`
 
-- [ ] **Step 1: Create the migration file with the Supabase CLI**
+- [x] **Step 1: Create the migration file with the Supabase CLI**
 
 Run:
 
@@ -85,7 +85,7 @@ npx supabase migration new add_activity_media_ownership
 
 Expected: a new file appears in `supabase/migrations/` with a timestamped name ending in `_add_activity_media_ownership.sql`.
 
-- [ ] **Step 2: Add the ownership migration SQL**
+- [x] **Step 2: Add the ownership migration SQL**
 
 Replace the new migration contents with:
 
@@ -127,7 +127,7 @@ on public.media_assets(trip_id, destination_id, activity_id);
 
 This migration relies on the existing `activities` table unique key on `(trip_id, destination_id, id)`.
 
-- [ ] **Step 3: Add domain types**
+- [x] **Step 3: Add domain types**
 
 In `src/domain/types.ts`, add these types after `MediaItem`:
 
@@ -149,7 +149,7 @@ export type ActivityMediaRecord = MediaItem & {
 };
 ```
 
-- [ ] **Step 4: Add a mapper test for owner metadata**
+- [x] **Step 4: Add a mapper test for owner metadata**
 
 In `src/storage/supabaseTripRepository.test.ts`, extend the media mapper test so the row fixture includes:
 
@@ -171,7 +171,7 @@ expect(mediaAssetFromSupabaseRow(
 
 Expected: this test keeps `MediaItem` owner-neutral. Ownership lives in query methods and rollup wrappers, not every `MediaItem` consumer.
 
-- [ ] **Step 5: Run the focused mapper tests**
+- [x] **Step 5: Run the focused mapper tests**
 
 Run:
 
@@ -181,7 +181,7 @@ npm test -- src/storage/supabaseTripRepository.test.ts
 
 Expected before implementation: FAIL if the row type does not accept `activity_id`. Expected after implementation: PASS.
 
-- [ ] **Step 6: Commit the schema and type contracts**
+- [x] **Step 6: Commit the schema and type contracts**
 
 Run:
 
@@ -201,7 +201,7 @@ git commit -m "feat: add activity media ownership schema"
 - Modify: `src/storage/supabaseTripRepository.ts`
 - Modify: `src/storage/supabaseTripRepository.test.ts`
 
-- [ ] **Step 1: Extend the repository interface**
+- [x] **Step 1: Extend the repository interface**
 
 In `src/storage/tripRepository.ts`, import `MediaRollupItem` and add these methods to `TripRepository` next to the existing destination media methods:
 
@@ -223,7 +223,7 @@ deleteActivityMedia(mediaId: string): Promise<void>;
 reorderActivityMedia(activityId: string, orderedMediaIds: string[]): Promise<MediaItem[]>;
 ```
 
-- [ ] **Step 2: Add local activity media storage**
+- [x] **Step 2: Add local activity media storage**
 
 In `src/storage/tripDb.ts`, add `ActivityMediaRecord` to the imports and the database type:
 
@@ -242,7 +242,7 @@ db.version(4).stores({
 });
 ```
 
-- [ ] **Step 3: Write local repository tests**
+- [x] **Step 3: Write local repository tests**
 
 In `src/storage/tripRepository.test.ts`, add a test that creates a destination, creates an activity, uploads destination media, uploads activity media, and expects:
 
@@ -269,7 +269,7 @@ expect(await repository.listDestinationMediaRollup(destination.id)).toEqual([
 ]);
 ```
 
-- [ ] **Step 4: Implement local repository methods**
+- [x] **Step 4: Implement local repository methods**
 
 In `src/storage/tripRepository.ts`:
 
@@ -280,7 +280,7 @@ In `src/storage/tripRepository.ts`:
 
 Use the existing `createLocalMediaUrl(file)` helper for local activity uploads.
 
-- [ ] **Step 5: Write Supabase tests for destination-owned filtering**
+- [x] **Step 5: Write Supabase tests for destination-owned filtering**
 
 In `src/storage/supabaseTripRepository.test.ts`, add a test that calls `repository.listDestinationMedia(destinationId)` and asserts the query chain includes:
 
@@ -293,7 +293,7 @@ order('sort_order', { ascending: true })
 
 This protects against activity-owned images leaking into stop-owned reorder paths.
 
-- [ ] **Step 6: Write Supabase tests for activity media upload and listing**
+- [x] **Step 6: Write Supabase tests for activity media upload and listing**
 
 Add tests that assert:
 
@@ -314,7 +314,7 @@ expect(mediaInsert).toHaveBeenCalledWith(expect.objectContaining({
 
 For `listActivityMedia(activityId)`, assert the query filters by active trip id and `activity_id`.
 
-- [ ] **Step 7: Write Supabase rollup test**
+- [x] **Step 7: Write Supabase rollup test**
 
 Add a test where:
 
@@ -336,7 +336,7 @@ expect(rollup.map((item) => ({
 ]);
 ```
 
-- [ ] **Step 8: Implement Supabase owner-aware methods**
+- [x] **Step 8: Implement Supabase owner-aware methods**
 
 In `src/storage/supabaseTripRepository.ts`:
 
@@ -347,7 +347,7 @@ In `src/storage/supabaseTripRepository.ts`:
 - Keep signed URL creation through `createSignedMediaItem(row)` so thumbnail, preview, and full URLs remain available.
 - Use two-phase temporary sort orders for `reorderActivityMedia`, matching `reorderDestinationMedia`.
 
-- [ ] **Step 9: Run repository tests**
+- [x] **Step 9: Run repository tests**
 
 Run:
 
@@ -357,7 +357,7 @@ npm test -- src/storage/tripRepository.test.ts src/storage/supabaseTripRepositor
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit repository work**
+- [x] **Step 10: Commit repository work**
 
 Run:
 
