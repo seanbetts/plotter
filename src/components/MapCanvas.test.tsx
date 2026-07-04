@@ -1392,6 +1392,148 @@ describe('MapCanvas', () => {
     });
   });
 
+  it('focuses an initially selected stop after the map loads', () => {
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[louvreActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+
+    expect(map.fitBounds).toHaveBeenLastCalledWith(
+      [
+        [2.3376, 38.6431],
+        [34.8289, 48.8606],
+      ],
+      expect.objectContaining({
+        padding: expect.objectContaining({
+          top: 96,
+          right: 760,
+          bottom: 96,
+          left: 96,
+        }),
+        maxZoom: 13,
+        duration: 700,
+      }),
+    );
+  });
+
+  it('does not refit focused maps when equivalent destination and activity data rerenders', () => {
+    const { rerender } = render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[louvreActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+    const fitCountAfterFocus = map.fitBounds.mock.calls.length;
+
+    rerender(
+      <MapCanvas
+        destinations={[{ ...destination, coordinates: { ...destination.coordinates } }]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[{ ...louvreActivity, location: { ...louvreActivity.location! } }]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    expect(map.fitBounds).toHaveBeenCalledTimes(fitCountAfterFocus);
+  });
+
+  it('clears the saved route viewport after restoring it when leaving focus', () => {
+    const { rerender } = render(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        focusedActivities={[]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    const map = maplibreMock.mapInstances[0];
+    map.getCenter.mockReturnValue({ lng: 18, lat: 24 });
+    map.getZoom.mockReturnValue(4.5);
+
+    rerender(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    rerender(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        focusedActivities={[]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    map.getCenter.mockReturnValue({ lng: 30, lat: 40 });
+    map.getZoom.mockReturnValue(6.5);
+    rerender(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[]}
+        selectedDestinationId={targetDestination.id}
+        focusedActivities={[]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    rerender(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        focusedActivities={[]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    expect(map.easeTo).toHaveBeenLastCalledWith({
+      center: [30, 40],
+      zoom: 6.5,
+      duration: 700,
+    });
+  });
+
   it('does not intercept map double-clicks so MapLibre can zoom normally', () => {
     render(
       <MapCanvas

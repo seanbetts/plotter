@@ -633,6 +633,15 @@ function findDestination(destinations: Destination[], destinationId: string) {
   return destinations.find((destination) => destination.id === destinationId);
 }
 
+function selectedDestinationForFocus(
+  destinations: Destination[],
+  selectedDestinationId: string | null,
+) {
+  return selectedDestinationId
+    ? destinations.find((candidate) => candidate.id === selectedDestinationId) ?? null
+    : null;
+}
+
 function straightLineGeometry(origin: Destination, target: Destination): LineString {
   return {
     type: 'LineString',
@@ -723,6 +732,28 @@ function focusedCoordinatesForDestination(destination: Destination, focusedActiv
         : [],
     ),
   ];
+}
+
+function coordinateKey(coordinates: Coordinates) {
+  return `${coordinates.lng},${coordinates.lat}`;
+}
+
+function stopFocusKeyForDestination(destination: Destination, focusedActivities: Activity[]) {
+  const activityCoordinateKeys = Array.from(
+    new Set(
+      focusedActivities.flatMap((activity) =>
+        activity.destinationId === destination.id && activity.location?.coordinates
+          ? [coordinateKey(activity.location.coordinates)]
+          : [],
+      ),
+    ),
+  ).sort();
+
+  return [
+    destination.id,
+    coordinateKey(destination.coordinates),
+    ...activityCoordinateKeys,
+  ].join('|');
 }
 
 function layerMatchesPattern(layerId: string, patterns: string[]) {
@@ -857,7 +888,7 @@ export function MapCanvas({
   } | null>(null);
   const previousDestinationCountRef = useRef(0);
   const routeViewportBeforeFocusRef = useRef<MapViewport | null>(null);
-  const previousSelectedDestinationIdRef = useRef(selectedDestinationId);
+  const appliedStopFocusKeyRef = useRef<string | null>(null);
   const [selectedZoomStep, setSelectedZoomStep] = useState(1);
   const [currentMapZoom, setCurrentMapZoom] = useState(1.4);
   const [mapDetailSettings, setMapDetailSettings] = useState(createDefaultMapDetailSettings);
@@ -1038,6 +1069,41 @@ export function MapCanvas({
     );
   }, []);
 
+  const syncStopFocusViewport = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const selectedDestination = selectedDestinationForFocus(
+      latestDestinationsRef.current,
+      latestSelectedDestinationIdRef.current,
+    );
+    const nextStopFocusKey = selectedDestination
+      ? stopFocusKeyForDestination(selectedDestination, latestFocusedActivitiesRef.current)
+      : null;
+
+    if (selectedDestination && nextStopFocusKey) {
+      if (!appliedStopFocusKeyRef.current && !routeViewportBeforeFocusRef.current) {
+        routeViewportBeforeFocusRef.current = mapViewport(map);
+      }
+      if (appliedStopFocusKeyRef.current !== nextStopFocusKey) {
+        fitMapToStopFocus(selectedDestination, latestFocusedActivitiesRef.current);
+        appliedStopFocusKeyRef.current = nextStopFocusKey;
+      }
+      return;
+    }
+
+    if (appliedStopFocusKeyRef.current && routeViewportBeforeFocusRef.current) {
+      map.easeTo({
+        center: routeViewportBeforeFocusRef.current.center,
+        zoom: routeViewportBeforeFocusRef.current.zoom,
+        duration: mapViewportTransitionMs,
+      });
+    }
+
+    routeViewportBeforeFocusRef.current = null;
+    appliedStopFocusKeyRef.current = null;
+  }, [fitMapToStopFocus]);
+
   useEffect(() => {
     const previousDestinationCount = previousDestinationCountRef.current;
     latestDestinationsRef.current = destinations;
@@ -1050,9 +1116,11 @@ export function MapCanvas({
     onRequestAddStopRef.current = onRequestAddStop;
     updateMapSources();
 
-    if (destinations.length > previousDestinationCount) {
+    const selectedDestination = selectedDestinationForFocus(destinations, selectedDestinationId);
+    if (!selectedDestination && destinations.length > previousDestinationCount) {
       fitMapToDestinations(destinations);
     }
+    syncStopFocusViewport();
     if (mapRef.current) {
       previousDestinationCountRef.current = destinations.length;
     }
@@ -1066,38 +1134,9 @@ export function MapCanvas({
     onSelectActivity,
     onRequestAddStop,
     fitMapToDestinations,
+    syncStopFocusViewport,
     updateMapSources,
   ]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    const previousSelectedDestinationId = previousSelectedDestinationIdRef.current;
-    const selectedDestination = selectedDestinationId
-      ? destinations.find((candidate) => candidate.id === selectedDestinationId) ?? null
-      : null;
-
-    if (selectedDestination) {
-      if (!previousSelectedDestinationId && !routeViewportBeforeFocusRef.current) {
-        routeViewportBeforeFocusRef.current = mapViewport(map);
-      }
-      fitMapToStopFocus(selectedDestination, focusedActivities);
-      previousSelectedDestinationIdRef.current = selectedDestinationId;
-      return;
-    }
-
-    if (previousSelectedDestinationId && routeViewportBeforeFocusRef.current) {
-      map.easeTo({
-        center: routeViewportBeforeFocusRef.current.center,
-        zoom: routeViewportBeforeFocusRef.current.zoom,
-        duration: mapViewportTransitionMs,
-      });
-      routeViewportBeforeFocusRef.current = null;
-    }
-
-    previousSelectedDestinationIdRef.current = selectedDestinationId;
-  }, [destinations, fitMapToStopFocus, focusedActivities, selectedDestinationId]);
 
   const addMapLayers = useCallback(() => {
     const map = mapRef.current;
@@ -1285,9 +1324,12 @@ export function MapCanvas({
 
     updateMapSources();
     updateDestinationLabelPositions();
-    fitMapToDestinations(latestDestinationsRef.current);
+    if (!selectedDestinationForFocus(latestDestinationsRef.current, latestSelectedDestinationIdRef.current)) {
+      fitMapToDestinations(latestDestinationsRef.current);
+    }
+    syncStopFocusViewport();
     previousDestinationCountRef.current = latestDestinationsRef.current.length;
-  }, [fitMapToDestinations, updateDestinationLabelPositions, updateMapSources]);
+  }, [fitMapToDestinations, syncStopFocusViewport, updateDestinationLabelPositions, updateMapSources]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
