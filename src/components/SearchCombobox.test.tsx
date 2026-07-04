@@ -187,4 +187,65 @@ describe('SearchCombobox', () => {
     await user.click(screen.getByRole('button', { name: 'Set Seoul' }));
     expect(input).toHaveValue('Seoul');
   });
+
+  it('does not expose stale controlled results after an external clear and new query', async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const seoulSearch = deferred<Result[]>();
+    const search = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 'paris', label: 'Paris, France', title: 'Paris', subtitle: 'France' },
+      ])
+      .mockReturnValueOnce(seoulSearch.promise);
+
+    function ControlledSearch() {
+      const [value, setValue] = useState('');
+
+      return (
+        <>
+          <SearchCombobox<Result>
+            label="Search test places"
+            placeholder="Search places"
+            inputId="test-search"
+            resultsId="test-search-results"
+            value={value}
+            onValueChange={setValue}
+            search={search}
+            getResultId={(result) => result.id}
+            getResultLabel={(result) => result.label}
+            onSelectResult={onSelect}
+            renderResult={(result) => <span>{result.title}</span>}
+          />
+          <button type="button" onClick={() => setValue('')}>
+            External clear
+          </button>
+        </>
+      );
+    }
+
+    render(<ControlledSearch />);
+
+    const input = screen.getByLabelText('Search test places');
+    await user.type(input, 'Paris');
+    await waitFor(() => expect(search).toHaveBeenCalledWith('Paris'));
+    expect(await screen.findByRole('option', { name: 'Paris, France' })).toBeInTheDocument();
+    await user.keyboard('{ArrowDown}');
+
+    await user.click(screen.getByRole('button', { name: 'External clear' }));
+
+    expect(input).toHaveValue('');
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('option', { name: 'Paris, France' })).not.toBeInTheDocument();
+
+    await user.type(input, 'Seoul');
+    expect(screen.queryByRole('option', { name: 'Paris, France' })).not.toBeInTheDocument();
+    await user.keyboard('{Enter}');
+    expect(onSelect).not.toHaveBeenCalled();
+
+    seoulSearch.resolve([
+      { id: 'seoul', label: 'Seoul, South Korea', title: 'Seoul', subtitle: 'South Korea' },
+    ]);
+    expect(await screen.findByRole('option', { name: 'Seoul, South Korea' })).toBeInTheDocument();
+  });
 });

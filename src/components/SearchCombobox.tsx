@@ -38,17 +38,21 @@ export function SearchCombobox<Result>({
 }: SearchComboboxProps<Result>) {
   const [internalQuery, setInternalQuery] = useState('');
   const [results, setResults] = useState<Result[]>([]);
+  const [resultsQuery, setResultsQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchingQuery, setSearchingQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [errorQuery, setErrorQuery] = useState('');
   const latestSearchId = useRef(0);
   const searchTimerRef = useRef<number | null>(null);
   const query = value ?? internalQuery;
-  const hasQuery = Boolean(query.trim());
-  const visibleResults = hasQuery ? results : [];
-  const visibleHighlightedIndex = hasQuery ? highlightedIndex : -1;
-  const visibleIsSearching = hasQuery ? isSearching : false;
-  const visibleError = hasQuery ? error : null;
+  const trimmedQuery = query.trim();
+  const isCurrentResultsQuery = Boolean(trimmedQuery) && resultsQuery === trimmedQuery;
+  const visibleResults = isCurrentResultsQuery ? results : [];
+  const visibleHighlightedIndex = isCurrentResultsQuery ? highlightedIndex : -1;
+  const visibleIsSearching = Boolean(trimmedQuery) && isSearching && searchingQuery === trimmedQuery;
+  const visibleError = Boolean(trimmedQuery) && errorQuery === trimmedQuery ? error : null;
 
   function setQuery(nextQuery: string) {
     if (value === undefined) {
@@ -63,21 +67,27 @@ export function SearchCombobox<Result>({
       const searchId = latestSearchId.current + 1;
       latestSearchId.current = searchId;
       setIsSearching(true);
+      setSearchingQuery(nextQuery);
       setError(null);
+      setErrorQuery('');
 
       try {
         const nextResults = await search(nextQuery);
         if (searchId !== latestSearchId.current) return;
         setResults(nextResults);
+        setResultsQuery(nextQuery);
         setHighlightedIndex(-1);
       } catch (caught) {
         if (searchId !== latestSearchId.current) return;
         setResults([]);
+        setResultsQuery('');
         setHighlightedIndex(-1);
         setError(caught instanceof Error ? caught.message : 'Search failed');
+        setErrorQuery(nextQuery);
       } finally {
         if (searchId === latestSearchId.current) {
           setIsSearching(false);
+          setSearchingQuery('');
         }
       }
     },
@@ -110,9 +120,12 @@ export function SearchCombobox<Result>({
     latestSearchId.current += 1;
     setQuery('');
     setResults([]);
+    setResultsQuery('');
     setHighlightedIndex(-1);
     setIsSearching(false);
+    setSearchingQuery('');
     setError(null);
+    setErrorQuery('');
   }
 
   async function selectResult(result: Result) {
@@ -196,16 +209,19 @@ export function SearchCombobox<Result>({
             if (!nextQuery.trim()) {
               latestSearchId.current += 1;
               setResults([]);
+              setResultsQuery('');
               setHighlightedIndex(-1);
               setIsSearching(false);
+              setSearchingQuery('');
               setError(null);
+              setErrorQuery('');
             }
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           role="combobox"
           aria-autocomplete="list"
-          aria-expanded={results.length > 0}
+          aria-expanded={visibleResults.length > 0}
           aria-controls={resultsId}
           aria-activedescendant={activeResultId}
         />
