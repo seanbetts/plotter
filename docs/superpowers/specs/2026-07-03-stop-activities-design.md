@@ -163,11 +163,10 @@ Destination-owned images are general stop images. Activity-owned images belong t
 
 ```sql
 alter table public.media_assets
-  add column activity_id uuid,
-  add column sort_order integer not null default 0;
+  add column activity_id uuid;
 ```
 
-The table should enforce that every media row belongs to a destination and optionally to one activity under that destination. A destination-owned image has `activity_id = null`. An activity-owned image has `activity_id` set to an activity for the same trip and destination.
+The existing `media_assets.sort_order` column remains the ordering field. The table should enforce that every media row belongs to a destination and optionally to one activity under that destination. A destination-owned image has `activity_id = null`. An activity-owned image has `activity_id` set to an activity for the same trip and destination.
 
 Add a composite uniqueness constraint on activities so media ownership can enforce same-stop ancestry:
 
@@ -186,20 +185,20 @@ alter table public.media_assets
 
 The foreign key permits `activity_id = null` for destination-owned media and enforces same-trip, same-destination ownership for activity media.
 
-The app-facing `MediaItem` should expose enough metadata for rollups and attribution:
+The existing destination media implementation already enforces unique `sort_order` values per destination. Activity media needs separate ownership-aware uniqueness so destination-owned image order and each activity-owned image order do not collide:
 
-```ts
-type MediaItem = {
-  id: string;
-  url: string;
-  caption: string;
-  credit: string;
-  ownerType: 'destination' | 'activity';
-  destinationId: string;
-  activityId?: string;
-  activityTitle?: string;
-  sortOrder: number;
-};
+```sql
+drop index if exists media_assets_trip_destination_sort_order_key;
+
+create unique index media_assets_destination_owned_sort_order_key
+on public.media_assets(trip_id, destination_id, sort_order)
+where destination_id is not null
+  and activity_id is null;
+
+create unique index media_assets_activity_owned_sort_order_key
+on public.media_assets(trip_id, destination_id, activity_id, sort_order)
+where destination_id is not null
+  and activity_id is not null;
 ```
 
 Storage paths should remain trip and destination scoped. Activity uploads can add the activity id as an extra path segment:
@@ -221,6 +220,18 @@ The stop carousel shows a rollup of:
 - Destination-owned images for the stop.
 - Activity-owned images from all activities under the stop.
 
+The app should keep `MediaItem` as the reusable image primitive used by the existing image strip and preview modal. Rollup-only ownership and attribution should be carried by a wrapper type rather than making every `MediaItem` consumer care about destination/activity ownership:
+
+```ts
+type MediaRollupItem = {
+  mediaItem: MediaItem;
+  ownerType: 'destination' | 'activity';
+  destinationId: string;
+  activityId?: string;
+  activityTitle?: string;
+};
+```
+
 Ordering should be deterministic without adding a second global carousel order:
 
 1. Destination-owned images first, ordered by `sort_order`.
@@ -231,13 +242,15 @@ The stop hero image is the first destination-owned image when one exists. If the
 
 Activity-owned images shown inside the stop carousel should be attributed to their activity, such as "Bakery crawl". Opening an activity-owned image from the stop carousel should offer an "Open activity" affordance without forcing navigation.
 
+The stop carousel owns reordering for destination-owned images only. Activity-owned images appear in the stop rollup, but their order is controlled inside their parent activity carousel. If the user drags thumbnails in a mixed stop rollup, the UI should either disable drag for activity-owned thumbnails or limit the reorder interaction to the destination-owned segment.
+
 ### Activity Carousel
 
 The activity panel has its own hero image and thumbnail carousel, using only that activity's images.
 
 The first activity-owned image by `sort_order` is the activity hero. Uploading from the activity panel creates activity-owned media. Uploading from the stop panel creates destination-owned media.
 
-The same image preview, caption, credit, delete, and reorder behavior from the stop reference image design should be reused for activity media.
+The same image preview, caption, credit, delete, and reorder behavior from the stop reference image design should be reused for activity media. The existing `DestinationImageStrip`, `DestinationImagePreviewModal`, and `useDestinationMedia` behavior should be generalized or wrapped rather than forked into a separate parallel implementation. The reusable layer should accept owner-specific labels and repository handlers so a stop can say "Stop images" while an activity can say "Activity images".
 
 ## Repository API
 
@@ -261,9 +274,9 @@ deleteActivity(activityId: string): Promise<void>;
 
 reorderActivities(destinationId: string, orderedActivityIds: string[]): Promise<Activity[]>;
 
-listDestinationMedia(destinationId: string, options?: {
-  includeActivityMedia?: boolean;
-}): Promise<MediaItem[]>;
+listDestinationMedia(destinationId: string): Promise<MediaItem[]>;
+
+listDestinationMediaRollup(destinationId: string): Promise<MediaRollupItem[]>;
 
 listActivityMedia(activityId: string): Promise<MediaItem[]>;
 
@@ -283,7 +296,7 @@ uploadActivityMedia(input: {
 }): Promise<MediaItem>;
 ```
 
-Existing stop media operations should keep destination-owned behavior by default. The stop carousel can opt into `includeActivityMedia` when it needs the rollup.
+Existing stop media operations should keep destination-owned behavior by default. The stop carousel should use `listDestinationMediaRollup` only when it needs the combined destination/activity view.
 
 ## Component Boundaries
 
@@ -291,8 +304,7 @@ Suggested components:
 
 - `ActivityList`: renders the ordered activity list inside the stop panel.
 - `ActivityPanel`: renders selected activity details to the left of the stop panel.
-- `ActivityImageStrip`: reuses the stop image strip pattern for activity-owned media.
-- `ActivityImagePreviewModal`: reuses the stop media preview pattern for activity-owned media.
+- Shared image strip and preview components: generalize or wrap the existing destination image components so both stop-owned and activity-owned media use the same upload, hero, carousel, preview, caption, credit, delete, and reorder behavior.
 - `MapCanvas`: renders activity pins only for the selected stop and emits activity selection events.
 - `App`: owns selected stop, selected activity, focus-layer map state, and viewport restoration.
 - `useTripData`: owns repository-backed activity state and mutations.
