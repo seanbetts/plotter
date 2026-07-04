@@ -110,14 +110,18 @@ export function ActivityList({
     });
   }
 
-  async function submitNewActivity() {
-    const title = newActivityTitle.trim();
+  async function createManualActivity(query: string) {
+    const title = query.trim();
     if (!title) return;
 
     setMutationError('');
+    await Promise.resolve(onCreateActivity({ title }));
+    setNewActivityTitle('');
+  }
+
+  async function submitNewActivity() {
     try {
-      await Promise.resolve(onCreateActivity({ title }));
-      setNewActivityTitle('');
+      await createManualActivity(newActivityTitle);
     } catch {
       setMutationError('Unable to update activities.');
     }
@@ -226,6 +230,7 @@ export function ActivityList({
           getResultId={(result) => result.id}
           getResultLabel={(result) => result.label}
           onSelectResult={createActivityFromSearchResult}
+          onSubmitQuery={createManualActivity}
           renderResult={(result) => {
             const context = formatActivitySearchContext(result);
             const distance = formatDistance(result.distanceFromProximityKm);

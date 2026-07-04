@@ -14,6 +14,7 @@ type SearchComboboxProps<Result> = {
   getResultId: (result: Result) => string;
   getResultLabel: (result: Result) => string;
   onSelectResult: (result: Result) => Promise<unknown> | unknown;
+  onSubmitQuery?: (query: string) => Promise<unknown> | unknown;
   renderResult: (result: Result, state: { isHighlighted: boolean }) => ReactNode;
 };
 
@@ -32,6 +33,7 @@ export function SearchCombobox<Result>({
   getResultId,
   getResultLabel,
   onSelectResult,
+  onSubmitQuery,
   renderResult,
 }: SearchComboboxProps<Result>) {
   const [internalQuery, setInternalQuery] = useState('');
@@ -85,6 +87,10 @@ export function SearchCombobox<Result>({
     const trimmed = query.trim();
     if (!trimmed) {
       latestSearchId.current += 1;
+      setResults([]);
+      setHighlightedIndex(-1);
+      setIsSearching(false);
+      setError(null);
       return;
     }
 
@@ -119,6 +125,19 @@ export function SearchCombobox<Result>({
     }
   }
 
+  async function submitQuery() {
+    const trimmed = query.trim();
+    if (!trimmed || !onSubmitQuery) return;
+
+    setError(null);
+    try {
+      await onSubmitQuery(trimmed);
+      clearSearch();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to submit search');
+    }
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -142,6 +161,12 @@ export function SearchCombobox<Result>({
     if (event.key === 'Enter' && highlightedIndex >= 0 && results[highlightedIndex]) {
       event.preventDefault();
       void selectResult(results[highlightedIndex]);
+      return;
+    }
+
+    if (event.key === 'Enter' && onSubmitQuery) {
+      event.preventDefault();
+      void submitQuery();
     }
   }
 
@@ -168,6 +193,7 @@ export function SearchCombobox<Result>({
               setResults([]);
               setHighlightedIndex(-1);
               setIsSearching(false);
+              setError(null);
             }
           }}
           onKeyDown={handleKeyDown}
