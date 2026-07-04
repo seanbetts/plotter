@@ -506,7 +506,8 @@ select {
   pointer-events: none;
 }
 
-.search-group input {
+.search-group input,
+.activity-search-group input {
   flex: 1 1 auto;
   width: 100%;
   min-width: 180px;
@@ -517,7 +518,8 @@ select {
   outline: 0;
 }
 
-.search-group input::placeholder {
+.search-group input::placeholder,
+.activity-search-group input::placeholder {
   color: var(--text-faint);
 }
 
@@ -607,8 +609,15 @@ select {
 .activity-search-group .search-input-shell,
 .activity-search-group .search-input-shell:focus-within {
   border: 0;
+  outline: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.destination-profile .activity-search-group input {
+  border: 0;
+  background: transparent;
+  outline: 0;
 }
 
 .activity-search-group .search-results {
@@ -1133,6 +1142,27 @@ select {
   background: var(--surface-control);
 }
 
+.destination-profile .profile-coordinate-input-pill,
+.activity-panel .profile-coordinate-input-pill {
+  gap: 3px;
+  color: rgb(var(--color-text-rgb) / 0.78);
+  font-size: inherit;
+}
+
+.destination-profile .profile-coordinate-input-pill input,
+.activity-panel .profile-coordinate-input-pill input {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: rgb(var(--color-text-rgb) / 0.78);
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1;
+  outline: 0;
+}
+
 .destination-profile textarea,
 .activity-panel textarea {
   min-height: 72px;
@@ -1253,7 +1283,7 @@ select {
 
 .activity-list {
   display: grid;
-  gap: 8px;
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1281,6 +1311,12 @@ select {
   min-width: 0;
   height: 34px;
   padding: 7px 9px;
+}
+
+.destination-profile .activity-search-group input {
+  border: 0;
+  background: transparent;
+  outline: 0;
 }
 
 .activity-select,
