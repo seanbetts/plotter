@@ -15,6 +15,7 @@ export type LinkPreviewClient = {
 type LinkPreviewFunctionData = {
   url?: string | null;
   title?: string | null;
+  domain?: string | null;
   imageUrl?: string | null;
 };
 
@@ -40,7 +41,7 @@ function normalizePreviewData(data: LinkPreviewFunctionData): LinkPreviewResult 
   }
 
   const url = normalizeResearchLinkUrl(data.url);
-  const domain = deriveLinkDomain(url);
+  const domain = data.domain?.trim() || deriveLinkDomain(url);
   const title = data.title?.trim() || domain;
 
   return {

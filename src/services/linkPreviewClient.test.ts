@@ -7,6 +7,7 @@ describe('linkPreviewClient', () => {
       data: {
         url: ' example.com/menu ',
         title: 'Example Menu',
+        domain: 'menus.example',
         imageUrl: 'https://example.com/preview.jpg',
       },
       error: null,
@@ -16,11 +17,33 @@ describe('linkPreviewClient', () => {
     await expect(client.fetchPreview('example.com/menu')).resolves.toEqual({
       url: 'https://example.com/menu',
       title: 'Example Menu',
-      domain: 'example.com',
+      domain: 'menus.example',
       imageUrl: 'https://example.com/preview.jpg',
     });
     expect(invoke).toHaveBeenCalledWith('link-preview', {
       body: { url: 'example.com/menu' },
+    });
+  });
+
+  it('uses the returned domain as the title fallback when the title is blank', async () => {
+    const client = createSupabaseLinkPreviewClient({
+      functions: {
+        invoke: vi.fn().mockResolvedValue({
+          data: {
+            url: 'https://example.com/menu',
+            title: '   ',
+            domain: 'menus.example',
+          },
+          error: null,
+        }),
+      },
+    });
+
+    await expect(client.fetchPreview('example.com/menu')).resolves.toEqual({
+      url: 'https://example.com/menu',
+      title: 'menus.example',
+      domain: 'menus.example',
+      imageUrl: undefined,
     });
   });
 
