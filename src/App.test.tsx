@@ -6,7 +6,7 @@ import App from './App';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
-import type { Activity, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
+import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
 
@@ -31,6 +31,12 @@ type MockMap = {
   fitBounds: Mock;
   unproject: Mock;
   project: Mock;
+};
+
+type CreateActivityInput = {
+  destinationId: string;
+  title: string;
+  location?: ActivityLocation;
 };
 
 const maplibreMock = vi.hoisted(() => {
@@ -89,7 +95,7 @@ const repositoryMock = vi.hoisted(() => {
       );
     }),
     listActivities: vi.fn<TripRepository['listActivities']>(async () => []),
-    createActivity: vi.fn(async (input: { destinationId: string; title: string }): Promise<Activity> => ({
+    createActivity: vi.fn(async (input: CreateActivityInput): Promise<Activity> => ({
       id: 'activity-mock',
       destinationId: input.destinationId,
       order: 0,
@@ -101,6 +107,7 @@ const repositoryMock = vi.hoisted(() => {
       links: [],
       notes: '',
       tags: [],
+      location: input.location,
       createdAt: '2026-07-03T12:00:00.000Z',
       updatedAt: '2026-07-03T12:00:00.000Z',
     })),
@@ -179,7 +186,7 @@ describe('App', () => {
     repositoryMock.listActivities.mockClear();
     repositoryMock.listActivities.mockImplementation(async () => []);
     repositoryMock.createActivity.mockClear();
-    repositoryMock.createActivity.mockImplementation(async (input: { destinationId: string; title: string }) =>
+    repositoryMock.createActivity.mockImplementation(async (input: CreateActivityInput) =>
       createActivity({ ...input, order: 0 }),
     );
     repositoryMock.updateActivity.mockClear();
@@ -266,7 +273,10 @@ describe('App', () => {
     await userEvent.type(screen.getByLabelText('Search for a destination'), 'Kyoto');
     await userEvent.click(await screen.findByRole('option', { name: 'Kyoto, Japan' }));
 
-    expect(searchMapTilerPlaces).toHaveBeenCalledWith('Kyoto', { apiKey: expect.any(String) });
+    expect(searchMapTilerPlaces).toHaveBeenCalledWith('Kyoto', {
+      apiKey: expect.any(String),
+      profile: 'stop',
+    });
     expect(await screen.findByRole('button', { name: 'Kyoto, Japan' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Kyoto profile' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select Kyoto' })).not.toHaveClass('is-selected');
@@ -759,18 +769,78 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Select activity Louvre' })).toHaveTextContent('Louvre');
     expect(screen.queryByDisplayValue('Louvre')).not.toBeInTheDocument();
 
-    await user.type(screen.getByLabelText('New activity title'), 'Bakery crawl');
+    await user.type(screen.getByLabelText('Search for an activity'), 'Bakery crawl');
     await user.click(screen.getByRole('button', { name: 'Add activity' }));
 
     expect(repositoryMock.createActivity).toHaveBeenCalledWith({
       destinationId: destination.id,
       title: 'Bakery crawl',
+      location: undefined,
     });
     expect(await screen.findByRole('complementary', { name: 'Bakery crawl activity' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select activity Bakery crawl' })).toHaveAttribute(
       'aria-current',
       'true',
     );
+  });
+
+  it('creates a location-aware activity from stop-proximate activity search', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const louvre = {
+      kind: 'place',
+      id: 'poi.123',
+      label: 'Louvre Museum, Rue de Rivoli, 75001 Paris, France',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      location: {
+        placeName: 'Louvre Museum',
+        regionName: 'Ile-de-France',
+        countryName: 'France',
+        countryCode: 'fr',
+        sourceLabel: 'Louvre Museum, Rue de Rivoli, 75001 Paris, France',
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi.123',
+      },
+      placeTypes: ['poi'],
+      placeTypeNames: ['Museum'],
+      address: 'Rue de Rivoli',
+      context: [],
+      distanceFromProximityKm: 1.3,
+    } satisfies Awaited<ReturnType<typeof searchMapTilerPlaces>>[number];
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    vi.mocked(searchMapTilerPlaces).mockResolvedValue([louvre]);
+    repositoryMock.createActivity.mockImplementation(async (input: CreateActivityInput) =>
+      createActivity({ ...input, order: 0 }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.type(screen.getByLabelText('Search for an activity'), 'Louvre');
+    await user.click(await screen.findByRole('option', { name: 'Louvre Museum, Rue de Rivoli, 75001 Paris, France' }));
+
+    expect(searchMapTilerPlaces).toHaveBeenCalledWith('Louvre', {
+      apiKey: expect.any(String),
+      profile: 'activity',
+      proximity: { lat: 48.8566, lng: 2.3522 },
+    });
+    expect(repositoryMock.createActivity).toHaveBeenCalledWith({
+      destinationId: destination.id,
+      title: 'Louvre Museum',
+      location: {
+        name: 'Louvre Museum',
+        address: 'Rue de Rivoli',
+        coordinates: louvre.coordinates,
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi.123',
+      },
+    });
+    expect(await screen.findByRole('complementary', { name: 'Louvre Museum activity' })).toBeInTheDocument();
   });
 
   it('opens the activity panel when an existing activity is selected', async () => {
