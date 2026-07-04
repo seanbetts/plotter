@@ -154,6 +154,7 @@ export function SearchCombobox<Result>({
       clearSearch();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to select result');
+      setErrorQuery(trimmedQuery);
     }
   }
 
@@ -167,6 +168,7 @@ export function SearchCombobox<Result>({
       clearSearch();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to submit search');
+      setErrorQuery(trimmed);
     }
   }
 

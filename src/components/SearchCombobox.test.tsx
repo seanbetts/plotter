@@ -23,6 +23,7 @@ function deferred<T>() {
 function renderSearchCombobox(input: {
   search?: (query: string) => Promise<Result[]>;
   onSelect?: (result: Result) => Promise<unknown> | unknown;
+  onSubmitQuery?: (query: string) => Promise<unknown> | unknown;
 } = {}) {
   return render(
     <SearchCombobox<Result>
@@ -34,6 +35,7 @@ function renderSearchCombobox(input: {
       getResultId={(result) => result.id}
       getResultLabel={(result) => result.label}
       onSelectResult={input.onSelect ?? vi.fn()}
+      onSubmitQuery={input.onSubmitQuery}
       renderResult={(result) => (
         <>
           <span>{result.title}</span>
@@ -110,6 +112,34 @@ describe('SearchCombobox', () => {
     expect(input).toHaveValue('');
     expect(screen.queryByText('Search unavailable')).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Paris, France' })).not.toBeInTheDocument();
+  });
+
+  it('shows errors from selecting a result', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn().mockResolvedValue([
+      { id: 'paris', label: 'Paris, France', title: 'Paris', subtitle: 'France' },
+    ]);
+    renderSearchCombobox({
+      search,
+      onSelect: vi.fn().mockRejectedValue(new Error('Unable to add destination')),
+    });
+
+    await user.type(screen.getByLabelText('Search test places'), 'Paris');
+    await screen.findByRole('option', { name: 'Paris, France' });
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(await screen.findByText('Unable to add destination')).toBeInTheDocument();
+  });
+
+  it('shows errors from submitting the current query', async () => {
+    const user = userEvent.setup();
+    renderSearchCombobox({
+      onSubmitQuery: vi.fn().mockRejectedValue(new Error('Unable to create activity')),
+    });
+
+    await user.type(screen.getByLabelText('Search test places'), 'Bakery crawl{Enter}');
+
+    expect(await screen.findByText('Unable to create activity')).toBeInTheDocument();
   });
 
   it('cancels Escape when clearing an active search', async () => {
