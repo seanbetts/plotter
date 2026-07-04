@@ -61,6 +61,35 @@ type ProjectedDestinationLabel = {
   y: number;
 };
 
+type ProjectedActivityLabel = {
+  id: string;
+  title: string;
+  selected: boolean;
+  position: ActivityLabelPosition;
+  x: number;
+  y: number;
+};
+
+type ActivityLabelPosition = 'below' | 'above';
+
+type LabelBounds = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+type ActivityLabelCandidate = ProjectedActivityLabel & {
+  order: number;
+  bounds: LabelBounds;
+};
+
+type ActivityLabelCandidateGroup = {
+  order: number;
+  selected: boolean;
+  placements: ActivityLabelCandidate[];
+};
+
 type OverlayPosition = {
   x: number;
   y: number;
@@ -479,7 +508,6 @@ const majorCitiesSourceId = 'world-tour-major-cities';
 const selectedDestinationHaloLayerId = 'world-tour-selected-destination-halo';
 const activityPointsLayerId = 'world-tour-activity-points';
 const selectedActivityHaloLayerId = 'world-tour-selected-activity-halo';
-const activityLabelsLayerId = 'world-tour-activity-labels';
 const destinationPointsLayerId = 'world-tour-destination-points';
 const routeLineLayerId = 'world-tour-routes-line';
 const cityPointsLayerId = 'world-tour-city-points';
@@ -499,6 +527,12 @@ const stopFocusMinimumViewportPx = 48;
 const stopFocusMaxZoom = 13;
 const mapViewportTransitionMs = 700;
 const defaultFocusedActivities: Activity[] = [];
+const activityLabelMaxWidthPx = 190;
+const activityLabelHeightPx = 24;
+const activityLabelVerticalOffsetPx = 14;
+const activityLabelCollisionPaddingPx = 6;
+const activityLabelApproxCharacterWidthPx = 7.2;
+const activityLabelHorizontalChromePx = 18;
 
 const mapColorTokenFallbacks = {
   '--color-accent': '#d9467a',
@@ -655,6 +689,78 @@ function buildMajorCityFeatures(): FeatureCollection<Point, CityFeaturePropertie
       },
     })),
   };
+}
+
+function estimateActivityLabelWidth(title: string) {
+  return Math.min(
+    activityLabelMaxWidthPx,
+    Math.max(activityLabelHeightPx, title.length * activityLabelApproxCharacterWidthPx + activityLabelHorizontalChromePx),
+  );
+}
+
+function labelCandidateBounds(input: { title: string; x: number; y: number }, position: ActivityLabelPosition) {
+  const width = estimateActivityLabelWidth(input.title);
+  const left = input.x - width / 2 - activityLabelCollisionPaddingPx;
+  const top =
+    position === 'above'
+      ? input.y - activityLabelVerticalOffsetPx - activityLabelHeightPx - activityLabelCollisionPaddingPx
+      : input.y + activityLabelVerticalOffsetPx - activityLabelCollisionPaddingPx;
+
+  return {
+    left,
+    right: left + width + activityLabelCollisionPaddingPx * 2,
+    top,
+    bottom: top + activityLabelHeightPx + activityLabelCollisionPaddingPx * 2,
+  };
+}
+
+function destinationLabelBounds(label: ProjectedDestinationLabel) {
+  return labelCandidateBounds(
+    {
+      title: `${label.label} - ${label.name}`,
+      x: label.x,
+      y: label.y,
+    },
+    'below',
+  );
+}
+
+function activityLabelBoundsOverlap(left: LabelBounds, right: LabelBounds) {
+  return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+}
+
+function visibleActivityLabels(
+  candidateGroups: ActivityLabelCandidateGroup[],
+  reservedBounds: LabelBounds[],
+): ProjectedActivityLabel[] {
+  const occupiedBounds = [...reservedBounds];
+  const visibleCandidates: ActivityLabelCandidate[] = [];
+
+  const prioritizedCandidates = [...candidateGroups].sort((left, right) => {
+    if (left.selected !== right.selected) return left.selected ? -1 : 1;
+    return left.order - right.order;
+  });
+
+  for (const candidateGroup of prioritizedCandidates) {
+    const visiblePlacement = candidateGroup.placements.find(
+      (placement) => !occupiedBounds.some((bounds) => activityLabelBoundsOverlap(placement.bounds, bounds)),
+    );
+    if (!visiblePlacement) continue;
+
+    visibleCandidates.push(visiblePlacement);
+    occupiedBounds.push(visiblePlacement.bounds);
+  }
+
+  return visibleCandidates
+    .sort((left, right) => left.order - right.order)
+    .map((candidate) => ({
+      id: candidate.id,
+      title: candidate.title,
+      selected: candidate.selected,
+      position: candidate.position,
+      x: candidate.x,
+      y: candidate.y,
+    }));
 }
 
 function findDestination(destinations: Destination[], destinationId: string) {
@@ -922,6 +1028,7 @@ export function MapCanvas({
   const [currentMapZoom, setCurrentMapZoom] = useState(1.4);
   const [mapDetailSettings, setMapDetailSettings] = useState(createDefaultMapDetailSettings);
   const [projectedDestinationLabels, setProjectedDestinationLabels] = useState<ProjectedDestinationLabel[]>([]);
+  const [projectedActivityLabels, setProjectedActivityLabels] = useState<ProjectedActivityLabel[]>([]);
   const [addStopMenu, setAddStopMenu] = useState<MapAddStopRequest | null>(null);
   const selectedZoomStepRef = useRef(selectedZoomStep);
   const mapDetailSettingsRef = useRef(mapDetailSettings);
@@ -964,6 +1071,67 @@ export function MapCanvas({
       }),
     );
   }, []);
+
+  const updateActivityLabelPositions = useCallback(() => {
+    const map = mapRef.current;
+    const selectedDestinationId = latestSelectedDestinationIdRef.current;
+    if (!map || !selectedDestinationId) {
+      setProjectedActivityLabels([]);
+      return;
+    }
+
+    const reservedDestinationLabelBounds = latestDestinationsRef.current.map((destination, index) => {
+      const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
+
+      return destinationLabelBounds({
+        id: destination.id,
+        name: destination.name,
+        label: formatStopMarker(index + 1),
+        selected: destination.id === latestSelectedDestinationIdRef.current,
+        x: point.x,
+        y: point.y,
+      });
+    });
+
+    setProjectedActivityLabels(
+      visibleActivityLabels(
+        latestFocusedActivitiesRef.current.flatMap((activity, index) => {
+          if (activity.destinationId !== selectedDestinationId) return [];
+
+          const coordinates = activity.location?.coordinates;
+          if (!coordinates) return [];
+
+          const point = map.project([coordinates.lng, coordinates.lat]);
+          const label = {
+            id: activity.id,
+            title: activity.title,
+            selected: activity.id === latestSelectedActivityIdRef.current,
+            x: point.x,
+            y: point.y,
+          };
+
+          return [
+            {
+              order: index,
+              selected: label.selected,
+              placements: (['below', 'above'] satisfies ActivityLabelPosition[]).map((position) => ({
+                ...label,
+                position,
+                order: index,
+                bounds: labelCandidateBounds(label, position),
+              })),
+            },
+          ];
+        }),
+        reservedDestinationLabelBounds,
+      ),
+    );
+  }, []);
+
+  const updateMapLabelPositions = useCallback(() => {
+    updateDestinationLabelPositions();
+    updateActivityLabelPositions();
+  }, [updateActivityLabelPositions, updateDestinationLabelPositions]);
 
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current === null) return;
@@ -1054,8 +1222,8 @@ export function MapCanvas({
     if (shouldRenderFallbackMajorCities) {
       setSourceData(map, majorCitiesSourceId, buildMajorCityFeatures());
     }
-    updateDestinationLabelPositions();
-  }, [updateDestinationLabelPositions]);
+    updateMapLabelPositions();
+  }, [updateMapLabelPositions]);
 
   const fitMapToDestinations = useCallback((nextDestinations: Destination[]) => {
     const map = mapRef.current;
@@ -1264,11 +1432,11 @@ export function MapCanvas({
         source: focusedActivitiesSourceId,
         filter: ['==', ['get', 'selected'], true],
         paint: {
-          'circle-color': mapColors.selected,
-          'circle-radius': 14,
+          'circle-color': mapColors.accentHalo,
+          'circle-radius': 16,
           'circle-stroke-color': mapColors.accent,
-          'circle-stroke-opacity': 0.72,
-          'circle-stroke-width': 2,
+          'circle-stroke-opacity': 0.34,
+          'circle-stroke-width': 1,
         },
       } as maplibregl.LayerSpecification);
     }
@@ -1279,9 +1447,9 @@ export function MapCanvas({
         type: 'circle',
         source: focusedActivitiesSourceId,
         paint: {
-          'circle-color': ['case', ['get', 'selected'], mapColors.selected, mapColors.textInverse],
-          'circle-radius': ['case', ['get', 'selected'], 7, 5],
-          'circle-stroke-color': mapColors.accent,
+          'circle-color': mapColors.accent,
+          'circle-radius': ['case', ['get', 'selected'], 8, 7],
+          'circle-stroke-color': mapColors.textInverse,
           'circle-stroke-width': 2,
         },
       } as maplibregl.LayerSpecification);
@@ -1297,27 +1465,6 @@ export function MapCanvas({
           'circle-radius': ['case', ['get', 'selected'], 8, 7],
           'circle-stroke-color': mapColors.textInverse,
           'circle-stroke-width': 2,
-        },
-      } as maplibregl.LayerSpecification);
-    }
-
-    if (!map.getLayer(activityLabelsLayerId)) {
-      map.addLayer({
-        id: activityLabelsLayerId,
-        type: 'symbol',
-        source: focusedActivitiesSourceId,
-        layout: {
-          'text-field': ['get', 'title'],
-          'text-font': cityLabelFontStack,
-          'text-offset': [0.8, 0],
-          'text-size': 11,
-          'text-anchor': 'left',
-          'text-allow-overlap': false,
-        },
-        paint: {
-          'text-color': mapColors.cityText,
-          'text-halo-color': mapColors.cityHalo,
-          'text-halo-width': 1.2,
         },
       } as maplibregl.LayerSpecification);
     }
@@ -1359,13 +1506,13 @@ export function MapCanvas({
     }
 
     updateMapSources();
-    updateDestinationLabelPositions();
+    updateMapLabelPositions();
     if (!selectedDestinationForFocus(latestDestinationsRef.current, latestSelectedDestinationIdRef.current)) {
       fitMapToDestinations(latestDestinationsRef.current);
     }
     syncStopFocusViewport();
     previousDestinationCountRef.current = latestDestinationsRef.current.length;
-  }, [fitMapToDestinations, syncStopFocusViewport, updateDestinationLabelPositions, updateMapSources]);
+  }, [fitMapToDestinations, syncStopFocusViewport, updateMapLabelPositions, updateMapSources]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -1386,10 +1533,10 @@ export function MapCanvas({
         calmBasemapStyle(map);
       }
       addMapLayers();
-      updateDestinationLabelPositions();
+      updateMapLabelPositions();
     };
     const handleMapMove = () => {
-      updateDestinationLabelPositions();
+      updateMapLabelPositions();
     };
     const handleZoomEnd = () => {
       const nextZoom = map.getZoom();
@@ -1471,7 +1618,7 @@ export function MapCanvas({
     applyCurrentMapDetailSettings,
     clearLongPressTimer,
     openAddStopMenu,
-    updateDestinationLabelPositions,
+    updateMapLabelPositions,
   ]);
 
   const selectedZoomSettings = mapDetailSettings[selectedZoomStep];
@@ -1604,6 +1751,28 @@ export function MapCanvas({
               onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
             >
               {destinationLabel.label} - {destinationLabel.name}
+            </button>
+          ))}
+          {projectedActivityLabels.map((activityLabel) => (
+            <button
+              key={activityLabel.id}
+              type="button"
+              className={[
+                'map-destination-label',
+                'map-activity-label',
+                activityLabel.position === 'above' ? 'map-label-position-above' : '',
+                activityLabel.selected ? 'is-selected' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              style={{
+                left: `${activityLabel.x}px`,
+                top: `${activityLabel.y}px`,
+              }}
+              aria-label={`Open ${activityLabel.title} activity details`}
+              onClick={() => onSelectActivityRef.current?.(activityLabel.id)}
+            >
+              {activityLabel.title}
             </button>
           ))}
         </div>

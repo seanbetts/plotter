@@ -592,6 +592,8 @@ describe('MapCanvas', () => {
   });
 
   it('adds focused activity sources and layers after the selected destination layer', () => {
+    const onSelectActivity = vi.fn();
+
     render(
       <MapCanvas
         destinations={[destination]}
@@ -600,15 +602,20 @@ describe('MapCanvas', () => {
         focusedActivities={[louvreActivity]}
         selectedActivityId={null}
         onSelectDestination={vi.fn()}
-        onSelectActivity={vi.fn()}
+        onSelectActivity={onSelectActivity}
       />,
     );
 
     const map = maplibreMock.mapInstances[0];
     const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
 
     act(() => {
       loadHandler();
+    });
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomEndHandler();
     });
 
     expect(map.addSource).toHaveBeenCalledWith(
@@ -621,20 +628,243 @@ describe('MapCanvas', () => {
       expect.arrayContaining([
         'world-tour-activity-points',
         'world-tour-selected-activity-halo',
-        'world-tour-activity-labels',
       ]),
     );
+    expect(layers.map((layer) => layer.id)).not.toContain('world-tour-activity-labels');
+    expect(layers.find((layer) => layer.id === 'world-tour-selected-activity-halo')).toMatchObject({
+      filter: ['==', ['get', 'selected'], true],
+      paint: {
+        'circle-color': 'rgba(217, 70, 122, 0.22)',
+        'circle-radius': 16,
+        'circle-stroke-color': '#d9467a',
+        'circle-stroke-opacity': 0.34,
+        'circle-stroke-width': 1,
+      },
+    });
     expect(layers.find((layer) => layer.id === 'world-tour-activity-points')).toMatchObject({
       type: 'circle',
       source: 'world-tour-focused-activities',
+      paint: {
+        'circle-color': '#d9467a',
+        'circle-radius': ['case', ['get', 'selected'], 8, 7],
+        'circle-stroke-color': '#111814',
+        'circle-stroke-width': 2,
+      },
     });
-    expect(layers.find((layer) => layer.id === 'world-tour-activity-labels')).toMatchObject({
-      type: 'symbol',
-      source: 'world-tour-focused-activities',
-      layout: expect.objectContaining({
-        'text-field': ['get', 'title'],
-      }),
+
+    const activityLabel = screen.getByRole('button', { name: 'Open Louvre Museum activity details' });
+    expect(activityLabel).toHaveClass('map-destination-label', 'map-activity-label');
+    expect(activityLabel).toHaveTextContent('Louvre Museum');
+    expect(activityLabel).not.toHaveTextContent('01 -');
+    fireEvent.click(activityLabel);
+    expect(onSelectActivity).toHaveBeenCalledWith(louvreActivity.id);
+  });
+
+  it('hides lower-priority activity name pills only when below and above positions both clash', () => {
+    const nearbyActivity: Activity = {
+      ...louvreActivity,
+      id: 'activity-nearby',
+      order: 1,
+      title: 'Tuileries Garden',
+      location: {
+        name: 'Tuileries Garden',
+        address: 'Place de la Concorde, 75001 Paris, France',
+        coordinates: { lat: 48.8608, lng: 2.3378 },
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi-tuileries',
+      },
+    };
+    const thirdActivity: Activity = {
+      ...louvreActivity,
+      id: 'activity-third',
+      order: 2,
+      title: 'Carrousel Gallery',
+      location: {
+        name: 'Carrousel Gallery',
+        address: '75001 Paris, France',
+        coordinates: { lat: 48.8609, lng: 2.3379 },
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi-carrousel',
+      },
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[louvreActivity, nearbyActivity, thirdActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+
+    act(() => {
+      loadHandler();
     });
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomEndHandler();
+    });
+
+    expect(screen.getByRole('button', { name: 'Open Louvre Museum activity details' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Tuileries Garden activity details' })).toHaveClass(
+      'map-label-position-above',
+    );
+    expect(screen.queryByRole('button', { name: 'Open Carrousel Gallery activity details' })).not.toBeInTheDocument();
+  });
+
+  it('flips an activity name pill above its pin when it would clash with the stop pill below', () => {
+    const caveActivity: Activity = {
+      ...louvreActivity,
+      id: 'activity-cave',
+      title: 'Cave Church',
+      location: {
+        name: 'Cave Church',
+        address: 'Cappadocia, Turkey',
+        coordinates: destination.coordinates,
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi-cave',
+      },
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[caveActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomEndHandler();
+    });
+
+    expect(screen.getByRole('button', { name: 'Open Cappadocia stop details' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Cave Church activity details' })).toHaveClass(
+      'map-label-position-above',
+    );
+  });
+
+  it('flips a nearby activity pill above its pin to display close activity labels together', () => {
+    const firstActivity: Activity = {
+      ...louvreActivity,
+      id: 'activity-first',
+      title: 'First Gallery',
+      location: {
+        name: 'First Gallery',
+        address: 'Cappadocia, Turkey',
+        coordinates: { lat: 40, lng: 0 },
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi-first',
+      },
+    };
+    const secondActivity: Activity = {
+      ...louvreActivity,
+      id: 'activity-second',
+      order: 1,
+      title: 'Second Gallery',
+      location: {
+        name: 'Second Gallery',
+        address: 'Cappadocia, Turkey',
+        coordinates: { lat: 40.02, lng: 0.02 },
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi-second',
+      },
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[firstActivity, secondActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomEndHandler();
+    });
+
+    expect(screen.getByRole('button', { name: 'Open First Gallery activity details' })).not.toHaveClass(
+      'map-label-position-above',
+    );
+    expect(screen.getByRole('button', { name: 'Open Second Gallery activity details' })).toHaveClass(
+      'map-label-position-above',
+    );
+  });
+
+  it('keeps the selected activity pill visible when nearby activity pills collide', () => {
+    const selectedNearbyActivity: Activity = {
+      ...louvreActivity,
+      id: 'activity-selected-nearby',
+      order: 1,
+      title: 'Tuileries Garden',
+      location: {
+        name: 'Tuileries Garden',
+        address: 'Place de la Concorde, 75001 Paris, France',
+        coordinates: { lat: 48.8608, lng: 2.3378 },
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi-tuileries',
+      },
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[louvreActivity, selectedNearbyActivity]}
+        selectedActivityId={selectedNearbyActivity.id}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+    maplibreMock.setZoom(4);
+    act(() => {
+      zoomEndHandler();
+    });
+
+    expect(screen.getByRole('button', { name: 'Open Tuileries Garden activity details' })).toHaveClass('is-selected');
+    expect(screen.getByRole('button', { name: 'Open Louvre Museum activity details' })).toHaveClass(
+      'map-label-position-above',
+    );
   });
 
   it('fires onSelectActivity when an activity pin is clicked', () => {

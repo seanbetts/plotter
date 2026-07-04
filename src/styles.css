@@ -188,6 +188,10 @@ select {
   background: rgb(255 255 255 / 0.9);
 }
 
+.map-destination-label.map-label-position-above {
+  transform: translate(-50%, calc(-100% - 14px));
+}
+
 .map-destination-label:hover,
 .map-destination-label:focus-visible {
   border-color: rgb(var(--color-accent-rgb) / 0.42);
