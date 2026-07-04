@@ -46,10 +46,47 @@ export type BookReference = {
   note: string;
 };
 
+export type ActivityCategory =
+  | 'food'
+  | 'culture'
+  | 'outdoors'
+  | 'street-art'
+  | 'ski'
+  | 'detour'
+  | 'logistics'
+  | 'other';
+
+export type ActivityStatus = 'idea' | 'planned' | 'booked' | 'done' | 'skipped';
+
+export type ActivityLocation = {
+  name: string;
+  address: string;
+  coordinates?: Coordinates;
+  sourceProvider?: 'maptiler' | 'manual';
+  sourceFeatureId?: string;
+};
+
+export type Activity = {
+  id: string;
+  destinationId: string;
+  order: number;
+  title: string;
+  description: string;
+  category: ActivityCategory;
+  status: ActivityStatus;
+  priority: Priority;
+  location?: ActivityLocation;
+  links: ResearchLink[];
+  notes: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ActivityItem = {
   id: string;
   label: string;
-  category: 'food' | 'culture' | 'outdoors' | 'street-art' | 'ski' | 'detour' | 'other';
+  category: ActivityCategory;
   notes: string;
 };
 
