@@ -312,4 +312,60 @@ describe('trip repository', () => {
     expect(routeLeg.type).toBe('driving-auto');
     expect(routeLeg.status).toBe('pending');
   });
+
+  it('creates, lists, updates, reorders, and deletes activities for a destination', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+
+    const louvre = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+    const bakery = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Bakery crawl',
+    });
+
+    expect((await repository.listActivities(destination.id)).map((activity) => activity.title)).toEqual([
+      'Louvre',
+      'Bakery crawl',
+    ]);
+
+    await repository.updateActivity(louvre.id, { title: 'Morning Louvre' });
+    expect((await repository.listActivities(destination.id))[0].title).toBe('Morning Louvre');
+
+    await repository.reorderActivities(destination.id, [bakery.id, louvre.id]);
+    expect((await repository.listActivities(destination.id)).map((activity) => activity.title)).toEqual([
+      'Bakery crawl',
+      'Morning Louvre',
+    ]);
+
+    await repository.deleteActivity(bakery.id);
+    expect((await repository.listActivities(destination.id)).map((activity) => activity.title)).toEqual([
+      'Morning Louvre',
+    ]);
+  });
+
+  it('deletes activities when their destination is deleted', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+
+    await repository.deleteDestination(destination.id);
+
+    expect(await repository.listActivities(destination.id)).toEqual([]);
+  });
 });

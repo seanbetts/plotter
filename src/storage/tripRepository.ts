@@ -1,4 +1,5 @@
-import type { Destination, MediaItem, RouteLeg } from '../domain/types';
+import { createActivity, reorderActivities as reorderActivityModels, updateActivity as patchActivity } from '../domain/activities';
+import type { Activity, Destination, MediaItem, RouteLeg } from '../domain/types';
 import { createLegacyLocation } from '../domain/locations';
 import type { TripDb } from './tripDb';
 
@@ -6,6 +7,18 @@ export type TripRepository = {
   listDestinations(): Promise<Destination[]>;
   saveDestination(destination: Destination): Promise<void>;
   deleteDestination(destinationId: string): Promise<void>;
+  listActivities(destinationId: string): Promise<Activity[]>;
+  createActivity(input: {
+    destinationId: string;
+    title: string;
+    order?: number;
+  }): Promise<Activity>;
+  updateActivity(
+    activityId: string,
+    patch: Partial<Omit<Activity, 'id' | 'destinationId' | 'createdAt' | 'updatedAt'>>,
+  ): Promise<Activity>;
+  deleteActivity(activityId: string): Promise<void>;
+  reorderActivities(destinationId: string, orderedActivityIds: string[]): Promise<Activity[]>;
   listDestinationMedia(destinationId: string): Promise<MediaItem[]>;
   uploadDestinationMedia(input: {
     destinationId: string;
@@ -25,6 +38,7 @@ export type TripRepository = {
   replaceTripData(snapshot: {
     destinations: Destination[];
     routeLegs: RouteLeg[];
+    activities?: Activity[];
   }): Promise<void>;
 };
 
@@ -86,8 +100,9 @@ export function createTripRepository(db: TripDb): TripRepository {
     },
 
     async deleteDestination(destinationId: string): Promise<void> {
-      await db.transaction('rw', db.destinations, db.routeLegs, async () => {
+      await db.transaction('rw', db.destinations, db.routeLegs, db.activities, async () => {
         await db.destinations.delete(destinationId);
+        await db.activities.where('destinationId').equals(destinationId).delete();
         const attachedLegs = await db.routeLegs
           .where('originDestinationId')
           .equals(destinationId)
@@ -97,6 +112,53 @@ export function createTripRepository(db: TripDb): TripRepository {
 
         await db.routeLegs.bulkDelete(attachedLegs.map((leg) => leg.id));
       });
+    },
+
+    async listActivities(destinationId: string): Promise<Activity[]> {
+      return (await db.activities.where('destinationId').equals(destinationId).toArray()).sort(
+        (left, right) => left.order - right.order || left.createdAt.localeCompare(right.createdAt),
+      );
+    },
+
+    async createActivity(input: {
+      destinationId: string;
+      title: string;
+      order?: number;
+    }): Promise<Activity> {
+      const existingActivities = await this.listActivities(input.destinationId);
+      const activity = createActivity({
+        ...input,
+        order: input.order ?? existingActivities.length,
+      });
+
+      await db.activities.put(activity);
+      return activity;
+    },
+
+    async updateActivity(
+      activityId: string,
+      patch: Partial<Omit<Activity, 'id' | 'destinationId' | 'createdAt' | 'updatedAt'>>,
+    ): Promise<Activity> {
+      const existing = await db.activities.get(activityId);
+      if (!existing) {
+        throw new Error('Activity not found.');
+      }
+
+      const updated = patchActivity(existing, patch);
+      await db.activities.put(updated);
+      return updated;
+    },
+
+    async deleteActivity(activityId: string): Promise<void> {
+      await db.activities.delete(activityId);
+    },
+
+    async reorderActivities(destinationId: string, orderedActivityIds: string[]): Promise<Activity[]> {
+      const currentActivities = await this.listActivities(destinationId);
+      const orderedActivities = reorderActivityModels(currentActivities, orderedActivityIds);
+
+      await db.activities.bulkPut(orderedActivities);
+      return orderedActivities;
     },
 
     async listDestinationMedia(destinationId: string): Promise<MediaItem[]> {
@@ -254,12 +316,17 @@ export function createTripRepository(db: TripDb): TripRepository {
     async replaceTripData(snapshot: {
       destinations: Destination[];
       routeLegs: RouteLeg[];
+      activities?: Activity[];
     }): Promise<void> {
-      await db.transaction('rw', db.destinations, db.routeLegs, async () => {
+      await db.transaction('rw', db.destinations, db.routeLegs, db.activities, async () => {
         await db.destinations.clear();
         await db.routeLegs.clear();
+        await db.activities.clear();
         await db.destinations.bulkPut(snapshot.destinations.map((destination, index) => normalizeDestination(destination, index)));
         await db.routeLegs.bulkPut(snapshot.routeLegs);
+        if (snapshot.activities) {
+          await db.activities.bulkPut(snapshot.activities);
+        }
       });
     },
   };
