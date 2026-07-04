@@ -2,7 +2,7 @@ import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { formatLocationParts } from '../domain/locations';
-import type { Activity, Destination, MediaItem } from '../domain/types';
+import type { Activity, Destination, MediaItem, MediaRollupItem } from '../domain/types';
 import { ActivityList } from './ActivityList';
 import { DestinationImageStrip } from './DestinationImageStrip';
 import { formatStopHeaderLabel } from './stopLabels';
@@ -23,6 +23,7 @@ type DestinationProfileProps = {
   selectedActivityId: string | null;
   stopNumber?: number;
   mediaItems: MediaItem[];
+  mediaRollupItems?: MediaRollupItem[];
   isMediaLoading: boolean;
   isMediaUploading: boolean;
   mediaError: string | null;
@@ -167,6 +168,7 @@ function DestinationProfileForm({
   selectedActivityId,
   stopNumber,
   mediaItems,
+  mediaRollupItems,
   isMediaLoading,
   isMediaUploading,
   mediaError,
@@ -577,6 +579,7 @@ function DestinationProfileForm({
       <DestinationImageStrip
         destinationName={form.name || destination.name}
         mediaItems={mediaItems}
+        mediaRollupItems={mediaRollupItems}
         isLoading={isMediaLoading}
         isUploading={isMediaUploading}
         error={mediaError}

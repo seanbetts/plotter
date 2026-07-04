@@ -724,7 +724,26 @@ select {
   white-space: nowrap;
 }
 
-.destination-profile {
+.workspace-panels {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  max-width: calc(100vw - 32px);
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.workspace-panels > * {
+  pointer-events: auto;
+}
+
+.destination-profile,
+.activity-panel {
   position: absolute;
   top: 16px;
   right: 16px;
@@ -743,6 +762,20 @@ select {
   backdrop-filter: blur(var(--blur-profile));
   backdrop-filter: blur(var(--blur-profile)) saturate(1.25);
   box-shadow: var(--shadow-profile);
+}
+
+.workspace-panels .destination-profile,
+.workspace-panels .activity-panel {
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  max-height: 100%;
+}
+
+.workspace-panels .activity-panel {
+  width: min(390px, calc(50vw - 28px));
 }
 
 .profile-header {
@@ -876,7 +909,8 @@ select {
   line-height: 1.15;
 }
 
-.destination-profile .profile-title-control {
+.destination-profile .profile-title-control,
+.activity-panel .activity-title-field {
   box-sizing: border-box;
   width: 100%;
   min-height: 30px;
@@ -921,7 +955,8 @@ select {
   border-bottom-color: var(--border-selected);
 }
 
-.destination-profile .profile-title-input {
+.destination-profile .profile-title-input,
+.activity-panel .profile-title-input {
   width: 100%;
   border: 0;
   padding: 0;
@@ -931,6 +966,17 @@ select {
   font-weight: 700;
   line-height: 1.15;
   outline: 0;
+}
+
+.activity-panel .activity-title-field {
+  display: flex;
+  gap: 0;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.activity-panel .activity-title-field:focus-within {
+  border-bottom-color: var(--border-selected);
 }
 
 .profile-close-button {
@@ -977,7 +1023,8 @@ select {
   background: var(--surface-danger-subtle);
 }
 
-.destination-profile label {
+.destination-profile label,
+.activity-panel label {
   display: grid;
   gap: 6px;
   color: var(--text-secondary);
@@ -985,7 +1032,10 @@ select {
 }
 
 .destination-profile input,
-.destination-profile textarea {
+.destination-profile textarea,
+.activity-panel input,
+.activity-panel select,
+.activity-panel textarea {
   width: 100%;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
@@ -994,9 +1044,30 @@ select {
   background: var(--surface-control);
 }
 
-.destination-profile textarea {
+.destination-profile textarea,
+.activity-panel textarea {
   min-height: 72px;
   resize: vertical;
+}
+
+.activity-panel-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.activity-panel-error {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border-danger);
+  border-radius: var(--radius-control);
+  color: var(--color-danger);
+  background: var(--surface-danger-subtle);
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 
 .tag-editor {
@@ -1738,12 +1809,35 @@ select {
     bottom: calc(var(--mobile-itinerary-panel-clearance) + 24px);
   }
 
-  .destination-profile {
+  .workspace-panels {
     top: 92px;
     right: 12px;
     bottom: 12px;
     left: 12px;
     width: auto;
+    max-width: none;
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .workspace-panels .destination-profile,
+  .workspace-panels .activity-panel {
+    width: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .destination-profile,
+  .activity-panel {
+    top: 92px;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .activity-panel-field-grid {
+    grid-template-columns: 1fr;
   }
 
 }

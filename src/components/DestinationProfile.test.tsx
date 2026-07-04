@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActivity } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
-import type { Destination, MediaItem } from '../domain/types';
+import type { Destination, MediaItem, MediaRollupItem } from '../domain/types';
 import { DestinationProfile } from './DestinationProfile';
 
 function deferred<T>() {
@@ -451,6 +451,57 @@ describe('DestinationProfile', () => {
     await user.click(screen.getByRole('button', { name: 'Open full image: Home lane' }));
     expect(onOpenMediaPreview).toHaveBeenCalledWith('media-1');
     expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
+  });
+
+  it('passes stop rollup attribution into the stop images strip', () => {
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const rollupItems: MediaRollupItem[] = [
+      {
+        mediaItem: createMediaItem({
+          id: 'stop-media-1',
+          url: '/paris.jpg',
+          caption: 'Paris street',
+          sortOrder: 0,
+        }),
+        ownerType: 'destination',
+        destinationId: destination.id,
+        canReorderInStopCarousel: true,
+      },
+      {
+        mediaItem: createMediaItem({
+          id: 'activity-media-1',
+          url: '/louvre.jpg',
+          caption: 'Museum wing',
+          sortOrder: 0,
+        }),
+        ownerType: 'activity',
+        destinationId: destination.id,
+        activityId: 'activity-1',
+        activityTitle: 'Louvre',
+        canReorderInStopCarousel: false,
+      },
+    ];
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        mediaItems={[rollupItems[0].mediaItem]}
+        mediaRollupItems={rollupItems}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show image 2: Museum wing' }));
+
+    expect(within(screen.getByRole('group', { name: 'Image preview' })).getByText('Louvre')).toHaveClass(
+      'destination-image-attribution',
+    );
   });
 
   it('labels the first stop as the start', () => {
