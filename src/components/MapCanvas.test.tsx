@@ -622,12 +622,24 @@ describe('MapCanvas', () => {
   });
 
   it('populates focused activity features only for selected-stop activities with coordinates', () => {
+    const otherDestinationActivity = {
+      ...louvreActivity,
+      id: 'activity-other-destination',
+      destinationId: targetDestination.id,
+      order: 2,
+      title: 'Wrong stop activity',
+      location: {
+        ...louvreActivity.location,
+        coordinates: { lat: 41.7151, lng: 44.8271 },
+      },
+    };
+
     render(
       <MapCanvas
         destinations={[destination]}
         routeLegs={[]}
         selectedDestinationId={destination.id}
-        focusedActivities={[louvreActivity, manualActivity]}
+        focusedActivities={[louvreActivity, manualActivity, otherDestinationActivity]}
         selectedActivityId={louvreActivity.id}
         onSelectDestination={vi.fn()}
         onSelectActivity={vi.fn()}

@@ -573,6 +573,8 @@ function buildFocusedActivityFeatures(
   return {
     type: 'FeatureCollection',
     features: focusedActivities.flatMap((activity, index) => {
+      if (activity.destinationId !== selectedDestinationId) return [];
+
       const coordinates = activity.location?.coordinates;
       if (!coordinates) return [];
 
