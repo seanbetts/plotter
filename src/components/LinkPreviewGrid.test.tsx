@@ -101,6 +101,21 @@ describe('LinkPreviewGrid', () => {
     expect(within(region).getByRole('button', { name: 'Move Train schedule up' })).not.toHaveClass('sr-only');
   });
 
+  it('renders the add link bar as an icon-led input with an icon-only submit button', () => {
+    render(<LinkPreviewGrid {...createProps()} />);
+
+    const region = screen.getByRole('region', { name: 'Research links' });
+    const addLinkForm = within(region).getByRole('form', { name: 'Add link' });
+    const linkInput = within(addLinkForm).getByLabelText('Add link URL');
+    const addButton = within(addLinkForm).getByRole('button', { name: 'Add link' });
+
+    expect(within(addLinkForm).getByText('Add link URL')).toHaveClass('sr-only');
+    expect(linkInput.closest('.link-preview-input-shell')).not.toBeNull();
+    expect(linkInput.closest('.link-preview-input-shell')?.querySelector('.link-preview-input-icon')).not.toBeNull();
+    expect(linkInput).toHaveAttribute('placeholder', 'Add link');
+    expect(addButton).toHaveTextContent('');
+  });
+
   it('adds a fetched preview link from the entered URL', async () => {
     vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000001');
@@ -176,7 +191,7 @@ describe('LinkPreviewGrid', () => {
 
     expect(previewClient.fetchPreview).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText('Add link URL')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add link' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete Museum guide' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Move Train schedule up' })).toBeDisabled();
     expect(screen.getByRole('link', { name: /Museum guide/ }).closest('article')).toHaveAttribute(

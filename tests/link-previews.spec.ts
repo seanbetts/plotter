@@ -56,7 +56,7 @@ async function addLink(stopPanel: Locator, rawUrl: string) {
   const linkForm = stopPanel.getByRole('form', { name: 'Add link' });
 
   await linkForm.getByLabel('Add link URL').fill(rawUrl);
-  await linkForm.getByRole('button', { name: 'Add' }).click();
+  await linkForm.getByRole('button', { name: 'Add link' }).click();
   await expect(linkForm.getByLabel('Add link URL')).not.toBeDisabled();
 }
 

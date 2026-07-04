@@ -152,6 +152,13 @@ describe('activity list styles', () => {
     expect(styles).toMatch(/\.activity-list-section\s*{[^}]*padding-top:\s*0;[^}]*border-top:\s*0;/s);
   });
 
+  it('keeps link preview input focus on the outer shell only', () => {
+    expect(styles).toMatch(/\.link-preview-add-row input\s*{[^}]*outline:\s*0;/s);
+    expect(styles).not.toMatch(
+      /\.link-preview-add-row input:focus-visible,\s*\.link-preview-add-row button:focus-visible,[^{]*\{[^}]*outline:\s*var\(--focus-ring\)/s,
+    );
+  });
+
   it('uses the shared itinerary row hover treatment for stops and activities', () => {
     expect(styles).toMatch(/\.stop-item,\s*\.activity-row\s*{[^}]*background:\s*var\(--surface-row\);/s);
     expect(styles).toMatch(

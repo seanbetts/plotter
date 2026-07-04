@@ -462,7 +462,7 @@ describe('ActivityPanel', () => {
 
     await waitFor(() => expect(onUpdateActivity).toHaveBeenCalledWith(activity.id, expect.any(Object)));
     expect(screen.getByLabelText('Add link URL')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add link' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete Museum tickets' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Move Dinner menu up' })).toBeDisabled();
     expect(screen.getByRole('link', { name: /Museum tickets/ }).closest('article')).toHaveAttribute(
@@ -476,7 +476,7 @@ describe('ActivityPanel', () => {
     });
 
     await waitFor(() => expect(screen.getByLabelText('Add link URL')).not.toBeDisabled());
-    expect(screen.getByRole('button', { name: 'Add' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add link' })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete Museum tickets' })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: 'Move Dinner menu up' })).not.toBeDisabled();
     expect(screen.getByRole('link', { name: /Museum tickets/ }).closest('article')).toHaveAttribute(

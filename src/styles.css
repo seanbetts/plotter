@@ -1379,39 +1379,80 @@ select {
 
 .link-preview-add-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+}
+
+.link-preview-input-shell {
+  display: grid;
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--surface-control);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.link-preview-input-shell:focus-within {
+  border-color: var(--border-selected);
+  background: var(--surface-control-focus);
+  box-shadow: 0 0 0 3px rgb(var(--color-accent-rgb) / 0.18);
+}
+
+.link-preview-input-shell .search-input-shell,
+.link-preview-input-shell .search-input-shell:focus-within {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.link-preview-add-row input {
+  min-width: 0;
+  height: 34px;
+  border: 0;
+  padding: 7px 9px;
+  color: var(--color-text);
+  background: transparent;
+  outline: 0;
+}
+
+.link-preview-add-row input::placeholder {
+  color: var(--text-faint);
 }
 
 .link-preview-add-row button {
-  display: inline-flex;
-  min-width: 72px;
-  min-height: 38px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid rgb(var(--color-accent-rgb) / 0.42);
+  display: grid;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
-  padding: 8px 10px;
-  color: var(--color-text-inverse);
-  background: var(--color-accent);
-  font-size: 0.82rem;
-  font-weight: 850;
+  padding: 0;
+  color: rgb(var(--color-text-rgb) / 0.78);
+  background: var(--surface-action-subtle);
   cursor: pointer;
 }
 
 .link-preview-add-row button:hover:not(:disabled),
 .link-preview-add-row button:focus-visible:not(:disabled) {
-  background: var(--color-accent-hover);
+  color: var(--color-text);
+  background: var(--surface-control-hover);
 }
 
 .link-preview-add-row button:disabled {
-  color: rgb(var(--color-text-inverse-rgb) / 0.58);
+  color: var(--text-disabled);
   cursor: progress;
   opacity: 0.7;
 }
 
-.link-preview-add-row input:focus-visible,
 .link-preview-add-row button:focus-visible,
 .link-preview-card__link:focus-visible,
 .link-preview-card__delete:focus-visible,
