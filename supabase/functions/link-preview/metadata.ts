@@ -68,11 +68,14 @@ export async function validatePublicPreviewUrl(
   return previewUrl;
 }
 
-export function createPreviewFromHtml({
-  requestedUrl,
-  finalUrl,
-  html,
-}: PreviewFromHtmlInput): LinkPreviewResponse {
+export async function createPreviewFromHtml(
+  {
+    requestedUrl,
+    finalUrl,
+    html,
+  }: PreviewFromHtmlInput,
+  resolver?: PreviewUrlResolver,
+): Promise<LinkPreviewResponse> {
   const normalizedFinalUrl = normalizePreviewUrl(finalUrl || requestedUrl);
   const domain = deriveDomain(normalizedFinalUrl);
   const title = getMetaContent(html, ["og:title"]) ||
@@ -82,7 +85,7 @@ export function createPreviewFromHtml({
   const rawImageUrl = getMetaContent(html, ["og:image"]) ||
     getMetaContent(html, ["twitter:image"]);
   const imageUrl = rawImageUrl
-    ? resolvePreviewImageUrl(rawImageUrl, normalizedFinalUrl)
+    ? await resolvePreviewImageUrl(rawImageUrl, normalizedFinalUrl, resolver)
     : undefined;
 
   return {
@@ -121,7 +124,10 @@ export async function fetchLinkPreview(
     }
 
     const html = await readPreviewHtml(response);
-    return createPreviewFromHtml({ requestedUrl: previewUrl, finalUrl, html });
+    return createPreviewFromHtml(
+      { requestedUrl: previewUrl, finalUrl, html },
+      resolver,
+    );
   } finally {
     clearTimeout(timeoutId);
   }
@@ -539,16 +545,36 @@ function decodeCodePoint(codePoint: number, fallback: string) {
   }
 }
 
-function resolvePreviewImageUrl(rawUrl: string, baseUrl: string) {
+async function resolvePreviewImageUrl(
+  rawUrl: string,
+  baseUrl: string,
+  resolver?: PreviewUrlResolver,
+) {
   try {
     const resolved = new URL(rawUrl, baseUrl);
     if (!allowedProtocols.has(resolved.protocol)) {
       return undefined;
     }
 
-    return isLocalOrPrivateHost(resolved.hostname)
-      ? undefined
-      : resolved.toString();
+    if (isLocalOrPrivateHost(resolved.hostname)) {
+      return undefined;
+    }
+
+    if (resolver && shouldResolveHostname(resolved.hostname)) {
+      try {
+        const resolvedAddresses = await resolver(resolved.hostname);
+        if (
+          resolvedAddresses.length === 0 ||
+          resolvedAddresses.some((address) => isLocalOrPrivateHost(address))
+        ) {
+          return undefined;
+        }
+      } catch {
+        return undefined;
+      }
+    }
+
+    return resolved.toString();
   } catch {
     return undefined;
   }

@@ -200,6 +200,28 @@ Deno.test("omits private absolute preview image URLs", async () => {
   );
 });
 
+Deno.test("omits DNS-private preview image URLs", async () => {
+  const resolver = (hostname: string) => {
+    assertEquals(hostname, "127.0.0.1.nip.io");
+    return Promise.resolve(["127.0.0.1"]);
+  };
+
+  assertEquals(
+    await createPreviewFromHtml({
+      requestedUrl: "https://example.com/page",
+      finalUrl: "https://example.com/page",
+      html:
+        '<meta property="og:title" content="DNS private image"><meta property="og:image" content="http://127.0.0.1.nip.io/private.png">',
+    }, resolver),
+    {
+      url: "https://example.com/page",
+      title: "DNS private image",
+      domain: "example.com",
+      imageUrl: undefined,
+    },
+  );
+});
+
 Deno.test("fetches HTML previews through an injectable fetcher", async () => {
   let fetchedUrl = "";
   let receivedSignal = false;
