@@ -10,3 +10,9 @@ describe('image preview styles', () => {
     expect(styles).toMatch(/\.image-preview-frame img\s*{[^}]*object-fit:\s*cover;/s);
   });
 });
+
+describe('panel tag editor styles', () => {
+  it('matches label-to-control spacing for tag legends', () => {
+    expect(styles).toMatch(/\.tag-editor legend\s*{[^}]*margin-bottom:\s*6px;/s);
+  });
+});

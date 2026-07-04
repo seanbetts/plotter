@@ -1163,6 +1163,7 @@ select {
 }
 
 .tag-editor legend {
+  margin-bottom: 6px;
   padding: 0;
   color: var(--text-secondary);
   font-size: 0.82rem;
