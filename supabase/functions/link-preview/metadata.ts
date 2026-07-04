@@ -11,6 +11,8 @@ type PreviewFromHtmlInput = {
   html: string;
 };
 
+type PreviewUrlResolver = (hostname: string) => string[] | Promise<string[]>;
+
 const allowedProtocols = new Set(["http:", "https:"]);
 const maxPreviewBytes = 512_000;
 const maxRedirects = 3;
@@ -41,12 +43,26 @@ export function normalizePreviewUrl(rawUrl: string) {
   return parsed.toString();
 }
 
-export function validatePublicPreviewUrl(rawUrl: string) {
+export async function validatePublicPreviewUrl(
+  rawUrl: string,
+  resolver: PreviewUrlResolver = resolvePreviewHostname,
+) {
   const previewUrl = normalizePreviewUrl(rawUrl);
   const parsed = new URL(previewUrl);
 
   if (isLocalOrPrivateHost(parsed.hostname)) {
     throw new Error("Enter a public URL.");
+  }
+
+  if (shouldResolveHostname(parsed.hostname)) {
+    const resolvedAddresses = await resolver(parsed.hostname);
+    if (resolvedAddresses.length === 0) {
+      throw new Error("Unable to resolve URL host.");
+    }
+
+    if (resolvedAddresses.some((address) => isLocalOrPrivateHost(address))) {
+      throw new Error("Enter a public URL.");
+    }
   }
 
   return previewUrl;
@@ -66,7 +82,7 @@ export function createPreviewFromHtml({
   const rawImageUrl = getMetaContent(html, ["og:image"]) ||
     getMetaContent(html, ["twitter:image"]);
   const imageUrl = rawImageUrl
-    ? resolveHttpUrl(rawImageUrl, normalizedFinalUrl)
+    ? resolvePreviewImageUrl(rawImageUrl, normalizedFinalUrl)
     : undefined;
 
   return {
@@ -80,8 +96,9 @@ export function createPreviewFromHtml({
 export async function fetchLinkPreview(
   rawUrl: string,
   fetcher: typeof fetch = fetch,
+  resolver: PreviewUrlResolver = resolvePreviewHostname,
 ) {
-  const previewUrl = validatePublicPreviewUrl(rawUrl);
+  const previewUrl = await validatePublicPreviewUrl(rawUrl, resolver);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), previewTimeoutMs);
 
@@ -89,6 +106,7 @@ export async function fetchLinkPreview(
     const { response, finalUrl } = await fetchPreviewResponse(
       previewUrl,
       fetcher,
+      resolver,
       controller.signal,
     );
 
@@ -112,6 +130,7 @@ export async function fetchLinkPreview(
 async function fetchPreviewResponse(
   initialUrl: string,
   fetcher: typeof fetch,
+  resolver: PreviewUrlResolver,
   signal: AbortSignal,
 ) {
   let currentUrl = initialUrl;
@@ -143,8 +162,9 @@ async function fetchPreviewResponse(
       throw new Error("Redirect response is missing a Location header.");
     }
 
-    currentUrl = validatePublicPreviewUrl(
+    currentUrl = await validatePublicPreviewUrl(
       new URL(location, currentUrl).toString(),
+      resolver,
     );
   }
 
@@ -158,6 +178,22 @@ function deriveDomain(url: string) {
 function isHtmlContentType(contentType: string) {
   const mimeType = contentType.split(";", 1)[0].trim();
   return mimeType === "text/html" || mimeType === "application/xhtml+xml";
+}
+
+async function resolvePreviewHostname(hostname: string) {
+  const lookups = await Promise.allSettled([
+    Deno.resolveDns(hostname, "A"),
+    Deno.resolveDns(hostname, "AAAA"),
+  ]);
+  const addresses = lookups.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : []
+  );
+
+  if (addresses.length === 0) {
+    throw new Error("Unable to resolve URL host.");
+  }
+
+  return addresses;
 }
 
 async function readPreviewHtml(response: Response) {
@@ -217,23 +253,25 @@ function isLocalOrPrivateHost(hostname: string) {
   return isPrivateIpv6(unbracketed);
 }
 
+function shouldResolveHostname(hostname: string) {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  const unbracketed = normalized.replace(/^\[|\]$/g, "");
+
+  return (
+    normalized !== "localhost" &&
+    !normalized.endsWith(".localhost") &&
+    !isIpv4Literal(unbracketed) &&
+    !unbracketed.includes(":")
+  );
+}
+
+function isIpv4Literal(hostname: string) {
+  return parseIpv4Octets(hostname) !== undefined;
+}
+
 function isPrivateIpv4(hostname: string) {
-  const parts = hostname.split(".");
-  if (parts.length !== 4) {
-    return false;
-  }
-
-  const octets = parts.map((part) => {
-    if (!/^\d+$/.test(part)) {
-      return Number.NaN;
-    }
-
-    return Number(part);
-  });
-
-  if (
-    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
-  ) {
+  const octets = parseIpv4Octets(hostname);
+  if (!octets) {
     return false;
   }
 
@@ -254,6 +292,27 @@ function isPrivateIpv4(hostname: string) {
     (first >= 224 && first <= 239) ||
     first >= 240
   );
+}
+
+function parseIpv4Octets(hostname: string) {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) {
+    return undefined;
+  }
+
+  const octets = parts.map((part) => {
+    if (!/^\d+$/.test(part)) {
+      return Number.NaN;
+    }
+
+    return Number(part);
+  });
+
+  return octets.every((octet) =>
+      Number.isInteger(octet) && octet >= 0 && octet <= 255
+    )
+    ? octets
+    : undefined;
 }
 
 function isPrivateIpv6(hostname: string) {
@@ -351,22 +410,8 @@ function parseIpv6Part(part: string) {
 }
 
 function parseEmbeddedIpv4Hextets(hostname: string) {
-  const parts = hostname.split(".");
-  if (parts.length !== 4) {
-    return undefined;
-  }
-
-  const octets = parts.map((part) => {
-    if (!/^\d+$/.test(part)) {
-      return Number.NaN;
-    }
-
-    return Number(part);
-  });
-
-  if (
-    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
-  ) {
+  const octets = parseIpv4Octets(hostname);
+  if (!octets) {
     return undefined;
   }
 
@@ -494,12 +539,16 @@ function decodeCodePoint(codePoint: number, fallback: string) {
   }
 }
 
-function resolveHttpUrl(rawUrl: string, baseUrl: string) {
+function resolvePreviewImageUrl(rawUrl: string, baseUrl: string) {
   try {
     const resolved = new URL(rawUrl, baseUrl);
-    return allowedProtocols.has(resolved.protocol)
-      ? resolved.toString()
-      : undefined;
+    if (!allowedProtocols.has(resolved.protocol)) {
+      return undefined;
+    }
+
+    return isLocalOrPrivateHost(resolved.hostname)
+      ? undefined
+      : resolved.toString();
   } catch {
     return undefined;
   }

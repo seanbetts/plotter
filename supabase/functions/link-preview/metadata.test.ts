@@ -11,6 +11,8 @@ import {
   validatePublicPreviewUrl,
 } from "./metadata.ts";
 
+const publicResolver = () => Promise.resolve(["93.184.216.34"]);
+
 Deno.test("normalizes URLs and rejects unsupported protocols", async () => {
   assertEquals(
     normalizePreviewUrl("example.com/menu"),
@@ -60,6 +62,19 @@ Deno.test("rejects private and local targets", async () => {
       Promise.resolve().then(() =>
         validatePublicPreviewUrl("http://169.254.1.2/page")
       ),
+    Error,
+    "public URL",
+  );
+});
+
+Deno.test("rejects hostnames that resolve to private addresses", async () => {
+  const resolver = (hostname: string) => {
+    assertEquals(hostname, "127.0.0.1.nip.io");
+    return Promise.resolve(["127.0.0.1"]);
+  };
+
+  await assertRejects(
+    () => validatePublicPreviewUrl("http://127.0.0.1.nip.io/admin", resolver),
     Error,
     "public URL",
   );
@@ -168,6 +183,23 @@ Deno.test("falls back to Twitter metadata and then document title", async () => 
   );
 });
 
+Deno.test("omits private absolute preview image URLs", async () => {
+  assertEquals(
+    await createPreviewFromHtml({
+      requestedUrl: "https://example.com/page",
+      finalUrl: "https://example.com/page",
+      html:
+        '<meta property="og:title" content="Private image"><meta property="og:image" content="http://127.0.0.1/private.png">',
+    }),
+    {
+      url: "https://example.com/page",
+      title: "Private image",
+      domain: "example.com",
+      imageUrl: undefined,
+    },
+  );
+});
+
 Deno.test("fetches HTML previews through an injectable fetcher", async () => {
   let fetchedUrl = "";
   let receivedSignal = false;
@@ -190,7 +222,11 @@ Deno.test("fetches HTML previews through an injectable fetcher", async () => {
     );
   };
 
-  const preview = await fetchLinkPreview("example.com/menu", fetcher);
+  const preview = await fetchLinkPreview(
+    "example.com/menu",
+    fetcher,
+    publicResolver,
+  );
 
   assertEquals(fetchedUrl, "https://example.com/menu");
   assertEquals(receivedSignal, true);
@@ -200,6 +236,25 @@ Deno.test("fetches HTML previews through an injectable fetcher", async () => {
     domain: "example.com",
     imageUrl: "https://example.com/menu.jpg",
   });
+});
+
+Deno.test("rejects DNS-private preview URLs before fetching", async () => {
+  let fetched = false;
+  const fetcher: typeof fetch = () => {
+    fetched = true;
+    return Promise.resolve(new Response("unreachable"));
+  };
+  const resolver = (hostname: string) => {
+    assertEquals(hostname, "127.0.0.1.nip.io");
+    return Promise.resolve(["127.0.0.1"]);
+  };
+
+  await assertRejects(
+    () => fetchLinkPreview("http://127.0.0.1.nip.io/admin", fetcher, resolver),
+    Error,
+    "public URL",
+  );
+  assertEquals(fetched, false);
 });
 
 Deno.test("rejects public redirects to private targets before second fetch", async () => {
@@ -215,7 +270,8 @@ Deno.test("rejects public redirects to private targets before second fetch", asy
   };
 
   await assertRejects(
-    () => fetchLinkPreview("https://example.com/start", fetcher),
+    () =>
+      fetchLinkPreview("https://example.com/start", fetcher, publicResolver),
     Error,
     "public URL",
   );
@@ -235,7 +291,7 @@ Deno.test("rejects redirect loops after the redirect limit", async () => {
   };
 
   await assertRejects(
-    () => fetchLinkPreview("https://example.com/loop", fetcher),
+    () => fetchLinkPreview("https://example.com/loop", fetcher, publicResolver),
     Error,
     "Too many redirects",
   );
@@ -256,7 +312,7 @@ Deno.test("rejects non-HTML preview responses", async () => {
     );
 
   await assertRejects(
-    () => fetchLinkPreview("example.com/data.json", fetcher),
+    () => fetchLinkPreview("example.com/data.json", fetcher, publicResolver),
     Error,
     "HTML",
   );
@@ -278,7 +334,7 @@ Deno.test("aborts slow preview fetches", async () => {
   };
 
   await assertRejects(
-    () => fetchLinkPreview("https://example.com/slow", fetcher),
+    () => fetchLinkPreview("https://example.com/slow", fetcher, publicResolver),
     Error,
     "aborted",
   );
@@ -314,7 +370,11 @@ Deno.test("bounds oversized HTML reads and cancels the stream", async () => {
       }),
     );
 
-  const preview = await fetchLinkPreview("https://example.com/large", fetcher);
+  const preview = await fetchLinkPreview(
+    "https://example.com/large",
+    fetcher,
+    publicResolver,
+  );
 
   assertEquals(preview.title, "Large page");
   assertEquals(canceled, true);
