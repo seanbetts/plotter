@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-import-prefix
 import {
+  assert,
   assertEquals,
   assertRejects,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
@@ -62,6 +63,27 @@ Deno.test("rejects private and local targets", async () => {
     Error,
     "public URL",
   );
+});
+
+Deno.test("rejects private IPv6 literal targets", async () => {
+  for (
+    const url of [
+      "http://[::1]/",
+      "http://[0:0:0:0:0:0:0:1]/",
+      "http://[fd00::1]/",
+      "http://[fc00::1]/",
+      "http://[fe80::1]/",
+      "http://[::]/",
+      "http://[::ffff:127.0.0.1]/",
+      "http://[::ffff:192.168.1.10]/",
+    ]
+  ) {
+    await assertRejects(
+      () => Promise.resolve().then(() => validatePublicPreviewUrl(url)),
+      Error,
+      "public URL",
+    );
+  }
 });
 
 Deno.test("extracts Open Graph preview data before other metadata", async () => {
@@ -127,6 +149,10 @@ Deno.test("fetches HTML previews through an injectable fetcher", async () => {
   const fetcher: typeof fetch = (input, init) => {
     fetchedUrl = input.toString();
     receivedSignal = init?.signal instanceof AbortSignal;
+    assertEquals(init?.redirect, "manual");
+    const headers = new Headers(init?.headers);
+    assertEquals(headers.get("accept"), "text/html, application/xhtml+xml");
+    assertEquals(headers.get("user-agent"), "WorldTourLinkPreview/1.0");
 
     return Promise.resolve(
       new Response(
@@ -150,6 +176,51 @@ Deno.test("fetches HTML previews through an injectable fetcher", async () => {
   });
 });
 
+Deno.test("rejects public redirects to private targets before second fetch", async () => {
+  const fetchedUrls: string[] = [];
+  const fetcher: typeof fetch = (input) => {
+    fetchedUrls.push(input.toString());
+    return Promise.resolve(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://127.0.0.1/admin" },
+      }),
+    );
+  };
+
+  await assertRejects(
+    () => fetchLinkPreview("https://example.com/start", fetcher),
+    Error,
+    "public URL",
+  );
+  assertEquals(fetchedUrls, ["https://example.com/start"]);
+});
+
+Deno.test("rejects redirect loops after the redirect limit", async () => {
+  const fetchedUrls: string[] = [];
+  const fetcher: typeof fetch = (input) => {
+    fetchedUrls.push(input.toString());
+    return Promise.resolve(
+      new Response(null, {
+        status: 302,
+        headers: { location: "/loop" },
+      }),
+    );
+  };
+
+  await assertRejects(
+    () => fetchLinkPreview("https://example.com/loop", fetcher),
+    Error,
+    "Too many redirects",
+  );
+  assertEquals(fetchedUrls, [
+    "https://example.com/loop",
+    "https://example.com/loop",
+    "https://example.com/loop",
+    "https://example.com/loop",
+  ]);
+});
+
 Deno.test("rejects non-HTML preview responses", async () => {
   const fetcher: typeof fetch = () =>
     Promise.resolve(
@@ -163,4 +234,63 @@ Deno.test("rejects non-HTML preview responses", async () => {
     Error,
     "HTML",
   );
+});
+
+Deno.test("aborts slow preview fetches", async () => {
+  let signalReceived = false;
+  let signalAborted = false;
+  const fetcher: typeof fetch = (_input, init) => {
+    const signal = init?.signal;
+    signalReceived = signal instanceof AbortSignal;
+
+    return new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => {
+        signalAborted = true;
+        reject(new Error("preview fetch aborted"));
+      });
+    });
+  };
+
+  await assertRejects(
+    () => fetchLinkPreview("https://example.com/slow", fetcher),
+    Error,
+    "aborted",
+  );
+  assertEquals(signalReceived, true);
+  assertEquals(signalAborted, true);
+});
+
+Deno.test("bounds oversized HTML reads and cancels the stream", async () => {
+  let canceled = false;
+  let pullCount = 0;
+  const chunk = new TextEncoder().encode("a".repeat(256_000));
+  const htmlPrefix = '<meta property="og:title" content="Large page">';
+
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pullCount += 1;
+      if (pullCount === 1) {
+        controller.enqueue(new TextEncoder().encode(htmlPrefix));
+        return;
+      }
+
+      controller.enqueue(chunk);
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+
+  const fetcher: typeof fetch = () =>
+    Promise.resolve(
+      new Response(stream, {
+        headers: { "content-type": "text/html" },
+      }),
+    );
+
+  const preview = await fetchLinkPreview("https://example.com/large", fetcher);
+
+  assertEquals(preview.title, "Large page");
+  assertEquals(canceled, true);
+  assert(pullCount >= 3);
 });

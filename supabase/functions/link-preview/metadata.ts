@@ -13,7 +13,10 @@ type PreviewFromHtmlInput = {
 
 const allowedProtocols = new Set(["http:", "https:"]);
 const maxPreviewBytes = 512_000;
+const maxRedirects = 3;
 const previewTimeoutMs = 5_000;
+const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+const userAgent = "WorldTourLinkPreview/1.0";
 
 export function normalizePreviewUrl(rawUrl: string) {
   const trimmed = rawUrl.trim();
@@ -83,18 +86,11 @@ export async function fetchLinkPreview(
   const timeoutId = setTimeout(() => controller.abort(), previewTimeoutMs);
 
   try {
-    const response = await fetcher(previewUrl, {
-      headers: {
-        accept: "text/html, application/xhtml+xml",
-      },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    const finalUrl = response.url || previewUrl;
-
-    if (response.url) {
-      validatePublicPreviewUrl(response.url);
-    }
+    const { response, finalUrl } = await fetchPreviewResponse(
+      previewUrl,
+      fetcher,
+      controller.signal,
+    );
 
     if (!response.ok) {
       throw new Error("Unable to fetch link preview.");
@@ -111,6 +107,48 @@ export async function fetchLinkPreview(
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function fetchPreviewResponse(
+  initialUrl: string,
+  fetcher: typeof fetch,
+  signal: AbortSignal,
+) {
+  let currentUrl = initialUrl;
+
+  for (
+    let redirectCount = 0;
+    redirectCount <= maxRedirects;
+    redirectCount += 1
+  ) {
+    const response = await fetcher(currentUrl, {
+      headers: {
+        accept: "text/html, application/xhtml+xml",
+        "User-Agent": userAgent,
+      },
+      redirect: "manual",
+      signal,
+    });
+
+    if (!redirectStatuses.has(response.status)) {
+      return { response, finalUrl: response.url || currentUrl };
+    }
+
+    if (redirectCount >= maxRedirects) {
+      throw new Error("Too many redirects while fetching link preview.");
+    }
+
+    const location = response.headers.get("location");
+    if (!location) {
+      throw new Error("Redirect response is missing a Location header.");
+    }
+
+    currentUrl = validatePublicPreviewUrl(
+      new URL(location, currentUrl).toString(),
+    );
+  }
+
+  throw new Error("Too many redirects while fetching link preview.");
 }
 
 function deriveDomain(url: string) {
@@ -166,16 +204,17 @@ async function readPreviewHtml(response: Response) {
 
 function isLocalOrPrivateHost(hostname: string) {
   const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  const unbracketed = normalized.replace(/^\[|\]$/g, "");
 
   if (normalized === "localhost" || normalized.endsWith(".localhost")) {
     return true;
   }
 
-  if (isPrivateIpv4(normalized)) {
+  if (isPrivateIpv4(unbracketed)) {
     return true;
   }
 
-  return isIpv6Loopback(normalized);
+  return isPrivateIpv6(unbracketed);
 }
 
 function isPrivateIpv4(hostname: string) {
@@ -209,9 +248,92 @@ function isPrivateIpv4(hostname: string) {
   );
 }
 
-function isIpv6Loopback(hostname: string) {
-  const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  return normalized === "::1" || normalized === "0:0:0:0:0:0:0:1";
+function isPrivateIpv6(hostname: string) {
+  if (!hostname.includes(":")) {
+    return false;
+  }
+
+  const hextets = parseIpv6Hextets(hostname);
+  if (!hextets) {
+    return false;
+  }
+
+  const [first = 0] = hextets;
+  const isUnspecified = hextets.every((hextet) => hextet === 0);
+  const isLoopback = hextets.slice(0, 7).every((hextet) => hextet === 0) &&
+    hextets[7] === 1;
+  const isUniqueLocal = (first & 0xfe00) === 0xfc00;
+  const isLinkLocal = (first & 0xffc0) === 0xfe80;
+
+  if (isUnspecified || isLoopback || isUniqueLocal || isLinkLocal) {
+    return true;
+  }
+
+  const mappedIpv4 = getIpv4MappedAddress(hextets);
+  return mappedIpv4 ? isPrivateIpv4(mappedIpv4) : false;
+}
+
+function parseIpv6Hextets(hostname: string) {
+  if (hostname.includes(".")) {
+    return undefined;
+  }
+
+  const halves = hostname.split("::");
+  if (halves.length > 2) {
+    return undefined;
+  }
+
+  const head = parseIpv6Part(halves[0] || "");
+  const tail = parseIpv6Part(halves[1] || "");
+  if (!head || !tail) {
+    return undefined;
+  }
+
+  if (halves.length === 1) {
+    return head.length === 8 ? head : undefined;
+  }
+
+  const missingCount = 8 - head.length - tail.length;
+  if (missingCount < 1) {
+    return undefined;
+  }
+
+  return [...head, ...Array(missingCount).fill(0), ...tail];
+}
+
+function parseIpv6Part(part: string) {
+  if (!part) {
+    return [];
+  }
+
+  const hextets = part.split(":").map((piece) => {
+    if (!/^[\da-f]{1,4}$/i.test(piece)) {
+      return Number.NaN;
+    }
+
+    return Number.parseInt(piece, 16);
+  });
+
+  return hextets.every((hextet) => Number.isInteger(hextet))
+    ? hextets
+    : undefined;
+}
+
+function getIpv4MappedAddress(hextets: number[]) {
+  const isMapped = hextets.slice(0, 5).every((hextet) => hextet === 0) &&
+    hextets[5] === 0xffff;
+  if (!isMapped) {
+    return undefined;
+  }
+
+  const high = hextets[6] ?? 0;
+  const low = hextets[7] ?? 0;
+  return [
+    (high >> 8) & 0xff,
+    high & 0xff,
+    (low >> 8) & 0xff,
+    low & 0xff,
+  ].join(".");
 }
 
 function getMetaContent(html: string, names: string[]) {
