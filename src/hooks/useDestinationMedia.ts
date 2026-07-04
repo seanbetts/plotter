@@ -12,6 +12,20 @@ const VALID_IMAGE_TYPES = new Set([
 ]);
 
 const imageTypeError = 'Choose a JPEG, PNG, WebP, or GIF image.';
+const mediaOrderingMigrationError =
+  'Images need the latest database migration before they can load.';
+
+function formatMediaError(caught: unknown, fallbackMessage: string) {
+  if (!(caught instanceof Error)) {
+    return fallbackMessage;
+  }
+
+  if (caught.message.includes('media_assets.sort_order') && caught.message.includes('does not exist')) {
+    return mediaOrderingMigrationError;
+  }
+
+  return caught.message || fallbackMessage;
+}
 
 function sortMediaItems(mediaItems: MediaItem[]) {
   return mediaItems
@@ -91,7 +105,7 @@ export function useDestinationMedia(
     } catch (caught) {
       if (!isCurrentGeneration(generation)) return;
 
-      setError(caught instanceof Error ? caught.message : 'Unable to load images.');
+      setError(formatMediaError(caught, 'Unable to load images.'));
     } finally {
       if (isCurrentGeneration(generation)) {
         setIsLoading(false);
@@ -162,7 +176,7 @@ export function useDestinationMedia(
     } catch (caught) {
       if (!isCurrentGeneration(generation)) return;
 
-      setError(caught instanceof Error ? caught.message : 'Unable to upload image.');
+      setError(formatMediaError(caught, 'Unable to upload image.'));
     } finally {
       if (isCurrentGeneration(generation)) {
         setUploadingCount((count) => Math.max(0, count - 1));
@@ -195,7 +209,7 @@ export function useDestinationMedia(
       return updatedMediaItem;
     } catch (caught) {
       if (isCurrentUpdate()) {
-        setError(caught instanceof Error ? caught.message : 'Unable to update image.');
+        setError(formatMediaError(caught, 'Unable to update image.'));
       }
       return undefined;
     }
@@ -212,7 +226,7 @@ export function useDestinationMedia(
       updateMediaItems((current) => current.filter((mediaItem) => mediaItem.id !== mediaId));
     } catch (caught) {
       if (isCurrentGeneration(generation)) {
-        const error = caught instanceof Error ? caught : new Error('Unable to delete image.');
+        const error = new Error(formatMediaError(caught, 'Unable to delete image.'));
         setError(error.message);
         throw error;
       }
@@ -261,7 +275,7 @@ export function useDestinationMedia(
       if (!isCurrentReorder()) return;
 
       replaceMediaItems(previousMediaItems);
-      setError(caught instanceof Error ? caught.message : 'Unable to reorder images.');
+      setError(formatMediaError(caught, 'Unable to reorder images.'));
     }
   }, [destinationId, isCurrentGeneration, replaceMediaItems, repository]);
 

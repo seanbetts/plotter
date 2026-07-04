@@ -31,6 +31,20 @@ describe('useDestinationMedia', () => {
     expect(result.current.mediaItems).toEqual([]);
   });
 
+  it('shows a friendly migration message when media ordering is missing from the database', async () => {
+    const repository = createMediaRepository({
+      listDestinationMedia: vi
+        .fn()
+        .mockRejectedValue(new Error('column media_assets.sort_order does not exist')),
+    });
+
+    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.error).toBe('Images need the latest database migration before they can load.');
+  });
+
   it('ignores stale load responses from a previous destination', async () => {
     const oldLoad = createDeferred([createMediaItem('old-media', 0)]);
     const newMedia = [createMediaItem('new-media', 0)];

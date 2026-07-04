@@ -1,4 +1,4 @@
-import { Image, LoaderCircle, Plus, Upload } from 'lucide-react';
+import { Image, LoaderCircle, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import type { MediaItem } from '../domain/types';
@@ -205,22 +205,6 @@ export function DestinationImageStrip({
       onDragLeave={handleStripDragLeave}
       onDrop={handleStripDrop}
     >
-      <div className="destination-image-strip-header">
-        <div>
-          <h3>Stop images</h3>
-          <p>{destinationName}</p>
-        </div>
-        <button
-          type="button"
-          className="destination-image-add-button"
-          aria-label="Add stop images"
-          onClick={openFilePicker}
-        >
-          <Plus size={16} aria-hidden="true" />
-          <span>Add</span>
-        </button>
-      </div>
-
       <input
         ref={fileInputRef}
         className="destination-image-file-input"
@@ -262,40 +246,35 @@ export function DestinationImageStrip({
         </button>
       ) : null}
 
-      <div className="destination-image-carousel" aria-label="Image thumbnails">
-        {mediaItems.map((mediaItem, index) => (
-          <button
-            key={mediaItem.id}
-            type="button"
-            className={`destination-image-thumbnail${
-              dragTarget?.mediaId === mediaItem.id ? ` is-drop-${dragTarget.side}` : ''
-            }`}
-            aria-label={openPreviewLabel(mediaItem, index)}
-            draggable
-            onClick={() => onOpenPreview(mediaItem.id)}
-            onDragStart={(event) => handleThumbnailDragStart(event, mediaItem.id)}
-            onDragOver={(event) => handleThumbnailDragOver(event, mediaItem.id)}
-            onDrop={(event) => handleThumbnailDrop(event, mediaItem.id)}
-            onDragEnd={clearThumbnailDrag}
-          >
-            <img src={mediaItem.url} alt={mediaLabel(mediaItem, index)} />
-          </button>
-        ))}
-        <button
-          type="button"
-          className="destination-image-add-tile"
-          aria-label={`Add another stop image for ${destinationName}`}
-          onClick={openFilePicker}
-        >
-          <Plus size={18} aria-hidden="true" />
-        </button>
-        {isUploading ? (
-          <div className="destination-image-uploading" role="status" aria-label="Uploading images">
-            <Upload size={15} aria-hidden="true" />
-            <span>Uploading</span>
-          </div>
-        ) : null}
-      </div>
+      {mediaItems.length > 0 ? (
+        <div className="destination-image-carousel" aria-label="Image thumbnails">
+          {mediaItems.map((mediaItem, index) => (
+            <button
+              key={mediaItem.id}
+              type="button"
+              className={`destination-image-thumbnail${
+                dragTarget?.mediaId === mediaItem.id ? ` is-drop-${dragTarget.side}` : ''
+              }`}
+              aria-label={openPreviewLabel(mediaItem, index)}
+              draggable
+              onClick={() => onOpenPreview(mediaItem.id)}
+              onDragStart={(event) => handleThumbnailDragStart(event, mediaItem.id)}
+              onDragOver={(event) => handleThumbnailDragOver(event, mediaItem.id)}
+              onDrop={(event) => handleThumbnailDrop(event, mediaItem.id)}
+              onDragEnd={clearThumbnailDrag}
+            >
+              <img src={mediaItem.url} alt={mediaLabel(mediaItem, index)} />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {isUploading ? (
+        <div className="destination-image-uploading" role="status" aria-label="Uploading images">
+          <Upload size={15} aria-hidden="true" />
+          <span>Uploading</span>
+        </div>
+      ) : null}
 
       {isFileDragOver ? (
         <div className="destination-image-drop-status" role="status" aria-label="Drop images to upload">

@@ -1862,38 +1862,12 @@ select {
   position: relative;
   display: grid;
   gap: 10px;
-  padding: 12px 0;
+  padding: 10px 0 14px;
   border-block: 1px solid var(--border-subtle);
 }
 
 .destination-image-strip.is-drag-over {
   border-color: rgb(var(--color-accent-rgb) / 0.48);
-}
-
-.destination-image-strip-header {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.destination-image-strip-header h3 {
-  margin: 0;
-  color: var(--color-text);
-  font-size: 0.9rem;
-  line-height: 1.2;
-  letter-spacing: 0;
-}
-
-.destination-image-strip-header p {
-  max-width: 22rem;
-  margin: 2px 0 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .destination-image-file-input {
@@ -1906,8 +1880,6 @@ select {
   white-space: nowrap;
 }
 
-.destination-image-add-button,
-.destination-image-add-tile,
 .destination-image-empty,
 .destination-image-hero,
 .destination-image-thumbnail {
@@ -1918,10 +1890,6 @@ select {
   cursor: pointer;
 }
 
-.destination-image-add-button:hover,
-.destination-image-add-button:focus-visible,
-.destination-image-add-tile:hover,
-.destination-image-add-tile:focus-visible,
 .destination-image-empty:hover,
 .destination-image-empty:focus-visible,
 .destination-image-hero:hover,
@@ -1932,24 +1900,11 @@ select {
   background: var(--surface-control-hover);
 }
 
-.destination-image-add-button:focus-visible,
-.destination-image-add-tile:focus-visible,
 .destination-image-empty:focus-visible,
 .destination-image-hero:focus-visible,
 .destination-image-thumbnail:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
-}
-
-.destination-image-add-button {
-  display: inline-flex;
-  min-height: 32px;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 9px;
-  font-size: 0.78rem;
-  font-weight: 800;
 }
 
 .destination-image-state {
@@ -1973,7 +1928,7 @@ select {
 
 .destination-image-empty {
   display: grid;
-  min-height: 86px;
+  min-height: 112px;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   justify-content: start;
@@ -2034,8 +1989,7 @@ select {
   padding: 1px 1px 5px;
 }
 
-.destination-image-thumbnail,
-.destination-image-add-tile {
+.destination-image-thumbnail {
   position: relative;
   display: grid;
   width: 72px;
@@ -2067,11 +2021,6 @@ select {
 
 .destination-image-thumbnail.is-drop-after::before {
   right: 4px;
-}
-
-.destination-image-add-tile {
-  color: var(--text-muted);
-  background: transparent;
 }
 
 .destination-image-uploading,

@@ -107,7 +107,7 @@ function dropThumbnail(element: Element, clientX: number) {
 describe('DestinationImageStrip', () => {
   it('renders an accessible compact empty state and supports choosing files', () => {
     const onUploadFiles = vi.fn();
-    render(
+    const { container } = render(
       <DestinationImageStrip
         {...createProps({
           mediaItems: [],
@@ -118,6 +118,10 @@ describe('DestinationImageStrip', () => {
 
     const region = screen.getByRole('region', { name: 'Stop images' });
     expect(region).toHaveTextContent('No images yet');
+    expect(screen.queryByRole('heading', { name: 'Stop images' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Bergen')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
+    expect(container.querySelector('.destination-image-carousel')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add stop images for Bergen' }));
 
@@ -135,6 +139,11 @@ describe('DestinationImageStrip', () => {
   it('renders the first media item as the hero and opens its preview when clicked', () => {
     const onOpenPreview = vi.fn();
     render(<DestinationImageStrip {...createProps({ onOpenPreview })} />);
+
+    expect(screen.queryByRole('heading', { name: 'Stop images' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Bergen')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add another stop image for Bergen' })).not.toBeInTheDocument();
 
     const hero = screen.getByRole('button', { name: 'Open hero image: Sunset over the harbour' });
     expect(within(hero).getByRole('img', { name: 'Sunset over the harbour' })).toHaveAttribute(
