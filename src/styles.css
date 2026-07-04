@@ -881,7 +881,7 @@ select {
 .profile-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 12px;
 }
 
@@ -1090,10 +1090,80 @@ select {
 }
 
 .profile-header-actions {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  justify-items: end;
   gap: 8px;
   min-height: 34px;
+}
+
+.profile-header-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.profile-stay-days {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-self: end;
+  align-items: center;
+  justify-content: end;
+  gap: 8px;
+}
+
+.profile-stay-days-readout {
+  display: grid;
+  justify-items: center;
+  line-height: 1;
+}
+
+.profile-stay-days-number {
+  color: var(--color-text);
+  font-size: 2.05rem;
+  font-weight: 850;
+  line-height: 0.86;
+}
+
+.profile-stay-days-label {
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.profile-stay-days-controls {
+  display: grid;
+  gap: 3px;
+}
+
+.profile-stay-days-step {
+  display: grid;
+  width: 24px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--text-soft);
+  background: var(--surface-action-subtle);
+  cursor: pointer;
+}
+
+.profile-stay-days-step:hover:not(:disabled),
+.profile-stay-days-step:focus-visible {
+  border-color: rgb(var(--color-accent-rgb) / 0.46);
+  color: var(--color-accent);
+  background: rgb(var(--color-accent-rgb) / 0.1);
+}
+
+.profile-stay-days-step:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+  opacity: 0.58;
 }
 
 .profile-save-status {

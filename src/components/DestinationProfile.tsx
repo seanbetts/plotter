@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react';
+import { Check, CircleAlert, Copy, LoaderCircle, Minus, Pencil, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, CSSProperties, KeyboardEvent } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
@@ -368,6 +368,15 @@ function DestinationProfileForm({
     updateForm({ tags: form.tags.filter((tag) => tag !== tagToRemove) });
   }
 
+  function changeExpectedStayDays(delta: -1 | 1) {
+    const currentDays = normalizeExpectedStayDays(form.expectedStayDays);
+    const nextDays = Math.max(1, currentDays + delta);
+
+    if (nextDays === currentDays) return;
+
+    updateForm({ expectedStayDays: String(nextDays) });
+  }
+
   function startEditingCoordinates() {
     setCoordinateDraft(createCoordinateDraft(destination));
     setCoordinateError('');
@@ -455,6 +464,7 @@ function DestinationProfileForm({
     : '';
   const tagsLabel = `${destinationTitle.trim() || destination.name} Tags`;
   const activitiesLabel = `${destinationTitle.trim() || destination.name} Activities`;
+  const expectedStayDays = normalizeExpectedStayDays(form.expectedStayDays);
   const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
     .filter(Boolean)
     .join(' ');
@@ -614,28 +624,55 @@ function DestinationProfileForm({
           )}
         </div>
         <div className="profile-header-actions">
-          {saveStatus !== 'idle' ? (
-            <div
-              className={saveStatusClassName}
-              role="status"
-              aria-live="polite"
-              aria-label={saveStatusText}
-              title={saveStatusText}
+          <div className="profile-header-action-row">
+            {saveStatus !== 'idle' ? (
+              <div
+                className={saveStatusClassName}
+                role="status"
+                aria-live="polite"
+                aria-label={saveStatusText}
+                title={saveStatusText}
+              >
+                {saveStatus === 'saving' ? <LoaderCircle size={16} aria-hidden="true" /> : null}
+                {saveStatus === 'saved' ? <Check size={16} aria-hidden="true" /> : null}
+                {saveStatus === 'error' ? <CircleAlert size={16} aria-hidden="true" /> : null}
+                <span className="sr-only">{saveStatusText}</span>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="profile-close-button"
+              onClick={onClose}
+              aria-label="Close destination profile"
             >
-              {saveStatus === 'saving' ? <LoaderCircle size={16} aria-hidden="true" /> : null}
-              {saveStatus === 'saved' ? <Check size={16} aria-hidden="true" /> : null}
-              {saveStatus === 'error' ? <CircleAlert size={16} aria-hidden="true" /> : null}
-              <span className="sr-only">{saveStatusText}</span>
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="profile-stay-days" role="group" aria-label="Expected stay days">
+            <div className="profile-stay-days-readout" aria-live="polite">
+              <span className="profile-stay-days-number">{expectedStayDays}</span>
+              <span className="profile-stay-days-label">Days</span>
             </div>
-          ) : null}
-          <button
-            type="button"
-            className="profile-close-button"
-            onClick={onClose}
-            aria-label="Close destination profile"
-          >
-            <X size={18} aria-hidden="true" />
-          </button>
+            <div className="profile-stay-days-controls">
+              <button
+                type="button"
+                className="profile-stay-days-step"
+                aria-label="Increase expected stay days"
+                onClick={() => changeExpectedStayDays(1)}
+              >
+                <Plus size={12} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="profile-stay-days-step"
+                aria-label="Decrease expected stay days"
+                disabled={expectedStayDays <= 1}
+                onClick={() => changeExpectedStayDays(-1)}
+              >
+                <Minus size={12} aria-hidden="true" />
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -650,16 +687,6 @@ function DestinationProfileForm({
         onReorder={onReorderMedia}
         onOpenPreview={onOpenMediaPreview}
       />
-
-      <label>
-        Expected stay days
-        <input
-          type="number"
-          min="1"
-          value={form.expectedStayDays}
-          onChange={(event) => updateForm({ expectedStayDays: event.target.value })}
-        />
-      </label>
 
       <ActivityList
         title={activitiesLabel}

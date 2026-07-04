@@ -65,6 +65,27 @@ describe('profile header styles', () => {
       /\.profile-location-address\s*{[^}]*max-width:\s*100%;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
     );
   });
+
+  it('places the stay-days stepper in the right header column', () => {
+    expect(styles).toMatch(
+      /\.profile-header\s*{[^}]*align-items:\s*stretch;/s,
+    );
+    expect(styles).toMatch(
+      /\.profile-header-actions\s*{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*auto 1fr;[^}]*justify-items:\s*end;/s,
+    );
+    expect(styles).toMatch(
+      /\.profile-stay-days\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*auto auto;[^}]*align-self:\s*end;[^}]*justify-content:\s*end;[^}]*gap:\s*8px;/s,
+    );
+    expect(styles).toMatch(
+      /\.profile-stay-days-readout\s*{[^}]*justify-items:\s*center;/s,
+    );
+    expect(styles).toMatch(
+      /\.profile-stay-days-number\s*{[^}]*font-size:\s*2\.05rem;/s,
+    );
+    expect(styles).toMatch(
+      /\.profile-stay-days-label\s*{[^}]*font-size:\s*0\.66rem;[^}]*text-transform:\s*uppercase;/s,
+    );
+  });
 });
 
 describe('panel coordinate editor styles', () => {

@@ -640,7 +640,13 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
 
-    expect(screen.getByLabelText('Expected stay days')).toBeInTheDocument();
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    const stayDays = within(header).getByRole('group', { name: 'Expected stay days' });
+    expect(within(stayDays).getByText('3')).toBeInTheDocument();
+    expect(within(stayDays).getByText('Days')).toBeInTheDocument();
+    expect(within(stayDays).getByRole('button', { name: 'Increase expected stay days' })).toBeInTheDocument();
+    expect(within(stayDays).getByRole('button', { name: 'Decrease expected stay days' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Expected stay days' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Samarkand Tags' })).toBeInTheDocument();
     expect(screen.getByLabelText('Add tag')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Samarkand Activities' })).toBeInTheDocument();
@@ -756,7 +762,7 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Increase expected stay days' }));
     addTag('port-city');
 
     expect(onUpdate).not.toHaveBeenCalled();
@@ -980,34 +986,39 @@ describe('DestinationProfile', () => {
     expect(screen.getByRole('button', { name: 'Remove tag temples' })).toBeInTheDocument();
   });
 
-  it('normalizes expected stay days to a positive whole number', async () => {
+  it('changes expected stay days from the header stepper and keeps the value above zero', async () => {
     setupAutosaveTimers();
-    const destination = createDestination({
-      name: 'Samarkand',
-      countryRegion: 'Uzbekistan',
-      coordinates: { lat: 39.6542, lng: 66.9597 },
-    });
+    const destination: Destination = {
+      ...createDestination({
+        name: 'Samarkand',
+        countryRegion: 'Uzbekistan',
+        coordinates: { lat: 39.6542, lng: 66.9597 },
+      }),
+      timing: {
+        idealMonths: [],
+        expectedStayDays: 1,
+        provisionalStartDate: '',
+        provisionalEndDate: '',
+      },
+    };
     const onUpdate = vi.fn();
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '-2' } });
+    const decrement = screen.getByRole('button', { name: 'Decrease expected stay days' });
+    expect(decrement).toBeDisabled();
+    fireEvent.click(decrement);
+    await advanceAutosave();
+
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Increase expected stay days' }));
     await advanceAutosave();
 
     expect(onUpdate).toHaveBeenLastCalledWith(
       destination.id,
       expect.objectContaining({
-        timing: expect.objectContaining({ expectedStayDays: 1 }),
-      }),
-    );
-
-    fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '4.8' } });
-    await advanceAutosave();
-
-    expect(onUpdate).toHaveBeenLastCalledWith(
-      destination.id,
-      expect.objectContaining({
-        timing: expect.objectContaining({ expectedStayDays: 4 }),
+        timing: expect.objectContaining({ expectedStayDays: 2 }),
       }),
     );
   });
