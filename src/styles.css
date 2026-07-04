@@ -1241,7 +1241,8 @@ select {
 .link-preview-add-row input:focus-visible,
 .link-preview-add-row button:focus-visible,
 .link-preview-card__link:focus-visible,
-.link-preview-card__delete:focus-visible {
+.link-preview-card__delete:focus-visible,
+.link-preview-card__move:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
@@ -1412,14 +1413,66 @@ select {
   background: rgb(255 255 255 / 0.9);
 }
 
-.link-preview-card__keyboard-actions {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+.link-preview-card__delete:disabled {
+  color: var(--text-disabled);
+  cursor: progress;
+  opacity: 0.62;
 }
 
-.link-preview-card__keyboard-actions button {
+.link-preview-card__keyboard-actions {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  left: 7px;
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 5px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  transform: translateY(3px);
+}
+
+.link-preview-card:focus-within .link-preview-card__keyboard-actions,
+.link-preview-card__keyboard-actions:focus-within {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.link-preview-card__move {
+  display: inline-flex;
+  width: 44px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.62);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: rgb(255 255 255 / 0.82);
+  box-shadow: 0 8px 18px rgb(var(--color-text-rgb) / 0.12);
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1;
+  cursor: pointer;
   pointer-events: auto;
+  -webkit-backdrop-filter: blur(10px) saturate(1.12);
+  backdrop-filter: blur(10px) saturate(1.12);
+}
+
+.link-preview-card__move:hover:not(:disabled),
+.link-preview-card__move:focus-visible:not(:disabled) {
+  border-color: rgb(var(--color-accent-rgb) / 0.36);
+  color: var(--color-accent);
+  background: rgb(255 255 255 / 0.94);
+}
+
+.link-preview-card__move:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+  opacity: 0.62;
 }
 
 .activity-list-section {

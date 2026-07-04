@@ -1,4 +1,5 @@
-import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ResearchLink } from '../domain/types';
 import type { LinkPreviewClient } from '../services/linkPreviewClient';
@@ -27,6 +28,17 @@ function createPreviewClient(overrides: Partial<LinkPreviewClient> = {}): LinkPr
     }),
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
 }
 
 function createProps(overrides: Partial<React.ComponentProps<typeof LinkPreviewGrid>> = {}) {
@@ -86,6 +98,7 @@ describe('LinkPreviewGrid', () => {
     expect(within(trainLink).getByText('T')).toHaveClass('link-preview-card__fallback-initial');
     expect(within(region).getByRole('button', { name: 'Delete Museum guide' })).toBeInTheDocument();
     expect(within(region).getByRole('button', { name: 'Delete Train schedule' })).toBeInTheDocument();
+    expect(within(region).getByRole('button', { name: 'Move Train schedule up' })).not.toHaveClass('sr-only');
   });
 
   it('adds a fetched preview link from the entered URL', async () => {
@@ -144,6 +157,92 @@ describe('LinkPreviewGrid', () => {
       ]),
     );
     expect(screen.getByLabelText('Add link URL')).toHaveValue('');
+  });
+
+  it('prevents duplicate submits while a preview fetch is pending', async () => {
+    const previewRequest = deferred<Awaited<ReturnType<LinkPreviewClient['fetchPreview']>>>();
+    const previewClient = createPreviewClient({
+      fetchPreview: vi.fn().mockReturnValue(previewRequest.promise),
+    });
+    const onChange = vi.fn();
+
+    render(<LinkPreviewGrid {...createProps({ previewClient, onChange })} />);
+
+    fireEvent.change(screen.getByLabelText('Add link URL'), {
+      target: { value: 'https://cafe.example/visit' },
+    });
+    fireEvent.submit(screen.getByRole('form', { name: 'Add link' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Add link' }));
+
+    expect(previewClient.fetchPreview).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Add link URL')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete Museum guide' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move Train schedule up' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: /Museum guide/ }).closest('article')).toHaveAttribute(
+      'draggable',
+      'false',
+    );
+
+    await act(async () => {
+      previewRequest.resolve({
+        title: 'Fetched cafe',
+        url: 'https://cafe.example/visit',
+        domain: 'cafe.example',
+      });
+      await previewRequest.promise;
+    });
+  });
+
+  it('does not resurrect a deleted link when a pending preview resolves', async () => {
+    vi.setSystemTime(new Date('2026-07-04T12:30:00.000Z'));
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000003');
+    const previewRequest = deferred<Awaited<ReturnType<LinkPreviewClient['fetchPreview']>>>();
+    const previewClient = createPreviewClient({
+      fetchPreview: vi.fn().mockReturnValue(previewRequest.promise),
+    });
+
+    function Harness() {
+      const [links, setLinks] = useState([
+        createResearchLink({ id: 'link-1', title: 'Museum guide', sortOrder: 0 }),
+      ]);
+
+      return (
+        <>
+          <button type="button" onClick={() => setLinks([])}>
+            Parent delete Museum guide
+          </button>
+          <LinkPreviewGrid
+            label="Research links"
+            links={links}
+            previewClient={previewClient}
+            onChange={setLinks}
+          />
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.change(screen.getByLabelText('Add link URL'), {
+      target: { value: 'https://cafe.example/visit' },
+    });
+    fireEvent.submit(screen.getByRole('form', { name: 'Add link' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Parent delete Museum guide' }));
+
+    expect(screen.queryByRole('link', { name: /Museum guide/ })).not.toBeInTheDocument();
+
+    await act(async () => {
+      previewRequest.resolve({
+        title: 'Fetched cafe',
+        url: 'https://cafe.example/visit',
+        domain: 'cafe.example',
+      });
+      await previewRequest.promise;
+    });
+
+    expect(screen.queryByRole('link', { name: /Museum guide/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Fetched cafe/ })).toBeInTheDocument();
   });
 
   it('shows an inline validation error for invalid URLs and does not call onChange', () => {
