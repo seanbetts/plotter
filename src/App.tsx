@@ -626,7 +626,7 @@ function TripWorkspace({
   const handleUpdateActivityPanel = useCallback(
     async (
       activityId: string,
-      patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority' | 'tags'>>,
+      patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority' | 'tags' | 'links'>>,
     ) => {
       await updateActivity(activityId, patch);
     },
@@ -772,6 +772,7 @@ function TripWorkspace({
                 mediaError={activityMedia.error}
                 isMediaLoading={activityMedia.isLoading}
                 isMediaUploading={activityMedia.isUploading}
+                linkPreviewClient={linkPreviewClient}
                 onClose={() => setSelectedActivityId(null)}
                 onUpdateActivity={handleUpdateActivityPanel}
                 onUploadMedia={handleActivityMediaUpload}

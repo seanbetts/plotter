@@ -2,7 +2,9 @@ import { CircleAlert, X } from 'lucide-react';
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, Ref } from 'react';
 import type { Activity, MediaItem } from '../domain/types';
+import type { LinkPreviewClient } from '../services/linkPreviewClient';
 import { ActivityImageStrip } from './ActivityImageStrip';
+import { LinkPreviewGrid } from './LinkPreviewGrid';
 
 type ActivityPanelProps = {
   activity: Activity;
@@ -11,17 +13,18 @@ type ActivityPanelProps = {
   mediaError: string | null;
   isMediaLoading: boolean;
   isMediaUploading: boolean;
+  linkPreviewClient: LinkPreviewClient;
   onClose: () => void;
   onUpdateActivity: (
     activityId: string,
-    patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'tags'>>,
+    patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'tags' | 'links'>>,
   ) => Promise<void> | void;
   onUploadMedia: (files: File[]) => Promise<void> | void;
   onReorderMedia: (orderedMediaIds: string[]) => Promise<void> | void;
   onOpenMediaPreview: (mediaId: string) => void;
 };
 
-type ActivityDraft = Pick<Activity, 'title' | 'description' | 'notes' | 'tags'>;
+type ActivityDraft = Pick<Activity, 'title' | 'description' | 'notes' | 'tags' | 'links'>;
 type ActivityDraftField = keyof ActivityDraft;
 
 function createActivityDraft(activity: Activity): ActivityDraft {
@@ -30,6 +33,7 @@ function createActivityDraft(activity: Activity): ActivityDraft {
     description: activity.description,
     notes: activity.notes,
     tags: activity.tags,
+    links: activity.links,
   };
 }
 
@@ -47,6 +51,14 @@ const tagKey = (tag: string) => tag.toLocaleLowerCase();
 
 const listsMatch = (left: string[], right: string[]) =>
   left.length === right.length && left.every((item, index) => item === right[index]);
+
+function draftValuesMatch(left: ActivityDraft[ActivityDraftField], right: ActivityDraft[ActivityDraftField]) {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  return left === right;
+}
 
 const addUniqueTags = (currentTags: string[], newTags: string[]) => {
   const existingTags = new Set(currentTags.map(tagKey));
@@ -75,6 +87,7 @@ export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(functio
   mediaError,
   isMediaLoading,
   isMediaUploading,
+  linkPreviewClient,
   onClose,
   onUpdateActivity,
   onUploadMedia,
@@ -91,6 +104,7 @@ export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(functio
       mediaError={mediaError}
       isMediaLoading={isMediaLoading}
       isMediaUploading={isMediaUploading}
+      linkPreviewClient={linkPreviewClient}
       onClose={onClose}
       onUpdateActivity={onUpdateActivity}
       onUploadMedia={onUploadMedia}
@@ -108,6 +122,7 @@ function ActivityPanelForm({
   mediaError,
   isMediaLoading,
   isMediaUploading,
+  linkPreviewClient,
   onClose,
   onUpdateActivity,
   onUploadMedia,
@@ -126,25 +141,28 @@ function ActivityPanelForm({
     description: 0,
     notes: 0,
     tags: 0,
+    links: 0,
   });
   const fieldSaveRevisionRef = useRef<Record<ActivityDraftField, number>>({
     title: 0,
     description: 0,
     notes: 0,
     tags: 0,
+    links: 0,
   });
   const sourceKey = activitySourceKey(activity);
   const activityTitle = activity.title;
   const activityDescription = activity.description;
   const activityNotes = activity.notes;
   const activityTags = activity.tags;
+  const activityLinks = activity.links;
 
   useEffect(() => {
     setDraft((current) => {
       const shouldPreserveDraft = <Field extends ActivityDraftField>(
         field: Field,
         persistedValue: ActivityDraft[Field],
-      ) => dirtyFieldsRef.current.has(field) && current[field] !== persistedValue;
+      ) => dirtyFieldsRef.current.has(field) && !draftValuesMatch(current[field], persistedValue);
       const acceptPersistedField = (field: ActivityDraftField) => {
         dirtyFieldsRef.current.delete(field);
       };
@@ -153,12 +171,14 @@ function ActivityPanelForm({
       if (!shouldPreserveDraft('description', activityDescription)) acceptPersistedField('description');
       if (!shouldPreserveDraft('notes', activityNotes)) acceptPersistedField('notes');
       if (!shouldPreserveDraft('tags', activityTags)) acceptPersistedField('tags');
+      if (!shouldPreserveDraft('links', activityLinks)) acceptPersistedField('links');
 
       const nextDraft = {
         title: dirtyFieldsRef.current.has('title') ? current.title : activityTitle,
         description: dirtyFieldsRef.current.has('description') ? current.description : activityDescription,
         notes: dirtyFieldsRef.current.has('notes') ? current.notes : activityNotes,
         tags: dirtyFieldsRef.current.has('tags') ? current.tags : activityTags,
+        links: dirtyFieldsRef.current.has('links') ? current.links : activityLinks,
       };
 
       latestDraftRef.current = nextDraft;
@@ -167,6 +187,7 @@ function ActivityPanelForm({
     setSaveError('');
   }, [
     activityDescription,
+    activityLinks,
     activityNotes,
     activityTags,
     activityTitle,
@@ -235,17 +256,6 @@ function ActivityPanelForm({
       fieldEditRevisionRef.current[field] === editRevision &&
       draftValuesMatch(latestDraftRef.current[field], submittedValue)
     );
-  }
-
-  function draftValuesMatch<Field extends ActivityDraftField>(
-    left: ActivityDraft[Field],
-    right: ActivityDraft[Field],
-  ) {
-    if (Array.isArray(left) && Array.isArray(right)) {
-      return listsMatch(left, right);
-    }
-
-    return left === right;
   }
 
   function commitTagInput() {
@@ -384,6 +394,15 @@ function ActivityPanelForm({
           />
         </div>
       </fieldset>
+      <LinkPreviewGrid
+        label="Links"
+        links={draft.links}
+        previewClient={linkPreviewClient}
+        onChange={(links) => {
+          updateDraft('links', links);
+          void commitDraft('links');
+        }}
+      />
     </aside>
   );
 }

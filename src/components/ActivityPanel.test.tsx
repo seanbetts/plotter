@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createActivity } from '../domain/activities';
-import type { MediaItem } from '../domain/types';
+import type { MediaItem, ResearchLink } from '../domain/types';
+import type { LinkPreviewClient } from '../services/linkPreviewClient';
 import { ActivityPanel } from './ActivityPanel';
 
 function deferred<T>() {
@@ -26,6 +27,17 @@ function createMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
   };
 }
 
+function createLinkPreviewClient(overrides: Partial<LinkPreviewClient> = {}): LinkPreviewClient {
+  return {
+    fetchPreview: vi.fn().mockResolvedValue({
+      title: 'Dinner menu',
+      url: 'https://restaurant.example/menu',
+      domain: 'restaurant.example',
+    }),
+    ...overrides,
+  };
+}
+
 function createProps(overrides: Partial<React.ComponentProps<typeof ActivityPanel>> = {}) {
   const activity = {
     ...createActivity({
@@ -44,6 +56,7 @@ function createProps(overrides: Partial<React.ComponentProps<typeof ActivityPane
     mediaError: null,
     isMediaLoading: false,
     isMediaUploading: false,
+    linkPreviewClient: createLinkPreviewClient(),
     onClose: vi.fn(),
     onUpdateActivity: vi.fn(),
     onUploadMedia: vi.fn(),
@@ -163,6 +176,53 @@ describe('ActivityPanel', () => {
     expect(props.onUpdateActivity).toHaveBeenCalledWith(activity.id, {
       tags: ['museum'],
     });
+  });
+
+  it('renders activity links and saves added fetched links', async () => {
+    const existingLink: ResearchLink = {
+      id: 'louvre-link',
+      title: 'Museum tickets',
+      url: 'https://louvre.example/tickets',
+      domain: 'louvre.example',
+      imageUrl: 'https://louvre.example/og.jpg',
+      sortOrder: 0,
+    };
+    const activity = {
+      ...createActivity({
+        destinationId: 'destination-1',
+        title: 'Louvre',
+        order: 0,
+      }),
+      links: [existingLink],
+    };
+    const linkPreviewClient = createLinkPreviewClient();
+    const onUpdateActivity = vi.fn();
+
+    render(<ActivityPanel {...createProps({ activity, linkPreviewClient, onUpdateActivity })} />);
+
+    expect(screen.getByRole('link', { name: /Museum tickets/ })).toHaveAttribute(
+      'href',
+      'https://louvre.example/tickets',
+    );
+
+    fireEvent.change(screen.getByLabelText('Add link URL'), {
+      target: { value: 'restaurant.example/menu' },
+    });
+    fireEvent.submit(screen.getByRole('form', { name: 'Add link' }));
+
+    await waitFor(() =>
+      expect(onUpdateActivity).toHaveBeenCalledWith(activity.id, {
+        links: [
+          existingLink,
+          expect.objectContaining({
+            title: 'Dinner menu',
+            url: 'https://restaurant.example/menu',
+            domain: 'restaurant.example',
+            sortOrder: 1,
+          }),
+        ],
+      }),
+    );
   });
 
   it('shows an accessible alert and restores the persisted value when a save fails', async () => {
