@@ -1,9 +1,11 @@
-import type { MediaItem } from '../domain/types';
+import type { MediaItem, MediaRollupItem } from '../domain/types';
 import { MediaImageStrip } from './MediaImageStrip';
+import type { MediaStripItem } from './MediaImageStrip';
 
 export type DestinationImageStripProps = {
   destinationName: string;
   mediaItems: MediaItem[];
+  mediaRollupItems?: MediaRollupItem[];
   isLoading: boolean;
   isUploading: boolean;
   error: string | null;
@@ -11,6 +13,21 @@ export type DestinationImageStripProps = {
   onReorder: (orderedMediaIds: string[]) => Promise<void> | void;
   onOpenPreview: (mediaId: string) => void;
 };
+
+function getMediaStripItems(props: DestinationImageStripProps): MediaStripItem[] {
+  if (props.mediaRollupItems) {
+    return props.mediaRollupItems.map((rollupItem) => ({
+      mediaItem: rollupItem.mediaItem,
+      attribution: rollupItem.activityTitle,
+      canReorder: rollupItem.canReorderInStopCarousel,
+    }));
+  }
+
+  return props.mediaItems.map((mediaItem) => ({
+    mediaItem,
+    canReorder: true,
+  }));
+}
 
 export function DestinationImageStrip(props: DestinationImageStripProps) {
   return (
@@ -20,10 +37,7 @@ export function DestinationImageStrip(props: DestinationImageStripProps) {
       emptyHint="Drop images here or click to add."
       chooseFilesLabel="Choose stop images"
       uploadingLabel="Uploading stop images"
-      items={props.mediaItems.map((mediaItem) => ({
-        mediaItem,
-        canReorder: true,
-      }))}
+      items={getMediaStripItems(props)}
       isLoading={props.isLoading}
       isUploading={props.isUploading}
       error={props.error}

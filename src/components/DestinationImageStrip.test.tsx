@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { MediaItem } from '../domain/types';
+import type { MediaItem, MediaRollupItem } from '../domain/types';
 import { DestinationImageStrip } from './DestinationImageStrip';
 
 function createMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
@@ -32,6 +32,16 @@ function createProps(overrides: Partial<React.ComponentProps<typeof DestinationI
     onUploadFiles: vi.fn(),
     onReorder: vi.fn(),
     onOpenPreview: vi.fn(),
+    ...overrides,
+  };
+}
+
+function createMediaRollupItem(overrides: Partial<MediaRollupItem> = {}): MediaRollupItem {
+  return {
+    mediaItem: createMediaItem(),
+    ownerType: 'destination',
+    destinationId: 'destination-1',
+    canReorderInStopCarousel: true,
     ...overrides,
   };
 }
@@ -92,5 +102,88 @@ describe('DestinationImageStrip', () => {
     fireEvent.click(preview);
 
     expect(onOpenPreview).toHaveBeenCalledWith('media-2');
+  });
+
+  it('renders activity attribution from rollup items on thumbnails and the selected preview', () => {
+    render(
+      <DestinationImageStrip
+        {...createProps({
+          mediaRollupItems: [
+            createMediaRollupItem(),
+            createMediaRollupItem({
+              mediaItem: createMediaItem({
+                id: 'media-2',
+                url: 'https://example.com/activity-1.jpg',
+                caption: 'Market lane',
+                sortOrder: 1,
+              }),
+              ownerType: 'activity',
+              activityId: 'activity-1',
+              activityTitle: 'Night market',
+              canReorderInStopCarousel: false,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const activityThumbnail = screen.getByRole('button', { name: 'Show image 2: Market lane' });
+    expect(within(activityThumbnail).getByText('Night market')).toBeInTheDocument();
+
+    fireEvent.click(activityThumbnail);
+
+    expect(within(screen.getByRole('group', { name: 'Image preview' })).getByText('Night market')).toBeInTheDocument();
+  });
+
+  it('blocks stop carousel reorder when a rollup item is not reorderable in the stop carousel', () => {
+    const onReorder = vi.fn();
+    render(
+      <DestinationImageStrip
+        {...createProps({
+          onReorder,
+          mediaRollupItems: [
+            createMediaRollupItem(),
+            createMediaRollupItem({
+              mediaItem: createMediaItem({
+                id: 'media-2',
+                url: 'https://example.com/activity-1.jpg',
+                caption: 'Market lane',
+                sortOrder: 1,
+              }),
+              ownerType: 'activity',
+              activityId: 'activity-1',
+              activityTitle: 'Night market',
+              canReorderInStopCarousel: false,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const activityThumbnail = screen.getByRole('button', { name: 'Show image 2: Market lane' });
+    expect(activityThumbnail).toHaveAttribute('draggable', 'false');
+    vi.spyOn(activityThumbnail, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 0,
+      width: 80,
+      height: 60,
+      top: 0,
+      right: 180,
+      bottom: 60,
+      left: 100,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Show image 1: Sunset over the harbour' }));
+
+    const dragOverEvent = new Event('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(dragOverEvent, 'clientX', { value: 110 });
+    fireEvent(activityThumbnail, dragOverEvent);
+
+    const dropEvent = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(dropEvent, 'clientX', { value: 110 });
+    fireEvent(activityThumbnail, dropEvent);
+
+    expect(onReorder).not.toHaveBeenCalled();
   });
 });
