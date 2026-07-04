@@ -1,4 +1,4 @@
-import { Image, LoaderCircle, Upload } from 'lucide-react';
+import { Image, LoaderCircle } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import type { MediaItem } from '../domain/types';
@@ -225,13 +225,32 @@ export function DestinationImageStrip({
       {!isLoading && !heroMediaItem ? (
         <button
           type="button"
-          className="destination-image-empty"
-          aria-label={`Add stop images for ${destinationName}`}
+          className={`destination-image-empty${isUploading ? ' is-uploading' : ''}`}
+          aria-label={
+            isUploading
+              ? `Uploading stop images for ${destinationName}`
+              : `Add stop images for ${destinationName}`
+          }
           onClick={openFilePicker}
+          disabled={isUploading}
         >
-          <Image size={20} aria-hidden="true" />
-          <span>No images yet</span>
-          <small>Drop images here or click to add.</small>
+          {isUploading ? (
+            <>
+              <span className="destination-image-upload-icon" aria-hidden="true">
+                <LoaderCircle size={20} />
+              </span>
+              <span role="status" aria-label="Uploading images">
+                Uploading images...
+              </span>
+              <small>Keep this pane open while the upload finishes.</small>
+            </>
+          ) : (
+            <>
+              <Image size={20} aria-hidden="true" />
+              <span>No images yet</span>
+              <small>Drop images here or click to add.</small>
+            </>
+          )}
         </button>
       ) : null}
 
@@ -243,6 +262,12 @@ export function DestinationImageStrip({
           onClick={() => onOpenPreview(heroMediaItem.id)}
         >
           <img src={heroMediaItem.url} alt={mediaLabel(heroMediaItem, 0)} />
+          {isUploading ? (
+            <span className="destination-image-hero-status" role="status" aria-label="Uploading images">
+              <LoaderCircle size={14} aria-hidden="true" />
+              Uploading
+            </span>
+          ) : null}
         </button>
       ) : null}
 
@@ -266,13 +291,6 @@ export function DestinationImageStrip({
               <img src={mediaItem.url} alt={mediaLabel(mediaItem, index)} />
             </button>
           ))}
-        </div>
-      ) : null}
-
-      {isUploading ? (
-        <div className="destination-image-uploading" role="status" aria-label="Uploading images">
-          <Upload size={15} aria-hidden="true" />
-          <span>Uploading</span>
         </div>
       ) : null}
 

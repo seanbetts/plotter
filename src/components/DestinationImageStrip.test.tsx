@@ -156,6 +156,21 @@ describe('DestinationImageStrip', () => {
     expect(onOpenPreview).toHaveBeenCalledWith('media-1');
   });
 
+  it('shows upload progress inside the empty image drop zone', () => {
+    const { container } = render(
+      <DestinationImageStrip {...createProps({ mediaItems: [], isUploading: true })} />,
+    );
+
+    const uploadTarget = screen.getByRole('button', { name: 'Uploading stop images for Bergen' });
+    const uploadStatus = screen.getByRole('status', { name: 'Uploading images' });
+
+    expect(uploadTarget).toBeDisabled();
+    expect(uploadTarget).toContainElement(uploadStatus);
+    expect(uploadTarget).toHaveTextContent('Uploading images...');
+    expect(container.querySelector('.destination-image-upload-icon svg')).toBeInTheDocument();
+    expect(container.querySelector('.destination-image-uploading')).not.toBeInTheDocument();
+  });
+
   it('opens a thumbnail preview when clicked', () => {
     const onOpenPreview = vi.fn();
     render(<DestinationImageStrip {...createProps({ onOpenPreview })} />);
@@ -236,13 +251,15 @@ describe('DestinationImageStrip', () => {
     expect(onReorder).toHaveBeenCalledWith(['media-3', 'media-1', 'media-2']);
   });
 
-  it('renders loading, uploading, and error feedback accessibly', () => {
-    const { rerender } = render(<DestinationImageStrip {...createProps({ isLoading: true })} />);
+  it('renders loading, hero upload, and error feedback accessibly', () => {
+    const { container, rerender } = render(<DestinationImageStrip {...createProps({ isLoading: true })} />);
 
     expect(screen.getByRole('status', { name: 'Loading images' })).toBeInTheDocument();
 
     rerender(<DestinationImageStrip {...createProps({ isUploading: true })} />);
-    expect(screen.getByRole('status', { name: 'Uploading images' })).toBeInTheDocument();
+    const uploadStatus = screen.getByRole('status', { name: 'Uploading images' });
+    expect(uploadStatus.closest('.destination-image-hero')).toBeInTheDocument();
+    expect(container.querySelector('.destination-image-uploading')).not.toBeInTheDocument();
 
     rerender(<DestinationImageStrip {...createProps({ error: 'Unable to upload image.' })} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Unable to upload image.');
