@@ -138,12 +138,13 @@ function assertSupabaseWriteSucceeded(response: SupabaseWriteResponse, fallbackM
   }
 }
 
-function isDestinationMediaSortOrderConflict(errorMessage: string | undefined) {
+function isMediaSortOrderConflict(errorMessage: string | undefined) {
   if (!errorMessage) return false;
 
   return (
     errorMessage.includes('media_assets_trip_destination_sort_order_key') ||
     errorMessage.includes('media_assets_destination_owned_sort_order_key') ||
+    errorMessage.includes('media_assets_activity_owned_sort_order_key') ||
     errorMessage.includes('duplicate key value')
   );
 }
@@ -467,7 +468,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         return response.data;
       }
 
-      if (!isDestinationMediaSortOrderConflict(response.error?.message) || attempt === 2) {
+      if (!isMediaSortOrderConflict(response.error?.message) || attempt === 2) {
         throw new Error(response.error?.message || 'Unable to save media metadata.');
       }
 
@@ -489,12 +490,12 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     sizeBytes: number;
     uploadedBy: string;
   }) {
-    const existingRows = await listExistingActivityMediaSortOrders(input.tripId, input.activityId);
-    const nextSortOrder =
-      existingRows.reduce((maxSortOrder, row) => Math.max(maxSortOrder, row.sort_order), -1) + 1;
+    let existingRows = await listExistingActivityMediaSortOrders(input.tripId, input.activityId);
 
-    return assertNoSupabaseError<SupabaseMediaAssetRow>(
-      await supabase
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const nextSortOrder =
+        existingRows.reduce((maxSortOrder, row) => Math.max(maxSortOrder, row.sort_order), -1) + 1;
+      const response = await supabase
         .from('media_assets')
         .insert({
           trip_id: input.tripId,
@@ -510,9 +511,20 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           uploaded_by: input.uploadedBy,
         })
         .select('*')
-        .single(),
-      'Unable to save activity media metadata.',
-    );
+        .single();
+
+      if (!response.error && response.data) {
+        return response.data;
+      }
+
+      if (!isMediaSortOrderConflict(response.error?.message) || attempt === 2) {
+        throw new Error(response.error?.message || 'Unable to save activity media metadata.');
+      }
+
+      existingRows = await listExistingActivityMediaSortOrders(input.tripId, input.activityId);
+    }
+
+    throw new Error('Unable to save activity media metadata.');
   }
 
   async function createSignedMediaItem(row: SupabaseMediaAssetRow) {
@@ -576,19 +588,79 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     return Promise.all(rows.map((row) => createSignedMediaItem(row)));
   }
 
+  async function loadActivityMediaRows(tripId: string, activityId: string) {
+    return assertNoSupabaseError<SupabaseMediaAssetRow[]>(
+      await supabase
+        .from('media_assets')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('activity_id', activityId),
+      'Unable to load activity media.',
+    );
+  }
+
   async function loadDestinationActivityMediaRows(tripId: string, destinationId: string) {
-    const rows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
+    return assertNoSupabaseError<SupabaseMediaAssetRow[]>(
       await supabase
         .from('media_assets')
         .select('*')
         .eq('trip_id', tripId)
         .eq('destination_id', destinationId)
+        .not('activity_id', 'is', null)
         .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true }),
       'Unable to load activity media.',
     );
+  }
 
-    return rows.filter((row) => row.activity_id);
+  async function assertActivityBelongsToDestination(input: {
+    tripId: string;
+    destinationId: string;
+    activityId: string;
+  }) {
+    assertNoSupabaseError<Pick<SupabaseActivityRow, 'id'>>(
+      await supabase
+        .from('activities')
+        .select('id')
+        .eq('trip_id', input.tripId)
+        .eq('destination_id', input.destinationId)
+        .eq('id', input.activityId)
+        .single(),
+      'Activity not found.',
+    );
+  }
+
+  async function removeStorageObjects(bucketId: string, objectPaths: string[], fallbackMessage: string) {
+    if (objectPaths.length === 0) return;
+
+    assertSupabaseWriteSucceeded(
+      await supabase.storage.from(bucketId).remove(objectPaths),
+      fallbackMessage,
+    );
+  }
+
+  async function removeStorageObjectBestEffort(bucketId: string, objectPath: string) {
+    try {
+      await removeStorageObjects(bucketId, [objectPath], 'Unable to remove uploaded media file.');
+    } catch {
+      // Preserve the original upload failure; cleanup is best-effort here.
+    }
+  }
+
+  async function deleteActivityMediaMetadataBestEffort(tripId: string, mediaId: string) {
+    try {
+      assertSupabaseWriteSucceeded(
+        await supabase
+          .from('media_assets')
+          .delete()
+          .eq('trip_id', tripId)
+          .eq('id', mediaId)
+          .not('activity_id', 'is', null),
+        'Unable to remove activity media metadata.',
+      );
+    } catch {
+      // Preserve the original upload failure; cleanup is best-effort here.
+    }
   }
 
   async function listTripActivities(tripId: string, destinationId: string) {
@@ -757,6 +829,19 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
     async deleteActivity(activityId) {
       const tripId = await getActiveTripId();
+      const mediaRows = await loadActivityMediaRows(tripId, activityId);
+      const objectPathsByBucketId = new Map<string, string[]>();
+
+      for (const row of mediaRows) {
+        objectPathsByBucketId.set(row.bucket_id, [
+          ...(objectPathsByBucketId.get(row.bucket_id) ?? []),
+          row.object_path,
+        ]);
+      }
+
+      for (const [bucketId, objectPaths] of objectPathsByBucketId) {
+        await removeStorageObjects(bucketId, objectPaths, 'Unable to remove activity media files.');
+      }
 
       assertSupabaseWriteSucceeded(
         await supabase
@@ -876,6 +961,12 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       }
 
       const bucketId = 'trip-media';
+      await assertActivityBelongsToDestination({
+        tripId,
+        destinationId: input.destinationId,
+        activityId: input.activityId,
+      });
+
       const objectPath = `${tripId}/${input.destinationId}/${input.activityId}/${createStorageObjectName(input.file.name)}`;
       const uploadResponse = await supabase.storage
         .from(bucketId)
@@ -886,19 +977,30 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
       assertNoSupabaseError(uploadResponse, 'Unable to upload activity media.');
 
-      const row = await insertActivityMediaMetadata({
-        tripId,
-        destinationId: input.destinationId,
-        activityId: input.activityId,
-        bucketId,
-        objectPath: uploadResponse.data?.path ?? objectPath,
-        caption: input.caption ?? '',
-        credit: input.credit ?? '',
-        contentType: input.file.type || null,
-        sizeBytes: input.file.size,
-        uploadedBy: user.id,
-      });
-      return createSignedMediaItem(row);
+      const uploadedObjectPath = uploadResponse.data?.path ?? objectPath;
+      let insertedRow: SupabaseMediaAssetRow | null = null;
+
+      try {
+        insertedRow = await insertActivityMediaMetadata({
+          tripId,
+          destinationId: input.destinationId,
+          activityId: input.activityId,
+          bucketId,
+          objectPath: uploadedObjectPath,
+          caption: input.caption ?? '',
+          credit: input.credit ?? '',
+          contentType: input.file.type || null,
+          sizeBytes: input.file.size,
+          uploadedBy: user.id,
+        });
+        return await createSignedMediaItem(insertedRow);
+      } catch (error) {
+        if (insertedRow) {
+          await deleteActivityMediaMetadataBestEffort(tripId, insertedRow.id);
+        }
+        await removeStorageObjectBestEffort(bucketId, uploadedObjectPath);
+        throw error;
+      }
     },
 
     async updateDestinationMedia(mediaId, patch) {

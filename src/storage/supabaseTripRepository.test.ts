@@ -409,6 +409,8 @@ describe('supabase trip repository mappers', () => {
     const deleteIdFilter = vi.fn(async () => ({ error: null }));
     const deleteTripFilter = vi.fn(() => ({ eq: deleteIdFilter }));
     const deleteRows = vi.fn(() => ({ eq: deleteTripFilter }));
+    const mediaActivityFilter = vi.fn(async () => ({ data: [], error: null }));
+    const mediaTripFilter = vi.fn(() => ({ eq: mediaActivityFilter }));
     const supabase = {
       auth: {
         getUser: vi.fn(async () => ({
@@ -427,6 +429,12 @@ describe('supabase trip repository mappers', () => {
           return {
             update,
             delete: deleteRows,
+          };
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: mediaTripFilter })),
           };
         }
 
@@ -456,8 +464,130 @@ describe('supabase trip repository mappers', () => {
     });
     expect(updateTripFilter).toHaveBeenCalledWith('trip_id', tripId);
     expect(updateIdFilter).toHaveBeenCalledWith('id', activityId);
+    expect(mediaTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(mediaActivityFilter).toHaveBeenCalledWith('activity_id', activityId);
     expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
     expect(deleteIdFilter).toHaveBeenCalledWith('id', activityId);
+  });
+
+  it('removes activity media storage objects before deleting an activity', async () => {
+    const tripId = crypto.randomUUID();
+    const activityId = crypto.randomUUID();
+    const calls: string[] = [];
+    const mediaRows = [
+      {
+        id: crypto.randomUUID(),
+        trip_id: tripId,
+        destination_id: crypto.randomUUID(),
+        activity_id: activityId,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/destination/${activityId}/first.webp`,
+        caption: '',
+        credit: '',
+        sort_order: 0,
+        content_type: 'image/webp',
+        size_bytes: 1200,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:00:00.000Z',
+        updated_at: '2026-06-29T12:00:00.000Z',
+      },
+      {
+        id: crypto.randomUUID(),
+        trip_id: tripId,
+        destination_id: crypto.randomUUID(),
+        activity_id: activityId,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/destination/${activityId}/second.webp`,
+        caption: '',
+        credit: '',
+        sort_order: 1,
+        content_type: 'image/webp',
+        size_bytes: 1200,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:01:00.000Z',
+        updated_at: '2026-06-29T12:01:00.000Z',
+      },
+      {
+        id: crypto.randomUUID(),
+        trip_id: tripId,
+        destination_id: crypto.randomUUID(),
+        activity_id: activityId,
+        bucket_id: 'archive-media',
+        object_path: `${tripId}/destination/${activityId}/archived.webp`,
+        caption: '',
+        credit: '',
+        sort_order: 2,
+        content_type: 'image/webp',
+        size_bytes: 1200,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:02:00.000Z',
+        updated_at: '2026-06-29T12:02:00.000Z',
+      },
+    ];
+    const removeTripMedia = vi.fn(async () => {
+      calls.push('storage:trip-media');
+      return { data: [], error: null };
+    });
+    const removeArchiveMedia = vi.fn(async () => {
+      calls.push('storage:archive-media');
+      return { data: [], error: null };
+    });
+    const mediaActivityFilter = vi.fn(async () => ({ data: mediaRows, error: null }));
+    const mediaTripFilter = vi.fn(() => ({ eq: mediaActivityFilter }));
+    const deleteIdFilter = vi.fn(async () => {
+      calls.push('activity');
+      return { error: null };
+    });
+    const deleteTripFilter = vi.fn(() => ({ eq: deleteIdFilter }));
+    const deleteRows = vi.fn(() => ({ eq: deleteTripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn((bucketId: string) => ({
+          remove: bucketId === 'archive-media' ? removeArchiveMedia : removeTripMedia,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: mediaTripFilter })),
+          };
+        }
+
+        if (tableName === 'activities') {
+          return {
+            delete: deleteRows,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await repository.deleteActivity(activityId);
+
+    expect(mediaTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(mediaActivityFilter).toHaveBeenCalledWith('activity_id', activityId);
+    expect(removeTripMedia).toHaveBeenCalledWith([
+      mediaRows[0].object_path,
+      mediaRows[1].object_path,
+    ]);
+    expect(removeArchiveMedia).toHaveBeenCalledWith([mediaRows[2].object_path]);
+    expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(deleteIdFilter).toHaveBeenCalledWith('id', activityId);
+    expect(calls).toEqual(['storage:trip-media', 'storage:archive-media', 'activity']);
   });
 
   it('reorders activities and persists updated orders for the active trip', async () => {
@@ -1092,6 +1222,10 @@ describe('supabase trip repository mappers', () => {
     }));
     const activityMediaFilter = vi.fn(async () => ({ data: [], error: null }));
     const tripFilter = vi.fn(() => ({ eq: activityMediaFilter }));
+    const validateActivitySingle = vi.fn(async () => ({ data: { id: activityId }, error: null }));
+    const validateActivityIdFilter = vi.fn(() => ({ single: validateActivitySingle }));
+    const validateDestinationFilter = vi.fn(() => ({ eq: validateActivityIdFilter }));
+    const validateTripFilter = vi.fn(() => ({ eq: validateDestinationFilter }));
     const supabase = {
       auth: {
         getUser: vi.fn(async () => ({
@@ -1110,6 +1244,12 @@ describe('supabase trip repository mappers', () => {
           return createTripsTableMock([
             { id: tripId, owner_user_id: userId, name: 'World tour' },
           ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            select: vi.fn(() => ({ eq: validateTripFilter })),
+          };
         }
 
         if (tableName === 'media_assets') {
@@ -1143,6 +1283,9 @@ describe('supabase trip repository mappers', () => {
       file,
       expect.objectContaining({ contentType: 'image/jpeg', upsert: false }),
     );
+    expect(validateTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(validateDestinationFilter).toHaveBeenCalledWith('destination_id', destinationId);
+    expect(validateActivityIdFilter).toHaveBeenCalledWith('id', activityId);
     expect(mediaInsert).toHaveBeenCalledWith(expect.objectContaining({
       trip_id: tripId,
       destination_id: destinationId,
@@ -1150,6 +1293,247 @@ describe('supabase trip repository mappers', () => {
       bucket_id: 'trip-media',
       sort_order: 0,
     }));
+  });
+
+  it('does not upload activity media when the activity does not belong to the destination', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const activityId = crypto.randomUUID();
+    const upload = vi.fn();
+    const validateActivitySingle = vi.fn(async () => ({
+      data: null,
+      error: { message: 'Activity not found.' },
+    }));
+    const validateActivityIdFilter = vi.fn(() => ({ single: validateActivitySingle }));
+    const validateDestinationFilter = vi.fn(() => ({ eq: validateActivityIdFilter }));
+    const validateTripFilter = vi.fn(() => ({ eq: validateDestinationFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({ upload })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            select: vi.fn(() => ({ eq: validateTripFilter })),
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.uploadActivityMedia({
+      destinationId,
+      activityId,
+      file: new File(['image-data'], 'Louvre.JPG', { type: 'image/jpeg' }),
+    })).rejects.toThrow('Activity not found.');
+
+    expect(validateTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(validateDestinationFilter).toHaveBeenCalledWith('destination_id', destinationId);
+    expect(validateActivityIdFilter).toHaveBeenCalledWith('id', activityId);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('removes an uploaded activity media object when metadata insertion fails', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const activityId = crypto.randomUUID();
+    const uploadedPath = `${tripId}/${destinationId}/${activityId}/asset-louvre.jpg`;
+    const upload = vi.fn(async () => ({ data: { path: uploadedPath }, error: null }));
+    const remove = vi.fn(async () => ({ data: [], error: null }));
+    const mediaInsert = vi.fn(() => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => ({
+          data: null,
+          error: { message: 'metadata insert failed' },
+        })),
+      })),
+    }));
+    const activityMediaFilter = vi.fn(async () => ({ data: [], error: null }));
+    const tripFilter = vi.fn(() => ({ eq: activityMediaFilter }));
+    const validateActivitySingle = vi.fn(async () => ({ data: { id: activityId }, error: null }));
+    const validateActivityIdFilter = vi.fn(() => ({ single: validateActivitySingle }));
+    const validateDestinationFilter = vi.fn(() => ({ eq: validateActivityIdFilter }));
+    const validateTripFilter = vi.fn(() => ({ eq: validateDestinationFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({
+          upload,
+          remove,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            select: vi.fn(() => ({ eq: validateTripFilter })),
+          };
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: tripFilter })),
+            insert: mediaInsert,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.uploadActivityMedia({
+      destinationId,
+      activityId,
+      file: new File(['image-data'], 'Louvre.JPG', { type: 'image/jpeg' }),
+    })).rejects.toThrow('metadata insert failed');
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith([uploadedPath]);
+  });
+
+  it('retries activity media metadata insert with a later sort order after a duplicate', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const activityId = crypto.randomUUID();
+    const mediaAssetId = crypto.randomUUID();
+    const uploadedPath = `${tripId}/${destinationId}/${activityId}/asset-louvre.jpg`;
+    const existingRowsResponses = [
+      [
+        { sort_order: 0 },
+        { sort_order: 2 },
+      ],
+      [
+        { sort_order: 0 },
+        { sort_order: 2 },
+        { sort_order: 3 },
+      ],
+    ];
+    const upload = vi.fn(async () => ({ data: { path: uploadedPath }, error: null }));
+    const remove = vi.fn(async () => ({ data: [], error: null }));
+    const createSignedUrl = vi.fn(async () => ({
+      data: { signedUrl: 'https://signed.example/louvre.jpg' },
+      error: null,
+    }));
+    const mediaInsert = vi
+      .fn()
+      .mockImplementationOnce(() => ({
+        select: vi.fn(() => ({
+          single: vi.fn(async () => ({
+            data: null,
+            error: {
+              message:
+                'duplicate key value violates unique constraint "media_assets_activity_owned_sort_order_key"',
+            },
+          })),
+        })),
+      }))
+      .mockImplementationOnce((row) => ({
+        select: vi.fn(() => ({
+          single: vi.fn(async () => ({
+            data: {
+              id: mediaAssetId,
+              ...row,
+              created_at: '2026-06-29T12:00:00.000Z',
+              updated_at: '2026-06-29T12:00:00.000Z',
+            },
+            error: null,
+          })),
+        })),
+      }));
+    const mediaSelect = vi
+      .fn()
+      .mockImplementationOnce(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(async () => ({ data: existingRowsResponses[0], error: null })),
+        })),
+      }))
+      .mockImplementationOnce(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(async () => ({ data: existingRowsResponses[1], error: null })),
+        })),
+      }));
+    const validateActivitySingle = vi.fn(async () => ({ data: { id: activityId }, error: null }));
+    const validateActivityIdFilter = vi.fn(() => ({ single: validateActivitySingle }));
+    const validateDestinationFilter = vi.fn(() => ({ eq: validateActivityIdFilter }));
+    const validateTripFilter = vi.fn(() => ({ eq: validateDestinationFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({
+          upload,
+          remove,
+          createSignedUrl,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            select: vi.fn(() => ({ eq: validateTripFilter })),
+          };
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: mediaSelect,
+            insert: mediaInsert,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.uploadActivityMedia({
+      destinationId,
+      activityId,
+      file: new File(['image-data'], 'Louvre.JPG', { type: 'image/jpeg' }),
+    })).resolves.toEqual(expect.objectContaining({
+      id: mediaAssetId,
+      sortOrder: 4,
+    }));
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(mediaSelect).toHaveBeenCalledTimes(2);
+    expect(mediaInsert).toHaveBeenNthCalledWith(1, expect.objectContaining({ sort_order: 3 }));
+    expect(mediaInsert).toHaveBeenNthCalledWith(2, expect.objectContaining({ sort_order: 4 }));
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it('lists activity media filtered by active trip and activity owner', async () => {
@@ -1327,7 +1711,8 @@ describe('supabase trip repository mappers', () => {
     const destinationMediaTripFilter = vi.fn(() => ({ eq: destinationMediaDestinationFilter }));
     const activityMediaCreatedOrder = vi.fn(async () => ({ data: activityRows, error: null }));
     const activityMediaSortOrder = vi.fn(() => ({ order: activityMediaCreatedOrder }));
-    const activityMediaDestinationFilter = vi.fn(() => ({ order: activityMediaSortOrder }));
+    const activityMediaOwnerFilter = vi.fn(() => ({ order: activityMediaSortOrder }));
+    const activityMediaDestinationFilter = vi.fn(() => ({ not: activityMediaOwnerFilter }));
     const activityMediaTripFilter = vi.fn(() => ({ eq: activityMediaDestinationFilter }));
     const activitiesCreatedOrder = vi.fn(async () => ({ data: activityRowsByOwner, error: null }));
     const activitiesOrder = vi.fn(() => ({ order: activitiesCreatedOrder }));
@@ -1384,6 +1769,7 @@ describe('supabase trip repository mappers', () => {
       { ownerType: 'activity', activityTitle: 'Bakery crawl', canReorder: false },
       { ownerType: 'activity', activityTitle: 'Louvre', canReorder: false },
     ]);
+    expect(activityMediaOwnerFilter).toHaveBeenCalledWith('activity_id', 'is', null);
   });
 
   it('updates destination media caption and credit in the active trip and returns a fresh signed URL', async () => {
