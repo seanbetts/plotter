@@ -718,7 +718,9 @@ function focusedCoordinatesForDestination(destination: Destination, focusedActiv
   return [
     destination.coordinates,
     ...focusedActivities.flatMap((activity) =>
-      activity.location?.coordinates ? [activity.location.coordinates] : [],
+      activity.destinationId === destination.id && activity.location?.coordinates
+        ? [activity.location.coordinates]
+        : [],
     ),
   ];
 }

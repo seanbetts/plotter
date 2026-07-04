@@ -1253,6 +1253,18 @@ describe('MapCanvas', () => {
   });
 
   it('fits to the selected stop and mappable activity coordinates when entering stop focus', () => {
+    const otherDestinationActivity = {
+      ...louvreActivity,
+      id: 'activity-other-destination',
+      destinationId: targetDestination.id,
+      order: 2,
+      title: 'Wrong stop activity',
+      location: {
+        ...louvreActivity.location,
+        coordinates: { lat: 41.7151, lng: 44.8271 },
+      },
+    };
+
     const { rerender } = render(
       <MapCanvas
         destinations={[destination]}
@@ -1271,7 +1283,7 @@ describe('MapCanvas', () => {
         destinations={[destination]}
         routeLegs={[]}
         selectedDestinationId={destination.id}
-        focusedActivities={[louvreActivity, manualActivity]}
+        focusedActivities={[louvreActivity, manualActivity, otherDestinationActivity]}
         selectedActivityId={null}
         onSelectDestination={vi.fn()}
         onSelectActivity={vi.fn()}
