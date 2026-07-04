@@ -225,6 +225,58 @@ describe('ActivityPanel', () => {
     );
   });
 
+  it('keeps activity link controls locked while added links are saving', async () => {
+    const existingLink: ResearchLink = {
+      id: 'louvre-link',
+      title: 'Museum tickets',
+      url: 'https://louvre.example/tickets',
+      domain: 'louvre.example',
+      imageUrl: 'https://louvre.example/og.jpg',
+      sortOrder: 0,
+    };
+    const activity = {
+      ...createActivity({
+        destinationId: 'destination-1',
+        title: 'Louvre',
+        order: 0,
+      }),
+      links: [existingLink],
+    };
+    const linkSave = deferred<void>();
+    const onUpdateActivity = vi.fn(() => linkSave.promise);
+
+    render(<ActivityPanel {...createProps({ activity, onUpdateActivity })} />);
+
+    fireEvent.change(screen.getByLabelText('Add link URL'), {
+      target: { value: 'restaurant.example/menu' },
+    });
+    fireEvent.submit(screen.getByRole('form', { name: 'Add link' }));
+
+    await waitFor(() => expect(onUpdateActivity).toHaveBeenCalledWith(activity.id, expect.any(Object)));
+    expect(screen.getByLabelText('Add link URL')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete Museum tickets' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move Dinner menu up' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: /Museum tickets/ }).closest('article')).toHaveAttribute(
+      'draggable',
+      'false',
+    );
+
+    await act(async () => {
+      linkSave.resolve(undefined);
+      await linkSave.promise;
+    });
+
+    await waitFor(() => expect(screen.getByLabelText('Add link URL')).not.toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Add' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete Museum tickets' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move Dinner menu up' })).not.toBeDisabled();
+    expect(screen.getByRole('link', { name: /Museum tickets/ }).closest('article')).toHaveAttribute(
+      'draggable',
+      'true',
+    );
+  });
+
   it('shows an accessible alert and restores the persisted value when a save fails', async () => {
     const activity = createActivity({
       destinationId: 'destination-1',

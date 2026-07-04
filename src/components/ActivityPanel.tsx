@@ -400,7 +400,7 @@ function ActivityPanelForm({
         previewClient={linkPreviewClient}
         onChange={(links) => {
           updateDraft('links', links);
-          void commitDraft('links');
+          return commitDraft('links');
         }}
       />
     </aside>
