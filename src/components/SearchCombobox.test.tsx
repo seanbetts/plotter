@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { SearchCombobox } from './SearchCombobox';
 
@@ -143,5 +144,47 @@ describe('SearchCombobox', () => {
     expect(wasNotCanceled).toBe(false);
     expect(onAncestorKeyDown).not.toHaveBeenCalled();
     expect(input).toHaveValue('');
+  });
+
+  it('supports controlled query state', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn().mockResolvedValue([]);
+
+    function ControlledSearch() {
+      const [value, setValue] = useState('Paris');
+
+      return (
+        <>
+          <SearchCombobox<Result>
+            label="Search test places"
+            placeholder="Search places"
+            inputId="test-search"
+            resultsId="test-search-results"
+            value={value}
+            onValueChange={setValue}
+            search={search}
+            getResultId={(result) => result.id}
+            getResultLabel={(result) => result.label}
+            onSelectResult={vi.fn()}
+            renderResult={(result) => <span>{result.title}</span>}
+          />
+          <button type="button" onClick={() => setValue('Seoul')}>
+            Set Seoul
+          </button>
+        </>
+      );
+    }
+
+    render(<ControlledSearch />);
+
+    const input = screen.getByLabelText('Search test places');
+    expect(input).toHaveValue('Paris');
+
+    await user.clear(input);
+    await user.type(input, 'Rome');
+    expect(input).toHaveValue('Rome');
+
+    await user.click(screen.getByRole('button', { name: 'Set Seoul' }));
+    expect(input).toHaveValue('Seoul');
   });
 });

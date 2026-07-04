@@ -8,6 +8,8 @@ type SearchComboboxProps<Result> = {
   resultsId: string;
   className?: string;
   clearLabel?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
   search: (query: string) => Promise<Result[]>;
   getResultId: (result: Result) => string;
   getResultLabel: (result: Result) => string;
@@ -24,19 +26,30 @@ export function SearchCombobox<Result>({
   resultsId,
   className = 'search-group',
   clearLabel = 'Clear search',
+  value,
+  onValueChange,
   search,
   getResultId,
   getResultLabel,
   onSelectResult,
   renderResult,
 }: SearchComboboxProps<Result>) {
-  const [query, setQuery] = useState('');
+  const [internalQuery, setInternalQuery] = useState('');
   const [results, setResults] = useState<Result[]>([]);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const latestSearchId = useRef(0);
   const searchTimerRef = useRef<number | null>(null);
+  const query = value ?? internalQuery;
+
+  function setQuery(nextQuery: string) {
+    if (value === undefined) {
+      setInternalQuery(nextQuery);
+    }
+
+    onValueChange?.(nextQuery);
+  }
 
   const handleSearch = useCallback(
     async (nextQuery: string) => {

@@ -1,12 +1,15 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import type { Activity } from '../domain/types';
+import type { PlaceSearchResult } from '../adapters/geocoding';
+import type { Activity, ActivityLocation } from '../domain/types';
+import { SearchCombobox } from './SearchCombobox';
 
 type ActivityListProps = {
   activities: Activity[];
   selectedActivityId: string | null;
   onSelectActivity: (activityId: string) => void;
-  onCreateActivity: (title: string) => Promise<unknown> | unknown;
+  onCreateActivity: (input: { title: string; location?: ActivityLocation }) => Promise<unknown> | unknown;
+  searchActivities: (query: string) => Promise<PlaceSearchResult[]>;
   onDeleteActivity: (activityId: string) => Promise<unknown> | unknown;
   onReorderActivities: (orderedActivityIds: string[]) => Promise<unknown> | unknown;
 };
@@ -25,11 +28,65 @@ function moveActivityId(activityIds: string[], activityId: string, direction: -1
   return nextActivityIds;
 }
 
+function formatCoordinatePair(result: Extract<PlaceSearchResult, { kind: 'coordinates' }>) {
+  return `${result.coordinates.lat}, ${result.coordinates.lng}`;
+}
+
+function activityLocationFromSearchResult(
+  result: Extract<PlaceSearchResult, { kind: 'place' }>,
+): ActivityLocation {
+  return {
+    name: result.location.placeName,
+    address: result.address ?? result.location.sourceLabel,
+    coordinates: result.coordinates,
+    sourceProvider: 'maptiler',
+    sourceFeatureId: result.location.sourceFeatureId,
+  };
+}
+
+function activityLocationFromCoordinateResult(
+  result: Extract<PlaceSearchResult, { kind: 'coordinates' }>,
+): ActivityLocation {
+  const coordinates = formatCoordinatePair(result);
+
+  return {
+    name: 'Coordinates',
+    address: coordinates,
+    coordinates: result.coordinates,
+    sourceProvider: 'manual',
+  };
+}
+
+function formatActivitySearchContext(result: PlaceSearchResult) {
+  if (result.kind === 'coordinates') {
+    return formatCoordinatePair(result);
+  }
+
+  return result.address ?? result.location.sourceLabel;
+}
+
+function formatDistance(distanceKm: number | undefined) {
+  if (distanceKm === undefined) return '';
+
+  if (distanceKm >= 10) {
+    return `${Math.round(distanceKm)} km`;
+  }
+
+  return `${distanceKm.toFixed(1)} km`;
+}
+
+function formatTypeBadge(result: PlaceSearchResult) {
+  if (result.kind === 'coordinates') return 'Coordinates';
+
+  return result.placeTypeNames?.[0] ?? result.placeTypes?.[0] ?? 'Place';
+}
+
 export function ActivityList({
   activities,
   selectedActivityId,
   onSelectActivity,
   onCreateActivity,
+  searchActivities,
   onDeleteActivity,
   onReorderActivities,
 }: ActivityListProps) {
@@ -59,10 +116,34 @@ export function ActivityList({
 
     setMutationError('');
     try {
-      await Promise.resolve(onCreateActivity(title));
+      await Promise.resolve(onCreateActivity({ title }));
       setNewActivityTitle('');
     } catch {
       setMutationError('Unable to update activities.');
+    }
+  }
+
+  async function createActivityFromSearchResult(result: PlaceSearchResult) {
+    setMutationError('');
+    try {
+      if (result.kind === 'coordinates') {
+        await Promise.resolve(
+          onCreateActivity({
+            title: 'Coordinates',
+            location: activityLocationFromCoordinateResult(result),
+          }),
+        );
+      } else {
+        await Promise.resolve(
+          onCreateActivity({
+            title: result.location.placeName,
+            location: activityLocationFromSearchResult(result),
+          }),
+        );
+      }
+    } catch {
+      setMutationError('Unable to update activities.');
+      throw new Error('Unable to update activities.');
     }
   }
 
@@ -133,16 +214,32 @@ export function ActivityList({
       )}
 
       <div className="activity-add-row">
-        <input
-          aria-label="New activity title"
-          placeholder="Add activity"
+        <SearchCombobox<PlaceSearchResult>
+          label="Search for an activity"
+          placeholder="Find a place, venue, or address"
+          inputId="activity-search"
+          resultsId="activity-search-results"
+          className="activity-search-group"
           value={newActivityTitle}
-          onChange={(event) => setNewActivityTitle(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              submitNewActivity();
-            }
+          onValueChange={setNewActivityTitle}
+          search={searchActivities}
+          getResultId={(result) => result.id}
+          getResultLabel={(result) => result.label}
+          onSelectResult={createActivityFromSearchResult}
+          renderResult={(result) => {
+            const context = formatActivitySearchContext(result);
+            const distance = formatDistance(result.distanceFromProximityKm);
+
+            return (
+              <>
+                <span className="search-result-title">
+                  {result.kind === 'coordinates' ? 'Use coordinates' : result.location.placeName}
+                </span>
+                <span className="search-result-badge">{formatTypeBadge(result)}</span>
+                {context ? <span className="search-result-subtitle">{context}</span> : null}
+                {distance ? <span className="search-result-distance">{distance}</span> : null}
+              </>
+            );
           }}
         />
         <button type="button" aria-label="Add activity" onClick={submitNewActivity}>
