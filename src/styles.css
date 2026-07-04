@@ -1916,7 +1916,7 @@ select {
 
 .image-preview-floating-button:focus-visible,
 .image-preview-delete-popover button:focus-visible,
-.image-preview-open-activity-button:focus-visible {
+.image-preview-activity-attribution:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
@@ -2051,22 +2051,21 @@ select {
   box-shadow: 0 8px 24px rgb(var(--color-text-rgb) / 0.16);
   font-size: 0.76rem;
   font-weight: 800;
+  font-family: inherit;
   -webkit-backdrop-filter: blur(14px) saturate(1.18);
   backdrop-filter: blur(14px) saturate(1.18);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.image-preview-open-activity-button {
-  flex: 0 0 auto;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-control);
-  padding: 5px 8px;
-  color: var(--color-text);
-  background: var(--surface-control);
-  font-size: 0.74rem;
-  font-weight: 850;
+button.image-preview-activity-attribution {
   cursor: pointer;
+}
+
+button.image-preview-activity-attribution:hover,
+button.image-preview-activity-attribution:focus-visible {
+  border-color: rgb(255 255 255 / 0.82);
+  background: rgb(255 255 255 / 0.86);
 }
 
 .destination-image-strip {

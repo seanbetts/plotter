@@ -18,6 +18,8 @@ function getMediaStripItems(props: DestinationImageStripProps): MediaStripItem[]
   if (props.mediaRollupItems) {
     return props.mediaRollupItems.map((rollupItem) => ({
       mediaItem: rollupItem.mediaItem,
+      attribution: rollupItem.activityTitle,
+      thumbnailAttribution: null,
       canReorder: rollupItem.canReorderInStopCarousel,
     }));
   }

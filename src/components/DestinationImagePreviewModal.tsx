@@ -186,16 +186,18 @@ export function DestinationImagePreviewModal({
           </div>
           {hasActivityAttribution ? (
             <div className="image-preview-activity-tools">
-              <span className="image-preview-activity-attribution">{activityAttribution}</span>
               {canOpenActivity ? (
                 <button
                   type="button"
-                  className="image-preview-open-activity-button"
+                  className="image-preview-activity-attribution"
+                  aria-label={`Open activity ${activityAttribution}`}
                   onClick={onOpenActivity}
                 >
-                  Open activity
+                  {activityAttribution}
                 </button>
-              ) : null}
+              ) : (
+                <span className="image-preview-activity-attribution">{activityAttribution}</span>
+              )}
             </div>
           ) : null}
         </div>

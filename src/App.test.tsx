@@ -910,7 +910,7 @@ describe('App', () => {
     });
   });
 
-  it('keeps activity attribution out of the stop image carousel', async () => {
+  it('shows activity attribution on the selected stop preview image', async () => {
     const user = userEvent.setup();
     const destination = createDestination({
       name: 'Paris',
@@ -958,7 +958,9 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Show image 2: Museum wing' }));
 
-    expect(within(screen.getByRole('group', { name: 'Image preview' })).queryByText('Louvre')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Image preview' })).getByText('Louvre')).toHaveClass(
+      'destination-image-attribution',
+    );
   });
 
   it('opens an activity-owned rollup image in the modal without reordering destination media', async () => {

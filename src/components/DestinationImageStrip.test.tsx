@@ -104,7 +104,7 @@ describe('DestinationImageStrip', () => {
     expect(onOpenPreview).toHaveBeenCalledWith('media-2');
   });
 
-  it('omits activity attribution from rollup thumbnails and the selected preview', () => {
+  it('shows activity attribution on the selected rollup preview but not rollup thumbnails', () => {
     render(
       <DestinationImageStrip
         {...createProps({
@@ -132,7 +132,9 @@ describe('DestinationImageStrip', () => {
 
     fireEvent.click(activityThumbnail);
 
-    expect(within(screen.getByRole('group', { name: 'Image preview' })).queryByText('Night market')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Image preview' })).getByText('Night market')).toHaveClass(
+      'destination-image-attribution',
+    );
   });
 
   it('blocks stop carousel reorder when a rollup item is not reorderable in the stop carousel', () => {

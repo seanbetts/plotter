@@ -96,7 +96,7 @@ describe('DestinationImagePreviewModal', () => {
     expect(screen.getByRole('img', { name: 'Activity reference image' })).toBeInTheDocument();
   });
 
-  it('renders an open activity action only when attribution and a handler are provided', () => {
+  it('uses the activity attribution pill as the open activity action when a handler is provided', () => {
     const onOpenActivity = vi.fn();
     const { rerender } = render(
       <DestinationImagePreviewModal
@@ -108,6 +108,7 @@ describe('DestinationImagePreviewModal', () => {
 
     expect(screen.queryByRole('button', { name: 'Open activity' })).not.toBeInTheDocument();
     expect(screen.getByText('Night market')).toHaveClass('image-preview-activity-attribution');
+    expect(screen.queryByRole('button', { name: 'Open activity Night market' })).not.toBeInTheDocument();
 
     rerender(
       <DestinationImagePreviewModal
@@ -118,13 +119,12 @@ describe('DestinationImagePreviewModal', () => {
       />,
     );
 
-    const attribution = screen.getByText('Night market');
-    const openActivityButton = screen.getByRole('button', { name: 'Open activity' });
+    expect(screen.queryByRole('button', { name: 'Open activity' })).not.toBeInTheDocument();
+    const attribution = screen.getByRole('button', { name: 'Open activity Night market' });
     expect(attribution).toHaveClass('image-preview-activity-attribution');
-    expect(openActivityButton).toHaveClass('image-preview-open-activity-button');
-    expect(attribution).not.toContainElement(openActivityButton);
+    expect(attribution).toHaveTextContent('Night market');
 
-    fireEvent.click(openActivityButton);
+    fireEvent.click(attribution);
 
     expect(onOpenActivity).toHaveBeenCalledTimes(1);
   });

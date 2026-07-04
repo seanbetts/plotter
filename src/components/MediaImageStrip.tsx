@@ -7,6 +7,7 @@ import { preloadImageUrls } from '../media/imagePreloading';
 export type MediaStripItem = {
   mediaItem: MediaItem;
   attribution?: string;
+  thumbnailAttribution?: string | null;
   canReorder: boolean;
 };
 
@@ -396,27 +397,32 @@ export function MediaImageStrip({
 
       {items.length > 0 ? (
         <div className="destination-image-carousel" aria-label="Image thumbnails">
-          {items.map((item, index) => (
-            <button
-              key={item.mediaItem.id}
-              type="button"
-              className={`destination-image-thumbnail${
-                dragTarget?.mediaId === item.mediaItem.id ? ` is-drop-${dragTarget.side}` : ''
-              }`}
-              aria-label={openPreviewLabel(item.mediaItem, index)}
-              draggable={item.canReorder}
-              onClick={() => setPreviewMediaId(item.mediaItem.id)}
-              onDragStart={(event) => handleThumbnailDragStart(event, item)}
-              onDragOver={(event) => handleThumbnailDragOver(event, item.mediaItem.id)}
-              onDrop={(event) => handleThumbnailDrop(event, item.mediaItem.id)}
-              onDragEnd={clearThumbnailDrag}
-            >
-              <img src={getThumbnailImageUrl(item.mediaItem)} alt={mediaLabel(item.mediaItem, index)} />
-              {item.attribution ? (
-                <span className="destination-image-thumbnail-attribution">{item.attribution}</span>
-              ) : null}
-            </button>
-          ))}
+          {items.map((item, index) => {
+            const thumbnailAttribution =
+              item.thumbnailAttribution === undefined ? item.attribution : item.thumbnailAttribution;
+
+            return (
+              <button
+                key={item.mediaItem.id}
+                type="button"
+                className={`destination-image-thumbnail${
+                  dragTarget?.mediaId === item.mediaItem.id ? ` is-drop-${dragTarget.side}` : ''
+                }`}
+                aria-label={openPreviewLabel(item.mediaItem, index)}
+                draggable={item.canReorder}
+                onClick={() => setPreviewMediaId(item.mediaItem.id)}
+                onDragStart={(event) => handleThumbnailDragStart(event, item)}
+                onDragOver={(event) => handleThumbnailDragOver(event, item.mediaItem.id)}
+                onDrop={(event) => handleThumbnailDrop(event, item.mediaItem.id)}
+                onDragEnd={clearThumbnailDrag}
+              >
+                <img src={getThumbnailImageUrl(item.mediaItem)} alt={mediaLabel(item.mediaItem, index)} />
+                {thumbnailAttribution ? (
+                  <span className="destination-image-thumbnail-attribution">{thumbnailAttribution}</span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       ) : null}
 
