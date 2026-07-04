@@ -66,6 +66,11 @@ type OverlayPosition = {
   y: number;
 };
 
+type MapViewport = {
+  center: [number, number];
+  zoom: number;
+};
+
 type GeoJsonSource = maplibregl.GeoJSONSource & {
   setData: (data: FeatureCollection) => void;
 };
@@ -484,6 +489,14 @@ const addStopMenuApproxSize = {
   width: 180,
   height: 112,
 };
+const stopFocusPadding = {
+  top: 96,
+  right: 760,
+  bottom: 96,
+  left: 96,
+};
+const stopFocusMaxZoom = 13;
+const mapViewportTransitionMs = 700;
 const defaultFocusedActivities: Activity[] = [];
 
 const mapColorTokenFallbacks = {
@@ -692,6 +705,24 @@ function setSourceData(map: maplibregl.Map, sourceId: string, data: FeatureColle
   getGeoJsonSource(map, sourceId)?.setData(data);
 }
 
+function mapViewport(map: maplibregl.Map): MapViewport {
+  const center = map.getCenter();
+
+  return {
+    center: [center.lng, center.lat],
+    zoom: map.getZoom(),
+  };
+}
+
+function focusedCoordinatesForDestination(destination: Destination, focusedActivities: Activity[]): Coordinates[] {
+  return [
+    destination.coordinates,
+    ...focusedActivities.flatMap((activity) =>
+      activity.location?.coordinates ? [activity.location.coordinates] : [],
+    ),
+  ];
+}
+
 function layerMatchesPattern(layerId: string, patterns: string[]) {
   const normalizedLayerId = layerId.toLowerCase();
 
@@ -823,6 +854,8 @@ export function MapCanvas({
     mapY: number;
   } | null>(null);
   const previousDestinationCountRef = useRef(0);
+  const routeViewportBeforeFocusRef = useRef<MapViewport | null>(null);
+  const previousSelectedDestinationIdRef = useRef(selectedDestinationId);
   const [selectedZoomStep, setSelectedZoomStep] = useState(1);
   const [currentMapZoom, setCurrentMapZoom] = useState(1.4);
   const [mapDetailSettings, setMapDetailSettings] = useState(createDefaultMapDetailSettings);
@@ -982,6 +1015,27 @@ export function MapCanvas({
     );
   }, []);
 
+  const fitMapToStopFocus = useCallback((destination: Destination, activities: Activity[]) => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const coordinates = focusedCoordinatesForDestination(destination, activities);
+    const lngs = coordinates.map((coordinate) => coordinate.lng);
+    const lats = coordinates.map((coordinate) => coordinate.lat);
+
+    map.fitBounds(
+      [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ],
+      {
+        padding: stopFocusPadding,
+        maxZoom: stopFocusMaxZoom,
+        duration: mapViewportTransitionMs,
+      },
+    );
+  }, []);
+
   useEffect(() => {
     const previousDestinationCount = previousDestinationCountRef.current;
     latestDestinationsRef.current = destinations;
@@ -1012,6 +1066,36 @@ export function MapCanvas({
     fitMapToDestinations,
     updateMapSources,
   ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const previousSelectedDestinationId = previousSelectedDestinationIdRef.current;
+    const selectedDestination = selectedDestinationId
+      ? destinations.find((candidate) => candidate.id === selectedDestinationId) ?? null
+      : null;
+
+    if (selectedDestination) {
+      if (!previousSelectedDestinationId && !routeViewportBeforeFocusRef.current) {
+        routeViewportBeforeFocusRef.current = mapViewport(map);
+      }
+      fitMapToStopFocus(selectedDestination, focusedActivities);
+      previousSelectedDestinationIdRef.current = selectedDestinationId;
+      return;
+    }
+
+    if (previousSelectedDestinationId && routeViewportBeforeFocusRef.current) {
+      map.easeTo({
+        center: routeViewportBeforeFocusRef.current.center,
+        zoom: routeViewportBeforeFocusRef.current.zoom,
+        duration: mapViewportTransitionMs,
+      });
+      routeViewportBeforeFocusRef.current = null;
+    }
+
+    previousSelectedDestinationIdRef.current = selectedDestinationId;
+  }, [destinations, fitMapToStopFocus, focusedActivities, selectedDestinationId]);
 
   const addMapLayers = useCallback(() => {
     const map = mapRef.current;
