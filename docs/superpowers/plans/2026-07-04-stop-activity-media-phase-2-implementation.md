@@ -377,7 +377,7 @@ git commit -m "feat: add activity media repositories"
 - Test: `src/hooks/useOwnedMedia.test.tsx`
 - Test: `src/hooks/useActivityMedia.test.tsx`
 
-- [ ] **Step 1: Create owner hook types**
+- [x] **Step 1: Create owner hook types**
 
 Create `src/hooks/useOwnedMedia.ts` with these public types:
 
@@ -401,7 +401,7 @@ export type UseOwnedMediaInput = {
 };
 ```
 
-- [ ] **Step 2: Move current hook behavior into `useOwnedMedia`**
+- [x] **Step 2: Move current hook behavior into `useOwnedMedia`**
 
 Move the existing behavior from `useDestinationMedia` into `useOwnedMedia(input)`:
 
@@ -429,7 +429,7 @@ The returned shape should match the current `useDestinationMedia` return shape:
 }
 ```
 
-- [ ] **Step 3: Wrap destination media**
+- [x] **Step 3: Wrap destination media**
 
 Replace `useDestinationMedia` internals with:
 
@@ -455,7 +455,7 @@ export function useDestinationMedia(repository: TripRepository, destinationId: s
 }
 ```
 
-- [ ] **Step 4: Add activity media hook**
+- [x] **Step 4: Add activity media hook**
 
 Create `src/hooks/useActivityMedia.ts`:
 
@@ -490,7 +490,7 @@ export function useActivityMedia(
 }
 ```
 
-- [ ] **Step 5: Add hook tests**
+- [x] **Step 5: Add hook tests**
 
 Move the current `useDestinationMedia` behavioral tests to `useOwnedMedia.test.tsx`. Keep one wrapper test in `useDestinationMedia.test.tsx` proving it calls destination methods, and add `useActivityMedia.test.tsx` proving it calls:
 
@@ -500,7 +500,7 @@ repository.uploadActivityMedia({ destinationId, activityId, file: normalizedFile
 repository.reorderActivityMedia(activityId, orderedMediaIds);
 ```
 
-- [ ] **Step 6: Run hook tests**
+- [x] **Step 6: Run hook tests**
 
 Run:
 
@@ -510,7 +510,7 @@ npm test -- src/hooks/useOwnedMedia.test.tsx src/hooks/useDestinationMedia.test.
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit hook generalization**
+- [x] **Step 7: Commit hook generalization**
 
 Run:
 
