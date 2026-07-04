@@ -30,6 +30,7 @@ describe('activities', () => {
       updatedAt: '2026-07-03T12:00:00.000Z',
     });
     expect(activity.id).toEqual(expect.any(String));
+    expect(activity.links).toEqual([]);
   });
 
   it('creates an activity with exact location details', () => {

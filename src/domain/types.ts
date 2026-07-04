@@ -56,6 +56,10 @@ export type ResearchLink = {
   id: string;
   title: string;
   url: string;
+  domain: string;
+  imageUrl?: string;
+  sortOrder: number;
+  previewFetchedAt?: string;
 };
 
 export type BookReference = {
