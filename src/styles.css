@@ -583,6 +583,18 @@ select {
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
 }
 
+.activity-search-group {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.activity-search-group .search-results {
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+}
+
 .search-results button {
   display: grid;
   gap: 3px;
@@ -620,6 +632,32 @@ select {
 .search-result-subtitle {
   color: var(--text-faint);
   font-size: 0.78rem;
+}
+
+.activity-search-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted, var(--text-muted));
+  font-size: 0.8rem;
+}
+
+.activity-search-badge,
+.activity-search-group .search-result-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border-subtle, var(--border-subtle));
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--color-text);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.activity-search-distance,
+.activity-search-group .search-result-distance {
+  flex: 0 0 auto;
+  color: var(--color-text-muted, var(--text-muted));
 }
 
 .search-results button.is-highlighted .search-result-subtitle,
