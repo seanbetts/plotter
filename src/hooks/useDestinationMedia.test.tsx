@@ -465,6 +465,16 @@ function createMediaRepository(overrides: Partial<TripRepository> = {}) {
 
     async deleteDestination() {},
 
+    listActivities: vi.fn(async () => []),
+
+    createActivity: vi.fn(),
+
+    updateActivity: vi.fn(),
+
+    deleteActivity: vi.fn(),
+
+    reorderActivities: vi.fn(),
+
     listDestinationMedia: vi.fn().mockResolvedValue([]),
 
     uploadDestinationMedia: vi.fn(async () => createMediaItem('uploaded-media', 0)),

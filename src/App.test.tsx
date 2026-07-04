@@ -84,6 +84,11 @@ const repositoryMock = vi.hoisted(() => {
         (leg) => leg.originDestinationId !== destinationId && leg.targetDestinationId !== destinationId,
       );
     }),
+    listActivities: vi.fn(async () => []),
+    createActivity: vi.fn(),
+    updateActivity: vi.fn(),
+    deleteActivity: vi.fn(),
+    reorderActivities: vi.fn(),
     listRouteLegs: vi.fn(async () => repository.initialRouteLegs),
     saveRouteLeg: vi.fn(async (routeLeg: RouteLeg) => {
       repository.routeLegs.push(routeLeg);
@@ -133,6 +138,11 @@ describe('App', () => {
       repositoryMock.destinations.push(destination);
     });
     repositoryMock.deleteDestination.mockClear();
+    repositoryMock.listActivities.mockClear();
+    repositoryMock.createActivity.mockClear();
+    repositoryMock.updateActivity.mockClear();
+    repositoryMock.deleteActivity.mockClear();
+    repositoryMock.reorderActivities.mockClear();
     repositoryMock.listRouteLegs.mockClear();
     repositoryMock.saveRouteLeg.mockClear();
     repositoryMock.deleteRouteLeg.mockClear();

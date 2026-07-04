@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { LineString } from 'geojson';
+import { createActivity, reorderActivities as reorderActivityModels } from '../domain/activities';
 import type {
+  Activity,
   Destination,
   DestinationLocation,
   DestinationStatus,
@@ -29,6 +31,24 @@ type SupabaseDestinationRow = {
   research: Destination['research'];
   activities: Destination['activities'];
   route_context: Destination['routeContext'];
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+type SupabaseActivityRow = {
+  id: string;
+  trip_id: string;
+  destination_id: string;
+  activity_order: number;
+  title: string;
+  description: string;
+  category: Activity['category'];
+  status: Activity['status'];
+  priority: Activity['priority'];
+  location: Activity['location'] | null;
+  links: Activity['links'];
+  notes: string;
   tags: string[];
   created_at: string;
   updated_at: string;
@@ -184,6 +204,45 @@ export function destinationFromSupabaseRow(row: SupabaseDestinationRow): Destina
     research: row.research,
     activities: row.activities,
     routeContext: row.route_context,
+    tags: row.tags,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function activityToSupabaseRow(activity: Activity, tripId: string): SupabaseActivityRow {
+  return {
+    id: activity.id,
+    trip_id: tripId,
+    destination_id: activity.destinationId,
+    activity_order: activity.order,
+    title: activity.title,
+    description: activity.description,
+    category: activity.category,
+    status: activity.status,
+    priority: activity.priority,
+    location: activity.location ?? null,
+    links: activity.links,
+    notes: activity.notes,
+    tags: activity.tags,
+    created_at: activity.createdAt,
+    updated_at: activity.updatedAt,
+  };
+}
+
+export function activityFromSupabaseRow(row: SupabaseActivityRow): Activity {
+  return {
+    id: row.id,
+    destinationId: row.destination_id,
+    order: row.activity_order,
+    title: row.title,
+    description: row.description,
+    category: row.category,
+    status: row.status,
+    priority: row.priority,
+    location: row.location ?? undefined,
+    links: row.links,
+    notes: row.notes,
     tags: row.tags,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -417,6 +476,38 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     return Promise.all(rows.map((row) => createSignedMediaItem(row)));
   }
 
+  async function listTripActivities(tripId: string, destinationId: string) {
+    const rows = assertNoSupabaseError<SupabaseActivityRow[]>(
+      await supabase
+        .from('activities')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('destination_id', destinationId)
+        .order('activity_order', { ascending: true })
+        .order('created_at', { ascending: true }),
+      'Unable to load activities.',
+    );
+
+    return rows.map(activityFromSupabaseRow);
+  }
+
+  async function updateActivityOrder(input: {
+    tripId: string;
+    destinationId: string;
+    activityId: string;
+    order: number;
+  }) {
+    assertSupabaseWriteSucceeded(
+      await supabase
+        .from('activities')
+        .update({ activity_order: input.order })
+        .eq('trip_id', input.tripId)
+        .eq('destination_id', input.destinationId)
+        .eq('id', input.activityId),
+      'Unable to update activity order.',
+    );
+  }
+
   async function updateDestinationMediaSortOrder(input: {
     tripId: string;
     destinationId: string;
@@ -471,6 +562,94 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .eq('id', destinationId),
         'Unable to delete destination.',
       );
+    },
+
+    async listActivities(destinationId) {
+      const tripId = await getActiveTripId();
+      return listTripActivities(tripId, destinationId);
+    },
+
+    async createActivity(input) {
+      const tripId = await getActiveTripId();
+      const existingActivities = await listTripActivities(tripId, input.destinationId);
+      const nextOrder =
+        existingActivities.reduce((maxOrder, activity) => Math.max(maxOrder, activity.order), -1) + 1;
+      const activity = createActivity({
+        ...input,
+        order: input.order ?? nextOrder,
+      });
+      const row = assertNoSupabaseError<SupabaseActivityRow>(
+        await supabase
+          .from('activities')
+          .insert(activityToSupabaseRow(activity, tripId))
+          .select('*')
+          .single(),
+        'Unable to create activity.',
+      );
+
+      return activityFromSupabaseRow(row);
+    },
+
+    async updateActivity(activityId, patch) {
+      const tripId = await getActiveTripId();
+      const rowPatch: Partial<Pick<
+        SupabaseActivityRow,
+        'activity_order' | 'title' | 'description' | 'category' | 'status' | 'priority' | 'location' | 'links' | 'notes' | 'tags'
+      >> = {};
+
+      if (patch.order !== undefined) rowPatch.activity_order = patch.order;
+      if (patch.title !== undefined) rowPatch.title = patch.title;
+      if (patch.description !== undefined) rowPatch.description = patch.description;
+      if (patch.category !== undefined) rowPatch.category = patch.category;
+      if (patch.status !== undefined) rowPatch.status = patch.status;
+      if (patch.priority !== undefined) rowPatch.priority = patch.priority;
+      if ('location' in patch) rowPatch.location = patch.location ?? null;
+      if (patch.links !== undefined) rowPatch.links = patch.links;
+      if (patch.notes !== undefined) rowPatch.notes = patch.notes;
+      if (patch.tags !== undefined) rowPatch.tags = patch.tags;
+
+      const row = assertNoSupabaseError<SupabaseActivityRow>(
+        await supabase
+          .from('activities')
+          .update(rowPatch)
+          .eq('trip_id', tripId)
+          .eq('id', activityId)
+          .select('*')
+          .single(),
+        'Unable to update activity.',
+      );
+
+      return activityFromSupabaseRow(row);
+    },
+
+    async deleteActivity(activityId) {
+      const tripId = await getActiveTripId();
+
+      assertSupabaseWriteSucceeded(
+        await supabase
+          .from('activities')
+          .delete()
+          .eq('trip_id', tripId)
+          .eq('id', activityId),
+        'Unable to delete activity.',
+      );
+    },
+
+    async reorderActivities(destinationId, orderedActivityIds) {
+      const tripId = await getActiveTripId();
+      const currentActivities = await listTripActivities(tripId, destinationId);
+      const orderedActivities = reorderActivityModels(currentActivities, orderedActivityIds);
+
+      for (const activity of orderedActivities) {
+        await updateActivityOrder({
+          tripId,
+          destinationId,
+          activityId: activity.id,
+          order: activity.order,
+        });
+      }
+
+      return listTripActivities(tripId, destinationId);
     },
 
     async listDestinationMedia(destinationId) {

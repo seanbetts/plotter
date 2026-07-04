@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
+import type { Activity } from '../domain/types';
 import {
+  activityFromSupabaseRow,
+  activityToSupabaseRow,
   destinationFromSupabaseRow,
   destinationToSupabaseRow,
   mediaAssetFromSupabaseRow,
@@ -85,6 +89,46 @@ describe('supabase trip repository mappers', () => {
     expect(routeLegFromSupabaseRow(row)).toEqual(routeLeg);
   });
 
+  it('maps activities to and from Supabase rows', () => {
+    const activity: Activity = {
+      ...createActivityModel({
+        destinationId: crypto.randomUUID(),
+        title: 'Night market',
+        order: 3,
+      }),
+      description: 'Street food crawl',
+      category: 'food',
+      status: 'planned',
+      priority: 'high',
+      location: {
+        name: 'Myeongdong',
+        address: 'Seoul, South Korea',
+        coordinates: { lat: 37.5638, lng: 126.985 },
+        sourceProvider: 'manual',
+      },
+      links: [{ id: crypto.randomUUID(), title: 'Menu', url: 'https://example.com/menu' }],
+      notes: 'Go hungry.',
+      tags: ['food', 'evening'],
+    };
+    const tripId = crypto.randomUUID();
+
+    const row = activityToSupabaseRow(activity, tripId);
+
+    expect(row).toMatchObject({
+      id: activity.id,
+      trip_id: tripId,
+      destination_id: activity.destinationId,
+      activity_order: 3,
+      title: 'Night market',
+      category: 'food',
+      status: 'planned',
+      priority: 'high',
+      notes: 'Go hungry.',
+      tags: ['food', 'evening'],
+    });
+    expect(activityFromSupabaseRow(row)).toEqual(activity);
+  });
+
   it('upserts destinations and route legs against the trip-scoped id', async () => {
     const tripId = crypto.randomUUID();
     const destination = createDestination({
@@ -136,6 +180,348 @@ describe('supabase trip repository mappers', () => {
       expect.objectContaining({ id: routeLeg.id, trip_id: tripId }),
       { onConflict: 'trip_id,id' },
     );
+  });
+
+  it('lists activities for a destination ordered by activity order and creation time', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const rows = [
+      activityToSupabaseRow(
+        createActivityModel({
+          destinationId,
+          title: 'First sorted',
+          order: 0,
+        }),
+        tripId,
+      ),
+      activityToSupabaseRow(
+        createActivityModel({
+          destinationId,
+          title: 'Second sorted',
+          order: 1,
+        }),
+        tripId,
+      ),
+    ];
+    const createdOrder = vi.fn(async () => ({ data: rows, error: null }));
+    const activityOrder = vi.fn(() => ({ order: createdOrder }));
+    const destinationFilter = vi.fn(() => ({ order: activityOrder }));
+    const tripFilter = vi.fn(() => ({ eq: destinationFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            select: vi.fn(() => ({ eq: tripFilter })),
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.listActivities(destinationId)).resolves.toEqual(
+      rows.map(activityFromSupabaseRow),
+    );
+
+    expect(tripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(destinationFilter).toHaveBeenCalledWith('destination_id', destinationId);
+    expect(activityOrder).toHaveBeenCalledWith('activity_order', { ascending: true });
+    expect(createdOrder).toHaveBeenCalledWith('created_at', { ascending: true });
+  });
+
+  it('creates an activity scoped to the active trip and destination', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const activityId = crypto.randomUUID();
+    const createdAt = '2026-07-03T12:00:00.000Z';
+    const insertedRows: unknown[] = [];
+    vi.setSystemTime(new Date(createdAt));
+
+    const existingCreatedOrder = vi.fn(async () => ({ data: [], error: null }));
+    const existingActivityOrder = vi.fn(() => ({ order: existingCreatedOrder }));
+    const existingDestinationFilter = vi.fn(() => ({ order: existingActivityOrder }));
+    const existingTripFilter = vi.fn(() => ({ eq: existingDestinationFilter }));
+    const insert = vi.fn((row) => {
+      insertedRows.push(row);
+      return {
+        select: vi.fn(() => ({
+          single: vi.fn(async () => ({
+            data: {
+              ...row,
+              id: activityId,
+              created_at: createdAt,
+              updated_at: createdAt,
+            },
+            error: null,
+          })),
+        })),
+      };
+    });
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            select: vi.fn(() => ({ eq: existingTripFilter })),
+            insert,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    const activity = await repository.createActivity({
+      destinationId,
+      title: 'Night market',
+      order: 4,
+    });
+
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({
+      trip_id: tripId,
+      destination_id: destinationId,
+      activity_order: 4,
+      title: 'Night market',
+      description: '',
+      category: 'other',
+      status: 'idea',
+      priority: 'medium',
+      links: [],
+      notes: '',
+      tags: [],
+    }));
+    expect(activity).toEqual(expect.objectContaining({
+      id: activityId,
+      destinationId,
+      title: 'Night market',
+      order: 4,
+    }));
+    expect(insertedRows).toHaveLength(1);
+
+    vi.useRealTimers();
+  });
+
+  it('creates an activity without explicit order after the current max order', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const existingRows = [0, 3].map((order) =>
+      activityToSupabaseRow(
+        createActivityModel({
+          destinationId,
+          title: `Existing ${order}`,
+          order,
+        }),
+        tripId,
+      ),
+    );
+    const existingCreatedOrder = vi.fn(async () => ({ data: existingRows, error: null }));
+    const existingActivityOrder = vi.fn(() => ({ order: existingCreatedOrder }));
+    const existingDestinationFilter = vi.fn(() => ({ order: existingActivityOrder }));
+    const existingTripFilter = vi.fn(() => ({ eq: existingDestinationFilter }));
+    const insert = vi.fn((row) => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => ({
+          data: row,
+          error: null,
+        })),
+      })),
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            select: vi.fn(() => ({ eq: existingTripFilter })),
+            insert,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await repository.createActivity({
+      destinationId,
+      title: 'After a deleted middle item',
+    });
+
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({
+      activity_order: 4,
+    }));
+  });
+
+  it('updates and deletes activities through Supabase using active trip scope', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const activityId = crypto.randomUUID();
+    const updatedRow = activityToSupabaseRow(
+      {
+        ...createActivityModel({ destinationId, title: 'Updated title', order: 0 }),
+        id: activityId,
+        description: 'Updated description',
+        status: 'booked',
+      },
+      tripId,
+    );
+    const updateSingle = vi.fn(async () => ({ data: updatedRow, error: null }));
+    const updateSelect = vi.fn(() => ({ single: updateSingle }));
+    const updateIdFilter = vi.fn(() => ({ select: updateSelect }));
+    const updateTripFilter = vi.fn(() => ({ eq: updateIdFilter }));
+    const update = vi.fn(() => ({ eq: updateTripFilter }));
+    const deleteIdFilter = vi.fn(async () => ({ error: null }));
+    const deleteTripFilter = vi.fn(() => ({ eq: deleteIdFilter }));
+    const deleteRows = vi.fn(() => ({ eq: deleteTripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            update,
+            delete: deleteRows,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.updateActivity(activityId, {
+      title: 'Updated title',
+      description: 'Updated description',
+      status: 'booked',
+      location: undefined,
+    })).resolves.toEqual(expect.objectContaining({
+      id: activityId,
+      title: 'Updated title',
+      description: 'Updated description',
+      status: 'booked',
+    }));
+    await repository.deleteActivity(activityId);
+
+    expect(update).toHaveBeenCalledWith({
+      title: 'Updated title',
+      description: 'Updated description',
+      status: 'booked',
+      location: null,
+    });
+    expect(updateTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(updateIdFilter).toHaveBeenCalledWith('id', activityId);
+    expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(deleteIdFilter).toHaveBeenCalledWith('id', activityId);
+  });
+
+  it('reorders activities and persists updated orders for the active trip', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const first = createActivityModel({ destinationId, title: 'First', order: 0 });
+    const second = createActivityModel({ destinationId, title: 'Second', order: 1 });
+    const listedRows = [activityToSupabaseRow(first, tripId), activityToSupabaseRow(second, tripId)];
+    const reorderedRows = [
+      activityToSupabaseRow({ ...second, order: 0 }, tripId),
+      activityToSupabaseRow({ ...first, order: 1 }, tripId),
+    ];
+    const updates: Array<{ id: string; order: number }> = [];
+    const listCreatedOrder = vi
+      .fn()
+      .mockResolvedValueOnce({ data: listedRows, error: null })
+      .mockResolvedValueOnce({ data: reorderedRows, error: null });
+    const listActivityOrder = vi.fn(() => ({ order: listCreatedOrder }));
+    const listDestinationFilter = vi.fn(() => ({ order: listActivityOrder }));
+    const listTripFilter = vi.fn(() => ({ eq: listDestinationFilter }));
+    const update = vi.fn((patch: { activity_order: number }) => ({
+      eq: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(async (_column: string, id: string) => {
+            updates.push({ id, order: patch.activity_order });
+            return { error: null };
+          }),
+        })),
+      })),
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'activities') {
+          return {
+            select: vi.fn(() => ({ eq: listTripFilter })),
+            update,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.reorderActivities(destinationId, [second.id, first.id])).resolves.toEqual([
+      expect.objectContaining({ id: second.id, order: 0 }),
+      expect.objectContaining({ id: first.id, order: 1 }),
+    ]);
+
+    expect(updates).toEqual([
+      { id: second.id, order: 0 },
+      { id: first.id, order: 1 },
+    ]);
   });
 
   it('uses the visible trip with planning data instead of a newer empty anonymous trip', async () => {

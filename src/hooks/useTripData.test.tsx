@@ -612,6 +612,26 @@ function createMemoryRepository(
 
     async deleteDestination() {},
 
+    async listActivities() {
+      return [];
+    },
+
+    async createActivity() {
+      throw new Error('Activities are not supported by this test repository.');
+    },
+
+    async updateActivity() {
+      throw new Error('Activity updates are not supported by this test repository.');
+    },
+
+    async deleteActivity() {
+      throw new Error('Activity deletes are not supported by this test repository.');
+    },
+
+    async reorderActivities() {
+      throw new Error('Activity reordering is not supported by this test repository.');
+    },
+
     async listDestinationMedia() {
       return [];
     },
