@@ -88,6 +88,17 @@ describe('ActivityPanel', () => {
     expect(props.onUpdateActivity).toHaveBeenCalledWith(props.activity.id, { title: 'Morning Louvre' });
   });
 
+  it('labels the tags group with the activity title', () => {
+    const props = createProps();
+
+    render(<ActivityPanel {...props} />);
+
+    const tagsGroup = screen.getByRole('group', { name: 'Louvre Tags' });
+
+    expect(screen.getByText('Louvre Tags')).toBeInTheDocument();
+    expect(tagsGroup).toContainElement(screen.getByLabelText('Add tag'));
+  });
+
   it('saves description and notes with labels based on the activity title', () => {
     const props = createProps();
 

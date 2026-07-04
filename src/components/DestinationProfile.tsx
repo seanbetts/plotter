@@ -415,6 +415,7 @@ function DestinationProfileForm({
   const latitudeText = formatCoordinateValue(destination.coordinates.lat);
   const longitudeText = formatCoordinateValue(destination.coordinates.lng);
   const coordinatesText = `${latitudeText}, ${longitudeText}`;
+  const tagsLabel = `${(form.name || destination.name).trim() || destination.name} Tags`;
   const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
     .filter(Boolean)
     .join(' ');
@@ -615,8 +616,8 @@ function DestinationProfileForm({
           onChange={(event) => updateForm({ expectedStayDays: event.target.value })}
         />
       </label>
-      <fieldset className="tag-editor" aria-label="Tags">
-        <legend>Tags</legend>
+      <fieldset className="tag-editor" aria-label={tagsLabel}>
+        <legend>{tagsLabel}</legend>
         <div className="tag-pill-list">
           {form.tags.map((tag) => (
             <button

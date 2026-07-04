@@ -264,6 +264,8 @@ function ActivityPanelForm({
     void commitDraft('tags');
   }
 
+  const tagsLabel = `${(draft.title || activity.title).trim() || 'Activity'} Tags`;
+
   return (
     <aside ref={panelRef} className="activity-panel" aria-label={`${activity.title} activity`}>
       <header className="profile-header" aria-label="Activity detail header">
@@ -345,8 +347,8 @@ function ActivityPanelForm({
           onBlur={() => void commitDraft('notes')}
         />
       </label>
-      <fieldset className="tag-editor" aria-label="Tags">
-        <legend>Tags</legend>
+      <fieldset className="tag-editor" aria-label={tagsLabel}>
+        <legend>{tagsLabel}</legend>
         <div className="tag-pill-list">
           {draft.tags.map((tag) => (
             <button

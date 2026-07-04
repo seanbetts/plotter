@@ -102,6 +102,28 @@ describe('DestinationProfile', () => {
     expect(screen.queryByLabelText('Stop name')).not.toBeInTheDocument();
   });
 
+  it('labels the tags group with the stop name', () => {
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const profile = screen.getByRole('complementary', { name: 'Samarkand profile' });
+    const tagsGroup = within(profile).getByRole('group', { name: 'Samarkand Tags' });
+
+    expect(within(tagsGroup).getByText('Samarkand Tags')).toBeInTheDocument();
+  });
+
   it('shows latitude and longitude as separate pills with a one-click copy button', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -523,7 +545,7 @@ describe('DestinationProfile', () => {
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByLabelText('Expected stay days')).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Tags' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Samarkand Tags' })).toBeInTheDocument();
     expect(screen.getByLabelText('Add tag')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
     expect(screen.getByLabelText('Search for an activity')).toBeInTheDocument();
