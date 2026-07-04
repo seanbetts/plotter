@@ -73,7 +73,10 @@ Deno.test("rejects private IPv6 literal targets", async () => {
       "http://[fd00::1]/",
       "http://[fc00::1]/",
       "http://[fe80::1]/",
+      "http://[fec0::1]/",
       "http://[::]/",
+      "http://[::127.0.0.1]/",
+      "http://[::192.168.1.10]/",
       "http://[::ffff:127.0.0.1]/",
       "http://[::ffff:192.168.1.10]/",
     ]

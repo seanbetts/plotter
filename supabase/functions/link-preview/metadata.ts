@@ -272,6 +272,7 @@ function isPrivateIpv6(hostname: string) {
     hextets[7] === 1;
   const isUniqueLocal = (first & 0xfe00) === 0xfc00;
   const isLinkLocal = (first & 0xffc0) === 0xfe80;
+  const isSiteLocal = (first & 0xffc0) === 0xfec0;
   const isMulticast = (first & 0xff00) === 0xff00;
   const isDocumentation = first === 0x2001 && hextets[1] === 0x0db8;
 
@@ -280,21 +281,19 @@ function isPrivateIpv6(hostname: string) {
     isLoopback ||
     isUniqueLocal ||
     isLinkLocal ||
+    isSiteLocal ||
     isMulticast ||
     isDocumentation
   ) {
     return true;
   }
 
-  const mappedIpv4 = getIpv4MappedAddress(hextets);
-  return mappedIpv4 ? isPrivateIpv4(mappedIpv4) : false;
+  const embeddedIpv4 = getIpv4MappedAddress(hextets) ||
+    getIpv4CompatibleAddress(hextets);
+  return embeddedIpv4 ? isPrivateIpv4(embeddedIpv4) : false;
 }
 
 function parseIpv6Hextets(hostname: string) {
-  if (hostname.includes(".")) {
-    return undefined;
-  }
-
   const halves = hostname.split("::");
   if (halves.length > 2) {
     return undefined;
@@ -323,23 +322,80 @@ function parseIpv6Part(part: string) {
     return [];
   }
 
-  const hextets = part.split(":").map((piece) => {
+  const pieces = part.split(":");
+  const hextets: number[] = [];
+
+  for (const [index, piece] of pieces.entries()) {
+    if (piece.includes(".")) {
+      if (index !== pieces.length - 1) {
+        return undefined;
+      }
+
+      const ipv4Hextets = parseEmbeddedIpv4Hextets(piece);
+      if (!ipv4Hextets) {
+        return undefined;
+      }
+
+      hextets.push(...ipv4Hextets);
+      continue;
+    }
+
     if (!/^[\da-f]{1,4}$/i.test(piece)) {
+      return undefined;
+    }
+
+    hextets.push(Number.parseInt(piece, 16));
+  }
+
+  return hextets;
+}
+
+function parseEmbeddedIpv4Hextets(hostname: string) {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) {
+    return undefined;
+  }
+
+  const octets = parts.map((part) => {
+    if (!/^\d+$/.test(part)) {
       return Number.NaN;
     }
 
-    return Number.parseInt(piece, 16);
+    return Number(part);
   });
 
-  return hextets.every((hextet) => Number.isInteger(hextet))
-    ? hextets
-    : undefined;
+  if (
+    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  ) {
+    return undefined;
+  }
+
+  return [
+    ((octets[0] ?? 0) << 8) | (octets[1] ?? 0),
+    ((octets[2] ?? 0) << 8) | (octets[3] ?? 0),
+  ];
 }
 
 function getIpv4MappedAddress(hextets: number[]) {
   const isMapped = hextets.slice(0, 5).every((hextet) => hextet === 0) &&
     hextets[5] === 0xffff;
   if (!isMapped) {
+    return undefined;
+  }
+
+  const high = hextets[6] ?? 0;
+  const low = hextets[7] ?? 0;
+  return [
+    (high >> 8) & 0xff,
+    high & 0xff,
+    (low >> 8) & 0xff,
+    low & 0xff,
+  ].join(".");
+}
+
+function getIpv4CompatibleAddress(hextets: number[]) {
+  const isCompatible = hextets.slice(0, 6).every((hextet) => hextet === 0);
+  if (!isCompatible) {
     return undefined;
   }
 
