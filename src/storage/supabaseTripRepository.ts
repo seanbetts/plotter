@@ -557,6 +557,17 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     );
   }
 
+  async function loadAllDestinationMediaRows(tripId: string, destinationId: string) {
+    return assertNoSupabaseError<SupabaseMediaAssetRow[]>(
+      await supabase
+        .from('media_assets')
+        .select('*')
+        .eq('trip_id', tripId)
+        .eq('destination_id', destinationId),
+      'Unable to load destination media.',
+    );
+  }
+
   async function listSignedDestinationMedia(tripId: string, destinationId: string) {
     const rows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
       await supabase
@@ -679,6 +690,22 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     }
   }
 
+  async function deleteDestinationMediaMetadataBestEffort(tripId: string, mediaId: string) {
+    try {
+      assertSupabaseWriteSucceeded(
+        await supabase
+          .from('media_assets')
+          .delete()
+          .eq('trip_id', tripId)
+          .eq('id', mediaId)
+          .is('activity_id', null),
+        'Unable to remove destination media metadata.',
+      );
+    } catch {
+      // Preserve the original upload failure; cleanup is best-effort here.
+    }
+  }
+
   async function listTripActivities(tripId: string, destinationId: string) {
     const rows = assertNoSupabaseError<SupabaseActivityRow[]>(
       await supabase
@@ -774,6 +801,15 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
     async deleteDestination(destinationId) {
       const tripId = await getActiveTripId();
+      const mediaRows = await loadAllDestinationMediaRows(tripId, destinationId);
+      const objectPathsByBucketId = new Map<string, string[]>();
+
+      for (const row of mediaRows) {
+        objectPathsByBucketId.set(row.bucket_id, [
+          ...(objectPathsByBucketId.get(row.bucket_id) ?? []),
+          row.object_path,
+        ]);
+      }
 
       assertSupabaseWriteSucceeded(
         await supabase
@@ -783,6 +819,10 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .eq('id', destinationId),
         'Unable to delete destination.',
       );
+
+      for (const [bucketId, objectPaths] of objectPathsByBucketId) {
+        await removeStorageObjectsBestEffort(bucketId, objectPaths);
+      }
     },
 
     async listActivities(destinationId) {
@@ -910,18 +950,30 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
       assertNoSupabaseError(uploadResponse, 'Unable to upload destination media.');
 
-      const row = await insertDestinationMediaMetadata({
-        tripId,
-        destinationId: input.destinationId,
-        bucketId,
-        objectPath: uploadResponse.data?.path ?? objectPath,
-        caption: input.caption ?? '',
-        credit: input.credit ?? '',
-        contentType: input.file.type || null,
-        sizeBytes: input.file.size,
-        uploadedBy: user.id,
-      });
-      return createSignedMediaItem(row);
+      const uploadedObjectPath = uploadResponse.data?.path ?? objectPath;
+      let insertedRow: SupabaseMediaAssetRow | null = null;
+
+      try {
+        const metadataRow = await insertDestinationMediaMetadata({
+          tripId,
+          destinationId: input.destinationId,
+          bucketId,
+          objectPath: uploadedObjectPath,
+          caption: input.caption ?? '',
+          credit: input.credit ?? '',
+          contentType: input.file.type || null,
+          sizeBytes: input.file.size,
+          uploadedBy: user.id,
+        });
+        insertedRow = metadataRow;
+        return await createSignedMediaItem(metadataRow);
+      } catch (error) {
+        if (insertedRow) {
+          await deleteDestinationMediaMetadataBestEffort(tripId, insertedRow.id);
+        }
+        await removeStorageObjectBestEffort(bucketId, uploadedObjectPath);
+        throw error;
+      }
     },
 
     async listDestinationMediaRollup(destinationId): Promise<MediaRollupItem[]> {

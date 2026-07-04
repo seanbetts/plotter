@@ -183,6 +183,126 @@ describe('supabase trip repository mappers', () => {
     );
   });
 
+  it('removes destination media storage objects after deleting a destination', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const calls: string[] = [];
+    const mediaRows = [
+      {
+        id: crypto.randomUUID(),
+        trip_id: tripId,
+        destination_id: destinationId,
+        activity_id: null,
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/${destinationId}/destination.webp`,
+        caption: '',
+        credit: '',
+        sort_order: 0,
+        content_type: 'image/webp',
+        size_bytes: 1200,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:00:00.000Z',
+        updated_at: '2026-06-29T12:00:00.000Z',
+      },
+      {
+        id: crypto.randomUUID(),
+        trip_id: tripId,
+        destination_id: destinationId,
+        activity_id: crypto.randomUUID(),
+        bucket_id: 'trip-media',
+        object_path: `${tripId}/${destinationId}/activity.webp`,
+        caption: '',
+        credit: '',
+        sort_order: 0,
+        content_type: 'image/webp',
+        size_bytes: 1200,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:01:00.000Z',
+        updated_at: '2026-06-29T12:01:00.000Z',
+      },
+      {
+        id: crypto.randomUUID(),
+        trip_id: tripId,
+        destination_id: destinationId,
+        activity_id: null,
+        bucket_id: 'archive-media',
+        object_path: `${tripId}/${destinationId}/archive.webp`,
+        caption: '',
+        credit: '',
+        sort_order: 1,
+        content_type: 'image/webp',
+        size_bytes: 1200,
+        uploaded_by: crypto.randomUUID(),
+        created_at: '2026-06-29T12:02:00.000Z',
+        updated_at: '2026-06-29T12:02:00.000Z',
+      },
+    ];
+    const removeTripMedia = vi.fn(async () => {
+      calls.push('storage:trip-media');
+      return { data: [], error: null };
+    });
+    const removeArchiveMedia = vi.fn(async () => {
+      calls.push('storage:archive-media');
+      return { data: [], error: null };
+    });
+    const mediaDestinationFilter = vi.fn(async () => ({ data: mediaRows, error: null }));
+    const mediaTripFilter = vi.fn(() => ({ eq: mediaDestinationFilter }));
+    const deleteIdFilter = vi.fn(async () => {
+      calls.push('destination');
+      return { error: null };
+    });
+    const deleteTripFilter = vi.fn(() => ({ eq: deleteIdFilter }));
+    const deleteRows = vi.fn(() => ({ eq: deleteTripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn((bucketId: string) => ({
+          remove: bucketId === 'archive-media' ? removeArchiveMedia : removeTripMedia,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: mediaTripFilter })),
+          };
+        }
+
+        if (tableName === 'destinations') {
+          return {
+            delete: deleteRows,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await repository.deleteDestination(destinationId);
+
+    expect(mediaTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(mediaDestinationFilter).toHaveBeenCalledWith('destination_id', destinationId);
+    expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(deleteIdFilter).toHaveBeenCalledWith('id', destinationId);
+    expect(removeTripMedia).toHaveBeenCalledWith([
+      mediaRows[0].object_path,
+      mediaRows[1].object_path,
+    ]);
+    expect(removeArchiveMedia).toHaveBeenCalledWith([mediaRows[2].object_path]);
+    expect(calls).toEqual(['destination', 'storage:trip-media', 'storage:archive-media']);
+  });
+
   it('lists activities for a destination ordered by activity order and creation time', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();
@@ -470,7 +590,7 @@ describe('supabase trip repository mappers', () => {
     expect(deleteIdFilter).toHaveBeenCalledWith('id', activityId);
   });
 
-  it('removes activity media storage objects before deleting an activity', async () => {
+  it('removes activity media storage objects after deleting an activity', async () => {
     const tripId = crypto.randomUUID();
     const activityId = crypto.randomUUID();
     const calls: string[] = [];
@@ -1049,6 +1169,140 @@ describe('supabase trip repository mappers', () => {
         sortOrder: 4,
       }),
     );
+  });
+
+  it('removes an uploaded destination media object when metadata insertion fails', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const uploadedPath = `${tripId}/${destinationId}/asset-paris.jpg`;
+    const upload = vi.fn(async () => ({ data: { path: uploadedPath }, error: null }));
+    const remove = vi.fn(async () => ({ data: [], error: null }));
+    const mediaInsert = vi.fn(() => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => ({
+          data: null,
+          error: { message: 'metadata insert failed' },
+        })),
+      })),
+    }));
+    const destinationOwnerFilter = vi.fn(async () => ({ data: [], error: null }));
+    const destinationFilter = vi.fn(() => ({ is: destinationOwnerFilter }));
+    const tripFilter = vi.fn(() => ({ eq: destinationFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({
+          upload,
+          remove,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: tripFilter })),
+            insert: mediaInsert,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.uploadDestinationMedia({
+      destinationId,
+      file: new File(['image-data'], 'Paris.JPG', { type: 'image/jpeg' }),
+    })).rejects.toThrow('metadata insert failed');
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith([uploadedPath]);
+  });
+
+  it('removes destination media metadata and storage when signed URL creation fails after upload', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const mediaAssetId = crypto.randomUUID();
+    const uploadedPath = `${tripId}/${destinationId}/asset-paris.jpg`;
+    const upload = vi.fn(async () => ({ data: { path: uploadedPath }, error: null }));
+    const remove = vi.fn(async () => ({ data: [], error: null }));
+    const createSignedUrl = vi.fn(async () => ({
+      data: null,
+      error: { message: 'signed url failed' },
+    }));
+    const mediaInsert = vi.fn((row) => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => ({
+          data: {
+            id: mediaAssetId,
+            ...row,
+            created_at: '2026-06-29T12:00:00.000Z',
+            updated_at: '2026-06-29T12:00:00.000Z',
+          },
+          error: null,
+        })),
+      })),
+    }));
+    const destinationOwnerFilter = vi.fn(async () => ({ data: [], error: null }));
+    const destinationFilter = vi.fn(() => ({ is: destinationOwnerFilter }));
+    const tripFilter = vi.fn(() => ({ eq: destinationFilter }));
+    const deleteActivityOwnerFilter = vi.fn(async () => ({ error: null }));
+    const deleteMediaIdFilter = vi.fn(() => ({ is: deleteActivityOwnerFilter }));
+    const deleteTripFilter = vi.fn(() => ({ eq: deleteMediaIdFilter }));
+    const deleteRows = vi.fn(() => ({ eq: deleteTripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({
+          upload,
+          remove,
+          createSignedUrl,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: tripFilter })),
+            insert: mediaInsert,
+            delete: deleteRows,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.uploadDestinationMedia({
+      destinationId,
+      file: new File(['image-data'], 'Paris.JPG', { type: 'image/jpeg' }),
+    })).rejects.toThrow('signed url failed');
+
+    expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(deleteMediaIdFilter).toHaveBeenCalledWith('id', mediaAssetId);
+    expect(deleteActivityOwnerFilter).toHaveBeenCalledWith('activity_id', null);
+    expect(remove).toHaveBeenCalledWith([uploadedPath]);
   });
 
   it('lists destination media with signed URLs', async () => {
