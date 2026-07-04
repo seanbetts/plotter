@@ -49,6 +49,10 @@ describe('panel tag editor styles', () => {
       /\.tag-editor legend\s*{[^}]*color:\s*var\(--text-secondary\);[^}]*font-size:\s*0\.82rem;[^}]*font-weight:\s*700;/s,
     );
   });
+
+  it('leaves breathing room between tag titles and their divider line', () => {
+    expect(styles).toMatch(/\.tag-editor legend\s*{[^}]*padding-right:\s*12px;/s);
+  });
 });
 
 describe('profile header styles', () => {
@@ -101,11 +105,28 @@ describe('activity list styles', () => {
     expect(styles).toMatch(/\.activity-list-section\s*{[^}]*align-content:\s*start;/s);
   });
 
+  it('styles the activity title divider like tag legends', () => {
+    expect(styles).toMatch(
+      /\.activity-list-header\s*{[^}]*display:\s*flex;[^}]*align-items:\s*center;[^}]*gap:\s*12px;/s,
+    );
+    expect(styles).toMatch(
+      /\.activity-list-header::after\s*{[^}]*flex:\s*1 1 auto;[^}]*border-top:\s*1px solid var\(--border-subtle\);/s,
+    );
+    expect(styles).toMatch(/\.activity-list-section\s*{[^}]*padding-top:\s*0;[^}]*border-top:\s*0;/s);
+  });
+
   it('uses the shared itinerary row hover treatment for stops and activities', () => {
     expect(styles).toMatch(/\.stop-item,\s*\.activity-row\s*{[^}]*background:\s*var\(--surface-row\);/s);
     expect(styles).toMatch(
       /\.stop-item:hover,\s*\.stop-item:focus-within,\s*\.activity-row:hover,\s*\.activity-row:focus-within\s*{[^}]*border-color:\s*var\(--border-hover\);[^}]*background:\s*var\(--surface-control-hover\);/s,
     );
     expect(styles).not.toMatch(/\.activity-select:hover,\s*\.activity-select:focus-visible/s);
+  });
+
+  it('keeps stop list rows compact without changing the row structure', () => {
+    expect(styles).toMatch(
+      /\.stop-item\s*{[^}]*grid-template-columns:\s*28px 28px minmax\(0,\s*1fr\) auto 32px;[^}]*gap:\s*4px;/s,
+    );
+    expect(styles).toMatch(/\.stop-select\s*{[^}]*gap:\s*2px;[^}]*padding:\s*7px 8px;/s);
   });
 });
