@@ -199,6 +199,30 @@ describe('DestinationImageStrip', () => {
     expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
   });
 
+  it('loops the selected preview image with left and right arrow keys', () => {
+    const onOpenPreview = vi.fn();
+    render(<DestinationImageStrip {...createProps({ onOpenPreview })} />);
+
+    const preview = screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' });
+
+    fireEvent.keyDown(preview, { key: 'ArrowRight' });
+
+    expect(screen.getByRole('button', { name: 'Open full image: Mountain trail' })).toBeInTheDocument();
+    expect(onOpenPreview).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open full image: Mountain trail' }), {
+      key: 'ArrowLeft',
+    });
+
+    expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' }), {
+      key: 'ArrowLeft',
+    });
+
+    expect(screen.getByRole('button', { name: 'Open full image' })).toBeInTheDocument();
+  });
+
   it('preloads the previous and next preview images into the browser cache', () => {
     const preloadedUrls: string[] = [];
     class FakeImage {

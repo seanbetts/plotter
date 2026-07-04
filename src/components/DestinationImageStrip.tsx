@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Image, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, DragEvent } from 'react';
+import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
 import type { MediaItem } from '../domain/types';
 import { preloadImageUrls } from '../media/imagePreloading';
 
@@ -244,10 +244,20 @@ export function DestinationImageStrip({
     setPreviewMediaId(nextMediaItem.id);
   };
 
+  const handleStripKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (mediaItems.length < 2) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    selectAdjacentPreview(event.key === 'ArrowLeft' ? -1 : 1);
+  };
+
   return (
     <section
       className={stripClassName}
       aria-label="Stop images"
+      onKeyDown={handleStripKeyDown}
       onDragEnter={handleStripDragEnter}
       onDragOver={handleStripDragOver}
       onDragLeave={handleStripDragLeave}

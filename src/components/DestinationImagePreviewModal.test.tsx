@@ -112,6 +112,35 @@ describe('DestinationImagePreviewModal', () => {
     expect(onNavigateNext).toHaveBeenCalledTimes(1);
   });
 
+  it('navigates left and right with arrow keys', () => {
+    const onNavigatePrevious = vi.fn();
+    const onNavigateNext = vi.fn();
+
+    const { rerender } = render(
+      <DestinationImagePreviewModal
+        {...createProps({ onNavigatePrevious, onNavigateNext, canMoveLeft: true, canMoveRight: true })}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: 'ArrowLeft' });
+    fireEvent.keyDown(document, { key: 'ArrowRight' });
+
+    expect(onNavigatePrevious).toHaveBeenCalledWith('media-1');
+    expect(onNavigateNext).toHaveBeenCalledWith('media-1');
+
+    rerender(
+      <DestinationImagePreviewModal
+        {...createProps({ onNavigatePrevious, onNavigateNext, canMoveLeft: false, canMoveRight: false })}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: 'ArrowLeft' });
+    fireEvent.keyDown(document, { key: 'ArrowRight' });
+
+    expect(onNavigatePrevious).toHaveBeenCalledTimes(1);
+    expect(onNavigateNext).toHaveBeenCalledTimes(1);
+  });
+
   it('closes from the close button and Escape key', () => {
     const onClose = vi.fn();
 

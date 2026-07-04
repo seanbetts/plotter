@@ -30,17 +30,34 @@ export function DestinationImagePreviewModal({
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing) return;
+      if (event.isComposing) return;
 
-      event.preventDefault();
-      event.stopPropagation();
-      if (isConfirmingDelete) {
-        setIsConfirmingDelete(false);
-        setDeleteError('');
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (event.key === 'ArrowLeft' && canMoveLeft) {
+          void onNavigatePrevious(mediaItem.id);
+        }
+
+        if (event.key === 'ArrowRight' && canMoveRight) {
+          void onNavigateNext(mediaItem.id);
+        }
+
         return;
       }
 
-      onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (isConfirmingDelete) {
+          setIsConfirmingDelete(false);
+          setDeleteError('');
+          return;
+        }
+
+        onClose();
+      }
     };
 
     document.addEventListener('keydown', handleDocumentKeyDown);
@@ -48,7 +65,15 @@ export function DestinationImagePreviewModal({
     return () => {
       document.removeEventListener('keydown', handleDocumentKeyDown);
     };
-  }, [isConfirmingDelete, onClose]);
+  }, [
+    canMoveLeft,
+    canMoveRight,
+    isConfirmingDelete,
+    mediaItem.id,
+    onClose,
+    onNavigateNext,
+    onNavigatePrevious,
+  ]);
 
   const handleDelete = async () => {
     if (isDeletingRef.current) return;
