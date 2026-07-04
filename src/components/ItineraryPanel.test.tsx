@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
+import { createRouteLeg } from '../domain/routeLegs';
 import type { RouteLeg } from '../domain/types';
 import { ItineraryPanel } from './ItineraryPanel';
 
@@ -13,6 +14,7 @@ describe('ItineraryPanel', () => {
       countryRegion: 'France',
       coordinates: { lat: 48.3904, lng: -4.4861 },
     });
+    destination.timing.expectedStayDays = 3;
     const onToggleCollapsed = vi.fn();
 
     render(
@@ -30,7 +32,10 @@ describe('ItineraryPanel', () => {
     );
 
     expect(screen.getByLabelText('Itinerary')).toHaveClass('is-collapsed');
-    expect(screen.getByText('1 stop')).toBeInTheDocument();
+    const summary = screen.getByLabelText('Itinerary summary');
+    expect(within(summary).getByText('1 stop')).toBeInTheDocument();
+    expect(within(summary).getByText('3 days')).toBeInTheDocument();
+    expect(within(summary).getByText('0 hrs travel')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Brest, France' })).not.toBeInTheDocument();
 
     const expandButton = screen.getByRole('button', { name: 'Expand itinerary panel' });
@@ -39,6 +44,102 @@ describe('ItineraryPanel', () => {
     await user.click(expandButton);
 
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+  });
+
+  it('converts the total travel summary into days and hours', () => {
+    const origin = createDestination({
+      name: 'Brest',
+      countryRegion: 'France',
+      coordinates: { lat: 48.3904, lng: -4.4861 },
+    });
+    const middle = createDestination({
+      name: 'Bordeaux',
+      countryRegion: 'France',
+      coordinates: { lat: 44.8378, lng: -0.5792 },
+    });
+    const target = createDestination({
+      name: 'Santander',
+      countryRegion: 'Spain',
+      coordinates: { lat: 43.4623, lng: -3.8099 },
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, middle, target]}
+        routeLegs={[
+          createRouteLeg({
+            originDestinationId: origin.id,
+            targetDestinationId: middle.id,
+            type: 'driving-auto',
+            status: 'ready',
+            travelTimeHours: 24,
+          }),
+          createRouteLeg({
+            originDestinationId: middle.id,
+            targetDestinationId: target.id,
+            type: 'driving-auto',
+            status: 'ready',
+            travelTimeHours: 25.4,
+          }),
+        ]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    const summary = screen.getByLabelText('Itinerary summary');
+    expect(within(summary).getByText('2 days 1 hr travel')).toBeInTheDocument();
+  });
+
+  it('pluralises inline route hours at two displayed hours and above', () => {
+    const origin = createDestination({
+      name: 'Brest',
+      countryRegion: 'France',
+      coordinates: { lat: 48.3904, lng: -4.4861 },
+    });
+    const middle = createDestination({
+      name: 'Bordeaux',
+      countryRegion: 'France',
+      coordinates: { lat: 44.8378, lng: -0.5792 },
+    });
+    const target = createDestination({
+      name: 'Santander',
+      countryRegion: 'Spain',
+      coordinates: { lat: 43.4623, lng: -3.8099 },
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, middle, target]}
+        routeLegs={[
+          createRouteLeg({
+            originDestinationId: origin.id,
+            targetDestinationId: middle.id,
+            type: 'driving-auto',
+            status: 'ready',
+            travelTimeHours: 1.9,
+          }),
+          createRouteLeg({
+            originDestinationId: middle.id,
+            targetDestinationId: target.id,
+            type: 'driving-auto',
+            status: 'ready',
+            travelTimeHours: 2,
+          }),
+        ]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('1.9 hr')).toBeInTheDocument();
+    expect(screen.getByText('2.0 hrs')).toBeInTheDocument();
   });
 
   it('shows a retry button for a failed driving route leg', async () => {

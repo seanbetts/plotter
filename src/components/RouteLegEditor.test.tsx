@@ -135,6 +135,9 @@ describe('ItineraryPanel', () => {
 
     expect(screen.getByLabelText('Itinerary')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Itinerary' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Itinerary summary')).toHaveTextContent('2 stops');
+    expect(screen.getByLabelText('Itinerary summary')).toHaveTextContent('5 days');
+    expect(screen.getByLabelText('Itinerary summary')).toHaveTextContent('2 hrs travel');
     expect(screen.queryByRole('heading', { name: 'Routes' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Istanbul, Turkey' })).toBeInTheDocument();
     expect(screen.getByText('ST')).toHaveAccessibleName('Start');
@@ -147,7 +150,7 @@ describe('ItineraryPanel', () => {
     expect(screen.getByText('1 day')).toBeInTheDocument();
     expect(screen.getByText('4 days')).toBeInTheDocument();
     expect(screen.getByText('99 mi')).toBeInTheDocument();
-    expect(screen.getByText('2.3 hr')).toBeInTheDocument();
+    expect(screen.getByText('2.3 hrs')).toBeInTheDocument();
     expect(screen.getByText('99 mi').parentElement).toHaveClass('inline-route-metrics');
 
     await user.click(screen.getByRole('button', { name: 'Istanbul, Turkey' }));

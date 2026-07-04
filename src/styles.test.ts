@@ -176,7 +176,10 @@ describe('itinerary panel styles', () => {
     expect(styles).toMatch(
       /\.itinerary-panel-actions\s*{[^}]*display:\s*flex;[^}]*justify-content:\s*end;[^}]*gap:\s*8px;/s,
     );
-    expect(styles).toMatch(/\.itinerary-panel-count\s*{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/s);
+    expect(styles).toMatch(
+      /\.itinerary-panel-stats\s*{[^}]*display:\s*flex;[^}]*flex:\s*0 0 auto;[^}]*gap:\s*7px;[^}]*white-space:\s*nowrap;/s,
+    );
+    expect(styles).toMatch(/\.itinerary-panel-stat \+ \.itinerary-panel-stat::before\s*{[^}]*content:\s*"·";/s);
     expect(styles).toMatch(/\.itinerary-panel-toggle\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
   });
 });

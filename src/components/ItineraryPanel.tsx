@@ -45,11 +45,34 @@ function formatLegDistance(routeLeg: RouteLeg) {
 function formatLegTime(routeLeg: RouteLeg) {
   if (routeLeg.travelTimeHours === undefined) return null;
 
-  return `${routeLeg.travelTimeHours.toFixed(1)} hr`;
+  const displayHours = Number(routeLeg.travelTimeHours.toFixed(1));
+  const unit = displayHours >= 2 ? 'hrs' : 'hr';
+
+  return `${displayHours.toFixed(1)} ${unit}`;
 }
 
 function formatStayDays(days: number) {
   return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+function formatTotalTravelTime(hours: number) {
+  const roundedHours = Math.round(hours);
+  if (roundedHours < 24) {
+    const unit = roundedHours === 1 ? 'hr' : 'hrs';
+
+    return `${roundedHours.toLocaleString()} ${unit} travel`;
+  }
+
+  const days = Math.floor(roundedHours / 24);
+  const remainingHours = roundedHours % 24;
+  const parts = [formatStayDays(days)];
+
+  if (remainingHours > 0) {
+    const unit = remainingHours === 1 ? 'hr' : 'hrs';
+    parts.push(`${remainingHours} ${unit}`);
+  }
+
+  return `${parts.join(' ')} travel`;
 }
 
 function countryKey(destination: Destination) {
@@ -159,6 +182,19 @@ export function ItineraryPanel({
     .filter(Boolean)
     .join(' ');
   const stopCountLabel = `${destinations.length} ${destinations.length === 1 ? 'stop' : 'stops'}`;
+  const totalStayDays = destinations.reduce(
+    (totalDays, destination) => totalDays + destination.timing.expectedStayDays,
+    0,
+  );
+  const totalTravelTimeHours = routeLegs.reduce(
+    (totalHours, routeLeg) => totalHours + (routeLeg.travelTimeHours ?? 0),
+    0,
+  );
+  const itineraryStats = [
+    stopCountLabel,
+    formatStayDays(totalStayDays),
+    formatTotalTravelTime(totalTravelTimeHours),
+  ];
   const displayedDestinations = draggedDestinationId
     ? destinations.filter((destination) => destination.id !== draggedDestinationId)
     : destinations;
@@ -365,7 +401,13 @@ export function ItineraryPanel({
             <h2>Itinerary</h2>
           </div>
           <div className="itinerary-panel-actions">
-            <span className="itinerary-panel-count">{stopCountLabel}</span>
+            <span className="itinerary-panel-stats" aria-label="Itinerary summary">
+              {itineraryStats.map((stat) => (
+                <span key={stat} className="itinerary-panel-stat">
+                  {stat}
+                </span>
+              ))}
+            </span>
             <button
               type="button"
               className="itinerary-panel-toggle"

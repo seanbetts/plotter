@@ -1585,12 +1585,21 @@ select {
   letter-spacing: 0;
 }
 
-.itinerary-panel-count {
+.itinerary-panel-stats {
+  display: flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.itinerary-panel-stat + .itinerary-panel-stat::before {
+  margin-right: 7px;
+  color: rgb(var(--color-text-rgb) / 0.34);
+  content: "·";
 }
 
 .itinerary-panel-toggle {
