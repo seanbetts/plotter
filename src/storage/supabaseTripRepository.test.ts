@@ -2427,8 +2427,8 @@ describe('supabase trip repository mappers', () => {
     ]);
 
     expect(updates).toEqual([
-      { id: secondId, sortOrder: -3 },
-      { id: firstId, sortOrder: -4 },
+      { id: secondId, sortOrder: 5 },
+      { id: firstId, sortOrder: 4 },
       { id: secondId, sortOrder: 0 },
       { id: firstId, sortOrder: 1 },
     ]);
@@ -2647,7 +2647,7 @@ describe('supabase trip repository mappers', () => {
     expect(updates).toEqual([
       {
         id: secondId,
-        sortOrder: -3,
+        sortOrder: 5,
         filters: [
           { column: 'trip_id', value: tripId },
           { column: 'activity_id', value: activityId },
@@ -2656,7 +2656,7 @@ describe('supabase trip repository mappers', () => {
       },
       {
         id: firstId,
-        sortOrder: -4,
+        sortOrder: 4,
         filters: [
           { column: 'trip_id', value: tripId },
           { column: 'activity_id', value: activityId },

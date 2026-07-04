@@ -1189,8 +1189,8 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         throw createMediaOrderMismatchError(currentIds, orderedMediaIds);
       }
 
-      const minSortOrder = Math.min(0, ...rows.map((row) => row.sort_order));
-      const temporarySortOrderBase = minSortOrder - orderedMediaIds.length - 1;
+      const maxSortOrder = Math.max(0, ...rows.map((row) => row.sort_order));
+      const temporarySortOrderBase = maxSortOrder + orderedMediaIds.length * 2;
 
       for (const [index, mediaId] of orderedMediaIds.entries()) {
         await updateDestinationMediaSortOrder({
@@ -1235,8 +1235,8 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         throw createMediaOrderMismatchError(currentIds, orderedMediaIds, 'activity');
       }
 
-      const minSortOrder = Math.min(0, ...rows.map((row) => row.sort_order));
-      const temporarySortOrderBase = minSortOrder - orderedMediaIds.length - 1;
+      const maxSortOrder = Math.max(0, ...rows.map((row) => row.sort_order));
+      const temporarySortOrderBase = maxSortOrder + orderedMediaIds.length * 2;
 
       for (const [index, mediaId] of orderedMediaIds.entries()) {
         await updateActivityMediaSortOrder({
