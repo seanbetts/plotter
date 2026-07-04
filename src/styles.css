@@ -980,7 +980,8 @@ select {
   outline: 0;
 }
 
-.profile-location-address {
+.profile-header .profile-location-address {
+  margin: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;

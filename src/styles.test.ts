@@ -62,6 +62,11 @@ describe('panel tag editor styles', () => {
 });
 
 describe('profile header styles', () => {
+  it('matches the stop list title-to-address spacing in profile headers', () => {
+    expect(styles).toMatch(/\.profile-header \.profile-location-address\s*{[^}]*margin:\s*0;/s);
+    expect(styles).toMatch(/\.stop-select\s*{[^}]*gap:\s*0;/s);
+  });
+
   it('keeps long location text inside the fixed-width profile panels', () => {
     expect(styles).toMatch(
       /\.profile-header\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/s,
