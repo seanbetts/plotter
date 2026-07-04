@@ -1,7 +1,7 @@
 import { Car, ChevronDown, ChevronUp, GripVertical, RefreshCw, Ship, Signpost, Trash2 } from 'lucide-react';
 import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { formatDestinationLocation, formatLocationParts } from '../domain/locations';
+import { formatDestinationLocation, formatLocationContext, formatLocationParts } from '../domain/locations';
 import type { Destination, RouteLeg, RouteLegType } from '../domain/types';
 import { formatStopAccessibleLabel, formatStopMarker } from './stopLabels';
 
@@ -53,6 +53,14 @@ function formatLegTime(routeLeg: RouteLeg) {
 
 function formatStayDays(days: number) {
   return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+function formatStopAddress(destination: Destination) {
+  const locationParts = formatLocationParts(destination.location);
+
+  if (!locationParts) return 'Unassigned location';
+
+  return formatLocationContext(locationParts, destination.name);
 }
 
 function formatTotalTravelTime(hours: number) {
@@ -429,7 +437,7 @@ export function ItineraryPanel({
             {destinations.length === 0 ? <p>Add your first destination from the map search.</p> : null}
             {displayedDestinations.map((destination, index) => {
               const locationLabel = formatDestinationLocation(destination);
-              const locationParts = formatLocationParts(destination.location) || 'Unassigned location';
+              const locationParts = formatStopAddress(destination);
               const stopNumber =
                 destinations.findIndex((orderedDestination) => orderedDestination.id === destination.id) + 1;
               const isSelected = destination.id === selectedDestinationId;
@@ -613,7 +621,7 @@ export function ItineraryPanel({
             </span>
             <span className="stop-drag-preview-copy">
               <strong>{draggedDestination.name}</strong>
-              <small>{formatLocationParts(draggedDestination.location) || 'Unassigned location'}</small>
+              <small>{formatStopAddress(draggedDestination)}</small>
             </span>
             <span className="stop-stay-days">
               {formatStayDays(draggedDestination.timing.expectedStayDays)}

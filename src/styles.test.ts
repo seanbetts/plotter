@@ -164,6 +164,12 @@ describe('activity list styles', () => {
     );
     expect(styles).not.toMatch(/\.stop-delete\s*{[^}]*border-left:/s);
   });
+
+  it('keeps itinerary stop addresses on one truncated line', () => {
+    expect(styles).toMatch(
+      /\.stop-select small\s*{[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
+    );
+  });
 });
 
 describe('itinerary panel styles', () => {

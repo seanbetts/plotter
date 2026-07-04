@@ -46,6 +46,37 @@ describe('ItineraryPanel', () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
+  it('uses the compact stop address in itinerary rows', () => {
+    const destination = createDestination({
+      name: 'Brest',
+      coordinates: { lat: 48.3904, lng: -4.4861 },
+      location: {
+        placeName: 'Brest',
+        regionName: 'Finistere',
+        countryName: 'France',
+        countryCode: 'fr',
+        sourceLabel: 'Brest, Finistere, France',
+        sourceProvider: 'maptiler',
+      },
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    const stopButton = screen.getByRole('button', { name: 'Brest, Finistere, France' });
+    expect(within(stopButton).getByText('Finistere, France')).toBeInTheDocument();
+    expect(within(stopButton).queryByText('Brest, Finistere, France')).not.toBeInTheDocument();
+  });
+
   it('converts the total travel summary into days and hours', () => {
     const origin = createDestination({
       name: 'Brest',

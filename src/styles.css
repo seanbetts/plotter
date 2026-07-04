@@ -1848,8 +1848,10 @@ select {
 
 .stop-select small {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
   color: var(--text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .route-leg-editor {
