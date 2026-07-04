@@ -1,5 +1,5 @@
 import { Search, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 type SearchComboboxProps<Result> = {
   label: string;
@@ -19,6 +19,7 @@ type SearchComboboxProps<Result> = {
 };
 
 const liveSearchDelayMs = 300;
+const keepLatestSearchId = (_current: number, nextSearchId: number) => nextSearchId;
 
 export function SearchCombobox<Result>({
   label,
@@ -44,11 +45,16 @@ export function SearchCombobox<Result>({
   const [searchingQuery, setSearchingQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [errorQuery, setErrorQuery] = useState('');
+  const [resultsSearchId, setResultsSearchId] = useState(0);
+  const [latestClearSearchId, markLatestClearSearchId] = useReducer(keepLatestSearchId, 0);
   const latestSearchId = useRef(0);
   const searchTimerRef = useRef<number | null>(null);
   const query = value ?? internalQuery;
   const trimmedQuery = query.trim();
-  const isCurrentResultsQuery = Boolean(trimmedQuery) && resultsQuery === trimmedQuery;
+  const isCurrentResultsQuery =
+    Boolean(trimmedQuery) &&
+    resultsQuery === trimmedQuery &&
+    resultsSearchId > latestClearSearchId;
   const visibleResults = isCurrentResultsQuery ? results : [];
   const visibleHighlightedIndex = isCurrentResultsQuery ? highlightedIndex : -1;
   const visibleIsSearching = Boolean(trimmedQuery) && isSearching && searchingQuery === trimmedQuery;
@@ -60,6 +66,23 @@ export function SearchCombobox<Result>({
     }
 
     onValueChange?.(nextQuery);
+  }
+
+  function invalidateSearches() {
+    latestSearchId.current += 1;
+    markLatestClearSearchId(latestSearchId.current);
+  }
+
+  function resetSearchState() {
+    invalidateSearches();
+    setResults([]);
+    setResultsQuery('');
+    setResultsSearchId(0);
+    setHighlightedIndex(-1);
+    setIsSearching(false);
+    setSearchingQuery('');
+    setError(null);
+    setErrorQuery('');
   }
 
   const handleSearch = useCallback(
@@ -76,11 +99,13 @@ export function SearchCombobox<Result>({
         if (searchId !== latestSearchId.current) return;
         setResults(nextResults);
         setResultsQuery(nextQuery);
+        setResultsSearchId(searchId);
         setHighlightedIndex(-1);
       } catch (caught) {
         if (searchId !== latestSearchId.current) return;
         setResults([]);
         setResultsQuery('');
+        setResultsSearchId(0);
         setHighlightedIndex(-1);
         setError(caught instanceof Error ? caught.message : 'Search failed');
         setErrorQuery(nextQuery);
@@ -101,7 +126,7 @@ export function SearchCombobox<Result>({
 
     const trimmed = query.trim();
     if (!trimmed) {
-      latestSearchId.current += 1;
+      invalidateSearches();
       return;
     }
 
@@ -117,15 +142,8 @@ export function SearchCombobox<Result>({
   }, [handleSearch, query]);
 
   function clearSearch() {
-    latestSearchId.current += 1;
     setQuery('');
-    setResults([]);
-    setResultsQuery('');
-    setHighlightedIndex(-1);
-    setIsSearching(false);
-    setSearchingQuery('');
-    setError(null);
-    setErrorQuery('');
+    resetSearchState();
   }
 
   async function selectResult(result: Result) {
@@ -207,14 +225,7 @@ export function SearchCombobox<Result>({
             const nextQuery = event.target.value;
             setQuery(nextQuery);
             if (!nextQuery.trim()) {
-              latestSearchId.current += 1;
-              setResults([]);
-              setResultsQuery('');
-              setHighlightedIndex(-1);
-              setIsSearching(false);
-              setSearchingQuery('');
-              setError(null);
-              setErrorQuery('');
+              resetSearchState();
             }
           }}
           onKeyDown={handleKeyDown}
