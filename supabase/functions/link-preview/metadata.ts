@@ -242,9 +242,17 @@ function isPrivateIpv4(hostname: string) {
     first === 0 ||
     first === 10 ||
     first === 127 ||
+    (first === 100 && second >= 64 && second <= 127) ||
     (first === 172 && second >= 16 && second <= 31) ||
     (first === 169 && second === 254) ||
-    (first === 192 && second === 168)
+    (first === 192 && second === 0 && octets[2] === 0) ||
+    (first === 192 && second === 0 && octets[2] === 2) ||
+    (first === 192 && second === 168) ||
+    (first === 198 && (second === 18 || second === 19)) ||
+    (first === 198 && second === 51 && octets[2] === 100) ||
+    (first === 203 && second === 0 && octets[2] === 113) ||
+    (first >= 224 && first <= 239) ||
+    first >= 240
   );
 }
 
@@ -264,8 +272,17 @@ function isPrivateIpv6(hostname: string) {
     hextets[7] === 1;
   const isUniqueLocal = (first & 0xfe00) === 0xfc00;
   const isLinkLocal = (first & 0xffc0) === 0xfe80;
+  const isMulticast = (first & 0xff00) === 0xff00;
+  const isDocumentation = first === 0x2001 && hextets[1] === 0x0db8;
 
-  if (isUnspecified || isLoopback || isUniqueLocal || isLinkLocal) {
+  if (
+    isUnspecified ||
+    isLoopback ||
+    isUniqueLocal ||
+    isLinkLocal ||
+    isMulticast ||
+    isDocumentation
+  ) {
     return true;
   }
 

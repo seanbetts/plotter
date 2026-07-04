@@ -86,6 +86,29 @@ Deno.test("rejects private IPv6 literal targets", async () => {
   }
 });
 
+Deno.test("rejects reserved and other non-public literal targets", async () => {
+  for (
+    const url of [
+      "http://100.64.0.1/",
+      "http://192.0.0.1/",
+      "http://192.0.2.1/",
+      "http://198.18.0.1/",
+      "http://198.51.100.1/",
+      "http://203.0.113.1/",
+      "http://224.0.0.1/",
+      "http://255.255.255.255/",
+      "http://[ff00::1]/",
+      "http://[2001:db8::1]/",
+    ]
+  ) {
+    await assertRejects(
+      () => Promise.resolve().then(() => validatePublicPreviewUrl(url)),
+      Error,
+      "public URL",
+    );
+  }
+});
+
 Deno.test("extracts Open Graph preview data before other metadata", async () => {
   const preview = await createPreviewFromHtml({
     requestedUrl: "example.com/page",
