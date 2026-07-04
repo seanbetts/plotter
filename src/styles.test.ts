@@ -162,13 +162,14 @@ describe('activity list styles', () => {
     expect(styles).toMatch(
       /\.stop-select\s*{[^}]*align-content:\s*center;[^}]*gap:\s*0;[^}]*padding:\s*10px 8px;/s,
     );
+    expect(styles).not.toMatch(/\.stop-delete\s*{[^}]*border-left:/s);
   });
 });
 
 describe('inline route connector styles', () => {
   it('keeps route rows compact and visually secondary between stops', () => {
     expect(styles).toMatch(
-      /\.inline-route-leg\s*{[^}]*grid-template-columns:\s*30px 1px minmax\(0,\s*1fr\);[^}]*gap:\s*10px;[^}]*min-height:\s*42px;[^}]*padding:\s*4px 36px 4px 36px;/s,
+      /\.inline-route-leg\s*{[^}]*grid-template-columns:\s*30px 1px minmax\(0,\s*1fr\);[^}]*gap:\s*10px;[^}]*min-height:\s*calc\(42px \+ var\(--stop-list-gap,\s*8px\)\);[^}]*margin-bottom:\s*calc\(0px - var\(--stop-list-gap,\s*8px\)\);[^}]*padding:\s*4px 36px 4px 36px;/s,
     );
     expect(styles).toMatch(/\.inline-route-rail\s*{[^}]*height:\s*30px;/s);
     expect(styles).toMatch(/\.inline-route-type\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);

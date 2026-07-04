@@ -1698,7 +1698,6 @@ select {
   width: 32px;
   min-height: 100%;
   place-items: center;
-  border-left: 1px solid var(--border-divider);
   color: rgb(var(--color-text-rgb) / 0.58);
 }
 
@@ -1797,7 +1796,8 @@ select {
   grid-template-columns: 30px 1px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  min-height: 42px;
+  min-height: calc(42px + var(--stop-list-gap, 8px));
+  margin-bottom: calc(0px - var(--stop-list-gap, 8px));
   padding: 4px 36px 4px 36px;
   color: var(--text-muted);
   font-size: 0.76rem;
