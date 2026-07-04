@@ -76,10 +76,10 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
   const errorId = useId();
   const sortedLinks = useMemo(() => sortResearchLinks(links), [links]);
   const latestSortedLinksRef = useRef(sortedLinks);
-  const isAddingRef = useRef(false);
+  const isMutatingRef = useRef(false);
   const [linkInput, setLinkInput] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [isAdding, setIsAdding] = useState(false);
+  const [isMutating, setIsMutating] = useState(false);
   const [draggedLinkId, setDraggedLinkId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ linkId: string; side: DropSide } | null>(null);
 
@@ -100,9 +100,23 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
     }
   };
 
+  const runMutation = async (createNextLinks: () => ResearchLink[] | Promise<ResearchLink[]>) => {
+    if (isMutatingRef.current) return;
+
+    isMutatingRef.current = true;
+    setIsMutating(true);
+
+    try {
+      await commitLinks(await createNextLinks());
+    } finally {
+      isMutatingRef.current = false;
+      setIsMutating(false);
+    }
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isAddingRef.current) return;
+    if (isMutatingRef.current) return;
 
     let normalizedUrl: string;
     try {
@@ -113,10 +127,8 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
     }
 
     setError(null);
-    isAddingRef.current = true;
-    setIsAdding(true);
 
-    try {
+    void runMutation(async () => {
       let createNewLink: (sortOrder: number) => ResearchLink;
 
       try {
@@ -141,41 +153,42 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
       const currentLinks = latestSortedLinksRef.current;
       const newLink = createNewLink(getNextSortOrder(currentLinks));
 
-      await commitLinks([
+      setLinkInput('');
+
+      return [
         ...currentLinks,
         newLink,
-      ]);
-    } finally {
-      setLinkInput('');
-      isAddingRef.current = false;
-      setIsAdding(false);
-    }
+      ];
+    }).catch(() => undefined);
   };
 
   const deleteLink = (linkId: string) => {
-    if (isAddingRef.current) return;
-
-    void commitLinks(denseSortOrders(sortedLinks.filter((link) => link.id !== linkId))).catch(() => undefined);
+    void runMutation(() => denseSortOrders(latestSortedLinksRef.current.filter((link) => link.id !== linkId))).catch(
+      () => undefined,
+    );
   };
 
   const moveLink = (linkId: string, direction: -1 | 1) => {
-    if (isAddingRef.current) return;
+    void runMutation(() => {
+      const currentLinks = latestSortedLinksRef.current;
+      const linkIndex = currentLinks.findIndex((link) => link.id === linkId);
+      const targetIndex = linkIndex + direction;
 
-    const linkIndex = sortedLinks.findIndex((link) => link.id === linkId);
-    const targetIndex = linkIndex + direction;
+      if (linkIndex === -1 || targetIndex < 0 || targetIndex >= currentLinks.length) {
+        return currentLinks;
+      }
 
-    if (linkIndex === -1 || targetIndex < 0 || targetIndex >= sortedLinks.length) return;
-
-    const nextLinks = [...sortedLinks];
-    const [movedLink] = nextLinks.splice(linkIndex, 1);
-    nextLinks.splice(targetIndex, 0, movedLink);
-    void commitLinks(denseSortOrders(nextLinks)).catch(() => undefined);
+      const nextLinks = [...currentLinks];
+      const [movedLink] = nextLinks.splice(linkIndex, 1);
+      nextLinks.splice(targetIndex, 0, movedLink);
+      return denseSortOrders(nextLinks);
+    }).catch(() => undefined);
   };
 
-  const canDropOnLink = (linkId: string) => Boolean(!isAddingRef.current && draggedLinkId && draggedLinkId !== linkId);
+  const canDropOnLink = (linkId: string) => Boolean(!isMutatingRef.current && draggedLinkId && draggedLinkId !== linkId);
 
   const handleDragStart = (event: DragEvent<HTMLElement>, linkId: string) => {
-    if (isAddingRef.current) {
+    if (isMutatingRef.current) {
       event.preventDefault();
       return;
     }
@@ -206,10 +219,15 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
     }
 
     event.preventDefault();
-    const orderedIds = orderAroundTarget(sortedLinks, draggedLinkId, targetLinkId, getDropSide(event));
+    const draggedId = draggedLinkId;
+    const dropSide = getDropSide(event);
     setDraggedLinkId(null);
     setDropTarget(null);
-    void commitLinks(reorderResearchLinks(sortedLinks, orderedIds)).catch(() => undefined);
+    void runMutation(() => {
+      const currentLinks = latestSortedLinksRef.current;
+      const orderedIds = orderAroundTarget(currentLinks, draggedId, targetLinkId, dropSide);
+      return reorderResearchLinks(currentLinks, orderedIds);
+    }).catch(() => undefined);
   };
 
   return (
@@ -223,9 +241,9 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
             onChange={(event) => setLinkInput(event.target.value)}
             placeholder="Add link"
             aria-describedby={error ? errorId : undefined}
-            disabled={isAdding}
+            disabled={isMutating}
           />
-          <button type="submit" disabled={isAdding}>
+          <button type="submit" disabled={isMutating}>
             <Plus size={16} aria-hidden="true" />
             <span>Add</span>
           </button>
@@ -245,7 +263,7 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
           return (
             <article
               className={`link-preview-card${draggedLinkId === link.id ? ' is-dragging' : ''}${dropClass}`}
-              draggable={!isAdding}
+              draggable={!isMutating}
               key={link.id}
               onDragStart={(event) => handleDragStart(event, link.id)}
               onDragEnd={() => {
@@ -273,7 +291,7 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
                 className="link-preview-card__delete"
                 type="button"
                 aria-label={`Delete ${link.title}`}
-                disabled={isAdding}
+                disabled={isMutating}
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -288,7 +306,7 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
                   className="link-preview-card__move"
                   aria-label={`Move ${link.title} up`}
                   onClick={() => moveLink(link.id, -1)}
-                  disabled={isAdding || sortedLinks[0]?.id === link.id}
+                  disabled={isMutating || sortedLinks[0]?.id === link.id}
                 >
                   Up
                 </button>
@@ -297,7 +315,7 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
                   className="link-preview-card__move"
                   aria-label={`Move ${link.title} down`}
                   onClick={() => moveLink(link.id, 1)}
-                  disabled={isAdding || sortedLinks.at(-1)?.id === link.id}
+                  disabled={isMutating || sortedLinks.at(-1)?.id === link.id}
                 >
                   Down
                 </button>

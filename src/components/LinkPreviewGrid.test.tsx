@@ -328,6 +328,58 @@ describe('LinkPreviewGrid', () => {
     expect(screen.getByRole('link', { name: /Second cafe/ })).toBeInTheDocument();
   });
 
+  it('serializes delete and reorder while async onChange is pending', async () => {
+    const firstSave = deferred<void>();
+    const saveRequests: ResearchLink[][] = [];
+
+    function Harness() {
+      const [links, setLinks] = useState<ResearchLink[]>([
+        createResearchLink({ id: 'link-1', title: 'First', sortOrder: 0 }),
+        createResearchLink({ id: 'link-2', title: 'Second', sortOrder: 1 }),
+        createResearchLink({ id: 'link-3', title: 'Third', sortOrder: 2 }),
+      ]);
+
+      return (
+        <LinkPreviewGrid
+          label="Research links"
+          links={links}
+          previewClient={createPreviewClient()}
+          onChange={(nextLinks) => {
+            saveRequests.push(nextLinks);
+            return firstSave.promise.then(() => setLinks(nextLinks));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Second' }));
+
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+    expect(saveRequests[0]).toEqual([
+      expect.objectContaining({ id: 'link-1', sortOrder: 0 }),
+      expect.objectContaining({ id: 'link-3', sortOrder: 1 }),
+    ]);
+    expect(screen.getByRole('button', { name: 'Delete First' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move Third up' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: /First/ }).closest('article')).toHaveAttribute('draggable', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete First' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move Third up' }));
+
+    expect(saveRequests).toHaveLength(1);
+
+    await act(async () => {
+      firstSave.resolve();
+      await firstSave.promise;
+    });
+
+    expect(screen.getByRole('link', { name: /First/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Second/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Third/ })).toBeInTheDocument();
+  });
+
   it('shows an inline validation error for invalid URLs and does not call onChange', () => {
     const previewClient = createPreviewClient();
     const onChange = vi.fn();
@@ -344,7 +396,7 @@ describe('LinkPreviewGrid', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('deletes a link and reassigns dense sort orders', () => {
+  it('deletes a link and reassigns dense sort orders', async () => {
     const onChange = vi.fn();
 
     render(
@@ -362,13 +414,15 @@ describe('LinkPreviewGrid', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete Second' }));
 
-    expect(onChange).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'link-1', sortOrder: 0 }),
-      expect.objectContaining({ id: 'link-3', sortOrder: 1 }),
-    ]);
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'link-1', sortOrder: 0 }),
+        expect.objectContaining({ id: 'link-3', sortOrder: 1 }),
+      ]),
+    );
   });
 
-  it('reorders links by dragging the tile itself', () => {
+  it('reorders links by dragging the tile itself', async () => {
     const onChange = vi.fn();
 
     render(<LinkPreviewGrid {...createProps({ onChange })} />);
@@ -392,9 +446,11 @@ describe('LinkPreviewGrid', () => {
     dragOver(trainLink, 280);
     drop(trainLink, 280);
 
-    expect(onChange).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'link-2', sortOrder: 0 }),
-      expect.objectContaining({ id: 'link-1', sortOrder: 1 }),
-    ]);
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'link-2', sortOrder: 0 }),
+        expect.objectContaining({ id: 'link-1', sortOrder: 1 }),
+      ]),
+    );
   });
 });
