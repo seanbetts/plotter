@@ -39,6 +39,24 @@ const louvreSearchResult = {
 } satisfies Extract<PlaceSearchResult, { kind: 'place' }>;
 
 describe('ActivityList', () => {
+  it('uses a contextual title for the activities section', () => {
+    render(
+      <ActivityList
+        title="Paris Activities"
+        activities={[]}
+        selectedActivityId={null}
+        onSelectActivity={vi.fn()}
+        onCreateActivity={vi.fn()}
+        searchActivities={vi.fn().mockResolvedValue([])}
+        onDeleteActivity={vi.fn()}
+        onReorderActivities={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('region', { name: 'Paris Activities' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Paris Activities' })).toBeInTheDocument();
+  });
+
   it('renders an empty state and manually adds an activity', async () => {
     const user = userEvent.setup();
     const onCreateActivity = vi.fn();

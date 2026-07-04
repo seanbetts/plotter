@@ -454,6 +454,7 @@ function DestinationProfileForm({
     ? formatLocationContext(destinationLocationLabel, destinationTitle)
     : '';
   const tagsLabel = `${destinationTitle.trim() || destination.name} Tags`;
+  const activitiesLabel = `${destinationTitle.trim() || destination.name} Activities`;
   const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
     .filter(Boolean)
     .join(' ');
@@ -659,6 +660,20 @@ function DestinationProfileForm({
           onChange={(event) => updateForm({ expectedStayDays: event.target.value })}
         />
       </label>
+
+      <ActivityList
+        title={activitiesLabel}
+        activities={activities}
+        selectedActivityId={selectedActivityId}
+        onSelectActivity={onSelectActivity}
+        onCreateActivity={createProfileActivity}
+        searchActivities={searchActivities ?? emptyActivitySearch}
+        onDeleteActivity={(activityId) => onDeleteActivity(activityId)}
+        onReorderActivities={(orderedActivityIds) =>
+          onReorderActivities(destination.id, orderedActivityIds)
+        }
+      />
+
       <fieldset className="tag-editor" aria-label={tagsLabel}>
         <legend>{tagsLabel}</legend>
         <div className="tag-pill-list">
@@ -696,18 +711,6 @@ function DestinationProfileForm({
           />
         </div>
       </fieldset>
-
-      <ActivityList
-        activities={activities}
-        selectedActivityId={selectedActivityId}
-        onSelectActivity={onSelectActivity}
-        onCreateActivity={createProfileActivity}
-        searchActivities={searchActivities ?? emptyActivitySearch}
-        onDeleteActivity={(activityId) => onDeleteActivity(activityId)}
-        onReorderActivities={(orderedActivityIds) =>
-          onReorderActivities(destination.id, orderedActivityIds)
-        }
-      />
     </aside>
   );
 }

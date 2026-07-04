@@ -5,6 +5,7 @@ import type { Activity, ActivityLocation } from '../domain/types';
 import { SearchCombobox } from './SearchCombobox';
 
 type ActivityListProps = {
+  title?: string;
   activities: Activity[];
   selectedActivityId: string | null;
   onSelectActivity: (activityId: string) => void;
@@ -82,6 +83,7 @@ function formatTypeBadge(result: PlaceSearchResult) {
 }
 
 export function ActivityList({
+  title = 'Activities',
   activities,
   selectedActivityId,
   onSelectActivity,
@@ -152,9 +154,9 @@ export function ActivityList({
   }
 
   return (
-    <section className="activity-list-section" aria-label="Activities">
+    <section className="activity-list-section" aria-label={title}>
       <div className="activity-list-header">
-        <h2>Activities</h2>
+        <h2>{title}</h2>
       </div>
 
       <div className="activity-add-row">

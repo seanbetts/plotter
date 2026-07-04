@@ -266,6 +266,17 @@ describe('ActivityPanel', () => {
     expect(tagsGroup).toContainElement(screen.getByLabelText('Add tag'));
   });
 
+  it('keeps the tags group at the bottom after notes', () => {
+    const props = createProps();
+
+    render(<ActivityPanel {...props} />);
+
+    const notes = screen.getByLabelText('Louvre Notes');
+    const tagsGroup = screen.getByRole('group', { name: 'Louvre Tags' });
+
+    expect(notes.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('saves description and notes with labels based on the activity title', () => {
     const props = createProps();
 

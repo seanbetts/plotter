@@ -155,6 +155,29 @@ describe('DestinationProfile', () => {
     expect(within(tagsGroup).getByText('Samarkand Tags')).toBeInTheDocument();
   });
 
+  it('places the tags group at the bottom after the activities section', () => {
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const profile = screen.getByRole('complementary', { name: 'Samarkand profile' });
+    const activitiesHeading = within(profile).getByRole('heading', { name: 'Samarkand Activities' });
+    const tagsGroup = within(profile).getByRole('group', { name: 'Samarkand Tags' });
+
+    expect(activitiesHeading.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('shows latitude and longitude as separate pills with a one-click copy button', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -481,7 +504,7 @@ describe('DestinationProfile', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Paris Activities' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select activity Louvre' })).toHaveTextContent('Louvre');
     expect(screen.queryByDisplayValue('Louvre')).not.toBeInTheDocument();
   });
@@ -620,7 +643,7 @@ describe('DestinationProfile', () => {
     expect(screen.getByLabelText('Expected stay days')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Samarkand Tags' })).toBeInTheDocument();
     expect(screen.getByLabelText('Add tag')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Samarkand Activities' })).toBeInTheDocument();
     expect(screen.getByLabelText('Search for an activity')).toBeInTheDocument();
     expect(screen.queryByLabelText('Why it matters')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Highlights')).not.toBeInTheDocument();

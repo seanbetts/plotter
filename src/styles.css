@@ -848,9 +848,9 @@ select {
   right: 16px;
   bottom: 16px;
   z-index: 20;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   width: min(430px, calc(100vw - 32px));
-  align-content: start;
   gap: 12px;
   overflow: auto;
   padding: 18px;
@@ -1197,11 +1197,19 @@ select {
   padding: 0;
 }
 
+.destination-profile > .tag-editor,
+.activity-panel > .tag-editor {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
 .tag-editor legend {
   margin-bottom: 6px;
   padding: 0;
   color: var(--text-secondary);
   font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .tag-pill-list {
@@ -1260,10 +1268,17 @@ select {
 
 .activity-list-section {
   display: grid;
+  align-content: start;
   gap: 10px;
   margin-top: 4px;
   padding-top: 10px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.destination-profile .activity-list-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .activity-list-header h2 {

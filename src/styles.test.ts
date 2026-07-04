@@ -34,6 +34,21 @@ describe('panel tag editor styles', () => {
   it('matches label-to-control spacing for tag legends', () => {
     expect(styles).toMatch(/\.tag-editor legend\s*{[^}]*margin-bottom:\s*6px;/s);
   });
+
+  it('bottom-aligns the tag section with a section divider in profile panels', () => {
+    expect(styles).toMatch(
+      /\.destination-profile,\s*\.activity-panel\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
+    );
+    expect(styles).toMatch(
+      /\.destination-profile > \.tag-editor,\s*\.activity-panel > \.tag-editor\s*{[^}]*margin-top:\s*auto;[^}]*padding-top:\s*10px;[^}]*border-top:\s*1px solid var\(--border-subtle\);/s,
+    );
+  });
+
+  it('styles tag legends like activity section headings', () => {
+    expect(styles).toMatch(
+      /\.tag-editor legend\s*{[^}]*color:\s*var\(--text-secondary\);[^}]*font-size:\s*0\.82rem;[^}]*font-weight:\s*700;/s,
+    );
+  });
 });
 
 describe('profile header styles', () => {
@@ -74,6 +89,16 @@ describe('activity list styles', () => {
 
   it('keeps activity rows tightly spaced', () => {
     expect(styles).toMatch(/\.activity-list\s*{[^}]*gap:\s*2px;/s);
+  });
+
+  it('lets the stop activity section shrink before the bottom tag editor', () => {
+    expect(styles).toMatch(
+      /\.destination-profile \.activity-list-section\s*{[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s,
+    );
+  });
+
+  it('keeps activity section controls packed together when the section grows', () => {
+    expect(styles).toMatch(/\.activity-list-section\s*{[^}]*align-content:\s*start;/s);
   });
 
   it('uses the shared itinerary row hover treatment for stops and activities', () => {
