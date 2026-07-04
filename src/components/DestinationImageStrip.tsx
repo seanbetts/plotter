@@ -1,7 +1,8 @@
-import { Image, LoaderCircle } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Image, LoaderCircle } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import type { MediaItem } from '../domain/types';
+import { preloadImageUrls } from '../media/imagePreloading';
 
 export type DestinationImageStripProps = {
   destinationName: string;
@@ -29,7 +30,7 @@ function mediaLabel(mediaItem: MediaItem, index: number) {
 
 function openPreviewLabel(mediaItem: MediaItem, index: number) {
   const caption = mediaItem.caption.trim();
-  return `Open image ${index + 1}${caption ? `: ${caption}` : ''}`;
+  return `Show image ${index + 1}${caption ? `: ${caption}` : ''}`;
 }
 
 function getHeroImageUrl(mediaItem: MediaItem) {
@@ -99,8 +100,37 @@ export function DestinationImageStrip({
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [draggedMediaId, setDraggedMediaId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<ThumbnailDropTarget | null>(null);
-  const heroMediaItem = mediaItems[0] ?? null;
+  const [previewMediaId, setPreviewMediaId] = useState<string | null>(null);
+  const previewMediaIndex =
+    previewMediaId === null
+      ? 0
+      : mediaItems.findIndex((mediaItem) => mediaItem.id === previewMediaId);
+  const safePreviewMediaIndex = previewMediaIndex === -1 ? 0 : previewMediaIndex;
+  const heroMediaItem = mediaItems[safePreviewMediaIndex] ?? null;
   const stripClassName = `destination-image-strip${isFileDragOver ? ' is-drag-over' : ''}`;
+
+  useEffect(() => {
+    if (mediaItems.length === 0) {
+      setPreviewMediaId(null);
+      return;
+    }
+
+    if (previewMediaId !== null && !mediaItems.some((mediaItem) => mediaItem.id === previewMediaId)) {
+      setPreviewMediaId(mediaItems[0].id);
+    }
+  }, [mediaItems, previewMediaId]);
+
+  useEffect(() => {
+    if (mediaItems.length < 2) return;
+
+    const previousIndex = (safePreviewMediaIndex - 1 + mediaItems.length) % mediaItems.length;
+    const nextIndex = (safePreviewMediaIndex + 1) % mediaItems.length;
+
+    preloadImageUrls([
+      getHeroImageUrl(mediaItems[previousIndex]),
+      getHeroImageUrl(mediaItems[nextIndex]),
+    ]);
+  }, [mediaItems, safePreviewMediaIndex]);
 
   const openFilePicker = () => {
     fileInputRef.current?.click();
@@ -204,6 +234,16 @@ export function DestinationImageStrip({
     setDragTarget(null);
   };
 
+  const selectAdjacentPreview = (direction: -1 | 1) => {
+    if (mediaItems.length === 0) return;
+
+    const nextMediaItem =
+      mediaItems[(safePreviewMediaIndex + direction + mediaItems.length) % mediaItems.length];
+    if (!nextMediaItem) return;
+
+    setPreviewMediaId(nextMediaItem.id);
+  };
+
   return (
     <section
       className={stripClassName}
@@ -263,20 +303,42 @@ export function DestinationImageStrip({
       ) : null}
 
       {!isLoading && heroMediaItem ? (
-        <button
-          type="button"
-          className="destination-image-hero"
-          aria-label={`Open hero image${heroMediaItem.caption.trim() ? `: ${heroMediaItem.caption.trim()}` : ''}`}
-          onClick={() => onOpenPreview(heroMediaItem.id)}
-        >
-          <img src={getHeroImageUrl(heroMediaItem)} alt={mediaLabel(heroMediaItem, 0)} />
+        <div className="destination-image-hero" role="group" aria-label="Image preview">
+          <button
+            type="button"
+            className="destination-image-preview-button"
+            aria-label={`Open full image${heroMediaItem.caption.trim() ? `: ${heroMediaItem.caption.trim()}` : ''}`}
+            onClick={() => onOpenPreview(heroMediaItem.id)}
+          >
+            <img src={getHeroImageUrl(heroMediaItem)} alt={mediaLabel(heroMediaItem, safePreviewMediaIndex)} />
+          </button>
+          <button
+            type="button"
+            className="destination-image-preview-nav is-previous"
+            aria-label="Previous preview image"
+            title="Previous preview image"
+            disabled={mediaItems.length < 2}
+            onClick={() => selectAdjacentPreview(-1)}
+          >
+            <ChevronLeft size={18} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="destination-image-preview-nav is-next"
+            aria-label="Next preview image"
+            title="Next preview image"
+            disabled={mediaItems.length < 2}
+            onClick={() => selectAdjacentPreview(1)}
+          >
+            <ChevronRight size={18} aria-hidden="true" />
+          </button>
           {isUploading ? (
             <span className="destination-image-hero-status" role="status" aria-label="Uploading images">
               <LoaderCircle size={14} aria-hidden="true" />
               Uploading
             </span>
           ) : null}
-        </button>
+        </div>
       ) : null}
 
       {mediaItems.length > 0 ? (
@@ -290,7 +352,7 @@ export function DestinationImageStrip({
               }`}
               aria-label={openPreviewLabel(mediaItem, index)}
               draggable
-              onClick={() => onOpenPreview(mediaItem.id)}
+              onClick={() => setPreviewMediaId(mediaItem.id)}
               onDragStart={(event) => handleThumbnailDragStart(event, mediaItem.id)}
               onDragOver={(event) => handleThumbnailDragOver(event, mediaItem.id)}
               onDrop={(event) => handleThumbnailDrop(event, mediaItem.id)}

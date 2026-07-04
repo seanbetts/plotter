@@ -422,7 +422,7 @@ describe('DestinationProfile', () => {
     expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
   });
 
-  it('requests the workspace image preview from the hero image', async () => {
+  it('requests the workspace full image preview from the pane preview image', async () => {
     const user = userEvent.setup();
     const destination = createDestination({
       name: 'Balcombe',
@@ -448,7 +448,7 @@ describe('DestinationProfile', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Open hero image: Home lane' }));
+    await user.click(screen.getByRole('button', { name: 'Open full image: Home lane' }));
     expect(onOpenMediaPreview).toHaveBeenCalledWith('media-1');
     expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
   });

@@ -11,6 +11,7 @@ import { createLegacyLocation, formatLocationParts } from './domain/locations';
 import type { Coordinates, DestinationLocation } from './domain/types';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
+import { preloadImageUrls } from './media/imagePreloading';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
 import './styles.css';
@@ -76,6 +77,10 @@ function formatCoordinate(value: number) {
 
 function formatCoordinatePair(coordinates: Coordinates) {
   return `${formatCoordinate(coordinates.lat)}, ${formatCoordinate(coordinates.lng)}`;
+}
+
+function getFullMediaImageUrl(mediaItem: { fullUrl?: string; previewUrl?: string; url: string }) {
+  return mediaItem.fullUrl ?? mediaItem.previewUrl ?? mediaItem.url;
 }
 
 function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, 'name' | 'location'> {
@@ -276,6 +281,19 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   }, [selectedDestinationId]);
 
   useEffect(() => {
+    if (previewMediaIndex === -1 || destinationMedia.mediaItems.length < 2) return;
+
+    const previousIndex =
+      (previewMediaIndex - 1 + destinationMedia.mediaItems.length) % destinationMedia.mediaItems.length;
+    const nextIndex = (previewMediaIndex + 1) % destinationMedia.mediaItems.length;
+
+    preloadImageUrls([
+      getFullMediaImageUrl(destinationMedia.mediaItems[previousIndex]),
+      getFullMediaImageUrl(destinationMedia.mediaItems[nextIndex]),
+    ]);
+  }, [destinationMedia.mediaItems, previewMediaIndex]);
+
+  useEffect(() => {
     if (!selectedDestinationId) {
       setSelectedActivityId(null);
       return;
@@ -464,17 +482,14 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     [deleteActivity],
   );
 
-  function reorderPreviewMedia(mediaId: string, direction: -1 | 1) {
+  function navigatePreviewMedia(mediaId: string, direction: -1 | 1) {
     const currentIndex = destinationMedia.mediaItems.findIndex((mediaItem) => mediaItem.id === mediaId);
-    const targetIndex = currentIndex + direction;
+    if (currentIndex === -1 || destinationMedia.mediaItems.length === 0) return;
 
-    if (currentIndex === -1 || targetIndex < 0 || targetIndex >= destinationMedia.mediaItems.length) return;
+    const targetIndex =
+      (currentIndex + direction + destinationMedia.mediaItems.length) % destinationMedia.mediaItems.length;
 
-    const nextOrder = destinationMedia.mediaItems.map((mediaItem) => mediaItem.id);
-    const [movedMediaId] = nextOrder.splice(currentIndex, 1);
-    nextOrder.splice(targetIndex, 0, movedMediaId);
-    void Promise.resolve(destinationMedia.reorder(nextOrder)).catch(() => undefined);
-    setPreviewMediaId(mediaId);
+    setPreviewMediaId(destinationMedia.mediaItems[targetIndex].id);
   }
 
   async function deletePreviewMedia(mediaId: string) {
@@ -583,11 +598,11 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         {!isInteractionLocked && previewMediaItem ? (
           <DestinationImagePreviewModal
             mediaItem={previewMediaItem}
-            canMoveLeft={previewMediaIndex > 0}
-            canMoveRight={previewMediaIndex < destinationMedia.mediaItems.length - 1}
+            canMoveLeft={destinationMedia.mediaItems.length > 1}
+            canMoveRight={destinationMedia.mediaItems.length > 1}
             onDelete={deletePreviewMedia}
-            onMoveLeft={(mediaId) => reorderPreviewMedia(mediaId, -1)}
-            onMoveRight={(mediaId) => reorderPreviewMedia(mediaId, 1)}
+            onNavigatePrevious={(mediaId) => navigatePreviewMedia(mediaId, -1)}
+            onNavigateNext={(mediaId) => navigatePreviewMedia(mediaId, 1)}
             onClose={() => setPreviewMediaId(null)}
           />
         ) : null}

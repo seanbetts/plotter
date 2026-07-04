@@ -12,8 +12,8 @@ The stop detail pane gets an image area directly below the stop title/location b
 
 The image area has two parts:
 
-- A hero image showing the first image in the stop's ordered image list.
-- A thumbnail carousel underneath showing all images plus an add tile.
+- A large preview image showing the currently selected image. The first ordered image is selected by default when the pane opens.
+- A thumbnail carousel underneath showing all images. Clicking a thumbnail selects it into the large preview instead of opening the full-screen modal.
 
 When a stop has no images, the same area shows a compact empty drop zone with an add tile. The empty state should invite upload without making the pane feel like a marketing card.
 
@@ -24,7 +24,7 @@ Users can add images in two ways:
 - Click the `+` tile in the carousel to open the native file picker.
 - Drag and drop image files onto the carousel/image area.
 
-Uploads start immediately after file selection/drop. During upload, the carousel should show an uploading placeholder. If an upload succeeds, the new image appears at the end of the ordered list. If this is the first image, it also becomes the hero image.
+Uploads start immediately after file selection/drop. During upload, the preview area should show an uploading status. If an upload succeeds, the new image appears at the end of the ordered list. If this is the first image, it also becomes the selected preview image.
 
 Only image files supported by the existing Supabase bucket are in scope for v1: JPEG, PNG, WebP, and GIF.
 
@@ -32,28 +32,26 @@ Only image files supported by the existing Supabase bucket are in scope for v1: 
 
 Users can drag thumbnails left/right inside the carousel to reorder images directly.
 
-The ordered image list is the source of truth:
+The ordered image list is the source of truth for thumbnail order and default preview selection:
 
-- The first image is always the hero image.
-- Moving an image to the first position immediately makes it the hero.
+- The first image is selected by default when the pane opens or the selected image is deleted.
+- Moving an image to the first position makes it the default selected preview the next time the pane is opened.
 - Newly uploaded images are appended to the end by default.
 
-For accessibility and trackpad edge cases, the preview modal should also offer keyboard-accessible move-left and move-right controls for the selected image.
+The large preview has previous/next controls for browsing without changing order. Reordering remains a thumbnail-carousel interaction.
 
 ## Preview Modal
 
-Clicking the hero image or any thumbnail opens a simple preview modal.
+Clicking the large preview opens a simple full-screen preview modal. Clicking a thumbnail selects the large preview and does not open the modal.
 
 The modal includes:
 
 - Large image preview.
-- Caption field.
-- Credit field.
 - Delete action.
-- Move left/right fallback controls.
+- Previous/next controls for browsing the full image set.
 - Close button.
 
-Caption and credit edits should autosave with the same save-status feedback pattern as the stop detail pane. Deleting an image removes it from the carousel and storage metadata; if the deleted image was first, the next image becomes the hero.
+The modal is for focused viewing, navigation, and deletion. Caption and credit editing should live outside the full-screen modal if it is reintroduced later. Deleting an image removes it from the carousel and storage metadata; if the deleted image was selected, the first remaining image becomes selected.
 
 ## Data Model
 
@@ -74,6 +72,19 @@ The existing Supabase Storage path pattern remains:
 ```
 
 The existing private `trip-media` bucket and signed URL read flow remain the right approach.
+
+Each loaded `MediaItem` should expose display-specific URLs when the backing storage provider supports transforms:
+
+```ts
+type MediaItem = {
+  url: string;
+  thumbnailUrl?: string;
+  previewUrl?: string;
+  fullUrl?: string;
+};
+```
+
+The thumbnail carousel should use `thumbnailUrl`, the in-panel preview should use `previewUrl`, and the full-screen modal should use `fullUrl`, each falling back to `url` when the optimized variant is unavailable.
 
 ## Repository API
 
@@ -105,8 +116,8 @@ The Supabase implementation should use patch/update operations and avoid rewriti
 
 Add focused components rather than growing `DestinationProfile` too much:
 
-- `DestinationImageStrip`: owns hero image display, carousel, add tile, drag/drop upload, direct thumbnail reordering, and opening the preview modal.
-- `DestinationImagePreviewModal`: owns large preview, caption/credit editing, delete, and fallback reorder controls.
+- `DestinationImageStrip`: owns large preview display, carousel, add tile, drag/drop upload, direct thumbnail reordering, and opening the full-screen preview modal.
+- `DestinationImagePreviewModal`: owns full-screen preview, previous/next navigation, delete confirmation, and close behavior.
 
 `DestinationProfile` should pass the destination id and repository-backed handlers down to these components. The existing stop name/stay/tags autosave behavior should remain separate.
 
@@ -120,7 +131,7 @@ States to support:
 - Uploading one or more images.
 - Upload failure with a retry affordance or clear failure message.
 - Reorder failure that restores the previous order.
-- Caption/credit save failure in the modal.
+- Delete failure in the modal.
 - Delete confirmation before removing an image.
 
 ## Accessibility
@@ -128,8 +139,9 @@ States to support:
 The carousel should remain usable without pointer drag:
 
 - Add tile is a button with a clear label.
-- Thumbnails are buttons that open the preview modal.
-- Drag reorder has keyboard fallback controls in the modal.
+- Thumbnails are buttons that select the large preview.
+- The large preview is a button that opens the full-screen modal.
+- Preview and modal previous/next controls are keyboard-accessible browsing controls.
 - Modal uses dialog semantics, focus trap behavior, and closes with Escape.
 - Upload/drop state is announced via an accessible status region.
 
@@ -140,12 +152,12 @@ Component tests should cover:
 - Empty image state.
 - Clicking `+` calls file upload flow.
 - Dropping an image calls upload flow.
-- Upload success adds a thumbnail and updates the hero when needed.
-- Thumbnail click opens the preview modal.
-- Caption/credit changes save through repository handlers.
-- Delete removes an image and updates the hero.
+- Upload success adds a thumbnail and updates the selected preview when needed.
+- Thumbnail click selects the large preview without opening the modal.
+- Large preview click opens the preview modal.
+- Delete removes an image and updates the selected preview.
 - Drag reorder calls `reorderDestinationMedia` with ordered ids.
-- Move-left/move-right fallback reorders images.
+- Preview and modal previous/next controls navigate images without reordering.
 - Upload/reorder/save/delete errors render accessible feedback.
 
 Repository tests should cover:

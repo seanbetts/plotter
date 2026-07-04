@@ -7,8 +7,8 @@ type DestinationImagePreviewModalProps = {
   canMoveLeft: boolean;
   canMoveRight: boolean;
   onDelete: (mediaId: string) => Promise<void> | void;
-  onMoveLeft: (mediaId: string) => Promise<void> | void;
-  onMoveRight: (mediaId: string) => Promise<void> | void;
+  onNavigatePrevious: (mediaId: string) => Promise<void> | void;
+  onNavigateNext: (mediaId: string) => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -17,8 +17,8 @@ export function DestinationImagePreviewModal({
   canMoveLeft,
   canMoveRight,
   onDelete,
-  onMoveLeft,
-  onMoveRight,
+  onNavigatePrevious,
+  onNavigateNext,
   onClose,
 }: DestinationImagePreviewModalProps) {
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -33,6 +33,7 @@ export function DestinationImagePreviewModal({
       if (event.key !== 'Escape' || event.isComposing) return;
 
       event.preventDefault();
+      event.stopPropagation();
       if (isConfirmingDelete) {
         setIsConfirmingDelete(false);
         setDeleteError('');
@@ -88,20 +89,20 @@ export function DestinationImagePreviewModal({
           <button
             type="button"
             className="image-preview-floating-button image-preview-nav-button is-previous"
-            aria-label="Move image left"
-            title="Move image left"
+            aria-label="Previous full image"
+            title="Previous full image"
             disabled={!canMoveLeft}
-            onClick={() => void onMoveLeft(mediaItem.id)}
+            onClick={() => void onNavigatePrevious(mediaItem.id)}
           >
             <ChevronLeft size={24} aria-hidden="true" />
           </button>
           <button
             type="button"
             className="image-preview-floating-button image-preview-nav-button is-next"
-            aria-label="Move image right"
-            title="Move image right"
+            aria-label="Next full image"
+            title="Next full image"
             disabled={!canMoveRight}
-            onClick={() => void onMoveRight(mediaItem.id)}
+            onClick={() => void onNavigateNext(mediaItem.id)}
           >
             <ChevronRight size={24} aria-hidden="true" />
           </button>

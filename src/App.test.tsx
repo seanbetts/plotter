@@ -598,7 +598,7 @@ describe('App', () => {
       await mediaLoad.promise;
     });
 
-    expect(screen.getByRole('button', { name: 'Open hero image: Balcombe lane' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open full image: Balcombe lane' })).toBeInTheDocument();
   });
 
   it('opens the image preview over the map stage instead of inside the stop pane', async () => {
@@ -621,7 +621,7 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
-    await user.click(await screen.findByRole('button', { name: 'Open hero image: Balcombe lane' }));
+    await user.click(await screen.findByRole('button', { name: 'Open full image: Balcombe lane' }));
 
     const profile = screen.getByRole('complementary', { name: 'Balcombe profile' });
     const mapStage = screen.getByRole('region', { name: 'World tour map workspace' });
@@ -638,6 +638,70 @@ describe('App', () => {
     expect(wasNotCanceled).toBe(false);
     expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
+  });
+
+  it('uses thumbnails and arrows for image preview selection, then loops full images without reordering', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listDestinationMedia.mockResolvedValue([
+      createMediaItem({
+        id: 'media-1',
+        url: '/balcombe-1.jpg',
+        previewUrl: '/balcombe-1-preview.jpg',
+        fullUrl: '/balcombe-1-full.jpg',
+        caption: 'Balcombe lane',
+        sortOrder: 0,
+      }),
+      createMediaItem({
+        id: 'media-2',
+        url: '/balcombe-2.jpg',
+        previewUrl: '/balcombe-2-preview.jpg',
+        fullUrl: '/balcombe-2-full.jpg',
+        caption: 'Garden',
+        sortOrder: 1,
+      }),
+      createMediaItem({
+        id: 'media-3',
+        url: '/balcombe-3.jpg',
+        previewUrl: '/balcombe-3-preview.jpg',
+        fullUrl: '/balcombe-3-full.jpg',
+        caption: 'Front drive',
+        sortOrder: 2,
+      }),
+    ]);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
+    await user.click(await screen.findByRole('button', { name: 'Show image 2: Garden' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open full image: Garden' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Open full image: Garden' }));
+    const preview = screen.getByRole('dialog', { name: 'Image preview' });
+    expect(within(preview).getByRole('img', { name: 'Garden' })).toHaveAttribute('src', '/balcombe-2-full.jpg');
+
+    await user.click(screen.getByRole('button', { name: 'Previous full image' }));
+
+    expect(within(preview).getByRole('img', { name: 'Balcombe lane' })).toHaveAttribute('src', '/balcombe-1-full.jpg');
+    expect(screen.getByRole('button', { name: 'Previous full image' })).not.toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Previous full image' }));
+
+    expect(within(preview).getByRole('img', { name: 'Front drive' })).toHaveAttribute('src', '/balcombe-3-full.jpg');
+    expect(screen.getByRole('button', { name: 'Next full image' })).not.toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Next full image' }));
+
+    expect(within(preview).getByRole('img', { name: 'Balcombe lane' })).toHaveAttribute('src', '/balcombe-1-full.jpg');
+    expect(repositoryMock.reorderDestinationMedia).not.toHaveBeenCalled();
   });
 
   it('shows stop activities and selects a newly added activity', async () => {

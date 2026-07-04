@@ -20,8 +20,8 @@ function createProps(overrides: Partial<React.ComponentProps<typeof DestinationI
     canMoveLeft: true,
     canMoveRight: true,
     onDelete: vi.fn(),
-    onMoveLeft: vi.fn(),
-    onMoveRight: vi.fn(),
+    onNavigatePrevious: vi.fn(),
+    onNavigateNext: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   };
@@ -83,33 +83,33 @@ describe('DestinationImagePreviewModal', () => {
     expect(screen.getByRole('img', { name: 'Stop reference image' })).toBeInTheDocument();
   });
 
-  it('moves left and right while respecting disabled move controls', () => {
-    const onMoveLeft = vi.fn();
-    const onMoveRight = vi.fn();
+  it('navigates left and right while respecting disabled controls', () => {
+    const onNavigatePrevious = vi.fn();
+    const onNavigateNext = vi.fn();
 
     const { rerender } = render(
       <DestinationImagePreviewModal
-        {...createProps({ onMoveLeft, onMoveRight, canMoveLeft: false, canMoveRight: true })}
+        {...createProps({ onNavigatePrevious, onNavigateNext, canMoveLeft: false, canMoveRight: true })}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move image left' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Move image right' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous full image' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next full image' }));
 
-    expect(onMoveLeft).not.toHaveBeenCalled();
-    expect(onMoveRight).toHaveBeenCalledWith('media-1');
+    expect(onNavigatePrevious).not.toHaveBeenCalled();
+    expect(onNavigateNext).toHaveBeenCalledWith('media-1');
 
     rerender(
       <DestinationImagePreviewModal
-        {...createProps({ onMoveLeft, onMoveRight, canMoveLeft: true, canMoveRight: false })}
+        {...createProps({ onNavigatePrevious, onNavigateNext, canMoveLeft: true, canMoveRight: false })}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move image left' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Move image right' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous full image' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next full image' }));
 
-    expect(onMoveLeft).toHaveBeenCalledWith('media-1');
-    expect(onMoveRight).toHaveBeenCalledTimes(1);
+    expect(onNavigatePrevious).toHaveBeenCalledWith('media-1');
+    expect(onNavigateNext).toHaveBeenCalledTimes(1);
   });
 
   it('closes from the close button and Escape key', () => {
@@ -170,6 +170,23 @@ describe('DestinationImagePreviewModal', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('consumes Escape so lower-level panels do not also close', () => {
+    const onClose = vi.fn();
+    const lowerLayerEscapeHandler = vi.fn();
+    window.addEventListener('keydown', lowerLayerEscapeHandler);
+
+    try {
+      render(<DestinationImagePreviewModal {...createProps({ onClose })} />);
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(lowerLayerEscapeHandler).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', lowerLayerEscapeHandler);
+    }
   });
 
   it('only calls delete once while a confirmed delete is pending', () => {

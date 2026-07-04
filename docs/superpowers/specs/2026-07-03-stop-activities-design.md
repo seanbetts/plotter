@@ -168,13 +168,9 @@ alter table public.media_assets
 
 The existing `media_assets.sort_order` column remains the ordering field. The table should enforce that every media row belongs to a destination and optionally to one activity under that destination. A destination-owned image has `activity_id = null`. An activity-owned image has `activity_id` set to an activity for the same trip and destination.
 
-Add a composite uniqueness constraint on activities so media ownership can enforce same-stop ancestry:
+The activities table already has a composite uniqueness constraint on `(trip_id, destination_id, id)`. Media ownership should reference that existing key so activity media cannot point at an activity under a different stop.
 
 ```sql
-alter table public.activities
-  add constraint activities_trip_destination_id_unique
-  unique (trip_id, destination_id, id);
-
 alter table public.media_assets
   alter column destination_id set not null,
   add constraint media_assets_activity_owner_fk
@@ -215,6 +211,8 @@ Destination-owned uploads can keep the existing path:
 
 ### Stop Carousel Rollup
 
+The stop image area keeps the preview-first interaction from the stop reference image design. The large preview shows the currently selected rollup image, thumbnails select that preview, and opening the full-screen modal happens from the large preview.
+
 The stop carousel shows a rollup of:
 
 - Destination-owned images for the stop.
@@ -229,6 +227,7 @@ type MediaRollupItem = {
   destinationId: string;
   activityId?: string;
   activityTitle?: string;
+  canReorderInStopCarousel: boolean;
 };
 ```
 
@@ -238,19 +237,21 @@ Ordering should be deterministic without adding a second global carousel order:
 2. Activity-owned images next, grouped by activity `order`.
 3. Within each activity group, images ordered by media `sort_order`.
 
-The stop hero image is the first destination-owned image when one exists. If the stop has no destination-owned images, the hero falls back to the first activity-owned image in the rollup.
+The first destination-owned image is the default selected preview when one exists. If the stop has no destination-owned images, the default selected preview falls back to the first activity-owned image in the rollup.
 
-Activity-owned images shown inside the stop carousel should be attributed to their activity, such as "Bakery crawl". Opening an activity-owned image from the stop carousel should offer an "Open activity" affordance without forcing navigation.
+Activity-owned images shown inside the stop carousel should be attributed to their activity, such as "Bakery crawl". Opening an activity-owned image in the full-screen modal from the stop rollup should offer an "Open activity" affordance without forcing navigation.
 
-The stop carousel owns reordering for destination-owned images only. Activity-owned images appear in the stop rollup, but their order is controlled inside their parent activity carousel. If the user drags thumbnails in a mixed stop rollup, the UI should either disable drag for activity-owned thumbnails or limit the reorder interaction to the destination-owned segment.
+The stop carousel owns reordering for destination-owned images only. Activity-owned images appear in the stop rollup, but their order is controlled inside their parent activity carousel. Mixed rollup thumbnails must mark activity-owned items as non-reorderable in the stop carousel. Drag reorder from the stop carousel should only be enabled when every dragged and target thumbnail is destination-owned.
 
 ### Activity Carousel
 
-The activity panel has its own hero image and thumbnail carousel, using only that activity's images.
+The activity panel has its own preview image and thumbnail carousel, using only that activity's images.
 
-The first activity-owned image by `sort_order` is the activity hero. Uploading from the activity panel creates activity-owned media. Uploading from the stop panel creates destination-owned media.
+The first activity-owned image by `sort_order` is the default selected activity preview. Uploading from the activity panel creates activity-owned media. Uploading from the stop panel creates destination-owned media.
 
-The same image preview, caption, credit, delete, and reorder behavior from the stop reference image design should be reused for activity media. The existing `DestinationImageStrip`, `DestinationImagePreviewModal`, and `useDestinationMedia` behavior should be generalized or wrapped rather than forked into a separate parallel implementation. The reusable layer should accept owner-specific labels and repository handlers so a stop can say "Stop images" while an activity can say "Activity images".
+The same preview-first browsing, optimized image URL selection, upload normalization, delete confirmation, and thumbnail reorder behavior from the stop reference image design should be reused for activity media. The existing `DestinationImageStrip`, `DestinationImagePreviewModal`, and `useDestinationMedia` behavior should be generalized or wrapped rather than forked into a separate parallel implementation. The reusable layer should accept owner-specific labels and repository handlers so a stop can say "Stop images" while an activity can say "Activity images".
+
+Caption and credit metadata can remain on `MediaItem` and in repository patch methods, but Phase 2 should not put caption/credit editing back into the full-screen modal. If metadata editing is exposed, it should live in the stop or activity panel alongside the selected preview.
 
 ## Repository API
 
@@ -294,9 +295,11 @@ uploadActivityMedia(input: {
   caption?: string;
   credit?: string;
 }): Promise<MediaItem>;
+
+reorderActivityMedia(activityId: string, orderedMediaIds: string[]): Promise<MediaItem[]>;
 ```
 
-Existing stop media operations should keep destination-owned behavior by default. The stop carousel should use `listDestinationMediaRollup` only when it needs the combined destination/activity view.
+Existing stop media operations should keep destination-owned behavior by default. `listDestinationMedia`, `uploadDestinationMedia`, `updateDestinationMedia`, `deleteDestinationMedia`, and `reorderDestinationMedia` must operate only on rows where `activity_id is null`. The stop carousel should use `listDestinationMediaRollup` only when it needs the combined destination/activity view.
 
 ## Component Boundaries
 
@@ -304,7 +307,7 @@ Suggested components:
 
 - `ActivityList`: renders the ordered activity list inside the stop panel.
 - `ActivityPanel`: renders selected activity details to the left of the stop panel.
-- Shared image strip and preview components: generalize or wrap the existing destination image components so both stop-owned and activity-owned media use the same upload, hero, carousel, preview, caption, credit, delete, and reorder behavior.
+- Shared image strip and preview components: generalize or wrap the existing destination image components so both stop-owned and activity-owned media use the same large-preview, thumbnail selection, upload, full-screen preview, delete, and reorder behavior.
 - `MapCanvas`: renders activity pins only for the selected stop and emits activity selection events.
 - `App`: owns selected stop, selected activity, focus-layer map state, and viewport restoration.
 - `useTripData`: owns repository-backed activity state and mutations.
@@ -343,7 +346,7 @@ Activities can be added, renamed, reordered, selected, and deleted. Coordinates 
 
 Add the activity detail panel, rich fields, activity-owned media, activity image strip, stop carousel rollup, and media attribution.
 
-This phase should reuse the media behavior from the stop reference images design.
+This phase should reuse the current media behavior from the stop reference images design: optimized thumbnail/preview/full URLs, normalized uploads, thumbnail-selects-preview browsing, full-screen navigation without reorder, and thumbnail-only reorder within the current owner scope.
 
 ### Phase 3: Map Focus Layer
 
@@ -368,6 +371,8 @@ Repository tests should cover:
 - RLS-compatible trip/destination scoping.
 - Activity media upload and listing.
 - Stop media rollup ordering with destination-owned and activity-owned media.
+- Destination media operations filtering out activity-owned rows.
+- Activity media reorder scoped to the selected activity.
 - Activity deletion behavior for associated media metadata and storage objects.
 
 Component tests should cover:
@@ -382,6 +387,8 @@ Component tests should cover:
 - Closing the stop closes the activity panel and restores route view.
 - Stop carousel includes destination-owned and activity-owned images.
 - Activity carousel includes only selected activity images.
+- Stop rollup thumbnails select the large preview and activity-owned thumbnails are attributed.
+- Full-screen image navigation does not reorder images.
 
 Browser checks should cover:
 

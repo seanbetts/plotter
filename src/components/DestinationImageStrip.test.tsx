@@ -1,5 +1,5 @@
 import { createEvent, fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MediaItem } from '../domain/types';
 import { DestinationImageStrip } from './DestinationImageStrip';
 
@@ -104,6 +104,10 @@ function dropThumbnail(element: Element, clientX: number) {
   fireEvent(element, dropEvent);
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('DestinationImageStrip', () => {
   it('renders an accessible compact empty state and supports choosing files', () => {
     const onUploadFiles = vi.fn();
@@ -136,7 +140,7 @@ describe('DestinationImageStrip', () => {
     expect(input.value).toBe('');
   });
 
-  it('renders the first media item as the hero and opens its preview when clicked', () => {
+  it('renders the first media item as the preview and opens the full image when clicked', () => {
     const onOpenPreview = vi.fn();
     render(<DestinationImageStrip {...createProps({ onOpenPreview })} />);
 
@@ -145,7 +149,7 @@ describe('DestinationImageStrip', () => {
     expect(screen.queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add another stop image for Bergen' })).not.toBeInTheDocument();
 
-    const hero = screen.getByRole('button', { name: 'Open hero image: Sunset over the harbour' });
+    const hero = screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' });
     expect(within(hero).getByRole('img', { name: 'Sunset over the harbour' })).toHaveAttribute(
       'src',
       'https://example.com/media-1.jpg',
@@ -154,6 +158,92 @@ describe('DestinationImageStrip', () => {
     fireEvent.click(hero);
 
     expect(onOpenPreview).toHaveBeenCalledWith('media-1');
+  });
+
+  it('selects a thumbnail into the preview without opening the full image', () => {
+    const onOpenPreview = vi.fn();
+    render(<DestinationImageStrip {...createProps({ onOpenPreview })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show image 2: Mountain trail' }));
+
+    expect(onOpenPreview).not.toHaveBeenCalled();
+    const preview = screen.getByRole('button', { name: 'Open full image: Mountain trail' });
+    expect(within(preview).getByRole('img', { name: 'Mountain trail' })).toHaveAttribute(
+      'src',
+      'https://example.com/media-2.jpg',
+    );
+
+    fireEvent.click(preview);
+
+    expect(onOpenPreview).toHaveBeenCalledWith('media-2');
+  });
+
+  it('loops the selected preview image with overlay arrows', () => {
+    const onOpenPreview = vi.fn();
+    render(<DestinationImageStrip {...createProps({ onOpenPreview })} />);
+
+    expect(screen.getByRole('button', { name: 'Previous preview image' })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous preview image' }));
+
+    expect(screen.getByRole('button', { name: 'Open full image' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next preview image' }));
+
+    expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
+    expect(onOpenPreview).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show image 3' }));
+    expect(screen.getByRole('button', { name: 'Next preview image' })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Next preview image' }));
+
+    expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
+  });
+
+  it('preloads the previous and next preview images into the browser cache', () => {
+    const preloadedUrls: string[] = [];
+    class FakeImage {
+      set src(value: string) {
+        preloadedUrls.push(value);
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
+
+    render(
+      <DestinationImageStrip
+        {...createProps({
+          mediaItems: [
+            createMediaItem({
+              previewUrl: 'https://example.com/media-1-preview.webp',
+            }),
+            createMediaItem({
+              id: 'media-2',
+              url: 'https://example.com/media-2.jpg',
+              previewUrl: 'https://example.com/media-2-preview.webp',
+              caption: 'Mountain trail',
+              sortOrder: 1,
+            }),
+            createMediaItem({
+              id: 'media-3',
+              url: 'https://example.com/media-3.jpg',
+              previewUrl: 'https://example.com/media-3-preview.webp',
+              caption: '',
+              sortOrder: 2,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(preloadedUrls).toEqual(
+      expect.arrayContaining([
+        'https://example.com/media-2-preview.webp',
+        'https://example.com/media-3-preview.webp',
+      ]),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous preview image' }));
+
+    expect(preloadedUrls).toContain('https://example.com/media-1-preview.webp');
   });
 
   it('uses optimized preview and thumbnail URLs when they are available', () => {
@@ -177,18 +267,18 @@ describe('DestinationImageStrip', () => {
       />,
     );
 
-    const hero = screen.getByRole('button', { name: 'Open hero image: Sunset over the harbour' });
+    const hero = screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' });
     expect(within(hero).getByRole('img', { name: 'Sunset over the harbour' })).toHaveAttribute(
       'src',
       'https://example.com/media-1-preview.webp',
     );
     expect(
-      within(screen.getByRole('button', { name: 'Open image 1: Sunset over the harbour' })).getByRole('img', {
+      within(screen.getByRole('button', { name: 'Show image 1: Sunset over the harbour' })).getByRole('img', {
         name: 'Sunset over the harbour',
       }),
     ).toHaveAttribute('src', 'https://example.com/media-1-thumbnail.webp');
     expect(
-      within(screen.getByRole('button', { name: 'Open image 2: Mountain trail' })).getByRole('img', {
+      within(screen.getByRole('button', { name: 'Show image 2: Mountain trail' })).getByRole('img', {
         name: 'Mountain trail',
       }),
     ).toHaveAttribute('src', 'https://example.com/media-2-thumbnail.webp');
@@ -209,20 +299,22 @@ describe('DestinationImageStrip', () => {
     expect(container.querySelector('.destination-image-uploading')).not.toBeInTheDocument();
   });
 
-  it('opens a thumbnail preview when clicked', () => {
+  it('selects an uncaptained thumbnail without opening the full image', () => {
     const onOpenPreview = vi.fn();
     render(<DestinationImageStrip {...createProps({ onOpenPreview })} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open image 2: Mountain trail' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show image 3' }));
 
-    expect(onOpenPreview).toHaveBeenCalledWith('media-2');
+    expect(onOpenPreview).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Open full image' })).toBeInTheDocument();
   });
 
   it('uses a fallback label for uncaptained thumbnails', () => {
     const onOpenPreview = vi.fn();
     render(<DestinationImageStrip {...createProps({ onOpenPreview })} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open image 3' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show image 3' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open full image' }));
 
     expect(onOpenPreview).toHaveBeenCalledWith('media-3');
   });
@@ -232,7 +324,7 @@ describe('DestinationImageStrip', () => {
     render(<DestinationImageStrip {...createProps({ onUploadFiles })} />);
 
     const region = screen.getByRole('region', { name: 'Stop images' });
-    const firstThumbnail = screen.getByRole('button', { name: 'Open image 1: Sunset over the harbour' });
+    const firstThumbnail = screen.getByRole('button', { name: 'Show image 1: Sunset over the harbour' });
     fileDragEnter(region);
     fileDragEnter(firstThumbnail);
     expect(region).toHaveClass('is-drag-over');
@@ -264,10 +356,10 @@ describe('DestinationImageStrip', () => {
   it('drops the dragged thumbnail after the target when hovering the right half', () => {
     const onReorder = vi.fn();
     render(<DestinationImageStrip {...createProps({ onReorder })} />);
-    const thirdThumbnail = screen.getByRole('button', { name: 'Open image 3' });
+    const thirdThumbnail = screen.getByRole('button', { name: 'Show image 3' });
     mockThumbnailBounds(thirdThumbnail);
 
-    fireEvent.dragStart(screen.getByRole('button', { name: 'Open image 1: Sunset over the harbour' }));
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Show image 1: Sunset over the harbour' }));
     dragOverThumbnail(thirdThumbnail, 170);
     expect(thirdThumbnail).toHaveClass('is-drop-after');
     dropThumbnail(thirdThumbnail, 170);
@@ -278,10 +370,10 @@ describe('DestinationImageStrip', () => {
   it('drops the dragged thumbnail before the target when hovering the left half', () => {
     const onReorder = vi.fn();
     render(<DestinationImageStrip {...createProps({ onReorder })} />);
-    const firstThumbnail = screen.getByRole('button', { name: 'Open image 1: Sunset over the harbour' });
+    const firstThumbnail = screen.getByRole('button', { name: 'Show image 1: Sunset over the harbour' });
     mockThumbnailBounds(firstThumbnail);
 
-    fireEvent.dragStart(screen.getByRole('button', { name: 'Open image 3' }));
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Show image 3' }));
     dragOverThumbnail(firstThumbnail, 110);
     expect(firstThumbnail).toHaveClass('is-drop-before');
     dropThumbnail(firstThumbnail, 110);
