@@ -275,6 +275,51 @@ describe('trip repository', () => {
     expect(mediaItem.url).toBe('data:image/webp;base64,aW1hZ2UtZGF0YQ==');
   });
 
+  it('keeps destination media separate from activity media and rolls activity media into stop media', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    const activity = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+
+    const destinationMedia = await repository.uploadDestinationMedia({
+      destinationId: destination.id,
+      file: new File(['destination-image'], 'paris.webp', { type: 'image/webp' }),
+    });
+    const activityMedia = await repository.uploadActivityMedia({
+      destinationId: destination.id,
+      activityId: activity.id,
+      file: new File(['activity-image'], 'louvre.webp', { type: 'image/webp' }),
+    });
+
+    expect((await repository.listDestinationMedia(destination.id)).map((item) => item.id)).toEqual([
+      destinationMedia.id,
+    ]);
+    expect((await repository.listActivityMedia(activity.id)).map((item) => item.id)).toEqual([
+      activityMedia.id,
+    ]);
+    expect(await repository.listDestinationMediaRollup(destination.id)).toEqual([
+      expect.objectContaining({
+        mediaItem: expect.objectContaining({ id: destinationMedia.id }),
+        ownerType: 'destination',
+        canReorderInStopCarousel: true,
+      }),
+      expect.objectContaining({
+        mediaItem: expect.objectContaining({ id: activityMedia.id }),
+        ownerType: 'activity',
+        activityId: activity.id,
+        activityTitle: activity.title,
+        canReorderInStopCarousel: false,
+      }),
+    ]);
+  });
+
   it('normalizes legacy records without order or route status', async () => {
     const repository = createTestRepository();
     const legacyDestination = {

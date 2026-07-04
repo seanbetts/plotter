@@ -1,5 +1,12 @@
 import { createActivity, reorderActivities as reorderActivityModels, updateActivity as patchActivity } from '../domain/activities';
-import type { Activity, Destination, MediaItem, RouteLeg } from '../domain/types';
+import type {
+  Activity,
+  ActivityMediaRecord,
+  Destination,
+  MediaItem,
+  MediaRollupItem,
+  RouteLeg,
+} from '../domain/types';
 import { createLegacyLocation } from '../domain/locations';
 import type { TripDb } from './tripDb';
 
@@ -32,6 +39,21 @@ export type TripRepository = {
   ): Promise<MediaItem>;
   deleteDestinationMedia(mediaId: string): Promise<void>;
   reorderDestinationMedia(destinationId: string, orderedMediaIds: string[]): Promise<MediaItem[]>;
+  listDestinationMediaRollup(destinationId: string): Promise<MediaRollupItem[]>;
+  listActivityMedia(activityId: string): Promise<MediaItem[]>;
+  uploadActivityMedia(input: {
+    destinationId: string;
+    activityId: string;
+    file: File;
+    caption?: string;
+    credit?: string;
+  }): Promise<MediaItem>;
+  updateActivityMedia(
+    mediaId: string,
+    patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>,
+  ): Promise<MediaItem>;
+  deleteActivityMedia(mediaId: string): Promise<void>;
+  reorderActivityMedia(activityId: string, orderedMediaIds: string[]): Promise<MediaItem[]>;
   listRouteLegs(): Promise<RouteLeg[]>;
   saveRouteLeg(routeLeg: RouteLeg): Promise<void>;
   deleteRouteLeg(routeLegId: string): Promise<void>;
@@ -74,6 +96,26 @@ function normalizeRouteLeg(routeLeg: LegacyRouteLeg): RouteLeg {
   };
 }
 
+function stripActivityMediaOwner(record: ActivityMediaRecord): MediaItem {
+  const { activityId: _activityId, destinationId: _destinationId, ...mediaItem } = record;
+  return mediaItem;
+}
+
+function sortMediaItems(left: MediaItem, right: MediaItem) {
+  return (left.sortOrder ?? 0) - (right.sortOrder ?? 0)
+    || (left.uploadedAt ?? '').localeCompare(right.uploadedAt ?? '');
+}
+
+function createMediaOrderMismatchError(ownerLabel: string, currentIds: string[], orderedMediaIds: string[]) {
+  const requestedIds = new Set(orderedMediaIds);
+  const missingIds = currentIds.filter((id) => !requestedIds.has(id));
+  const extraIds = orderedMediaIds.filter((id) => !currentIds.includes(id));
+
+  return new Error(
+    `Media order must include each ${ownerLabel} media item exactly once. Missing ${missingIds.join(', ') || 'none'}; extra ${extraIds.join(', ') || 'none'}.`,
+  );
+}
+
 async function createLocalMediaUrl(file: File) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = '';
@@ -100,9 +142,10 @@ export function createTripRepository(db: TripDb): TripRepository {
     },
 
     async deleteDestination(destinationId: string): Promise<void> {
-      await db.transaction('rw', db.destinations, db.routeLegs, db.activities, async () => {
+      await db.transaction('rw', db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
         await db.destinations.delete(destinationId);
         await db.activities.where('destinationId').equals(destinationId).delete();
+        await db.activityMedia.where('destinationId').equals(destinationId).delete();
         const attachedLegs = await db.routeLegs
           .where('originDestinationId')
           .equals(destinationId)
@@ -157,7 +200,10 @@ export function createTripRepository(db: TripDb): TripRepository {
     },
 
     async deleteActivity(activityId: string): Promise<void> {
-      await db.activities.delete(activityId);
+      await db.transaction('rw', db.activities, db.activityMedia, async () => {
+        await db.activities.delete(activityId);
+        await db.activityMedia.where('activityId').equals(activityId).delete();
+      });
     },
 
     async reorderActivities(destinationId: string, orderedActivityIds: string[]): Promise<Activity[]> {
@@ -170,9 +216,7 @@ export function createTripRepository(db: TripDb): TripRepository {
 
     async listDestinationMedia(destinationId: string): Promise<MediaItem[]> {
       const destination = await db.destinations.get(destinationId);
-      return [...(destination?.media ?? [])].sort(
-        (left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0),
-      );
+      return [...(destination?.media ?? [])].sort(sortMediaItems);
     },
 
     async uploadDestinationMedia(input: {
@@ -288,9 +332,7 @@ export function createTripRepository(db: TripDb): TripRepository {
       const extraIds = orderedMediaIds.filter((id) => !currentMediaIds.includes(id));
 
       if (requestedIds.size !== orderedMediaIds.length || missingIds.length > 0 || extraIds.length > 0) {
-        throw new Error(
-          `Media order must include each destination media item exactly once. Missing ${missingIds.join(', ') || 'none'}; extra ${extraIds.join(', ') || 'none'}.`,
-        );
+        throw createMediaOrderMismatchError('destination', currentMediaIds, orderedMediaIds);
       }
 
       const mediaById = new Map(destination.media.map((mediaItem) => [mediaItem.id, mediaItem]));
@@ -306,6 +348,131 @@ export function createTripRepository(db: TripDb): TripRepository {
       });
 
       return media;
+    },
+
+    async listDestinationMediaRollup(destinationId: string): Promise<MediaRollupItem[]> {
+      const destinationMedia = await this.listDestinationMedia(destinationId);
+      const activities = await this.listActivities(destinationId);
+      const rollup: MediaRollupItem[] = destinationMedia.map((mediaItem) => ({
+        mediaItem,
+        ownerType: 'destination',
+        destinationId,
+        canReorderInStopCarousel: true,
+      }));
+
+      for (const activity of activities) {
+        const activityMedia = await this.listActivityMedia(activity.id);
+
+        rollup.push(...activityMedia.map((mediaItem) => ({
+          mediaItem,
+          ownerType: 'activity' as const,
+          destinationId,
+          activityId: activity.id,
+          activityTitle: activity.title,
+          canReorderInStopCarousel: false,
+        })));
+      }
+
+      return rollup;
+    },
+
+    async listActivityMedia(activityId: string): Promise<MediaItem[]> {
+      return (await db.activityMedia.where('activityId').equals(activityId).toArray())
+        .map(stripActivityMediaOwner)
+        .sort(sortMediaItems);
+    },
+
+    async uploadActivityMedia(input: {
+      destinationId: string;
+      activityId: string;
+      file: File;
+      caption?: string;
+      credit?: string;
+    }): Promise<MediaItem> {
+      const [destination, activity] = await Promise.all([
+        db.destinations.get(input.destinationId),
+        db.activities.get(input.activityId),
+      ]);
+      if (!destination) {
+        throw new Error('Destination not found.');
+      }
+      if (!activity || activity.destinationId !== input.destinationId) {
+        throw new Error('Activity not found.');
+      }
+
+      const timestamp = new Date().toISOString();
+      const mediaUrl = await createLocalMediaUrl(input.file);
+      const existingMedia = await this.listActivityMedia(input.activityId);
+      const mediaRecord: ActivityMediaRecord = {
+        id: crypto.randomUUID(),
+        activityId: input.activityId,
+        destinationId: input.destinationId,
+        url: mediaUrl,
+        thumbnailUrl: mediaUrl,
+        previewUrl: mediaUrl,
+        fullUrl: mediaUrl,
+        caption: input.caption ?? '',
+        credit: input.credit ?? '',
+        sortOrder:
+          existingMedia.reduce(
+            (maxSortOrder, item, index) => Math.max(maxSortOrder, item.sortOrder ?? index),
+            -1,
+          ) + 1,
+        contentType: input.file.type || undefined,
+        sizeBytes: input.file.size,
+        uploadedAt: timestamp,
+      };
+
+      await db.activityMedia.put(mediaRecord);
+      return stripActivityMediaOwner(mediaRecord);
+    },
+
+    async updateActivityMedia(
+      mediaId: string,
+      patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>,
+    ): Promise<MediaItem> {
+      const existing = await db.activityMedia.get(mediaId);
+      if (!existing) {
+        throw new Error('Media item not found.');
+      }
+
+      const updated: ActivityMediaRecord = {
+        ...existing,
+        ...(patch.caption !== undefined ? { caption: patch.caption } : {}),
+        ...(patch.credit !== undefined ? { credit: patch.credit } : {}),
+      };
+      await db.activityMedia.put(updated);
+      return stripActivityMediaOwner(updated);
+    },
+
+    async deleteActivityMedia(mediaId: string): Promise<void> {
+      const existing = await db.activityMedia.get(mediaId);
+      if (!existing) {
+        throw new Error('Media item not found.');
+      }
+
+      await db.activityMedia.delete(mediaId);
+    },
+
+    async reorderActivityMedia(activityId: string, orderedMediaIds: string[]): Promise<MediaItem[]> {
+      const currentMedia = await db.activityMedia.where('activityId').equals(activityId).toArray();
+      const currentMediaIds = currentMedia.map((mediaItem) => mediaItem.id);
+      const requestedIds = new Set(orderedMediaIds);
+      const missingIds = currentMediaIds.filter((id) => !requestedIds.has(id));
+      const extraIds = orderedMediaIds.filter((id) => !currentMediaIds.includes(id));
+
+      if (requestedIds.size !== orderedMediaIds.length || missingIds.length > 0 || extraIds.length > 0) {
+        throw createMediaOrderMismatchError('activity', currentMediaIds, orderedMediaIds);
+      }
+
+      const mediaById = new Map(currentMedia.map((mediaItem) => [mediaItem.id, mediaItem]));
+      const media = orderedMediaIds.map((id, index) => ({
+        ...mediaById.get(id)!,
+        sortOrder: index,
+      }));
+
+      await db.activityMedia.bulkPut(media);
+      return media.map(stripActivityMediaOwner);
     },
 
     async listRouteLegs(): Promise<RouteLeg[]> {
@@ -329,10 +496,11 @@ export function createTripRepository(db: TripDb): TripRepository {
       routeLegs: RouteLeg[];
       activities?: Activity[];
     }): Promise<void> {
-      await db.transaction('rw', db.destinations, db.routeLegs, db.activities, async () => {
+      await db.transaction('rw', db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
         await db.destinations.clear();
         await db.routeLegs.clear();
         await db.activities.clear();
+        await db.activityMedia.clear();
         await db.destinations.bulkPut(snapshot.destinations.map((destination, index) => normalizeDestination(destination, index)));
         await db.routeLegs.bulkPut(snapshot.routeLegs);
         if (snapshot.activities) {
