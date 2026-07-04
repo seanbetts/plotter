@@ -674,8 +674,11 @@ describe('MapCanvas', () => {
       order: 2,
       title: 'Wrong stop activity',
       location: {
-        ...louvreActivity.location,
+        name: 'Wrong stop activity',
+        address: 'Tbilisi, Georgia',
         coordinates: { lat: 41.7151, lng: 44.8271 },
+        sourceProvider: 'maptiler' as const,
+        sourceFeatureId: 'poi-wrong-stop',
       },
     };
 
@@ -1303,8 +1306,11 @@ describe('MapCanvas', () => {
       order: 2,
       title: 'Wrong stop activity',
       location: {
-        ...louvreActivity.location,
+        name: 'Wrong stop activity',
+        address: 'Tbilisi, Georgia',
         coordinates: { lat: 41.7151, lng: 44.8271 },
+        sourceProvider: 'maptiler' as const,
+        sourceFeatureId: 'poi-wrong-stop',
       },
     };
 
