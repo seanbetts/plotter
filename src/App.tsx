@@ -595,7 +595,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   const handleUpdateActivityPanel = useCallback(
     async (
       activityId: string,
-      patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority'>>,
+      patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority' | 'tags'>>,
     ) => {
       await updateActivity(activityId, patch);
     },

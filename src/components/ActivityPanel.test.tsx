@@ -53,6 +53,13 @@ function createProps(overrides: Partial<React.ComponentProps<typeof ActivityPane
   };
 }
 
+function addTag(tag: string) {
+  const input = screen.getByLabelText('Add tag');
+
+  fireEvent.change(input, { target: { value: tag } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+}
+
 describe('ActivityPanel', () => {
   it('renders the parent stop name and edits the title like a stop name', () => {
     const props = createProps();
@@ -103,6 +110,58 @@ describe('ActivityPanel', () => {
     });
     expect(props.onUpdateActivity).toHaveBeenNthCalledWith(2, props.activity.id, {
       notes: 'Check Friday late opening.',
+    });
+  });
+
+  it('renders tags as removable pills and deduplicates new tags', () => {
+    const activity = {
+      ...createActivity({
+        destinationId: 'destination-1',
+        title: 'Louvre',
+        order: 0,
+      }),
+      tags: ['museum'],
+    };
+    const props = createProps({ activity });
+
+    render(<ActivityPanel {...props} />);
+
+    expect(screen.getByRole('button', { name: 'Remove tag museum' })).toBeInTheDocument();
+
+    addTag('Museum');
+    addTag('art, morning');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag museum' }));
+
+    expect(screen.queryByRole('button', { name: 'Remove tag museum' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove tag art' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove tag morning' })).toBeInTheDocument();
+    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(1, activity.id, {
+      tags: ['museum', 'art', 'morning'],
+    });
+    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(2, activity.id, {
+      tags: ['art', 'morning'],
+    });
+  });
+
+  it('removes the last activity tag with backspace when the tag input is empty', () => {
+    const activity = {
+      ...createActivity({
+        destinationId: 'destination-1',
+        title: 'Louvre',
+        order: 0,
+      }),
+      tags: ['museum', 'morning'],
+    };
+    const props = createProps({ activity });
+
+    render(<ActivityPanel {...props} />);
+
+    fireEvent.keyDown(screen.getByLabelText('Add tag'), { key: 'Backspace' });
+
+    expect(screen.getByRole('button', { name: 'Remove tag museum' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove tag morning' })).not.toBeInTheDocument();
+    expect(props.onUpdateActivity).toHaveBeenCalledWith(activity.id, {
+      tags: ['museum'],
     });
   });
 

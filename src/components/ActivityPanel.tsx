@@ -14,14 +14,14 @@ type ActivityPanelProps = {
   onClose: () => void;
   onUpdateActivity: (
     activityId: string,
-    patch: Partial<Pick<Activity, 'title' | 'description' | 'notes'>>,
+    patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'tags'>>,
   ) => Promise<void> | void;
   onUploadMedia: (files: File[]) => Promise<void> | void;
   onReorderMedia: (orderedMediaIds: string[]) => Promise<void> | void;
   onOpenMediaPreview: (mediaId: string) => void;
 };
 
-type ActivityDraft = Pick<Activity, 'title' | 'description' | 'notes'>;
+type ActivityDraft = Pick<Activity, 'title' | 'description' | 'notes' | 'tags'>;
 type ActivityDraftField = keyof ActivityDraft;
 
 function createActivityDraft(activity: Activity): ActivityDraft {
@@ -29,12 +29,39 @@ function createActivityDraft(activity: Activity): ActivityDraft {
     title: activity.title,
     description: activity.description,
     notes: activity.notes,
+    tags: activity.tags,
   };
 }
 
 function activitySourceKey(activity: Activity) {
   return `${activity.id}:${activity.updatedAt}`;
 }
+
+const splitTagInput = (value: string) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const tagKey = (tag: string) => tag.toLocaleLowerCase();
+
+const listsMatch = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((item, index) => item === right[index]);
+
+const addUniqueTags = (currentTags: string[], newTags: string[]) => {
+  const existingTags = new Set(currentTags.map(tagKey));
+  const additions = newTags.filter((tag) => {
+    const key = tagKey(tag);
+    if (existingTags.has(key)) {
+      return false;
+    }
+
+    existingTags.add(key);
+    return true;
+  });
+
+  return [...currentTags, ...additions];
+};
 
 const profileTitleControlStyle = {
   '--profile-title-block-padding': '0px',
@@ -88,6 +115,7 @@ function ActivityPanelForm({
   onOpenMediaPreview,
 }: ActivityPanelProps & { panelRef: Ref<HTMLElement> }) {
   const [draft, setDraft] = useState(() => createActivityDraft(activity));
+  const [tagInput, setTagInput] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [saveError, setSaveError] = useState('');
   const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -97,16 +125,19 @@ function ActivityPanelForm({
     title: 0,
     description: 0,
     notes: 0,
+    tags: 0,
   });
   const fieldSaveRevisionRef = useRef<Record<ActivityDraftField, number>>({
     title: 0,
     description: 0,
     notes: 0,
+    tags: 0,
   });
   const sourceKey = activitySourceKey(activity);
   const activityTitle = activity.title;
   const activityDescription = activity.description;
   const activityNotes = activity.notes;
+  const activityTags = activity.tags;
 
   useEffect(() => {
     setDraft((current) => {
@@ -121,11 +152,13 @@ function ActivityPanelForm({
       if (!shouldPreserveDraft('title', activityTitle)) acceptPersistedField('title');
       if (!shouldPreserveDraft('description', activityDescription)) acceptPersistedField('description');
       if (!shouldPreserveDraft('notes', activityNotes)) acceptPersistedField('notes');
+      if (!shouldPreserveDraft('tags', activityTags)) acceptPersistedField('tags');
 
       const nextDraft = {
         title: dirtyFieldsRef.current.has('title') ? current.title : activityTitle,
         description: dirtyFieldsRef.current.has('description') ? current.description : activityDescription,
         notes: dirtyFieldsRef.current.has('notes') ? current.notes : activityNotes,
+        tags: dirtyFieldsRef.current.has('tags') ? current.tags : activityTags,
       };
 
       latestDraftRef.current = nextDraft;
@@ -135,6 +168,7 @@ function ActivityPanelForm({
   }, [
     activityDescription,
     activityNotes,
+    activityTags,
     activityTitle,
     sourceKey,
   ]);
@@ -150,19 +184,17 @@ function ActivityPanelForm({
     setSaveError('');
     dirtyFieldsRef.current.add(field);
     fieldEditRevisionRef.current[field] += 1;
-    setDraft((current) => {
-      const nextDraft = {
-        ...current,
-        [field]: value,
-      };
-      latestDraftRef.current = nextDraft;
-      return nextDraft;
-    });
+    const nextDraft = {
+      ...latestDraftRef.current,
+      [field]: value,
+    };
+    latestDraftRef.current = nextDraft;
+    setDraft(nextDraft);
   }
 
   async function commitDraft<Field extends ActivityDraftField>(field: Field) {
     const nextValue = latestDraftRef.current[field];
-    if (nextValue === activity[field]) {
+    if (draftValuesMatch(nextValue, activity[field])) {
       dirtyFieldsRef.current.delete(field);
       return;
     }
@@ -201,8 +233,35 @@ function ActivityPanelForm({
     return (
       fieldSaveRevisionRef.current[field] === saveRevision &&
       fieldEditRevisionRef.current[field] === editRevision &&
-      latestDraftRef.current[field] === submittedValue
+      draftValuesMatch(latestDraftRef.current[field], submittedValue)
     );
+  }
+
+  function draftValuesMatch<Field extends ActivityDraftField>(
+    left: ActivityDraft[Field],
+    right: ActivityDraft[Field],
+  ) {
+    if (Array.isArray(left) && Array.isArray(right)) {
+      return listsMatch(left, right);
+    }
+
+    return left === right;
+  }
+
+  function commitTagInput() {
+    const nextTags = addUniqueTags(draft.tags, splitTagInput(tagInput));
+    setTagInput('');
+
+    if (listsMatch(nextTags, draft.tags)) return;
+
+    updateDraft('tags', nextTags);
+    void commitDraft('tags');
+  }
+
+  function removeTag(tagToRemove: string) {
+    const nextTags = draft.tags.filter((tag) => tag !== tagToRemove);
+    updateDraft('tags', nextTags);
+    void commitDraft('tags');
   }
 
   return (
@@ -286,6 +345,45 @@ function ActivityPanelForm({
           onBlur={() => void commitDraft('notes')}
         />
       </label>
+      <fieldset className="tag-editor" aria-label="Tags">
+        <legend>Tags</legend>
+        <div className="tag-pill-list">
+          {draft.tags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className="tag-pill"
+              aria-label={`Remove tag ${tag}`}
+              onClick={() => removeTag(tag)}
+            >
+              <span>{tag}</span>
+              <X size={13} aria-hidden="true" />
+            </button>
+          ))}
+          <input
+            className="tag-pill-input"
+            aria-label="Add tag"
+            placeholder="Add tag"
+            value={tagInput}
+            onChange={(event) => setTagInput(event.target.value)}
+            onBlur={commitTagInput}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ',') {
+                event.preventDefault();
+                commitTagInput();
+                return;
+              }
+
+              if (event.key === 'Backspace' && tagInput === '' && draft.tags.length > 0) {
+                event.preventDefault();
+                const nextTags = draft.tags.slice(0, -1);
+                updateDraft('tags', nextTags);
+                void commitDraft('tags');
+              }
+            }}
+          />
+        </div>
+      </fieldset>
     </aside>
   );
 }

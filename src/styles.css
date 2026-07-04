@@ -1074,12 +1074,17 @@ select {
 .tag-pill-list {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   min-height: 40px;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
-  padding: 6px;
+  padding: 5px 6px;
   background: var(--surface-control);
+}
+
+.tag-pill-list:focus-within {
+  border-color: var(--border-selected);
 }
 
 .tag-pill {
@@ -1110,12 +1115,12 @@ select {
   background: rgb(var(--color-accent-rgb) / 0.17);
 }
 
-.destination-profile .tag-pill-input {
+.tag-editor .tag-pill-input {
   flex: 1 1 110px;
   width: auto;
   min-width: 92px;
   border: 0;
-  padding: 4px 2px;
+  padding: 3px 2px;
   background: transparent;
   outline: 0;
 }
