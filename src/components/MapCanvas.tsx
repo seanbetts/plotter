@@ -3,7 +3,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { FeatureCollection, LineString, Point } from 'geojson';
-import type { Coordinates, Destination, RouteLeg } from '../domain/types';
+import type { Activity, Coordinates, Destination, RouteLeg } from '../domain/types';
 import { formatStopMarker } from './stopLabels';
 
 export type MapAddStopRequest = {
@@ -19,7 +19,10 @@ type MapCanvasProps = {
   destinations: Destination[];
   routeLegs: RouteLeg[];
   selectedDestinationId: string | null;
+  focusedActivities?: Activity[];
+  selectedActivityId?: string | null;
   onSelectDestination: (destinationId: string) => void;
+  onSelectActivity?: (activityId: string) => void;
   onRequestAddStop?: (request: MapAddStopRequest) => void;
 };
 
@@ -28,6 +31,13 @@ type DestinationFeatureProperties = {
   name: string;
   order: number;
   label: string;
+  selected: boolean;
+};
+
+type ActivityFeatureProperties = {
+  id: string;
+  title: string;
+  order: number;
   selected: boolean;
 };
 
@@ -458,9 +468,13 @@ const majorCities = [
 ];
 
 const destinationsSourceId = 'world-tour-destinations';
+const focusedActivitiesSourceId = 'world-tour-focused-activities';
 const routesSourceId = 'world-tour-routes';
 const majorCitiesSourceId = 'world-tour-major-cities';
 const selectedDestinationHaloLayerId = 'world-tour-selected-destination-halo';
+const activityPointsLayerId = 'world-tour-activity-points';
+const selectedActivityHaloLayerId = 'world-tour-selected-activity-halo';
+const activityLabelsLayerId = 'world-tour-activity-labels';
 const destinationPointsLayerId = 'world-tour-destination-points';
 const routeLineLayerId = 'world-tour-routes-line';
 const cityPointsLayerId = 'world-tour-city-points';
@@ -470,6 +484,7 @@ const addStopMenuApproxSize = {
   width: 180,
   height: 112,
 };
+const defaultFocusedActivities: Activity[] = [];
 
 const mapColorTokenFallbacks = {
   '--color-accent': '#d9467a',
@@ -543,6 +558,41 @@ function buildDestinationFeatures(
         selected: destination.id === selectedDestinationId,
       },
     })),
+  };
+}
+
+function buildFocusedActivityFeatures(
+  selectedDestinationId: string | null,
+  focusedActivities: Activity[],
+  selectedActivityId: string | null,
+): FeatureCollection<Point, ActivityFeatureProperties> {
+  if (!selectedDestinationId) {
+    return emptyFeatureCollection<Point, ActivityFeatureProperties>();
+  }
+
+  return {
+    type: 'FeatureCollection',
+    features: focusedActivities.flatMap((activity, index) => {
+      const coordinates = activity.location?.coordinates;
+      if (!coordinates) return [];
+
+      return [
+        {
+          type: 'Feature' as const,
+          id: activity.id,
+          geometry: {
+            type: 'Point' as const,
+            coordinates: [coordinates.lng, coordinates.lat],
+          },
+          properties: {
+            id: activity.id,
+            title: activity.title,
+            order: index + 1,
+            selected: activity.id === selectedActivityId,
+          },
+        },
+      ];
+    }),
   };
 }
 
@@ -746,15 +796,21 @@ export function MapCanvas({
   destinations,
   routeLegs,
   selectedDestinationId,
+  focusedActivities = defaultFocusedActivities,
+  selectedActivityId = null,
   onSelectDestination,
+  onSelectActivity,
   onRequestAddStop,
 }: MapCanvasProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const latestDestinationsRef = useRef(destinations);
   const latestRouteLegsRef = useRef(routeLegs);
+  const latestFocusedActivitiesRef = useRef(focusedActivities);
+  const latestSelectedActivityIdRef = useRef(selectedActivityId);
   const latestSelectedDestinationIdRef = useRef(selectedDestinationId);
   const onSelectDestinationRef = useRef(onSelectDestination);
+  const onSelectActivityRef = useRef(onSelectActivity);
   const onRequestAddStopRef = useRef(onRequestAddStop);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{
@@ -886,6 +942,15 @@ export function MapCanvas({
     );
     setSourceData(
       map,
+      focusedActivitiesSourceId,
+      buildFocusedActivityFeatures(
+        latestSelectedDestinationIdRef.current,
+        latestFocusedActivitiesRef.current,
+        latestSelectedActivityIdRef.current,
+      ),
+    );
+    setSourceData(
+      map,
       routesSourceId,
       buildRouteFeatures(latestDestinationsRef.current, latestRouteLegsRef.current),
     );
@@ -919,8 +984,11 @@ export function MapCanvas({
     const previousDestinationCount = previousDestinationCountRef.current;
     latestDestinationsRef.current = destinations;
     latestRouteLegsRef.current = routeLegs;
+    latestFocusedActivitiesRef.current = focusedActivities;
+    latestSelectedActivityIdRef.current = selectedActivityId;
     latestSelectedDestinationIdRef.current = selectedDestinationId;
     onSelectDestinationRef.current = onSelectDestination;
+    onSelectActivityRef.current = onSelectActivity;
     onRequestAddStopRef.current = onRequestAddStop;
     updateMapSources();
 
@@ -934,7 +1002,10 @@ export function MapCanvas({
     destinations,
     routeLegs,
     selectedDestinationId,
+    focusedActivities,
+    selectedActivityId,
     onSelectDestination,
+    onSelectActivity,
     onRequestAddStop,
     fitMapToDestinations,
     updateMapSources,
@@ -949,6 +1020,13 @@ export function MapCanvas({
       map.addSource(destinationsSourceId, {
         type: 'geojson',
         data: emptyFeatureCollection<Point, DestinationFeatureProperties>(),
+      });
+    }
+
+    if (!map.getSource(focusedActivitiesSourceId)) {
+      map.addSource(focusedActivitiesSourceId, {
+        type: 'geojson',
+        data: emptyFeatureCollection<Point, ActivityFeatureProperties>(),
       });
     }
 
@@ -1016,6 +1094,36 @@ export function MapCanvas({
       } as maplibregl.LayerSpecification);
     }
 
+    if (!map.getLayer(selectedActivityHaloLayerId)) {
+      map.addLayer({
+        id: selectedActivityHaloLayerId,
+        type: 'circle',
+        source: focusedActivitiesSourceId,
+        filter: ['==', ['get', 'selected'], true],
+        paint: {
+          'circle-color': mapColors.selected,
+          'circle-radius': 14,
+          'circle-stroke-color': mapColors.accent,
+          'circle-stroke-opacity': 0.72,
+          'circle-stroke-width': 2,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
+    if (!map.getLayer(activityPointsLayerId)) {
+      map.addLayer({
+        id: activityPointsLayerId,
+        type: 'circle',
+        source: focusedActivitiesSourceId,
+        paint: {
+          'circle-color': ['case', ['get', 'selected'], mapColors.selected, mapColors.textInverse],
+          'circle-radius': ['case', ['get', 'selected'], 7, 5],
+          'circle-stroke-color': mapColors.accent,
+          'circle-stroke-width': 2,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
     if (!map.getLayer(destinationPointsLayerId)) {
       map.addLayer({
         id: destinationPointsLayerId,
@@ -1026,6 +1134,27 @@ export function MapCanvas({
           'circle-radius': ['case', ['get', 'selected'], 8, 7],
           'circle-stroke-color': mapColors.textInverse,
           'circle-stroke-width': 2,
+        },
+      } as maplibregl.LayerSpecification);
+    }
+
+    if (!map.getLayer(activityLabelsLayerId)) {
+      map.addLayer({
+        id: activityLabelsLayerId,
+        type: 'symbol',
+        source: focusedActivitiesSourceId,
+        layout: {
+          'text-field': ['get', 'title'],
+          'text-font': cityLabelFontStack,
+          'text-offset': [0.8, 0],
+          'text-size': 11,
+          'text-anchor': 'left',
+          'text-allow-overlap': false,
+        },
+        paint: {
+          'text-color': mapColors.cityText,
+          'text-halo-color': mapColors.cityHalo,
+          'text-halo-width': 1.2,
         },
       } as maplibregl.LayerSpecification);
     }
