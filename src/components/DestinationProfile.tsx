@@ -529,6 +529,15 @@ function DestinationProfileForm({
               </span>
               <button
                 type="button"
+                className="profile-coordinate-action"
+                aria-label="Edit coordinates"
+                title="Edit coordinates"
+                onClick={startEditingCoordinates}
+              >
+                <Pencil size={13} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
                 className={copyButtonClassName}
                 aria-label={`Copy coordinates ${coordinatesText}`}
                 title="Copy coordinates"
@@ -539,15 +548,6 @@ function DestinationProfileForm({
                 ) : (
                   <Copy size={13} aria-hidden="true" />
                 )}
-              </button>
-              <button
-                type="button"
-                className="profile-coordinate-action"
-                aria-label="Edit coordinates"
-                title="Edit coordinates"
-                onClick={startEditingCoordinates}
-              >
-                <Pencil size={13} aria-hidden="true" />
               </button>
             </div>
           )}

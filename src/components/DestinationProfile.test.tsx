@@ -133,6 +133,11 @@ describe('DestinationProfile', () => {
     expect(within(header).getByText('-0.1342')).toBeInTheDocument();
     expect(latitudeLabel.closest('button')).toBeNull();
     expect(longitudeLabel.closest('button')).toBeNull();
+    const coordinateControls = within(within(header).getByLabelText('Coordinates')).getAllByRole('button');
+    expect(coordinateControls.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Edit coordinates',
+      'Copy coordinates 51.0576, -0.1342',
+    ]);
 
     await user.click(within(header).getByRole('button', { name: 'Copy coordinates 51.0576, -0.1342' }));
 
