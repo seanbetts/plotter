@@ -946,6 +946,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .update(rowPatch)
           .eq('trip_id', tripId)
           .eq('id', mediaId)
+          .not('activity_id', 'is', null)
           .select('*')
           .single(),
         'Unable to update activity media.',
@@ -990,6 +991,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .select('*')
           .eq('trip_id', tripId)
           .eq('id', mediaId)
+          .not('activity_id', 'is', null)
           .single(),
         'Unable to load activity media before deletion.',
       );
@@ -1003,7 +1005,8 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .from('media_assets')
           .delete()
           .eq('trip_id', tripId)
-          .eq('id', mediaId),
+          .eq('id', mediaId)
+          .not('activity_id', 'is', null),
         'Unable to delete activity media metadata.',
       );
     },

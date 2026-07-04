@@ -1458,6 +1458,79 @@ describe('supabase trip repository mappers', () => {
     expect(createSignedUrl).toHaveBeenCalledWith(row.object_path, 60 * 60);
   });
 
+  it('updates activity media caption and credit only for activity-owned rows', async () => {
+    const tripId = crypto.randomUUID();
+    const mediaId = crypto.randomUUID();
+    const row = {
+      id: mediaId,
+      trip_id: tripId,
+      destination_id: crypto.randomUUID(),
+      activity_id: crypto.randomUUID(),
+      bucket_id: 'trip-media',
+      object_path: `${tripId}/destination/activity/asset.webp`,
+      caption: 'New caption',
+      credit: 'Example photographer',
+      sort_order: 2,
+      content_type: 'image/webp',
+      size_bytes: 2048,
+      uploaded_by: crypto.randomUUID(),
+      created_at: '2026-06-29T12:00:00.000Z',
+      updated_at: '2026-06-29T12:10:00.000Z',
+    };
+    const createSignedUrl = vi.fn(async () => ({
+      data: { signedUrl: 'https://signed.example/activity-updated.webp' },
+      error: null,
+    }));
+    const updateSingle = vi.fn(async () => ({ data: row, error: null }));
+    const updateSelect = vi.fn(() => ({ single: updateSingle }));
+    const activityOwnerFilter = vi.fn(() => ({ select: updateSelect }));
+    const mediaIdFilter = vi.fn(() => ({ not: activityOwnerFilter }));
+    const tripFilter = vi.fn(() => ({ eq: mediaIdFilter }));
+    const update = vi.fn(() => ({ eq: tripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({ createSignedUrl })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return { update };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.updateActivityMedia(mediaId, {
+      caption: 'New caption',
+      credit: 'Example photographer',
+    })).resolves.toEqual(expect.objectContaining({
+      id: mediaId,
+      url: 'https://signed.example/activity-updated.webp',
+      caption: 'New caption',
+      credit: 'Example photographer',
+      sortOrder: 2,
+    }));
+
+    expect(update).toHaveBeenCalledWith({ caption: 'New caption', credit: 'Example photographer' });
+    expect(tripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(mediaIdFilter).toHaveBeenCalledWith('id', mediaId);
+    expect(activityOwnerFilter).toHaveBeenCalledWith('activity_id', 'is', null);
+    expect(createSignedUrl).toHaveBeenCalledWith(row.object_path, 60 * 60);
+  });
+
   it('deletes destination media storage before deleting active-trip metadata', async () => {
     const tripId = crypto.randomUUID();
     const mediaId = crypto.randomUUID();
@@ -1530,6 +1603,82 @@ describe('supabase trip repository mappers', () => {
     expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
     expect(deleteMediaIdFilter).toHaveBeenCalledWith('id', mediaId);
     expect(deleteActivityOwnerFilter).toHaveBeenCalledWith('activity_id', null);
+    expect(calls).toEqual(['storage', 'metadata']);
+  });
+
+  it('deletes activity media storage and metadata only for activity-owned rows', async () => {
+    const tripId = crypto.randomUUID();
+    const mediaId = crypto.randomUUID();
+    const row = {
+      id: mediaId,
+      trip_id: tripId,
+      destination_id: crypto.randomUUID(),
+      activity_id: crypto.randomUUID(),
+      bucket_id: 'trip-media',
+      object_path: `${tripId}/destination/activity/asset.webp`,
+      caption: '',
+      credit: '',
+      sort_order: 0,
+      content_type: 'image/webp',
+      size_bytes: 2048,
+      uploaded_by: crypto.randomUUID(),
+      created_at: '2026-06-29T12:00:00.000Z',
+      updated_at: '2026-06-29T12:00:00.000Z',
+    };
+    const calls: string[] = [];
+    const remove = vi.fn(async () => {
+      calls.push('storage');
+      return { data: [{ name: 'asset.webp' }], error: null };
+    });
+    const loadSingle = vi.fn(async () => ({ data: row, error: null }));
+    const loadActivityOwnerFilter = vi.fn(() => ({ single: loadSingle }));
+    const loadMediaIdFilter = vi.fn(() => ({ not: loadActivityOwnerFilter }));
+    const loadTripFilter = vi.fn(() => ({ eq: loadMediaIdFilter }));
+    const deleteActivityOwnerFilter = vi.fn(async () => {
+      calls.push('metadata');
+      return { error: null };
+    });
+    const deleteMediaIdFilter = vi.fn(() => ({ not: deleteActivityOwnerFilter }));
+    const deleteTripFilter = vi.fn(() => ({ eq: deleteMediaIdFilter }));
+    const deleteRows = vi.fn(() => ({ eq: deleteTripFilter }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      storage: {
+        from: vi.fn(() => ({ remove })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: loadTripFilter })),
+            delete: deleteRows,
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await repository.deleteActivityMedia(mediaId);
+
+    expect(loadTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(loadMediaIdFilter).toHaveBeenCalledWith('id', mediaId);
+    expect(loadActivityOwnerFilter).toHaveBeenCalledWith('activity_id', 'is', null);
+    expect(remove).toHaveBeenCalledWith([row.object_path]);
+    expect(deleteTripFilter).toHaveBeenCalledWith('trip_id', tripId);
+    expect(deleteMediaIdFilter).toHaveBeenCalledWith('id', mediaId);
+    expect(deleteActivityOwnerFilter).toHaveBeenCalledWith('activity_id', 'is', null);
     expect(calls).toEqual(['storage', 'metadata']);
   });
 
