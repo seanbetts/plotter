@@ -134,6 +134,12 @@ const repositoryMock = vi.hoisted(() => {
     updateDestinationMedia: vi.fn(),
     deleteDestinationMedia: vi.fn(),
     reorderDestinationMedia: vi.fn(),
+    listDestinationMediaRollup: vi.fn(async () => []),
+    listActivityMedia: vi.fn(async (): Promise<MediaItem[]> => []),
+    uploadActivityMedia: vi.fn(),
+    updateActivityMedia: vi.fn(),
+    deleteActivityMedia: vi.fn(),
+    reorderActivityMedia: vi.fn(),
   };
 
   return repository;
@@ -190,6 +196,12 @@ describe('App', () => {
     repositoryMock.updateDestinationMedia.mockClear();
     repositoryMock.deleteDestinationMedia.mockClear();
     repositoryMock.reorderDestinationMedia.mockClear();
+    repositoryMock.listDestinationMediaRollup.mockClear();
+    repositoryMock.listActivityMedia.mockClear();
+    repositoryMock.uploadActivityMedia.mockClear();
+    repositoryMock.updateActivityMedia.mockClear();
+    repositoryMock.deleteActivityMedia.mockClear();
+    repositoryMock.reorderActivityMedia.mockClear();
     vi.mocked(createAppTripRepository).mockResolvedValue(repositoryMock);
     vi.mocked(searchMapTilerPlaces).mockReset();
     vi.mocked(resolveMapTilerCoordinates).mockReset();

@@ -822,6 +822,30 @@ function createMemoryRepository(
       throw new Error('Media reordering is not supported by this test repository.');
     },
 
+    async listDestinationMediaRollup() {
+      return [];
+    },
+
+    async listActivityMedia() {
+      return [];
+    },
+
+    async uploadActivityMedia() {
+      throw new Error('Activity media uploads are not supported by this test repository.');
+    },
+
+    async updateActivityMedia() {
+      throw new Error('Activity media updates are not supported by this test repository.');
+    },
+
+    async deleteActivityMedia() {
+      throw new Error('Activity media deletes are not supported by this test repository.');
+    },
+
+    async reorderActivityMedia() {
+      throw new Error('Activity media reordering is not supported by this test repository.');
+    },
+
     async listRouteLegs() {
       return [];
     },

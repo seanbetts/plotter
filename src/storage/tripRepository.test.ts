@@ -320,6 +320,13 @@ describe('trip repository', () => {
     ]);
   });
 
+  it('rejects local activity media reorder for a missing activity even when the order is empty', async () => {
+    const repository = createTestRepository();
+
+    await expect(repository.reorderActivityMedia('missing-activity', []))
+      .rejects.toThrow('Activity not found.');
+  });
+
   it('normalizes legacy records without order or route status', async () => {
     const repository = createTestRepository();
     const legacyDestination = {

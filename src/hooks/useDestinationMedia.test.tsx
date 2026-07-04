@@ -519,6 +519,23 @@ function createMediaRepository(overrides: Partial<TripRepository> = {}) {
       orderedMediaIds.map((id, index) => createMediaItem(id, index)),
     ),
 
+    listDestinationMediaRollup: vi.fn().mockResolvedValue([]),
+
+    listActivityMedia: vi.fn().mockResolvedValue([]),
+
+    uploadActivityMedia: vi.fn(async () => createMediaItem('uploaded-activity-media', 0)),
+
+    updateActivityMedia: vi.fn(async (mediaId: string, patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>) => ({
+      ...createMediaItem(mediaId, 0),
+      ...patch,
+    })),
+
+    deleteActivityMedia: vi.fn(async () => {}),
+
+    reorderActivityMedia: vi.fn(async (_activityId: string, orderedMediaIds: string[]) =>
+      orderedMediaIds.map((id, index) => createMediaItem(id, index)),
+    ),
+
     async listRouteLegs() {
       return [];
     },

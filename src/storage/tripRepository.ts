@@ -455,6 +455,11 @@ export function createTripRepository(db: TripDb): TripRepository {
     },
 
     async reorderActivityMedia(activityId: string, orderedMediaIds: string[]): Promise<MediaItem[]> {
+      const activity = await db.activities.get(activityId);
+      if (!activity) {
+        throw new Error('Activity not found.');
+      }
+
       const currentMedia = await db.activityMedia.where('activityId').equals(activityId).toArray();
       const currentMediaIds = currentMedia.map((mediaItem) => mediaItem.id);
       const requestedIds = new Set(orderedMediaIds);

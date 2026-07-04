@@ -630,6 +630,18 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     );
   }
 
+  async function assertActivityExists(tripId: string, activityId: string) {
+    assertNoSupabaseError<Pick<SupabaseActivityRow, 'id'>>(
+      await supabase
+        .from('activities')
+        .select('id')
+        .eq('trip_id', tripId)
+        .eq('id', activityId)
+        .single(),
+      'Activity not found.',
+    );
+  }
+
   async function removeStorageObjects(bucketId: string, objectPaths: string[], fallbackMessage: string) {
     if (objectPaths.length === 0) return;
 
@@ -639,12 +651,16 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
     );
   }
 
-  async function removeStorageObjectBestEffort(bucketId: string, objectPath: string) {
+  async function removeStorageObjectsBestEffort(bucketId: string, objectPaths: string[]) {
     try {
-      await removeStorageObjects(bucketId, [objectPath], 'Unable to remove uploaded media file.');
+      await removeStorageObjects(bucketId, objectPaths, 'Unable to remove media files.');
     } catch {
-      // Preserve the original upload failure; cleanup is best-effort here.
+      // Storage cleanup follows metadata deletion; preserve the successful DB operation.
     }
+  }
+
+  async function removeStorageObjectBestEffort(bucketId: string, objectPath: string) {
+    await removeStorageObjectsBestEffort(bucketId, [objectPath]);
   }
 
   async function deleteActivityMediaMetadataBestEffort(tripId: string, mediaId: string) {
@@ -839,10 +855,6 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         ]);
       }
 
-      for (const [bucketId, objectPaths] of objectPathsByBucketId) {
-        await removeStorageObjects(bucketId, objectPaths, 'Unable to remove activity media files.');
-      }
-
       assertSupabaseWriteSucceeded(
         await supabase
           .from('activities')
@@ -851,6 +863,10 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .eq('id', activityId),
         'Unable to delete activity.',
       );
+
+      for (const [bucketId, objectPaths] of objectPathsByBucketId) {
+        await removeStorageObjectsBestEffort(bucketId, objectPaths);
+      }
     },
 
     async reorderActivities(destinationId, orderedActivityIds) {
@@ -981,7 +997,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       let insertedRow: SupabaseMediaAssetRow | null = null;
 
       try {
-        insertedRow = await insertActivityMediaMetadata({
+        const metadataRow = await insertActivityMediaMetadata({
           tripId,
           destinationId: input.destinationId,
           activityId: input.activityId,
@@ -993,7 +1009,8 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           sizeBytes: input.file.size,
           uploadedBy: user.id,
         });
-        return await createSignedMediaItem(insertedRow);
+        insertedRow = metadataRow;
+        return await createSignedMediaItem(metadataRow);
       } catch (error) {
         if (insertedRow) {
           await deleteActivityMediaMetadataBestEffort(tripId, insertedRow.id);
@@ -1071,10 +1088,6 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       );
 
       assertSupabaseWriteSucceeded(
-        await supabase.storage.from(row.bucket_id).remove([row.object_path]),
-        'Unable to remove destination media file.',
-      );
-      assertSupabaseWriteSucceeded(
         await supabase
           .from('media_assets')
           .delete()
@@ -1083,6 +1096,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .is('activity_id', null),
         'Unable to delete destination media metadata.',
       );
+      await removeStorageObjectBestEffort(row.bucket_id, row.object_path);
     },
 
     async deleteActivityMedia(mediaId) {
@@ -1099,10 +1113,6 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       );
 
       assertSupabaseWriteSucceeded(
-        await supabase.storage.from(row.bucket_id).remove([row.object_path]),
-        'Unable to remove activity media file.',
-      );
-      assertSupabaseWriteSucceeded(
         await supabase
           .from('media_assets')
           .delete()
@@ -1111,6 +1121,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
           .not('activity_id', 'is', null),
         'Unable to delete activity media metadata.',
       );
+      await removeStorageObjectBestEffort(row.bucket_id, row.object_path);
     },
 
     async reorderDestinationMedia(destinationId, orderedMediaIds) {
@@ -1152,6 +1163,8 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
     async reorderActivityMedia(activityId, orderedMediaIds) {
       const tripId = await getActiveTripId();
+      await assertActivityExists(tripId, activityId);
+
       const rows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
         await supabase
           .from('media_assets')

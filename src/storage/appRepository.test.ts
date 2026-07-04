@@ -28,6 +28,12 @@ function createMockRepository(snapshot: {
     updateDestinationMedia: vi.fn(),
     deleteDestinationMedia: vi.fn(),
     reorderDestinationMedia: vi.fn(),
+    listDestinationMediaRollup: vi.fn(async () => []),
+    listActivityMedia: vi.fn(async () => []),
+    uploadActivityMedia: vi.fn(),
+    updateActivityMedia: vi.fn(),
+    deleteActivityMedia: vi.fn(),
+    reorderActivityMedia: vi.fn(),
   };
 }
 
