@@ -21,6 +21,13 @@ const savedStatusVisibleMs = 2400;
 const defaultMediaProps = {
   activities: [],
   selectedActivityId: null,
+  linkPreviewClient: {
+    fetchPreview: vi.fn().mockResolvedValue({
+      url: 'https://example.com',
+      title: 'Example',
+      domain: 'example.com',
+    }),
+  },
   onSelectActivity: vi.fn(),
   onCreateActivity: vi.fn(),
   searchActivities: vi.fn().mockResolvedValue([]),
@@ -658,6 +665,87 @@ describe('DestinationProfile', () => {
     expect(onUpdate.mock.calls[0][1]).not.toHaveProperty('research');
     expect(onUpdate.mock.calls[0][1]).not.toHaveProperty('activities');
     expect(onUpdate.mock.calls[0][1]).not.toHaveProperty('routeContext');
+  });
+
+  it('renders stop research links and saves added previews without overwriting other research fields', async () => {
+    setupAutosaveTimers();
+    const existingLink = {
+      id: 'existing-link',
+      title: 'Paris guide',
+      url: 'https://paris.example/guide',
+      domain: 'paris.example',
+      sortOrder: 0,
+    };
+    const destination: Destination = {
+      ...createDestination({
+        name: 'Paris',
+        countryRegion: 'France',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      }),
+      research: {
+        notes: 'Keep this research note.',
+        links: [existingLink],
+        bookReferences: [],
+      },
+    };
+    const linkPreviewClient = {
+      fetchPreview: vi.fn().mockResolvedValue({
+        title: 'Museum tickets',
+        url: 'https://museum.example/tickets',
+        domain: 'museum.example',
+      }),
+    };
+    const onUpdate = vi.fn();
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        linkPreviewClient={linkPreviewClient}
+        onUpdate={onUpdate}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: /Paris guide/ })).toHaveAttribute(
+      'href',
+      'https://paris.example/guide',
+    );
+
+    const addLinkForm = screen.getByRole('form', { name: 'Add link' });
+    fireEvent.change(within(addLinkForm).getByLabelText('Add link URL'), {
+      target: { value: 'museum.example/tickets' },
+    });
+    await act(async () => {
+      fireEvent.submit(addLinkForm);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(linkPreviewClient.fetchPreview).toHaveBeenCalledWith('museum.example/tickets');
+    await advanceAutosave();
+    await flushAutosave();
+
+    expect(onUpdate).toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledWith(destination.id, {
+      name: 'Paris',
+      location: destination.location,
+      timing: destination.timing,
+      tags: destination.tags,
+      research: {
+        notes: 'Keep this research note.',
+        bookReferences: [],
+        links: [
+          existingLink,
+          expect.objectContaining({
+            title: 'Museum tickets',
+            url: 'https://museum.example/tickets',
+            domain: 'museum.example',
+            sortOrder: 1,
+          }),
+        ],
+      },
+    });
   });
 
   it('debounces rapid typing into one save with the final value', async () => {

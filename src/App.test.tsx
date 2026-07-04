@@ -7,6 +7,7 @@ import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geo
 import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
+import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
 
@@ -155,8 +156,20 @@ const repositoryMock = vi.hoisted(() => {
   return repository;
 });
 
+const linkPreviewClientMock = vi.hoisted(() => ({
+  fetchPreview: vi.fn(async () => ({
+    url: 'https://example.com',
+    title: 'Example',
+    domain: 'example.com',
+  })),
+}));
+
 vi.mock('./storage/appRepository', () => ({
   createAppTripRepository: vi.fn(async () => repositoryMock),
+}));
+
+vi.mock('./services/linkPreviewClient', () => ({
+  createAppLinkPreviewClient: vi.fn(() => linkPreviewClientMock),
 }));
 
 vi.mock('./adapters/geocoding', () => ({
@@ -213,6 +226,14 @@ describe('App', () => {
     repositoryMock.deleteActivityMedia.mockClear();
     repositoryMock.reorderActivityMedia.mockClear();
     vi.mocked(createAppTripRepository).mockResolvedValue(repositoryMock);
+    linkPreviewClientMock.fetchPreview.mockReset();
+    linkPreviewClientMock.fetchPreview.mockResolvedValue({
+      url: 'https://example.com',
+      title: 'Example',
+      domain: 'example.com',
+    });
+    vi.mocked(createAppLinkPreviewClient).mockReset();
+    vi.mocked(createAppLinkPreviewClient).mockReturnValue(linkPreviewClientMock);
     vi.mocked(searchMapTilerPlaces).mockReset();
     vi.mocked(resolveMapTilerCoordinates).mockReset();
     maplibreMock.Map.mockClear();

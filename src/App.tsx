@@ -14,6 +14,8 @@ import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
 import { preloadImageUrls } from './media/imagePreloading';
+import { createAppLinkPreviewClient } from './services/linkPreviewClient';
+import type { LinkPreviewClient } from './services/linkPreviewClient';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
 import './styles.css';
@@ -133,16 +135,26 @@ function getAvailableOverlayHeight(position: OverlayPosition) {
 
 export default function App() {
   const [repository, setRepository] = useState<TripRepository | null>(null);
+  const [linkPreviewClient, setLinkPreviewClient] = useState<LinkPreviewClient | null>(null);
   const [repositoryError, setRepositoryError] = useState<RepositoryError | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
 
-    createAppTripRepository()
-      .then((nextRepository) => {
+    Promise.resolve()
+      .then(() => {
+        const nextLinkPreviewClient = createAppLinkPreviewClient();
+
+        return createAppTripRepository().then((nextRepository) => ({
+          nextRepository,
+          nextLinkPreviewClient,
+        }));
+      })
+      .then(({ nextRepository, nextLinkPreviewClient }) => {
         if (isCancelled) return;
 
         setRepository(nextRepository);
+        setLinkPreviewClient(nextLinkPreviewClient);
       })
       .catch((caught) => {
         if (isCancelled) return;
@@ -155,7 +167,7 @@ export default function App() {
     };
   }, []);
 
-  if (!repository) {
+  if (!repository || !linkPreviewClient) {
     return (
       <main className="app-shell">
         <section className="map-stage" aria-label="World tour map workspace">
@@ -183,10 +195,16 @@ export default function App() {
     );
   }
 
-  return <TripWorkspace repository={repository} />;
+  return <TripWorkspace repository={repository} linkPreviewClient={linkPreviewClient} />;
 }
 
-function TripWorkspace({ repository }: { repository: TripRepository }) {
+function TripWorkspace({
+  repository,
+  linkPreviewClient,
+}: {
+  repository: TripRepository;
+  linkPreviewClient: LinkPreviewClient;
+}) {
   const calculateRoute = useCallback(
     (input: Omit<Parameters<typeof calculateOpenRouteServiceRoute>[0], 'apiKey'>) =>
       calculateOpenRouteServiceRoute({
@@ -771,6 +789,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               isMediaLoading={destinationMedia.isLoading || isDestinationMediaRollupLoading}
               isMediaUploading={destinationMedia.isUploading}
               mediaError={destinationMedia.error ?? destinationMediaRollupError}
+              linkPreviewClient={linkPreviewClient}
               onSelectActivity={setSelectedActivityId}
               onCreateActivity={handleCreateActivity}
               searchActivities={searchActivityPlaces}

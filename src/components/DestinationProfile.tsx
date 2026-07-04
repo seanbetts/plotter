@@ -3,9 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import { formatLocationParts } from '../domain/locations';
-import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem } from '../domain/types';
+import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, ResearchLink } from '../domain/types';
+import type { LinkPreviewClient } from '../services/linkPreviewClient';
 import { ActivityList } from './ActivityList';
 import { DestinationImageStrip } from './DestinationImageStrip';
+import { LinkPreviewGrid } from './LinkPreviewGrid';
 import { formatStopHeaderLabel } from './stopLabels';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
@@ -15,6 +17,7 @@ type DestinationFormState = {
   name: string;
   expectedStayDays: string;
   tags: string[];
+  links: ResearchLink[];
   tagInput: string;
 };
 
@@ -33,6 +36,7 @@ type DestinationProfileProps = {
   isMediaLoading: boolean;
   isMediaUploading: boolean;
   mediaError: string | null;
+  linkPreviewClient: LinkPreviewClient;
   onSelectActivity: (activityId: string) => void;
   onCreateActivity: CreateActivityHandler;
   searchActivities?: (query: string) => Promise<PlaceSearchResult[]>;
@@ -109,6 +113,22 @@ const normalizeCoordinateValue = (coordinate: number) => {
 const formatCoordinateValue = (coordinate: number) => String(normalizeCoordinateValue(coordinate));
 const listsMatch = (left: string[], right: string[]) =>
   left.length === right.length && left.every((item, index) => item === right[index]);
+const researchLinksMatch = (left: ResearchLink[], right: ResearchLink[]) =>
+  left.length === right.length &&
+  left.every((leftLink, index) => {
+    const rightLink = right[index];
+
+    return (
+      rightLink &&
+      leftLink.id === rightLink.id &&
+      leftLink.title === rightLink.title &&
+      leftLink.url === rightLink.url &&
+      leftLink.domain === rightLink.domain &&
+      leftLink.imageUrl === rightLink.imageUrl &&
+      leftLink.sortOrder === rightLink.sortOrder &&
+      leftLink.previewFetchedAt === rightLink.previewFetchedAt
+    );
+  });
 const createCoordinateDraft = (destination: Destination): CoordinateDraft => ({
   lat: formatCoordinateValue(destination.coordinates.lat),
   lng: formatCoordinateValue(destination.coordinates.lng),
@@ -119,6 +139,7 @@ const createFormState = (destination: Destination): DestinationFormState => ({
   name: destination.name,
   expectedStayDays: String(destination.timing.expectedStayDays),
   tags: destination.tags,
+  links: destination.research.links,
   tagInput: '',
 });
 
@@ -137,16 +158,19 @@ const createPatchFromForm = (
   const name = form.name.trim() || destination.name;
   const expectedStayDays = normalizeExpectedStayDays(form.expectedStayDays);
   const tags = form.tags;
+  const links = form.links;
+  const linksChanged = !researchLinksMatch(links, destination.research.links);
   const hasChanges =
     name !== destination.name ||
     expectedStayDays !== destination.timing.expectedStayDays ||
-    !listsMatch(tags, destination.tags);
+    !listsMatch(tags, destination.tags) ||
+    linksChanged;
 
   if (!hasChanges) {
     return null;
   }
 
-  return {
+  const patch: DestinationPatch = {
     name,
     location: destination.location,
     timing: {
@@ -155,6 +179,15 @@ const createPatchFromForm = (
     },
     tags,
   };
+
+  if (linksChanged) {
+    patch.research = {
+      ...destination.research,
+      links,
+    };
+  }
+
+  return patch;
 };
 
 export function DestinationProfile(props: DestinationProfileProps) {
@@ -176,6 +209,7 @@ function DestinationProfileForm({
   isMediaLoading,
   isMediaUploading,
   mediaError,
+  linkPreviewClient,
   onSelectActivity,
   onCreateActivity,
   searchActivities,
@@ -652,6 +686,13 @@ function DestinationProfileForm({
           />
         </div>
       </fieldset>
+
+      <LinkPreviewGrid
+        label="Links"
+        links={form.links}
+        previewClient={linkPreviewClient}
+        onChange={(links) => updateForm({ links })}
+      />
 
       <ActivityList
         activities={activities}
