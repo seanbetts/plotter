@@ -166,7 +166,7 @@ test('opens an activity panel with image region beside the selected stop', async
 
   await expect(stopPanel).toBeVisible();
 
-  await stopPanel.getByLabel('New activity title').fill(activityTitle);
+  await stopPanel.getByLabel('Search for an activity').fill(activityTitle);
   await stopPanel.getByRole('button', { name: 'Add activity' }).click();
 
   const activitySelect = stopPanel.getByRole('button', { name: `Select activity ${activityTitle}` });
