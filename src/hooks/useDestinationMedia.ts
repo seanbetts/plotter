@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MediaItem } from '../domain/types';
+import { normalizeImageFile } from '../media/imageOptimization';
 import type { TripRepository } from '../storage/tripRepository';
 
 type MediaPatch = Pick<Partial<MediaItem>, 'caption' | 'credit'>;
@@ -162,10 +163,10 @@ export function useDestinationMedia(
 
     try {
       const uploadedMediaItems = await Promise.all(
-        validFiles.map((file) =>
+        validFiles.map(async (file) =>
           repository.uploadDestinationMedia({
             destinationId,
-            file,
+            file: await normalizeImageFile(file),
           }),
         ),
       );

@@ -12,6 +12,7 @@ import type {
   RouteLegStatus,
   RouteLegType,
 } from '../domain/types';
+import { mediaImageVariants } from '../media/imageOptimization';
 import type { TripRepository } from './tripRepository';
 
 type SupabaseDestinationRow = {
@@ -99,6 +100,13 @@ type SupabaseMediaAssetRow = {
   uploaded_by: string;
   created_at: string;
   updated_at: string;
+};
+
+type SupabaseMediaSignedUrls = {
+  originalUrl: string;
+  thumbnailUrl: string;
+  previewUrl: string;
+  fullUrl: string;
 };
 
 type SupabaseResponse<T> = {
@@ -292,10 +300,25 @@ export function routeLegFromSupabaseRow(row: SupabaseRouteLegRow): RouteLeg {
   };
 }
 
-export function mediaAssetFromSupabaseRow(row: SupabaseMediaAssetRow, signedUrl: string): MediaItem {
+export function mediaAssetFromSupabaseRow(
+  row: SupabaseMediaAssetRow,
+  signedUrls: string | SupabaseMediaSignedUrls,
+): MediaItem {
+  const urls = typeof signedUrls === 'string'
+    ? {
+        originalUrl: signedUrls,
+        thumbnailUrl: signedUrls,
+        previewUrl: signedUrls,
+        fullUrl: signedUrls,
+      }
+    : signedUrls;
+
   return {
     id: row.id,
-    url: signedUrl,
+    url: urls.originalUrl,
+    thumbnailUrl: urls.thumbnailUrl,
+    previewUrl: urls.previewUrl,
+    fullUrl: urls.fullUrl,
     caption: row.caption,
     credit: row.credit,
     sortOrder: row.sort_order,
@@ -439,15 +462,21 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
   }
 
   async function createSignedMediaItem(row: SupabaseMediaAssetRow) {
-    const signedUrlResponse = await supabase.storage
-      .from(row.bucket_id)
-      .createSignedUrl(row.object_path, 60 * 60);
-    const signedUrl = assertNoSupabaseError(
-      signedUrlResponse,
-      'Unable to create media URL.',
-    ).signedUrl;
+    const storage = supabase.storage.from(row.bucket_id);
+    const [originalUrlResponse, thumbnailUrlResponse, previewUrlResponse, fullUrlResponse] = await Promise.all([
+      storage.createSignedUrl(row.object_path, 60 * 60),
+      storage.createSignedUrl(row.object_path, 60 * 60, { transform: mediaImageVariants.thumbnail }),
+      storage.createSignedUrl(row.object_path, 60 * 60, { transform: mediaImageVariants.preview }),
+      storage.createSignedUrl(row.object_path, 60 * 60, { transform: mediaImageVariants.full }),
+    ]);
+    const signedUrls: SupabaseMediaSignedUrls = {
+      originalUrl: assertNoSupabaseError(originalUrlResponse, 'Unable to create media URL.').signedUrl,
+      thumbnailUrl: assertNoSupabaseError(thumbnailUrlResponse, 'Unable to create thumbnail media URL.').signedUrl,
+      previewUrl: assertNoSupabaseError(previewUrlResponse, 'Unable to create preview media URL.').signedUrl,
+      fullUrl: assertNoSupabaseError(fullUrlResponse, 'Unable to create full-size media URL.').signedUrl,
+    };
 
-    return mediaAssetFromSupabaseRow(row, signedUrl);
+    return mediaAssetFromSupabaseRow(row, signedUrls);
   }
 
   async function loadDestinationMediaRows(tripId: string, destinationId: string) {
@@ -687,15 +716,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         sizeBytes: input.file.size,
         uploadedBy: user.id,
       });
-      const signedUrlResponse = await supabase.storage
-        .from(bucketId)
-        .createSignedUrl(row.object_path, 60 * 60);
-      const signedUrl = assertNoSupabaseError(
-        signedUrlResponse,
-        'Unable to create media URL.',
-      ).signedUrl;
-
-      return mediaAssetFromSupabaseRow(row, signedUrl);
+      return createSignedMediaItem(row);
     },
 
     async updateDestinationMedia(mediaId, patch) {

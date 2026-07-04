@@ -32,6 +32,14 @@ function openPreviewLabel(mediaItem: MediaItem, index: number) {
   return `Open image ${index + 1}${caption ? `: ${caption}` : ''}`;
 }
 
+function getHeroImageUrl(mediaItem: MediaItem) {
+  return mediaItem.previewUrl ?? mediaItem.fullUrl ?? mediaItem.url;
+}
+
+function getThumbnailImageUrl(mediaItem: MediaItem) {
+  return mediaItem.thumbnailUrl ?? mediaItem.previewUrl ?? mediaItem.url;
+}
+
 function isFileDrag(event: DragEvent<HTMLElement>) {
   const types = Array.from(event.dataTransfer.types ?? []);
 
@@ -261,7 +269,7 @@ export function DestinationImageStrip({
           aria-label={`Open hero image${heroMediaItem.caption.trim() ? `: ${heroMediaItem.caption.trim()}` : ''}`}
           onClick={() => onOpenPreview(heroMediaItem.id)}
         >
-          <img src={heroMediaItem.url} alt={mediaLabel(heroMediaItem, 0)} />
+          <img src={getHeroImageUrl(heroMediaItem)} alt={mediaLabel(heroMediaItem, 0)} />
           {isUploading ? (
             <span className="destination-image-hero-status" role="status" aria-label="Uploading images">
               <LoaderCircle size={14} aria-hidden="true" />
@@ -288,7 +296,7 @@ export function DestinationImageStrip({
               onDrop={(event) => handleThumbnailDrop(event, mediaItem.id)}
               onDragEnd={clearThumbnailDrag}
             >
-              <img src={mediaItem.url} alt={mediaLabel(mediaItem, index)} />
+              <img src={getThumbnailImageUrl(mediaItem)} alt={mediaLabel(mediaItem, index)} />
             </button>
           ))}
         </div>

@@ -23,6 +23,9 @@ export type RouteLegStatus = 'pending' | 'calculating' | 'ready' | 'failed' | 'm
 export type MediaItem = {
   id: string;
   url: string;
+  thumbnailUrl?: string;
+  previewUrl?: string;
+  fullUrl?: string;
   caption: string;
   credit: string;
   sortOrder?: number;

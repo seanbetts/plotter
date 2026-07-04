@@ -187,9 +187,13 @@ export function createTripRepository(db: TripDb): TripRepository {
       }
 
       const timestamp = new Date().toISOString();
+      const mediaUrl = await createLocalMediaUrl(input.file);
       const mediaItem: MediaItem = {
         id: crypto.randomUUID(),
-        url: await createLocalMediaUrl(input.file),
+        url: mediaUrl,
+        thumbnailUrl: mediaUrl,
+        previewUrl: mediaUrl,
+        fullUrl: mediaUrl,
         caption: input.caption ?? '',
         credit: input.credit ?? '',
         sortOrder:

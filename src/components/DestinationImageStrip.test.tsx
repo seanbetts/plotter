@@ -156,6 +156,44 @@ describe('DestinationImageStrip', () => {
     expect(onOpenPreview).toHaveBeenCalledWith('media-1');
   });
 
+  it('uses optimized preview and thumbnail URLs when they are available', () => {
+    render(
+      <DestinationImageStrip
+        {...createProps({
+          mediaItems: [
+            createMediaItem({
+              previewUrl: 'https://example.com/media-1-preview.webp',
+              thumbnailUrl: 'https://example.com/media-1-thumbnail.webp',
+            }),
+            createMediaItem({
+              id: 'media-2',
+              url: 'https://example.com/media-2.jpg',
+              thumbnailUrl: 'https://example.com/media-2-thumbnail.webp',
+              caption: 'Mountain trail',
+              sortOrder: 1,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const hero = screen.getByRole('button', { name: 'Open hero image: Sunset over the harbour' });
+    expect(within(hero).getByRole('img', { name: 'Sunset over the harbour' })).toHaveAttribute(
+      'src',
+      'https://example.com/media-1-preview.webp',
+    );
+    expect(
+      within(screen.getByRole('button', { name: 'Open image 1: Sunset over the harbour' })).getByRole('img', {
+        name: 'Sunset over the harbour',
+      }),
+    ).toHaveAttribute('src', 'https://example.com/media-1-thumbnail.webp');
+    expect(
+      within(screen.getByRole('button', { name: 'Open image 2: Mountain trail' })).getByRole('img', {
+        name: 'Mountain trail',
+      }),
+    ).toHaveAttribute('src', 'https://example.com/media-2-thumbnail.webp');
+  });
+
   it('shows upload progress inside the empty image drop zone', () => {
     const { container } = render(
       <DestinationImageStrip {...createProps({ mediaItems: [], isUploading: true })} />,

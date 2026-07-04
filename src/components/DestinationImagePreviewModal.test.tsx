@@ -59,6 +59,24 @@ describe('DestinationImagePreviewModal', () => {
     expect(screen.queryByLabelText('Credit')).not.toBeInTheDocument();
   });
 
+  it('uses the optimized full-size URL when it is available', () => {
+    render(
+      <DestinationImagePreviewModal
+        {...createProps({
+          mediaItem: createMediaItem({
+            fullUrl: 'https://example.com/media-1-full.webp',
+            previewUrl: 'https://example.com/media-1-preview.webp',
+          }),
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: 'Sunset over the harbour' })).toHaveAttribute(
+      'src',
+      'https://example.com/media-1-full.webp',
+    );
+  });
+
   it('uses a useful generic image label when the media has no caption', () => {
     render(<DestinationImagePreviewModal {...createProps({ mediaItem: createMediaItem({ caption: '' }) })} />);
 

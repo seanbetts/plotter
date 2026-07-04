@@ -1,8 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MediaItem } from '../domain/types';
+import { normalizeImageFile } from '../media/imageOptimization';
 import type { TripRepository } from '../storage/tripRepository';
 import { useDestinationMedia } from './useDestinationMedia';
+
+vi.mock('../media/imageOptimization', () => ({
+  normalizeImageFile: vi.fn(async (file: File) => file),
+}));
 
 describe('useDestinationMedia', () => {
   it('loads destination media and populates state', async () => {
@@ -109,6 +114,30 @@ describe('useDestinationMedia', () => {
       'existing-media',
       'uploaded-media',
     ]);
+  });
+
+  it('normalizes valid images before uploading them to the repository', async () => {
+    const originalFile = createFile('full-size.jpg', 'image/jpeg');
+    const normalizedFile = createFile('full-size-normalized.jpg', 'image/jpeg');
+    vi.mocked(normalizeImageFile).mockResolvedValueOnce(normalizedFile);
+    const repository = createMediaRepository({
+      listDestinationMedia: vi.fn().mockResolvedValue([]),
+      uploadDestinationMedia: vi.fn().mockResolvedValue(createMediaItem('uploaded-media', 0)),
+    });
+
+    const { result } = renderHook(() => useDestinationMedia(repository, 'destination-1'));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.uploadFiles([originalFile]);
+    });
+
+    expect(normalizeImageFile).toHaveBeenCalledWith(originalFile);
+    expect(repository.uploadDestinationMedia).toHaveBeenCalledWith({
+      destinationId: 'destination-1',
+      file: normalizedFile,
+    });
   });
 
   it('rejects all-invalid uploads with an image type error', async () => {

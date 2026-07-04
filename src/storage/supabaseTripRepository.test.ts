@@ -3,6 +3,7 @@ import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
 import type { Activity } from '../domain/types';
+import { mediaImageVariants } from '../media/imageOptimization';
 import {
   activityFromSupabaseRow,
   activityToSupabaseRow,
@@ -949,8 +950,8 @@ describe('supabase trip repository mappers', () => {
         updated_at: '2026-06-29T12:00:00.000Z',
       },
     ];
-    const createSignedUrl = vi.fn(async () => ({
-      data: { signedUrl: 'https://signed.example/asset.webp' },
+    const createSignedUrl = vi.fn(async (_path: string, _expiresIn: number, options?: { transform?: { width: number } }) => ({
+      data: { signedUrl: `https://signed.example/asset-${options?.transform?.width ?? 'original'}.webp` },
       error: null,
     }));
     const mediaOrderBy = vi.fn(async () => ({ data: rows, error: null }));
@@ -993,6 +994,9 @@ describe('supabase trip repository mappers', () => {
       expect.objectContaining({
         id: rows[0].id,
         url: 'https://signed.example/asset.webp',
+        thumbnailUrl: 'https://signed.example/asset.webp',
+        previewUrl: 'https://signed.example/asset.webp',
+        fullUrl: 'https://signed.example/asset.webp',
         sortOrder: rows[0].sort_order,
       }),
     );
@@ -1000,19 +1004,43 @@ describe('supabase trip repository mappers', () => {
     await expect(repository.listDestinationMedia(destinationId)).resolves.toEqual([
       expect.objectContaining({
         id: rows[0].id,
-        url: 'https://signed.example/asset.webp',
+        url: 'https://signed.example/asset-original.webp',
+        thumbnailUrl: 'https://signed.example/asset-320.webp',
+        previewUrl: 'https://signed.example/asset-900.webp',
+        fullUrl: 'https://signed.example/asset-2200.webp',
         sortOrder: rows[0].sort_order,
       }),
       expect.objectContaining({
         id: rows[1].id,
-        url: 'https://signed.example/asset.webp',
+        url: 'https://signed.example/asset-original.webp',
+        thumbnailUrl: 'https://signed.example/asset-320.webp',
+        previewUrl: 'https://signed.example/asset-900.webp',
+        fullUrl: 'https://signed.example/asset-2200.webp',
         sortOrder: rows[1].sort_order,
       }),
     ]);
     expect(mediaSortOrderBy).toHaveBeenCalledWith('sort_order', { ascending: true });
     expect(mediaOrderBy).toHaveBeenCalledWith('created_at', { ascending: true });
     expect(createSignedUrl).toHaveBeenNthCalledWith(1, rows[0].object_path, 60 * 60);
-    expect(createSignedUrl).toHaveBeenNthCalledWith(2, rows[1].object_path, 60 * 60);
+    expect(createSignedUrl).toHaveBeenNthCalledWith(2, rows[0].object_path, 60 * 60, {
+      transform: mediaImageVariants.thumbnail,
+    });
+    expect(createSignedUrl).toHaveBeenNthCalledWith(3, rows[0].object_path, 60 * 60, {
+      transform: mediaImageVariants.preview,
+    });
+    expect(createSignedUrl).toHaveBeenNthCalledWith(4, rows[0].object_path, 60 * 60, {
+      transform: mediaImageVariants.full,
+    });
+    expect(createSignedUrl).toHaveBeenNthCalledWith(5, rows[1].object_path, 60 * 60);
+    expect(createSignedUrl).toHaveBeenNthCalledWith(6, rows[1].object_path, 60 * 60, {
+      transform: mediaImageVariants.thumbnail,
+    });
+    expect(createSignedUrl).toHaveBeenNthCalledWith(7, rows[1].object_path, 60 * 60, {
+      transform: mediaImageVariants.preview,
+    });
+    expect(createSignedUrl).toHaveBeenNthCalledWith(8, rows[1].object_path, 60 * 60, {
+      transform: mediaImageVariants.full,
+    });
   });
 
   it('updates destination media caption and credit in the active trip and returns a fresh signed URL', async () => {

@@ -26,6 +26,7 @@ export function DestinationImagePreviewModal({
   const [deleteError, setDeleteError] = useState('');
   const isDeletingRef = useRef(false);
   const imageAlt = mediaItem.caption.trim() || 'Stop reference image';
+  const imageUrl = mediaItem.fullUrl ?? mediaItem.previewUrl ?? mediaItem.url;
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: KeyboardEvent) => {
@@ -74,7 +75,7 @@ export function DestinationImagePreviewModal({
         aria-label="Image preview"
       >
         <div className="image-preview-frame">
-          <img src={mediaItem.url} alt={imageAlt} />
+          <img src={imageUrl} alt={imageAlt} />
           <button
             type="button"
             className="image-preview-floating-button image-preview-close-button"
