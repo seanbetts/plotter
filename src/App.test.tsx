@@ -1016,7 +1016,10 @@ describe('App', () => {
 
     const preview = screen.getByRole('dialog', { name: 'Image preview' });
     expect(within(preview).getByRole('img', { name: 'Museum wing' })).toHaveAttribute('src', '/louvre-full.jpg');
-    expect(within(preview).getByText('Louvre')).toBeInTheDocument();
+    await user.click(within(preview).getByRole('button', { name: 'Open activity Louvre' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Louvre activity' })).toBeInTheDocument();
     expect(repositoryMock.reorderDestinationMedia).not.toHaveBeenCalled();
   });
 

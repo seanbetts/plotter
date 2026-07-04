@@ -778,7 +778,10 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
             activityAttribution={previewMediaRollupItem?.activityTitle}
             onOpenActivity={
               previewMediaRollupItem?.activityId
-                ? () => setSelectedActivityId(previewMediaRollupItem.activityId ?? null)
+                ? () => {
+                    setSelectedActivityId(previewMediaRollupItem.activityId ?? null);
+                    setPreviewMedia(null);
+                  }
                 : undefined
             }
             onDelete={deletePreviewMedia}
