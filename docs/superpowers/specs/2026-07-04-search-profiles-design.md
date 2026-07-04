@@ -104,6 +104,13 @@ The UI can display a small subset, but keeping the normalized fields avoids rewo
 
 The first implementation should rely mostly on MapTiler's ranking plus type filters.
 
+Result limits should be profile-specific:
+
+- Stop search should request 8 results.
+- Activity search should request 10 results.
+
+Stop search needs a little more breadth than the current 6-result request so useful macro places are less likely to be crowded out. Activity search should use 10 results because it is more exploratory and the user is looking for multiple possible things to do around a selected stop.
+
 For activity search, proximity to the selected stop should be sent to MapTiler. The app can compute `distanceFromStopKm` for display, but should avoid custom heavy ranking until real examples show it is needed.
 
 Blank queries return no results. Coordinate input should remain supported by the shared search module. In the main search context, coordinates resolve to a stop candidate. In activity search, coordinates can create an activity location under the selected stop.

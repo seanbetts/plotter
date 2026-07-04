@@ -55,6 +55,7 @@ Add these tests inside `describe('geocoding adapter', () => { ... })` in `src/ad
     await searchMapTilerPlaces('Sagres', { apiKey: 'test-key', profile: 'stop' });
 
     const requestedUrl = new URL(fetchMock.mock.calls[0][0]);
+    expect(requestedUrl.searchParams.get('limit')).toBe('8');
     expect(requestedUrl.searchParams.get('types')).toBe(
       [
         'place',
@@ -86,6 +87,7 @@ Add these tests inside `describe('geocoding adapter', () => { ... })` in `src/ad
     });
 
     const requestedUrl = new URL(fetchMock.mock.calls[0][0]);
+    expect(requestedUrl.searchParams.get('limit')).toBe('10');
     expect(requestedUrl.searchParams.get('types')).toBe(
       ['poi', 'address', 'road', 'neighbourhood', 'place', 'locality'].join(','),
     );
@@ -132,6 +134,11 @@ const placeTypesByProfile: Record<SearchProfile, string[]> = {
   activity: ['poi', 'address', 'road', 'neighbourhood', 'place', 'locality'],
 };
 
+const resultLimitByProfile: Record<SearchProfile, number> = {
+  stop: 8,
+  activity: 10,
+};
+
 function getSearchProfile(options: SearchOptions): SearchProfile {
   return options.profile ?? 'stop';
 }
@@ -143,7 +150,7 @@ Update `searchMapTilerPlaces` request construction:
   const profile = getSearchProfile(options);
   const url = new URL(`${mapTilerBaseUrl}/${encodeURIComponent(trimmed)}.json`);
   url.searchParams.set('key', options.apiKey);
-  url.searchParams.set('limit', '6');
+  url.searchParams.set('limit', String(resultLimitByProfile[profile]));
   url.searchParams.set('autocomplete', 'true');
   url.searchParams.set('types', placeTypesByProfile[profile].join(','));
   if (options.proximity) {
