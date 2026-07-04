@@ -556,7 +556,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Add stop at map center' })).not.toBeInTheDocument();
   });
 
-  it('closes the selected destination profile with Escape', async () => {
+  it('closes the selected destination profile with Escape when no activity is open', async () => {
     const user = userEvent.setup();
     const destination = createDestination({
       name: 'Balcombe',
@@ -576,9 +576,7 @@ describe('App', () => {
 
     expect(wasNotCanceled).toBe(false);
     expect(screen.queryByRole('complementary', { name: 'Balcombe profile' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Balcombe, United Kingdom' })).not.toHaveAttribute(
-      'aria-current',
-    );
+    expect(screen.getByRole('button', { name: 'Balcombe, United Kingdom' })).not.toHaveAttribute('aria-current');
   });
 
   it('loads destination media after opening a profile without blocking the pane', async () => {
@@ -801,6 +799,39 @@ describe('App', () => {
     expect(repositoryMock.listActivityMedia).toHaveBeenCalledWith(louvre.id);
   });
 
+  it('closes only the activity panel with Escape', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const louvre = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listActivities.mockResolvedValue([louvre] satisfies Activity[]);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
+
+    expect(screen.getByRole('complementary', { name: 'Louvre activity' })).toBeInTheDocument();
+
+    const wasNotCanceled = fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+
+    expect(wasNotCanceled).toBe(false);
+    expect(screen.queryByRole('complementary', { name: 'Louvre activity' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Paris profile' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select activity Louvre' })).not.toHaveAttribute(
+      'aria-current',
+    );
+  });
+
   it('scrolls the selected activity panel into view on mobile', async () => {
     const user = userEvent.setup();
     const scrollIntoView = vi.fn();
@@ -879,7 +910,7 @@ describe('App', () => {
     });
   });
 
-  it('shows activity attribution in the stop image rollup', async () => {
+  it('keeps activity attribution out of the stop image carousel', async () => {
     const user = userEvent.setup();
     const destination = createDestination({
       name: 'Paris',
@@ -927,9 +958,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Show image 2: Museum wing' }));
 
-    expect(within(screen.getByRole('group', { name: 'Image preview' })).getByText('Louvre')).toHaveClass(
-      'destination-image-attribution',
-    );
+    expect(within(screen.getByRole('group', { name: 'Image preview' })).queryByText('Louvre')).not.toBeInTheDocument();
   });
 
   it('opens an activity-owned rollup image in the modal without reordering destination media', async () => {

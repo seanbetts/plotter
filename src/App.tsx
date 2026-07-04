@@ -405,12 +405,19 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   }, [selectedActivityPanelId]);
 
   useEffect(() => {
-    if (pendingMapStop || previewMediaItem || !selectedDestination || isInteractionLocked) return undefined;
+    if (pendingMapStop || previewMediaItem || !selectedDestinationId || isInteractionLocked) {
+      return undefined;
+    }
 
     const handleWindowKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
 
       event.preventDefault();
+      if (selectedActivityPanelId) {
+        setSelectedActivityId(null);
+        return;
+      }
+
       setSelectedDestinationId(null);
     };
 
@@ -418,7 +425,13 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-  }, [isInteractionLocked, pendingMapStop, previewMediaItem, selectedDestination]);
+  }, [
+    isInteractionLocked,
+    pendingMapStop,
+    previewMediaItem,
+    selectedActivityPanelId,
+    selectedDestinationId,
+  ]);
 
   const handleAddDestination = useCallback(
     async (input: Parameters<typeof addDestination>[0]) => {

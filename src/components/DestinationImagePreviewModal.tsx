@@ -33,6 +33,7 @@ export function DestinationImagePreviewModal({
   const isDeletingRef = useRef(false);
   const imageAlt = mediaItem.caption.trim() || imageFallbackAlt || 'Reference image';
   const imageUrl = mediaItem.fullUrl ?? mediaItem.previewUrl ?? mediaItem.url;
+  const hasActivityAttribution = Boolean(activityAttribution);
   const canOpenActivity = Boolean(activityAttribution && onOpenActivity);
 
   useEffect(() => {
@@ -183,12 +184,18 @@ export function DestinationImagePreviewModal({
               {isDeleting ? <LoaderCircle size={18} aria-hidden="true" /> : <Trash2 size={18} aria-hidden="true" />}
             </button>
           </div>
-          {canOpenActivity ? (
-            <div className="image-preview-activity-control">
-              <span>{activityAttribution}</span>
-              <button type="button" onClick={onOpenActivity}>
-                Open activity
-              </button>
+          {hasActivityAttribution ? (
+            <div className="image-preview-activity-tools">
+              <span className="image-preview-activity-attribution">{activityAttribution}</span>
+              {canOpenActivity ? (
+                <button
+                  type="button"
+                  className="image-preview-open-activity-button"
+                  onClick={onOpenActivity}
+                >
+                  Open activity
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>

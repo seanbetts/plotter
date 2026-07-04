@@ -54,7 +54,7 @@ function createProps(overrides: Partial<React.ComponentProps<typeof ActivityPane
 }
 
 describe('ActivityPanel', () => {
-  it('renders the parent stop name and saves title drafts on blur', () => {
+  it('renders the parent stop name and edits the title like a stop name', () => {
     const props = createProps();
 
     render(<ActivityPanel {...props} />);
@@ -62,6 +62,20 @@ describe('ActivityPanel', () => {
     expect(screen.getByRole('complementary', { name: 'Louvre activity' })).toBeInTheDocument();
     expect(screen.getByText('Paris')).toHaveClass('profile-stop-number');
     expect(screen.getByRole('region', { name: 'Activity images' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Activity title')).not.toBeInTheDocument();
+
+    const titleButton = screen.getByRole('button', { name: 'Edit activity title Louvre' });
+    expect(titleButton).toHaveClass('profile-title-button', 'profile-title-control');
+    expect(titleButton).toHaveStyle({
+      '--profile-title-block-padding': '0px',
+      '--profile-title-inline-padding': '0px',
+    });
+
+    fireEvent.click(titleButton);
+
+    const titleInput = screen.getByLabelText('Activity title');
+    expect(titleInput).toHaveClass('profile-title-input');
+    expect(titleInput.closest('.profile-title-editor')).toHaveClass('profile-title-control');
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
     fireEvent.blur(screen.getByLabelText('Activity title'));
     expect(props.onUpdateActivity).toHaveBeenCalledWith(props.activity.id, { title: 'Morning Louvre' });
@@ -102,6 +116,7 @@ describe('ActivityPanel', () => {
 
     render(<ActivityPanel {...createProps({ activity, onUpdateActivity })} />);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Edit activity title Louvre' }));
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
     fireEvent.blur(screen.getByLabelText('Activity title'));
 
@@ -122,6 +137,7 @@ describe('ActivityPanel', () => {
       <ActivityPanel {...createProps({ activity, onUpdateActivity })} />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Edit activity title Louvre' }));
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
     fireEvent.blur(screen.getByLabelText('Activity title'));
     fireEvent.change(screen.getByLabelText('Morning Louvre notes'), {
@@ -163,6 +179,7 @@ describe('ActivityPanel', () => {
       <ActivityPanel {...createProps({ activity, onUpdateActivity })} />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Edit activity title Louvre' }));
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
     fireEvent.blur(screen.getByLabelText('Activity title'));
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Evening Louvre' } });
@@ -203,6 +220,7 @@ describe('ActivityPanel', () => {
 
     render(<ActivityPanel {...createProps({ activity, onUpdateActivity })} />);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Edit activity title Louvre' }));
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
     fireEvent.blur(screen.getByLabelText('Activity title'));
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Evening Louvre' } });

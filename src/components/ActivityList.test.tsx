@@ -49,6 +49,9 @@ describe('ActivityList', () => {
 
     expect(screen.getByRole('button', { name: 'Move Louvre up' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Move Bakery crawl down' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Select activity Bakery crawl' }).closest('li')).toHaveClass(
+      'is-selected',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Select activity Louvre' }));
     expect(onSelectActivity).toHaveBeenCalledWith(louvre.id);

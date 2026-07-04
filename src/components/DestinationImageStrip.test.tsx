@@ -104,7 +104,7 @@ describe('DestinationImageStrip', () => {
     expect(onOpenPreview).toHaveBeenCalledWith('media-2');
   });
 
-  it('renders activity attribution from rollup items on thumbnails and the selected preview', () => {
+  it('omits activity attribution from rollup thumbnails and the selected preview', () => {
     render(
       <DestinationImageStrip
         {...createProps({
@@ -128,11 +128,11 @@ describe('DestinationImageStrip', () => {
     );
 
     const activityThumbnail = screen.getByRole('button', { name: 'Show image 2: Market lane' });
-    expect(within(activityThumbnail).getByText('Night market')).toBeInTheDocument();
+    expect(within(activityThumbnail).queryByText('Night market')).not.toBeInTheDocument();
 
     fireEvent.click(activityThumbnail);
 
-    expect(within(screen.getByRole('group', { name: 'Image preview' })).getByText('Night market')).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Image preview' })).queryByText('Night market')).not.toBeInTheDocument();
   });
 
   it('blocks stop carousel reorder when a rollup item is not reorderable in the stop carousel', () => {

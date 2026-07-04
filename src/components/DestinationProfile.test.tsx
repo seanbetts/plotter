@@ -447,7 +447,7 @@ describe('DestinationProfile', () => {
     expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
   });
 
-  it('passes stop rollup attribution into the stop images strip', () => {
+  it('omits activity attribution from the stop images carousel', () => {
     const destination = createDestination({
       name: 'Paris',
       countryRegion: 'France',
@@ -493,9 +493,7 @@ describe('DestinationProfile', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show image 2: Museum wing' }));
 
-    expect(within(screen.getByRole('group', { name: 'Image preview' })).getByText('Louvre')).toHaveClass(
-      'destination-image-attribution',
-    );
+    expect(within(screen.getByRole('group', { name: 'Image preview' })).queryByText('Louvre')).not.toBeInTheDocument();
   });
 
   it('labels the first stop as the start', () => {

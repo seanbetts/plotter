@@ -911,7 +911,7 @@ select {
 }
 
 .destination-profile .profile-title-control,
-.activity-panel .activity-title-field {
+.activity-panel .profile-title-control {
   box-sizing: border-box;
   width: 100%;
   min-height: 30px;
@@ -944,7 +944,8 @@ select {
   color: var(--color-accent);
 }
 
-.destination-profile .profile-title-editor {
+.destination-profile .profile-title-editor,
+.activity-panel .profile-title-editor {
   display: flex;
   gap: 0;
   margin: 0;
@@ -952,7 +953,8 @@ select {
   font-size: inherit;
 }
 
-.destination-profile .profile-title-editor:focus-within {
+.destination-profile .profile-title-editor:focus-within,
+.activity-panel .profile-title-editor:focus-within {
   border-bottom-color: var(--border-selected);
 }
 
@@ -967,17 +969,6 @@ select {
   font-weight: 700;
   line-height: 1.15;
   outline: 0;
-}
-
-.activity-panel .activity-title-field {
-  display: flex;
-  gap: 0;
-  margin: 0;
-  color: var(--color-text);
-}
-
-.activity-panel .activity-title-field:focus-within {
-  border-bottom-color: var(--border-selected);
 }
 
 .profile-close-button {
@@ -1174,12 +1165,15 @@ select {
 
 .activity-row {
   grid-template-columns: minmax(0, 1fr) 32px 32px 32px;
+  padding: 4px;
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
 }
 
 .activity-row.is-selected {
-  outline: 2px solid rgb(var(--color-accent-rgb) / 0.5);
-  outline-offset: 2px;
+  border-color: rgb(var(--color-accent-rgb) / 0.5);
+  background: rgb(var(--color-accent-rgb) / 0.1);
+  box-shadow: 0 0 0 1px rgb(var(--color-accent-rgb) / 0.18);
 }
 
 .activity-add-row {
@@ -1209,6 +1203,7 @@ select {
 
 .activity-select {
   grid-template-columns: 34px minmax(0, 1fr);
+  justify-items: stretch;
   width: 100%;
   min-width: 0;
   color: var(--text-soft);
@@ -1237,9 +1232,9 @@ select {
 }
 
 .activity-select[aria-current='true'] {
-  border-color: rgb(var(--color-accent-rgb) / 0.48);
+  border-color: rgb(var(--color-accent-rgb) / 0.28);
   color: var(--color-accent-strong);
-  background: rgb(var(--color-accent-rgb) / 0.12);
+  background: rgb(var(--color-accent-rgb) / 0.08);
 }
 
 .activity-select:hover,
@@ -1921,7 +1916,7 @@ select {
 
 .image-preview-floating-button:focus-visible,
 .image-preview-delete-popover button:focus-visible,
-.image-preview-activity-control button:focus-visible {
+.image-preview-open-activity-button:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
@@ -2035,7 +2030,7 @@ select {
   background: var(--surface-danger-subtle);
 }
 
-.image-preview-activity-control {
+.image-preview-activity-tools {
   position: absolute;
   left: 14px;
   bottom: 14px;
@@ -2043,6 +2038,11 @@ select {
   max-width: min(420px, calc(100% - 92px));
   align-items: center;
   gap: 8px;
+}
+
+.image-preview-activity-attribution {
+  min-width: 0;
+  overflow: hidden;
   padding: 7px 8px 7px 10px;
   border: 1px solid rgb(255 255 255 / 0.62);
   border-radius: var(--radius-control);
@@ -2053,16 +2053,11 @@ select {
   font-weight: 800;
   -webkit-backdrop-filter: blur(14px) saturate(1.18);
   backdrop-filter: blur(14px) saturate(1.18);
-}
-
-.image-preview-activity-control span {
-  min-width: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.image-preview-activity-control button {
+.image-preview-open-activity-button {
   flex: 0 0 auto;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);

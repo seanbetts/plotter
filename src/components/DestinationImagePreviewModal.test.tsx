@@ -107,6 +107,7 @@ describe('DestinationImagePreviewModal', () => {
     );
 
     expect(screen.queryByRole('button', { name: 'Open activity' })).not.toBeInTheDocument();
+    expect(screen.getByText('Night market')).toHaveClass('image-preview-activity-attribution');
 
     rerender(
       <DestinationImagePreviewModal
@@ -117,8 +118,13 @@ describe('DestinationImagePreviewModal', () => {
       />,
     );
 
-    expect(screen.getByText('Night market')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open activity' }));
+    const attribution = screen.getByText('Night market');
+    const openActivityButton = screen.getByRole('button', { name: 'Open activity' });
+    expect(attribution).toHaveClass('image-preview-activity-attribution');
+    expect(openActivityButton).toHaveClass('image-preview-open-activity-button');
+    expect(attribution).not.toContainElement(openActivityButton);
+
+    fireEvent.click(openActivityButton);
 
     expect(onOpenActivity).toHaveBeenCalledTimes(1);
   });

@@ -1,6 +1,6 @@
 import { CircleAlert, X } from 'lucide-react';
 import { forwardRef, useEffect, useRef, useState } from 'react';
-import type { Ref } from 'react';
+import type { CSSProperties, Ref } from 'react';
 import type { Activity, MediaItem } from '../domain/types';
 import { ActivityImageStrip } from './ActivityImageStrip';
 
@@ -35,6 +35,11 @@ function createActivityDraft(activity: Activity): ActivityDraft {
 function activitySourceKey(activity: Activity) {
   return `${activity.id}:${activity.updatedAt}`;
 }
+
+const profileTitleControlStyle = {
+  '--profile-title-block-padding': '0px',
+  '--profile-title-inline-padding': '0px',
+} as CSSProperties;
 
 export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(function ActivityPanel({
   activity,
@@ -83,7 +88,9 @@ function ActivityPanelForm({
   onOpenMediaPreview,
 }: ActivityPanelProps & { panelRef: Ref<HTMLElement> }) {
   const [draft, setDraft] = useState(() => createActivityDraft(activity));
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
   const latestDraftRef = useRef(createActivityDraft(activity));
   const dirtyFieldsRef = useRef(new Set<ActivityDraftField>());
   const fieldEditRevisionRef = useRef<Record<ActivityDraftField, number>>({
@@ -131,6 +138,13 @@ function ActivityPanelForm({
     activityTitle,
     sourceKey,
   ]);
+
+  useEffect(() => {
+    if (isEditingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [isEditingTitle]);
 
   function updateDraft<Field extends ActivityDraftField>(field: Field, value: ActivityDraft[Field]) {
     setSaveError('');
@@ -196,22 +210,36 @@ function ActivityPanelForm({
       <header className="profile-header" aria-label="Activity detail header">
         <div>
           <span className="profile-stop-number">{stopName}</span>
-          <label className="activity-title-field">
-            <span className="sr-only">Activity title</span>
-            <input
-              className="profile-title-input"
-              aria-label="Activity title"
-              value={draft.title}
-              onChange={(event) => updateDraft('title', event.target.value)}
-              onBlur={() => void commitDraft('title')}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  event.currentTarget.blur();
-                }
-              }}
-            />
-          </label>
+          {isEditingTitle ? (
+            <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
+              <span className="sr-only">Activity title</span>
+              <input
+                ref={titleInputRef}
+                className="profile-title-input"
+                aria-label="Activity title"
+                value={draft.title}
+                onChange={(event) => updateDraft('title', event.target.value)}
+                onBlur={() => void commitDraft('title')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void commitDraft('title');
+                    setIsEditingTitle(false);
+                  }
+                }}
+              />
+            </label>
+          ) : (
+            <button
+              type="button"
+              className="profile-title-button profile-title-control"
+              style={profileTitleControlStyle}
+              aria-label={`Edit activity title ${draft.title || activity.title}`}
+              onClick={() => setIsEditingTitle(true)}
+            >
+              <h1>{draft.title || activity.title}</h1>
+            </button>
+          )}
         </div>
         <button
           type="button"
