@@ -2,7 +2,10 @@ import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { formatLocationParts } from '../domain/locations';
-import type { Destination } from '../domain/types';
+import type { Activity, Destination, MediaItem, MediaRollupItem } from '../domain/types';
+import { ActivityList } from './ActivityList';
+import { DestinationImageStrip } from './DestinationImageStrip';
+import { formatStopHeaderLabel } from './stopLabels';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
 
@@ -16,8 +19,29 @@ type DestinationFormState = {
 
 type DestinationProfileProps = {
   destination: Destination;
+  activities: Activity[];
+  selectedActivityId: string | null;
   stopNumber?: number;
+  mediaItems: MediaItem[];
+  mediaRollupItems?: MediaRollupItem[];
+  isMediaLoading: boolean;
+  isMediaUploading: boolean;
+  mediaError: string | null;
+  onSelectActivity: (activityId: string) => void;
+  onCreateActivity: (destinationId: string, title: string) => Promise<void> | void;
+  onUpdateActivity: (
+    activityId: string,
+    patch: Partial<Pick<Activity, 'title'>>,
+  ) => Promise<unknown> | unknown;
+  onDeleteActivity: (activityId: string) => Promise<void> | void;
+  onReorderActivities: (
+    destinationId: string,
+    orderedActivityIds: string[],
+  ) => Promise<unknown> | unknown;
   onUpdate: (destinationId: string, patch: DestinationPatch) => Promise<void> | void;
+  onUploadMedia: (files: File[]) => Promise<void> | void;
+  onReorderMedia: (orderedMediaIds: string[]) => Promise<void> | void;
+  onOpenMediaPreview: (mediaId: string) => void;
   onClose: () => void;
 };
 
@@ -73,7 +97,6 @@ const profileTitleControlStyle = {
   '--profile-title-inline-padding': '0px',
 } as CSSProperties;
 const coordinateDecimalPlaces = 5;
-const formatStopNumber = (stopNumber: number) => String(stopNumber).padStart(2, '0');
 const normalizeCoordinateValue = (coordinate: number) => {
   const rounded = Number(coordinate.toFixed(coordinateDecimalPlaces));
 
@@ -130,19 +153,36 @@ const createPatchFromForm = (
   };
 };
 
-export function DestinationProfile({ destination, stopNumber, onUpdate, onClose }: DestinationProfileProps) {
+export function DestinationProfile(props: DestinationProfileProps) {
   return (
     <DestinationProfileForm
-      key={destination.id}
-      destination={destination}
-      stopNumber={stopNumber}
-      onUpdate={onUpdate}
-      onClose={onClose}
+      key={props.destination.id}
+      {...props}
     />
   );
 }
 
-function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: DestinationProfileProps) {
+function DestinationProfileForm({
+  destination,
+  activities,
+  selectedActivityId,
+  stopNumber,
+  mediaItems,
+  mediaRollupItems,
+  isMediaLoading,
+  isMediaUploading,
+  mediaError,
+  onSelectActivity,
+  onCreateActivity,
+  onUpdateActivity,
+  onDeleteActivity,
+  onReorderActivities,
+  onUpdate,
+  onUploadMedia,
+  onReorderMedia,
+  onOpenMediaPreview,
+  onClose,
+}: DestinationProfileProps) {
   const [draft, setDraft] = useState(() => createFormState(destination));
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
@@ -397,7 +437,7 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
       <header className="profile-header" aria-label="Stop detail header">
         <div>
-          {stopNumber ? <span className="profile-stop-number">Stop {formatStopNumber(stopNumber)}</span> : null}
+          {stopNumber ? <span className="profile-stop-number">{formatStopHeaderLabel(stopNumber)}</span> : null}
           {isEditingName ? (
             <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
               <span className="sr-only">Stop name</span>
@@ -487,6 +527,15 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
               </span>
               <button
                 type="button"
+                className="profile-coordinate-action"
+                aria-label="Edit coordinates"
+                title="Edit coordinates"
+                onClick={startEditingCoordinates}
+              >
+                <Pencil size={13} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
                 className={copyButtonClassName}
                 aria-label={`Copy coordinates ${coordinatesText}`}
                 title="Copy coordinates"
@@ -497,15 +546,6 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
                 ) : (
                   <Copy size={13} aria-hidden="true" />
                 )}
-              </button>
-              <button
-                type="button"
-                className="profile-coordinate-action"
-                aria-label="Edit coordinates"
-                title="Edit coordinates"
-                onClick={startEditingCoordinates}
-              >
-                <Pencil size={13} aria-hidden="true" />
               </button>
             </div>
           )}
@@ -535,6 +575,18 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
           </button>
         </div>
       </header>
+
+      <DestinationImageStrip
+        destinationName={form.name || destination.name}
+        mediaItems={mediaItems}
+        mediaRollupItems={mediaRollupItems}
+        isLoading={isMediaLoading}
+        isUploading={isMediaUploading}
+        error={mediaError}
+        onUploadFiles={onUploadMedia}
+        onReorder={onReorderMedia}
+        onOpenPreview={onOpenMediaPreview}
+      />
 
       <label>
         Expected stay days
@@ -582,6 +634,18 @@ function DestinationProfileForm({ destination, stopNumber, onUpdate, onClose }: 
           />
         </div>
       </fieldset>
+
+      <ActivityList
+        activities={activities}
+        selectedActivityId={selectedActivityId}
+        onSelectActivity={onSelectActivity}
+        onCreateActivity={(title) => onCreateActivity(destination.id, title)}
+        onUpdateActivity={(activityId, patch) => onUpdateActivity(activityId, patch)}
+        onDeleteActivity={(activityId) => onDeleteActivity(activityId)}
+        onReorderActivities={(orderedActivityIds) =>
+          onReorderActivities(destination.id, orderedActivityIds)
+        }
+      />
     </aside>
   );
 }

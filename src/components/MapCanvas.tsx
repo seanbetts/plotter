@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Coordinates, Destination, RouteLeg } from '../domain/types';
+import { formatStopMarker } from './stopLabels';
 
 export type MapAddStopRequest = {
   coordinates: Coordinates;
@@ -26,6 +27,7 @@ type DestinationFeatureProperties = {
   id: string;
   name: string;
   order: number;
+  label: string;
   selected: boolean;
 };
 
@@ -43,7 +45,7 @@ type CityFeatureProperties = {
 type ProjectedDestinationLabel = {
   id: string;
   name: string;
-  order: number;
+  label: string;
   selected: boolean;
   x: number;
   y: number;
@@ -537,6 +539,7 @@ function buildDestinationFeatures(
         id: destination.id,
         name: destination.name,
         order: index + 1,
+        label: formatStopMarker(index + 1),
         selected: destination.id === selectedDestinationId,
       },
     })),
@@ -800,7 +803,7 @@ export function MapCanvas({
         return {
           id: destination.id,
           name: destination.name,
-          order: index + 1,
+          label: formatStopMarker(index + 1),
           selected: destination.id === latestSelectedDestinationIdRef.current,
           x: point.x,
           y: point.y,
@@ -1286,7 +1289,7 @@ export function MapCanvas({
               aria-label={`Open ${destinationLabel.name} stop details`}
               onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
             >
-              {destinationLabel.order}. {destinationLabel.name}
+              {destinationLabel.label} - {destinationLabel.name}
             </button>
           ))}
         </div>

@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
   webServer: {
-    command: 'VITE_TRIP_STORAGE=e2e-local npm run dev -- --port 5174 --strictPort',
+    command: 'npm run dev:e2e',
     url: 'http://127.0.0.1:5174',
     reuseExistingServer: false,
     timeout: 120_000,

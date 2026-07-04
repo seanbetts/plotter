@@ -12,6 +12,17 @@ const istanbulResult = [
   },
 ];
 
+const parisResult = [
+  {
+    id: 'place.paris',
+    text: 'Paris',
+    place_name: 'Paris, France',
+    center: [2.3522, 48.8566],
+    properties: { country_code: 'fr' },
+    context: [{ id: 'country.1', text: 'France', short_code: 'fr' }],
+  },
+];
+
 test('searches and saves an Istanbul destination profile', async ({ baseURL, context, page }) => {
   const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
   const cdpSession = await context.newCDPSession(page);
@@ -117,4 +128,61 @@ test('adds a stop from the map context menu', async ({ page }) => {
   await addStopButton.click();
 
   await expect(page.getByRole('complementary', { name: 'Map stop profile' })).toBeVisible();
+});
+
+test('opens an activity panel with image region beside the selected stop', async ({ baseURL, context, page }) => {
+  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
+  const cdpSession = await context.newCDPSession(page);
+  const activityTitle = 'Morning Louvre';
+
+  await cdpSession.send('Storage.clearDataForOrigin', {
+    origin,
+    storageTypes: 'indexeddb',
+  });
+
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    const url = new URL(route.request().url());
+
+    expect(url.pathname).toBe('/geocoding/Paris.json');
+
+    await route.fulfill({
+      contentType: 'application/json',
+      json: { features: parisResult },
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Search for a destination')).toBeVisible();
+  await page.getByLabel('Search for a destination').fill('Paris');
+  await page.getByRole('option', { name: 'Paris, France' }).click();
+
+  const stopPanel = page.getByRole('complementary', { name: 'Paris profile' });
+
+  if (!(await stopPanel.isVisible())) {
+    await page.getByRole('button', { name: 'Paris, France' }).last().click();
+  }
+
+  await expect(stopPanel).toBeVisible();
+
+  await stopPanel.getByLabel('New activity title').fill(activityTitle);
+  await stopPanel.getByRole('button', { name: 'Add activity' }).click();
+
+  const activitySelect = stopPanel.getByRole('button', { name: `Select activity ${activityTitle}` });
+  await expect(activitySelect).toBeVisible();
+  await activitySelect.click();
+
+  const activityPanel = page.getByRole('complementary', { name: `${activityTitle} activity` });
+  await expect(activityPanel).toBeVisible();
+  await expect(stopPanel).toBeVisible();
+  await expect(activityPanel.getByRole('region', { name: 'Activity images' })).toBeVisible();
+
+  const activityBox = await activityPanel.boundingBox();
+  const stopBox = await stopPanel.boundingBox();
+  if (!activityBox || !stopBox) {
+    throw new Error('Expected activity and stop panels to have layout boxes.');
+  }
+
+  expect(activityBox.x + activityBox.width).toBeLessThanOrEqual(stopBox.x);
 });

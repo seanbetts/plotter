@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
 import { findBestDestinationInsertionIndex, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
-import type { Coordinates, Destination, DestinationLocation, RouteLeg, RouteLegType } from '../domain/types';
+import type { Activity, Coordinates, Destination, DestinationLocation, RouteLeg, RouteLegType } from '../domain/types';
 import type { TripRepository } from '../storage/tripRepository';
 
 
@@ -33,10 +34,12 @@ const createTimestamp = () => new Date().toISOString();
 export function useTripData(repository: TripRepository, options: UseTripDataOptions = {}) {
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [routeLegs, setRouteLegs] = useState<RouteLeg[]>([]);
+  const [activitiesByDestinationId, setActivitiesByDestinationId] = useState<Record<string, Activity[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const destinationsRef = useRef<Destination[]>([]);
   const routeLegsRef = useRef<RouteLeg[]>([]);
+  const activitiesByDestinationIdRef = useRef<Record<string, Activity[]>>({});
   const isMountedRef = useRef(false);
   const activeRepositoryTokenRef = useRef<object | null>(null);
   const reloadSequenceRef = useRef(0);
@@ -66,6 +69,21 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     setRouteLegs(nextRouteLegs);
     return nextRouteLegs;
   }, []);
+
+  const replaceActivitiesByDestinationId = useCallback((nextActivities: Record<string, Activity[]>) => {
+    activitiesByDestinationIdRef.current = nextActivities;
+    setActivitiesByDestinationId(nextActivities);
+  }, []);
+
+  const updateActivitiesByDestinationId = useCallback(
+    (updater: (current: Record<string, Activity[]>) => Record<string, Activity[]>) => {
+      const nextActivities = updater(activitiesByDestinationIdRef.current);
+      activitiesByDestinationIdRef.current = nextActivities;
+      setActivitiesByDestinationId(nextActivities);
+      return nextActivities;
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     isMountedRef.current = true;
@@ -112,8 +130,19 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
       if (!isCurrentReload()) return;
 
+      const loadedActivities = await Promise.all(
+        loadedDestinations.map(async (destination) => [
+          destination.id,
+          await repository.listActivities(destination.id),
+        ] as const),
+      );
+      const nextActivitiesByDestinationId = Object.fromEntries(loadedActivities);
+
+      if (!isCurrentReload()) return;
+
       replaceDestinations(loadedDestinations);
       replaceRouteLegs(loadedRouteLegs);
+      replaceActivitiesByDestinationId(nextActivitiesByDestinationId);
     } catch (caught) {
       if (!isCurrentReload()) return;
 
@@ -123,7 +152,13 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     if (!isCurrentReload()) return;
 
     setIsLoading(false);
-  }, [isActiveGeneration, replaceDestinations, replaceRouteLegs, repository]);
+  }, [
+    isActiveGeneration,
+    replaceActivitiesByDestinationId,
+    replaceDestinations,
+    replaceRouteLegs,
+    repository,
+  ]);
 
   const reload = useCallback(async () => {
     await startReload(repositoryToken);
@@ -297,6 +332,10 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           if (!isActiveAction()) return destination;
 
           replaceDestinations(orderedDestinations);
+          updateActivitiesByDestinationId((current) => ({
+            ...current,
+            [destination.id]: current[destination.id] ?? [],
+          }));
           await reconcileAndSaveRouteLegs(orderedDestinations, routeLegsRef.current);
           return destination;
         },
@@ -330,6 +369,11 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           const nextDestinations = updateDestinations((current) =>
             current.filter((destination) => destination.id !== destinationId),
           );
+          updateActivitiesByDestinationId((current) => {
+            const remaining = { ...current };
+            delete remaining[destinationId];
+            return remaining;
+          });
           const remainingRouteLegs = updateRouteLegs((current) =>
             current.filter(
               (leg) =>
@@ -418,6 +462,82 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           updateRouteLegs((current) => current.filter((leg) => leg.id !== routeLegId));
         },
 
+        async createActivity(input: { destinationId: string; title: string; order?: number }) {
+          if (!isActiveAction()) return createActivityModel(input);
+
+          const activity = await repository.createActivity(input);
+          if (!isActiveAction()) return activity;
+
+          updateActivitiesByDestinationId((current) => ({
+            ...current,
+            [activity.destinationId]: [...(current[activity.destinationId] ?? []), activity].sort(
+              (left, right) =>
+                left.order - right.order || left.createdAt.localeCompare(right.createdAt),
+            ),
+          }));
+          return activity;
+        },
+
+        async updateActivity(
+          activityId: string,
+          patch: Partial<Omit<Activity, 'id' | 'destinationId' | 'createdAt' | 'updatedAt'>>,
+        ) {
+          if (!isActiveAction()) return;
+
+          const updated = await repository.updateActivity(activityId, patch);
+          if (!isActiveAction()) return updated;
+
+          updateActivitiesByDestinationId((current) => ({
+            ...current,
+            [updated.destinationId]: (current[updated.destinationId] ?? []).map((activity) =>
+              activity.id === activityId ? updated : activity,
+            ),
+          }));
+          return updated;
+        },
+
+        async deleteActivity(activityId: string) {
+          if (!isActiveAction()) return;
+
+          let destinationId = '';
+          for (const [candidateDestinationId, activities] of Object.entries(
+            activitiesByDestinationIdRef.current,
+          )) {
+            if (activities.some((activity) => activity.id === activityId)) {
+              destinationId = candidateDestinationId;
+              break;
+            }
+          }
+
+          await repository.deleteActivity(activityId);
+          if (!isActiveAction() || !destinationId) return;
+
+          updateActivitiesByDestinationId((current) => ({
+            ...current,
+            [destinationId]: (current[destinationId] ?? []).filter(
+              (activity) => activity.id !== activityId,
+            ),
+          }));
+        },
+
+        async reorderActivities(destinationId: string, orderedActivityIds: string[]) {
+          if (!isActiveAction()) {
+            return activitiesByDestinationIdRef.current[destinationId] ?? [];
+          }
+
+          const orderedActivities = await repository.reorderActivities(
+            destinationId,
+            orderedActivityIds,
+          );
+          if (!isActiveAction()) return orderedActivities;
+
+          updateActivitiesByDestinationId((current) => ({
+            ...current,
+            [destinationId]: orderedActivities,
+          }));
+          return orderedActivities;
+        },
+
         reload,
       };
     },
@@ -429,6 +549,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       replaceRouteLegs,
       repository,
       repositoryToken,
+      updateActivitiesByDestinationId,
       updateDestinations,
       updateRouteLegs,
     ],
@@ -437,6 +558,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   return {
     destinations,
     routeLegs,
+    activitiesByDestinationId,
     isLoading,
     error,
     ...actions,

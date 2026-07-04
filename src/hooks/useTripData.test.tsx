@@ -1,6 +1,7 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
@@ -55,6 +56,115 @@ describe('useTripData', () => {
     });
 
     expect(result.current.destinations).toEqual([]);
+  });
+
+  it('loads activities for loaded destinations', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.activitiesByDestinationId[destination.id].map((activity) => activity.title)).toEqual([
+      'Louvre',
+    ]);
+  });
+
+  it('adds, updates, reorders, and deletes activities through hook actions', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let destinationId = '';
+    await act(async () => {
+      const destination = await result.current.addDestination({
+        name: 'Paris',
+        countryRegion: 'France',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      });
+      destinationId = destination.id;
+    });
+
+    let louvreId = '';
+    let bakeryId = '';
+    await act(async () => {
+      const louvre = await result.current.createActivity({
+        destinationId,
+        title: 'Louvre',
+      });
+      const bakery = await result.current.createActivity({
+        destinationId,
+        title: 'Bakery crawl',
+      });
+      louvreId = louvre.id;
+      bakeryId = bakery.id;
+    });
+
+    await act(async () => {
+      await result.current.updateActivity(louvreId, { title: 'Morning Louvre' });
+      await result.current.reorderActivities(destinationId, [bakeryId, louvreId]);
+    });
+
+    expect(result.current.activitiesByDestinationId[destinationId].map((activity) => activity.title)).toEqual([
+      'Bakery crawl',
+      'Morning Louvre',
+    ]);
+
+    expect((await repository.listActivities(destinationId)).map((activity) => activity.title)).toEqual([
+      'Bakery crawl',
+      'Morning Louvre',
+    ]);
+
+    await act(async () => {
+      await result.current.deleteActivity(bakeryId);
+    });
+
+    expect(result.current.activitiesByDestinationId[destinationId].map((activity) => activity.title)).toEqual([
+      'Morning Louvre',
+    ]);
+    expect((await repository.listActivities(destinationId)).map((activity) => activity.title)).toEqual([
+      'Morning Louvre',
+    ]);
+  });
+
+  it('clears activity state when deleting a destination', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let destinationId = '';
+    await act(async () => {
+      const destination = await result.current.addDestination({
+        name: 'Paris',
+        countryRegion: 'France',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      });
+      destinationId = destination.id;
+      await result.current.createActivity({
+        destinationId,
+        title: 'Louvre',
+      });
+    });
+
+    expect(result.current.activitiesByDestinationId[destinationId]).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.deleteDestination(destinationId);
+    });
+
+    expect(result.current.activitiesByDestinationId).not.toHaveProperty(destinationId);
   });
 
   it('updates a destination through an action object captured before the destination was added', async () => {
@@ -585,6 +695,66 @@ describe('useTripData', () => {
 
     expect(result.current.destinations).toEqual([]);
   });
+
+  it('does not write stale activity actions after the repository changes', async () => {
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const activity = createActivityModel({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    const createActivity = vi.fn(async () =>
+      createActivityModel({
+        destinationId: destination.id,
+        title: 'Bakery crawl',
+        order: 1,
+      }),
+    );
+    const updateActivity = vi.fn(async () => ({
+      ...activity,
+      title: 'Morning Louvre',
+    }));
+    const deleteActivity = vi.fn(async () => {});
+    const reorderActivities = vi.fn(async () => [activity]);
+    const oldRepository = createMemoryRepository(Promise.resolve([destination]), {
+      listActivities: async () => [activity],
+      createActivity,
+      updateActivity,
+      deleteActivity,
+      reorderActivities,
+    });
+    const newRepository = createMemoryRepository(Promise.resolve([]));
+    const { result, rerender } = renderHook(
+      ({ repository }) => useTripData(repository),
+      { initialProps: { repository: oldRepository } },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    const capturedActions = result.current;
+
+    rerender({ repository: newRepository });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await capturedActions.createActivity({
+        destinationId: destination.id,
+        title: 'Bakery crawl',
+      });
+      await capturedActions.updateActivity(activity.id, { title: 'Morning Louvre' });
+      await capturedActions.deleteActivity(activity.id);
+      await capturedActions.reorderActivities(destination.id, [activity.id]);
+    });
+
+    expect(createActivity).not.toHaveBeenCalled();
+    expect(updateActivity).not.toHaveBeenCalled();
+    expect(deleteActivity).not.toHaveBeenCalled();
+    expect(reorderActivities).not.toHaveBeenCalled();
+  });
 });
 
 function createDeferred<T>(value: T) {
@@ -612,12 +782,68 @@ function createMemoryRepository(
 
     async deleteDestination() {},
 
+    async listActivities() {
+      return [];
+    },
+
+    async createActivity() {
+      throw new Error('Activities are not supported by this test repository.');
+    },
+
+    async updateActivity() {
+      throw new Error('Activity updates are not supported by this test repository.');
+    },
+
+    async deleteActivity() {
+      throw new Error('Activity deletes are not supported by this test repository.');
+    },
+
+    async reorderActivities() {
+      throw new Error('Activity reordering is not supported by this test repository.');
+    },
+
     async listDestinationMedia() {
       return [];
     },
 
     async uploadDestinationMedia() {
       throw new Error('Media uploads are not supported by this test repository.');
+    },
+
+    async updateDestinationMedia() {
+      throw new Error('Media updates are not supported by this test repository.');
+    },
+
+    async deleteDestinationMedia() {
+      throw new Error('Media deletes are not supported by this test repository.');
+    },
+
+    async reorderDestinationMedia() {
+      throw new Error('Media reordering is not supported by this test repository.');
+    },
+
+    async listDestinationMediaRollup() {
+      return [];
+    },
+
+    async listActivityMedia() {
+      return [];
+    },
+
+    async uploadActivityMedia() {
+      throw new Error('Activity media uploads are not supported by this test repository.');
+    },
+
+    async updateActivityMedia() {
+      throw new Error('Activity media updates are not supported by this test repository.');
+    },
+
+    async deleteActivityMedia() {
+      throw new Error('Activity media deletes are not supported by this test repository.');
+    },
+
+    async reorderActivityMedia() {
+      throw new Error('Activity media reordering is not supported by this test repository.');
     },
 
     async listRouteLegs() {

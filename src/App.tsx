@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
+import { ActivityPanel } from './components/ActivityPanel';
+import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
 import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapAddStopRequest } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
-import type { Coordinates, DestinationLocation } from './domain/types';
+import type { Activity, Coordinates, DestinationLocation, MediaRollupItem } from './domain/types';
+import { useActivityMedia } from './hooks/useActivityMedia';
+import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
+import { preloadImageUrls } from './media/imagePreloading';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
 import './styles.css';
 
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
+const mobileWorkspacePanelsQuery = '(max-width: 760px)';
 
 type RepositoryError = {
   title: string;
@@ -37,6 +43,12 @@ type PendingMapStop = {
 type OverlayPosition = {
   x: number;
   y: number;
+};
+
+type PreviewMediaSource = 'destination-rollup' | 'activity';
+type PreviewMediaSelection = {
+  mediaId: string;
+  source: PreviewMediaSource;
 };
 
 const overlayViewportPaddingPx = 16;
@@ -74,6 +86,10 @@ function formatCoordinate(value: number) {
 
 function formatCoordinatePair(coordinates: Coordinates) {
   return `${formatCoordinate(coordinates.lat)}, ${formatCoordinate(coordinates.lng)}`;
+}
+
+function getFullMediaImageUrl(mediaItem: { fullUrl?: string; previewUrl?: string; url: string }) {
+  return mediaItem.fullUrl ?? mediaItem.previewUrl ?? mediaItem.url;
 }
 
 function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, 'name' | 'location'> {
@@ -182,6 +198,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   const {
     destinations,
     routeLegs,
+    activitiesByDestinationId,
     isLoading,
     error,
     addDestination,
@@ -189,9 +206,21 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     deleteDestination,
     reorderDestinations,
     updateRouteLeg,
+    createActivity,
+    updateActivity,
+    deleteActivity,
+    reorderActivities,
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<PreviewMediaSelection | null>(null);
+  const [destinationMediaRollupItems, setDestinationMediaRollupItems] = useState<MediaRollupItem[]>([]);
+  const [isDestinationMediaRollupLoading, setIsDestinationMediaRollupLoading] = useState(false);
+  const [destinationMediaRollupError, setDestinationMediaRollupError] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
+  const selectedDestinationIdRef = useRef<string | null>(null);
+  const activityPanelRef = useRef<HTMLElement | null>(null);
+  const rollupLoadSequenceRef = useRef(0);
   const pendingMapStopRequestIdRef = useRef(0);
   const activePendingMapStopIdRef = useRef<number | null>(null);
   const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
@@ -209,6 +238,42 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
 
     return selectedDestinationIndex === -1 ? undefined : selectedDestinationIndex + 1;
   }, [destinations, selectedDestinationId]);
+  const destinationMedia = useDestinationMedia(repository, selectedDestinationId);
+  const selectedDestinationActivities = useMemo(
+    () => (selectedDestination ? activitiesByDestinationId[selectedDestination.id] ?? [] : []),
+    [activitiesByDestinationId, selectedDestination],
+  );
+  const selectedActivity = useMemo(
+    () =>
+      selectedActivityId === null
+        ? null
+        : selectedDestinationActivities.find((activity) => activity.id === selectedActivityId) ?? null,
+    [selectedActivityId, selectedDestinationActivities],
+  );
+  const selectedActivityPanelId = selectedActivity?.id ?? null;
+  const activityMedia = useActivityMedia(
+    repository,
+    selectedDestination?.id ?? null,
+    selectedActivity?.id ?? null,
+  );
+  const previewMediaRollupItem =
+    previewMedia?.source === 'destination-rollup'
+      ? destinationMediaRollupItems.find((rollupItem) => rollupItem.mediaItem.id === previewMedia.mediaId) ?? null
+      : null;
+  const previewMediaNavigationItems =
+    previewMedia?.source === 'destination-rollup'
+      ? destinationMediaRollupItems.map((rollupItem) => rollupItem.mediaItem)
+      : previewMedia?.source === 'activity'
+        ? activityMedia.mediaItems
+        : destinationMedia.mediaItems;
+  const previewMediaIndex =
+    previewMedia === null
+      ? -1
+      : previewMediaNavigationItems.findIndex((mediaItem) => mediaItem.id === previewMedia.mediaId);
+  const previewMediaItem =
+    previewMediaIndex === -1
+      ? null
+      : previewMediaNavigationItems[previewMediaIndex];
   const pendingMapStopPosition = pendingMapStop
     ? clampOverlayPosition(pendingMapStop.screenPosition, mapStopConfirmationApproxSize)
     : null;
@@ -253,7 +318,94 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   }, [isInteractionLocked, pendingMapStopId]);
 
   useEffect(() => {
-    if (pendingMapStop || !selectedDestination || isInteractionLocked) return undefined;
+    selectedDestinationIdRef.current = selectedDestinationId;
+  }, [selectedDestinationId]);
+
+  useEffect(() => {
+    setPreviewMedia(null);
+  }, [selectedDestinationId]);
+
+  const loadDestinationMediaRollup = useCallback(async (destinationId: string | null) => {
+    const loadSequence = rollupLoadSequenceRef.current + 1;
+    rollupLoadSequenceRef.current = loadSequence;
+    const isCurrentLoad = () =>
+      rollupLoadSequenceRef.current === loadSequence &&
+      selectedDestinationIdRef.current === destinationId;
+
+    if (!destinationId) {
+      setDestinationMediaRollupItems([]);
+      setIsDestinationMediaRollupLoading(false);
+      setDestinationMediaRollupError(null);
+      return;
+    }
+
+    setIsDestinationMediaRollupLoading(true);
+    setDestinationMediaRollupError(null);
+    setDestinationMediaRollupItems([]);
+
+    try {
+      const rollupItems = await repository.listDestinationMediaRollup(destinationId);
+      if (!isCurrentLoad()) return;
+
+      setDestinationMediaRollupItems(rollupItems);
+    } catch (caught) {
+      if (!isCurrentLoad()) return;
+
+      setDestinationMediaRollupItems([]);
+      setDestinationMediaRollupError(
+        caught instanceof Error ? caught.message : 'Unable to load images.',
+      );
+    } finally {
+      if (isCurrentLoad()) {
+        setIsDestinationMediaRollupLoading(false);
+      }
+    }
+  }, [repository]);
+
+  const reloadDestinationMediaRollup = useCallback(async () => {
+    await loadDestinationMediaRollup(selectedDestinationIdRef.current);
+  }, [loadDestinationMediaRollup]);
+
+  useEffect(() => {
+    void loadDestinationMediaRollup(selectedDestinationId);
+  }, [loadDestinationMediaRollup, selectedDestinationId]);
+
+  useEffect(() => {
+    if (previewMediaIndex === -1 || previewMediaNavigationItems.length < 2) return;
+
+    const previousIndex =
+      (previewMediaIndex - 1 + previewMediaNavigationItems.length) % previewMediaNavigationItems.length;
+    const nextIndex = (previewMediaIndex + 1) % previewMediaNavigationItems.length;
+
+    preloadImageUrls([
+      getFullMediaImageUrl(previewMediaNavigationItems[previousIndex]),
+      getFullMediaImageUrl(previewMediaNavigationItems[nextIndex]),
+    ]);
+  }, [previewMediaNavigationItems, previewMediaIndex]);
+
+  useEffect(() => {
+    if (!selectedDestinationId) {
+      setSelectedActivityId(null);
+      return;
+    }
+
+    if (
+      selectedActivityId &&
+      !selectedDestinationActivities.some((activity) => activity.id === selectedActivityId)
+    ) {
+      setSelectedActivityId(null);
+    }
+  }, [selectedActivityId, selectedDestinationActivities, selectedDestinationId]);
+
+  useEffect(() => {
+    if (!selectedActivityPanelId) return;
+    if (!window.matchMedia?.(mobileWorkspacePanelsQuery).matches) return;
+
+    activityPanelRef.current?.scrollIntoView({ block: 'start', inline: 'nearest' });
+  }, [selectedActivityPanelId]);
+
+  useEffect(() => {
+    if (pendingMapStop || previewMediaItem || !selectedDestination || isInteractionLocked) return undefined;
 
     const handleWindowKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -266,7 +418,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-  }, [isInteractionLocked, pendingMapStop, selectedDestination]);
+  }, [isInteractionLocked, pendingMapStop, previewMediaItem, selectedDestination]);
 
   const handleAddDestination = useCallback(
     async (input: Parameters<typeof addDestination>[0]) => {
@@ -276,6 +428,11 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     },
     [addDestination, isInteractionLocked],
   );
+
+  const handleSelectDestination = useCallback((destinationId: string) => {
+    setSelectedDestinationId(destinationId);
+    setSelectedActivityId(null);
+  }, []);
 
   const openPendingMapStop = useCallback(
     async (request: MapAddStopRequest) => {
@@ -394,9 +551,101 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
       setSelectedDestinationId((currentDestinationId) =>
         currentDestinationId === destinationId ? null : currentDestinationId,
       );
+      setSelectedActivityId(null);
     },
     [deleteDestination, isInteractionLocked],
   );
+
+  const handleCloseDestinationProfile = useCallback(() => {
+    setSelectedDestinationId(null);
+    setSelectedActivityId(null);
+  }, []);
+
+  const handleCreateActivity = useCallback(
+    async (destinationId: string, title: string) => {
+      const activity = await createActivity({ destinationId, title });
+      setSelectedActivityId(activity.id);
+    },
+    [createActivity],
+  );
+
+  const handleDeleteActivity = useCallback(
+    async (activityId: string) => {
+      await deleteActivity(activityId);
+      setSelectedActivityId((currentActivityId) =>
+        currentActivityId === activityId ? null : currentActivityId,
+      );
+    },
+    [deleteActivity],
+  );
+
+  const handleUpdateActivityPanel = useCallback(
+    async (
+      activityId: string,
+      patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority'>>,
+    ) => {
+      await updateActivity(activityId, patch);
+    },
+    [updateActivity],
+  );
+
+  const handleDestinationMediaUpload = useCallback(async (files: File[]) => {
+    await destinationMedia.uploadFiles(files);
+    await reloadDestinationMediaRollup();
+  }, [destinationMedia, reloadDestinationMediaRollup]);
+
+  const handleDestinationMediaReorder = useCallback(async (orderedMediaIds: string[]) => {
+    await destinationMedia.reorder(orderedMediaIds);
+    await reloadDestinationMediaRollup();
+  }, [destinationMedia, reloadDestinationMediaRollup]);
+
+  const handleActivityMediaUpload = useCallback(async (files: File[]) => {
+    await activityMedia.uploadFiles(files);
+    await reloadDestinationMediaRollup();
+  }, [activityMedia, reloadDestinationMediaRollup]);
+
+  const handleActivityMediaReorder = useCallback(async (orderedMediaIds: string[]) => {
+    await activityMedia.reorder(orderedMediaIds);
+    await reloadDestinationMediaRollup();
+  }, [activityMedia, reloadDestinationMediaRollup]);
+
+  function navigatePreviewMedia(mediaId: string, direction: -1 | 1) {
+    const currentIndex = previewMediaNavigationItems.findIndex((mediaItem) => mediaItem.id === mediaId);
+    if (!previewMedia || currentIndex === -1 || previewMediaNavigationItems.length === 0) return;
+
+    const targetIndex =
+      (currentIndex + direction + previewMediaNavigationItems.length) % previewMediaNavigationItems.length;
+
+    setPreviewMedia({
+      mediaId: previewMediaNavigationItems[targetIndex].id,
+      source: previewMedia.source,
+    });
+  }
+
+  async function deletePreviewMedia(mediaId: string) {
+    const currentIndex = previewMediaNavigationItems.findIndex((mediaItem) => mediaItem.id === mediaId);
+    const nextPreviewMediaItem =
+      currentIndex === -1
+        ? null
+        : previewMediaNavigationItems[currentIndex + 1] ?? previewMediaNavigationItems[currentIndex - 1] ?? null;
+
+    if (previewMedia?.source === 'activity') {
+      await Promise.resolve(activityMedia.deleteMedia(mediaId));
+    } else if (previewMediaRollupItem?.ownerType === 'activity') {
+      await repository.deleteActivityMedia(mediaId);
+      if (previewMediaRollupItem.activityId === selectedActivity?.id) {
+        await activityMedia.reload();
+      }
+    } else {
+      await Promise.resolve(destinationMedia.deleteMedia(mediaId));
+    }
+    await reloadDestinationMediaRollup();
+    setPreviewMedia(
+      nextPreviewMediaItem && previewMedia
+        ? { mediaId: nextPreviewMediaItem.id, source: previewMedia.source }
+        : null,
+    );
+  }
 
   return (
     <main className="app-shell">
@@ -405,7 +654,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
           destinations={destinations}
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
-          onSelectDestination={setSelectedDestinationId}
+          onSelectDestination={handleSelectDestination}
           onRequestAddStop={openPendingMapStop}
         />
         {!isInteractionLocked ? (
@@ -419,7 +668,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               destinations={destinations}
               routeLegs={routeLegs}
               selectedDestinationId={selectedDestinationId}
-              onSelectDestination={setSelectedDestinationId}
+              onSelectDestination={handleSelectDestination}
               onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
               onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
               onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
@@ -469,11 +718,60 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
           </section>
         ) : null}
         {!isInteractionLocked && selectedDestination ? (
-          <DestinationProfile
-            destination={selectedDestination}
-            stopNumber={selectedDestinationNumber}
-            onUpdate={updateDestination}
-            onClose={() => setSelectedDestinationId(null)}
+          <div className="workspace-panels">
+            {selectedActivity ? (
+              <ActivityPanel
+                ref={activityPanelRef}
+                activity={selectedActivity}
+                mediaItems={activityMedia.mediaItems}
+                mediaError={activityMedia.error}
+                isMediaLoading={activityMedia.isLoading}
+                isMediaUploading={activityMedia.isUploading}
+                onClose={() => setSelectedActivityId(null)}
+                onUpdateActivity={handleUpdateActivityPanel}
+                onUploadMedia={handleActivityMediaUpload}
+                onReorderMedia={handleActivityMediaReorder}
+                onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'activity' })}
+              />
+            ) : null}
+            <DestinationProfile
+              destination={selectedDestination}
+              activities={selectedDestinationActivities}
+              selectedActivityId={selectedActivityId}
+              stopNumber={selectedDestinationNumber}
+              mediaItems={destinationMedia.mediaItems}
+              mediaRollupItems={destinationMediaRollupItems}
+              isMediaLoading={destinationMedia.isLoading || isDestinationMediaRollupLoading}
+              isMediaUploading={destinationMedia.isUploading}
+              mediaError={destinationMedia.error ?? destinationMediaRollupError}
+              onSelectActivity={setSelectedActivityId}
+              onCreateActivity={handleCreateActivity}
+              onUpdateActivity={updateActivity}
+              onDeleteActivity={handleDeleteActivity}
+              onReorderActivities={reorderActivities}
+              onUpdate={updateDestination}
+              onUploadMedia={handleDestinationMediaUpload}
+              onReorderMedia={handleDestinationMediaReorder}
+              onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'destination-rollup' })}
+              onClose={handleCloseDestinationProfile}
+            />
+          </div>
+        ) : null}
+        {!isInteractionLocked && previewMediaItem ? (
+          <DestinationImagePreviewModal
+            mediaItem={previewMediaItem}
+            canMoveLeft={previewMediaNavigationItems.length > 1}
+            canMoveRight={previewMediaNavigationItems.length > 1}
+            activityAttribution={previewMediaRollupItem?.activityTitle}
+            onOpenActivity={
+              previewMediaRollupItem?.activityId
+                ? () => setSelectedActivityId(previewMediaRollupItem.activityId ?? null)
+                : undefined
+            }
+            onDelete={deletePreviewMedia}
+            onNavigatePrevious={(mediaId) => navigatePreviewMedia(mediaId, -1)}
+            onNavigateNext={(mediaId) => navigatePreviewMedia(mediaId, 1)}
+            onClose={() => setPreviewMedia(null)}
           />
         ) : null}
         {isInteractionLocked ? (

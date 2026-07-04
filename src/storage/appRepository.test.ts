@@ -1,22 +1,39 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Destination, RouteLeg } from '../domain/types';
+import type { Activity, Destination, RouteLeg } from '../domain/types';
 import { createAppTripRepository, ensureAnonymousSession } from './appRepository';
 import type { TripRepository } from './tripRepository';
 
 function createMockRepository(snapshot: {
   destinations?: Destination[];
   routeLegs?: RouteLeg[];
+  activities?: Activity[];
 } = {}): TripRepository {
   return {
     listDestinations: vi.fn(async () => snapshot.destinations ?? []),
     saveDestination: vi.fn(),
     deleteDestination: vi.fn(),
+    listActivities: vi.fn(async (destinationId: string) =>
+      (snapshot.activities ?? []).filter((activity) => activity.destinationId === destinationId),
+    ),
+    createActivity: vi.fn(),
+    updateActivity: vi.fn(),
+    deleteActivity: vi.fn(),
+    reorderActivities: vi.fn(),
     listRouteLegs: vi.fn(async () => snapshot.routeLegs ?? []),
     saveRouteLeg: vi.fn(),
     deleteRouteLeg: vi.fn(),
     replaceTripData: vi.fn(),
     listDestinationMedia: vi.fn(),
     uploadDestinationMedia: vi.fn(),
+    updateDestinationMedia: vi.fn(),
+    deleteDestinationMedia: vi.fn(),
+    reorderDestinationMedia: vi.fn(),
+    listDestinationMediaRollup: vi.fn(async () => []),
+    listActivityMedia: vi.fn(async () => []),
+    uploadActivityMedia: vi.fn(),
+    updateActivityMedia: vi.fn(),
+    deleteActivityMedia: vi.fn(),
+    reorderActivityMedia: vi.fn(),
   };
 }
 
@@ -113,9 +130,14 @@ describe('app repository bootstrap', () => {
     const user = { id: crypto.randomUUID() };
     const destination = { id: crypto.randomUUID() } as Destination;
     const routeLeg = { id: crypto.randomUUID() } as RouteLeg;
+    const activity = {
+      id: crypto.randomUUID(),
+      destinationId: destination.id,
+    } as Activity;
     const localRepository = createMockRepository({
       destinations: [destination],
       routeLegs: [routeLeg],
+      activities: [activity],
     });
     const cloudRepository = createMockRepository();
     const storage = {
@@ -141,6 +163,7 @@ describe('app repository bootstrap', () => {
     expect(cloudRepository.replaceTripData).toHaveBeenCalledWith({
       destinations: [destination],
       routeLegs: [routeLeg],
+      activities: [activity],
     });
     expect(storage.setItem).toHaveBeenCalledWith(
       `world-tour:supabase-migrated:${user.id}`,

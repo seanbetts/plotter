@@ -1,5 +1,6 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg } from '../domain/routeLegs';
 import { createTripDb } from './tripDb';
@@ -188,6 +189,144 @@ describe('trip repository', () => {
     ]);
   });
 
+  it('updates, deletes, and reorders destination media locally', async () => {
+    const repository = createTestRepository();
+    const destination = {
+      ...createDestination({
+        name: 'Paris',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      }),
+      media: [
+        {
+          id: crypto.randomUUID(),
+          url: 'first.webp',
+          caption: 'First',
+          credit: '',
+          sortOrder: 0,
+        },
+        {
+          id: crypto.randomUUID(),
+          url: 'second.webp',
+          caption: 'Second',
+          credit: '',
+          sortOrder: 1,
+        },
+      ],
+    };
+    const [firstMedia, secondMedia] = destination.media;
+
+    await repository.saveDestination(destination);
+
+    await expect(repository.updateDestinationMedia(secondMedia.id, {
+      caption: 'Hero image',
+      credit: 'Example photographer',
+    })).resolves.toEqual(expect.objectContaining({
+      id: secondMedia.id,
+      caption: 'Hero image',
+      credit: 'Example photographer',
+      url: 'second.webp',
+    }));
+
+    await expect(repository.reorderDestinationMedia(destination.id, [
+      secondMedia.id,
+      firstMedia.id,
+    ])).resolves.toEqual([
+      expect.objectContaining({ id: secondMedia.id, sortOrder: 0 }),
+      expect.objectContaining({ id: firstMedia.id, sortOrder: 1 }),
+    ]);
+
+    await repository.deleteDestinationMedia(firstMedia.id);
+
+    expect(await repository.listDestinationMedia(destination.id)).toEqual([
+      expect.objectContaining({
+        id: secondMedia.id,
+        caption: 'Hero image',
+        sortOrder: 0,
+      }),
+    ]);
+  });
+
+  it('assigns local uploads after the existing max media sort order', async () => {
+    const repository = createTestRepository();
+    const destination = {
+      ...createDestination({
+        name: 'Bergen',
+        coordinates: { lat: 60.3913, lng: 5.3221 },
+      }),
+      media: [
+        {
+          id: crypto.randomUUID(),
+          url: 'existing.webp',
+          caption: '',
+          credit: '',
+          sortOrder: 4,
+        },
+      ],
+    };
+
+    await repository.saveDestination(destination);
+
+    const mediaItem = await repository.uploadDestinationMedia({
+      destinationId: destination.id,
+      file: new File(['image-data'], 'bergen.webp', { type: 'image/webp' }),
+    });
+
+    expect(mediaItem.sortOrder).toBe(5);
+    expect(mediaItem.url).toBe('data:image/webp;base64,aW1hZ2UtZGF0YQ==');
+  });
+
+  it('keeps destination media separate from activity media and rolls activity media into stop media', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    const activity = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+
+    const destinationMedia = await repository.uploadDestinationMedia({
+      destinationId: destination.id,
+      file: new File(['destination-image'], 'paris.webp', { type: 'image/webp' }),
+    });
+    const activityMedia = await repository.uploadActivityMedia({
+      destinationId: destination.id,
+      activityId: activity.id,
+      file: new File(['activity-image'], 'louvre.webp', { type: 'image/webp' }),
+    });
+
+    expect((await repository.listDestinationMedia(destination.id)).map((item) => item.id)).toEqual([
+      destinationMedia.id,
+    ]);
+    expect((await repository.listActivityMedia(activity.id)).map((item) => item.id)).toEqual([
+      activityMedia.id,
+    ]);
+    expect(await repository.listDestinationMediaRollup(destination.id)).toEqual([
+      expect.objectContaining({
+        mediaItem: expect.objectContaining({ id: destinationMedia.id }),
+        ownerType: 'destination',
+        canReorderInStopCarousel: true,
+      }),
+      expect.objectContaining({
+        mediaItem: expect.objectContaining({ id: activityMedia.id }),
+        ownerType: 'activity',
+        activityId: activity.id,
+        activityTitle: activity.title,
+        canReorderInStopCarousel: false,
+      }),
+    ]);
+  });
+
+  it('rejects local activity media reorder for a missing activity even when the order is empty', async () => {
+    const repository = createTestRepository();
+
+    await expect(repository.reorderActivityMedia('missing-activity', []))
+      .rejects.toThrow('Activity not found.');
+  });
+
   it('normalizes legacy records without order or route status', async () => {
     const repository = createTestRepository();
     const legacyDestination = {
@@ -225,5 +364,143 @@ describe('trip repository', () => {
     });
     expect(routeLeg.type).toBe('driving-auto');
     expect(routeLeg.status).toBe('pending');
+  });
+
+  it('creates, lists, updates, reorders, and deletes activities for a destination', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+
+    const louvre = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+    const bakery = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Bakery crawl',
+    });
+
+    expect((await repository.listActivities(destination.id)).map((activity) => activity.title)).toEqual([
+      'Louvre',
+      'Bakery crawl',
+    ]);
+
+    await repository.updateActivity(louvre.id, { title: 'Morning Louvre' });
+    expect((await repository.listActivities(destination.id))[0].title).toBe('Morning Louvre');
+
+    await repository.reorderActivities(destination.id, [bakery.id, louvre.id]);
+    expect((await repository.listActivities(destination.id)).map((activity) => activity.title)).toEqual([
+      'Bakery crawl',
+      'Morning Louvre',
+    ]);
+
+    await repository.deleteActivity(bakery.id);
+    expect((await repository.listActivities(destination.id)).map((activity) => activity.title)).toEqual([
+      'Morning Louvre',
+    ]);
+  });
+
+  it('deletes activities when their destination is deleted', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+
+    await repository.deleteDestination(destination.id);
+
+    expect(await repository.listActivities(destination.id)).toEqual([]);
+  });
+
+  it('rejects creating an activity for a missing destination', async () => {
+    const repository = createTestRepository();
+
+    await expect(repository.createActivity({
+      destinationId: 'missing-destination',
+      title: 'Nowhere cafe',
+    })).rejects.toThrow('Destination not found.');
+
+    expect(await repository.listActivities('missing-destination')).toEqual([]);
+  });
+
+  it('appends new activities after the current max order when earlier activities are deleted', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    const morning = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Morning walk',
+    });
+    const lunch = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Lunch',
+    });
+    await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Museum',
+    });
+
+    await repository.deleteActivity(lunch.id);
+    const evening = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Evening view',
+    });
+
+    expect(evening.order).toBe(3);
+    expect((await repository.listActivities(destination.id)).map((activity) => ({
+      title: activity.title,
+      order: activity.order,
+    }))).toEqual([
+      { title: 'Morning walk', order: 0 },
+      { title: 'Museum', order: 2 },
+      { title: 'Evening view', order: 3 },
+    ]);
+    expect(morning.order).toBe(0);
+  });
+
+  it('restores activities from trip snapshots', async () => {
+    const repository = createTestRepository();
+    const oldDestination = createDestination({
+      name: 'Old stop',
+      coordinates: { lat: 0, lng: 0 },
+    });
+    const newDestination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const newActivity = createActivityModel({
+      destinationId: newDestination.id,
+      title: 'Louvre',
+      order: 4,
+    });
+
+    await repository.saveDestination(oldDestination);
+    await repository.createActivity({
+      destinationId: oldDestination.id,
+      title: 'Old activity',
+    });
+
+    await repository.replaceTripData({
+      destinations: [newDestination],
+      routeLegs: [],
+      activities: [newActivity],
+    });
+
+    expect(await repository.listActivities(oldDestination.id)).toEqual([]);
+    expect(await repository.listActivities(newDestination.id)).toEqual([newActivity]);
   });
 });

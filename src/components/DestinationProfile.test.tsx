@@ -2,8 +2,9 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createActivity } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
-import type { Destination } from '../domain/types';
+import type { Destination, MediaItem, MediaRollupItem } from '../domain/types';
 import { DestinationProfile } from './DestinationProfile';
 
 function deferred<T>() {
@@ -17,6 +18,31 @@ function deferred<T>() {
 
 const autosaveDelayMs = 700;
 const savedStatusVisibleMs = 2400;
+const defaultMediaProps = {
+  activities: [],
+  selectedActivityId: null,
+  onSelectActivity: vi.fn(),
+  onCreateActivity: vi.fn(),
+  onUpdateActivity: vi.fn(),
+  onDeleteActivity: vi.fn(),
+  onReorderActivities: vi.fn(),
+  mediaItems: [],
+  isMediaLoading: false,
+  isMediaUploading: false,
+  mediaError: null,
+  onUploadMedia: vi.fn(),
+  onReorderMedia: vi.fn(),
+  onOpenMediaPreview: vi.fn(),
+};
+
+function createMediaItem(input: Partial<MediaItem> & Pick<MediaItem, 'id' | 'url'>): MediaItem {
+  return {
+    caption: '',
+    credit: '',
+    sortOrder: 0,
+    ...input,
+  };
+}
 
 async function advanceAutosave(ms = autosaveDelayMs) {
   await act(async () => {
@@ -61,7 +87,14 @@ describe('DestinationProfile', () => {
       },
     });
 
-    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     expect(within(header).getByRole('button', { name: 'Edit stop name Balcombe' })).toBeInTheDocument();
@@ -89,7 +122,14 @@ describe('DestinationProfile', () => {
       },
     });
 
-    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     const latitudeLabel = within(header).getByText('Latitude');
@@ -100,6 +140,11 @@ describe('DestinationProfile', () => {
     expect(within(header).getByText('-0.1342')).toBeInTheDocument();
     expect(latitudeLabel.closest('button')).toBeNull();
     expect(longitudeLabel.closest('button')).toBeNull();
+    const coordinateControls = within(within(header).getByLabelText('Coordinates')).getAllByRole('button');
+    expect(coordinateControls.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Edit coordinates',
+      'Copy coordinates 51.0576, -0.1342',
+    ]);
 
     await user.click(within(header).getByRole('button', { name: 'Copy coordinates 51.0576, -0.1342' }));
 
@@ -127,7 +172,14 @@ describe('DestinationProfile', () => {
       },
     });
 
-    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     expect(within(header).getByText('51.05761')).toBeInTheDocument();
@@ -158,7 +210,14 @@ describe('DestinationProfile', () => {
       },
     });
 
-    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     const copyButton = within(header).getByRole('button', { name: 'Copy coordinates 51.0576, -0.1342' });
@@ -193,7 +252,14 @@ describe('DestinationProfile', () => {
     });
     const onUpdate = vi.fn();
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={onUpdate}
+        onClose={vi.fn()}
+      />,
+    );
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     fireEvent.click(within(header).getByRole('button', { name: 'Edit coordinates' }));
@@ -220,7 +286,14 @@ describe('DestinationProfile', () => {
       },
     });
 
-    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     expect(within(header).getByText('Latitude').closest('.profile-coordinate-pill')).toHaveClass(
@@ -247,29 +320,221 @@ describe('DestinationProfile', () => {
       coordinates: { lat: 63.4305, lng: 10.3951 },
     });
 
-    render(<DestinationProfile destination={destination} stopNumber={3} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        stopNumber={3}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
 
     expect(screen.getByText('Stop 03')).toBeInTheDocument();
   });
 
-  it('only shows editable fields for stay days and tags until the stop name is clicked', () => {
+  it('renders stop images directly after the stop profile header', () => {
+    const destination = createDestination({
+      name: 'Liseleje',
+      countryRegion: 'Denmark',
+      coordinates: { lat: 56.0128, lng: 11.9646 },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        mediaItems={[
+          createMediaItem({
+            id: 'media-1',
+            url: '/liseleje.jpg',
+            caption: 'Liseleje beach',
+          }),
+        ]}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const profile = screen.getByRole('complementary', { name: 'Liseleje profile' });
+    const header = within(profile).getByRole('banner', { name: 'Stop detail header' });
+    const imageStrip = within(profile).getByRole('region', { name: 'Stop images' });
+
+    expect(imageStrip).toBeInTheDocument();
+    expect(header.nextElementSibling).toBe(imageStrip);
+  });
+
+  it('renders activities inside the stop profile', () => {
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const activity = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        activities={[activity]}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
+  });
+
+  it('surfaces activity mutation failures from the profile adapters', async () => {
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const activity = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        activities={[activity]}
+        onUpdateActivity={vi.fn().mockRejectedValue(new Error('Network unavailable'))}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('Louvre'), {
+      target: { value: 'Morning Louvre' },
+    });
+    fireEvent.blur(screen.getByDisplayValue('Morning Louvre'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to update activities.');
+    expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
+  });
+
+  it('requests the workspace full image preview from the pane preview image', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    });
+    const onOpenMediaPreview = vi.fn();
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        mediaItems={[
+          createMediaItem({
+            id: 'media-1',
+            url: '/balcombe.jpg',
+            caption: 'Home lane',
+          }),
+        ]}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+        onOpenMediaPreview={onOpenMediaPreview}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open full image: Home lane' }));
+    expect(onOpenMediaPreview).toHaveBeenCalledWith('media-1');
+    expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
+  });
+
+  it('passes stop rollup attribution into the stop images strip', () => {
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const rollupItems: MediaRollupItem[] = [
+      {
+        mediaItem: createMediaItem({
+          id: 'stop-media-1',
+          url: '/paris.jpg',
+          caption: 'Paris street',
+          sortOrder: 0,
+        }),
+        ownerType: 'destination',
+        destinationId: destination.id,
+        canReorderInStopCarousel: true,
+      },
+      {
+        mediaItem: createMediaItem({
+          id: 'activity-media-1',
+          url: '/louvre.jpg',
+          caption: 'Museum wing',
+          sortOrder: 0,
+        }),
+        ownerType: 'activity',
+        destinationId: destination.id,
+        activityId: 'activity-1',
+        activityTitle: 'Louvre',
+        canReorderInStopCarousel: false,
+      },
+    ];
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        mediaItems={[rollupItems[0].mediaItem]}
+        mediaRollupItems={rollupItems}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show image 2: Museum wing' }));
+
+    expect(within(screen.getByRole('group', { name: 'Image preview' })).getByText('Louvre')).toHaveClass(
+      'destination-image-attribution',
+    );
+  });
+
+  it('labels the first stop as the start', () => {
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'England',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    });
+
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} stopNumber={1} onUpdate={vi.fn()} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Start')).toBeInTheDocument();
+  });
+
+  it('shows the compact editable stop fields until the stop name is clicked', () => {
     const destination = createDestination({
       name: 'Samarkand',
       countryRegion: 'Uzbekistan',
       coordinates: { lat: 39.6542, lng: 66.9597 },
     });
 
-    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByLabelText('Expected stay days')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Tags' })).toBeInTheDocument();
     expect(screen.getByLabelText('Add tag')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByLabelText('New activity title')).toBeInTheDocument();
     expect(screen.queryByLabelText('Why it matters')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Highlights')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Personal rationale')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Ideal months')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Research notes')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Activities')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Route notes')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save destination' })).not.toBeInTheDocument();
   });
@@ -290,7 +555,7 @@ describe('DestinationProfile', () => {
     });
     const onUpdate = vi.fn();
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit stop name Balcombe' }));
     const input = screen.getByLabelText('Stop name');
@@ -320,7 +585,7 @@ describe('DestinationProfile', () => {
       coordinates: { lat: 51.0576, lng: -0.1342 },
     });
 
-    render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
 
     const titleButton = screen.getByRole('button', { name: 'Edit stop name Balcombe' });
     expect(titleButton).toHaveClass('profile-title-control');
@@ -374,7 +639,7 @@ describe('DestinationProfile', () => {
     };
     const onUpdate = vi.fn();
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '5' } });
     addTag('port-city');
@@ -407,7 +672,7 @@ describe('DestinationProfile', () => {
     });
     const onUpdate = vi.fn();
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     const tagsInput = screen.getByLabelText('Add tag');
     fireEvent.change(tagsInput, { target: { value: 'silk' } });
@@ -441,7 +706,7 @@ describe('DestinationProfile', () => {
     };
     const onUpdate = vi.fn();
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Remove tag street-art' })).toBeInTheDocument();
 
@@ -473,7 +738,7 @@ describe('DestinationProfile', () => {
     };
     const onUpdate = vi.fn();
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     fireEvent.keyDown(screen.getByLabelText('Add tag'), { key: 'Backspace' });
     await advanceAutosave();
@@ -501,13 +766,13 @@ describe('DestinationProfile', () => {
     };
     const onUpdate = vi.fn();
 
-    const { rerender } = render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    const { rerender } = render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Remove tag silk-road' }));
     await user.type(screen.getByLabelText('Add tag'), 'local-draft{Enter}');
 
     rerender(
-      <DestinationProfile
+      <DestinationProfile {...defaultMediaProps}
         destination={{
           ...destination,
           timing: {
@@ -523,7 +788,7 @@ describe('DestinationProfile', () => {
     expect(screen.getByRole('button', { name: 'Remove tag local-draft' })).toBeInTheDocument();
 
     rerender(
-      <DestinationProfile
+      <DestinationProfile {...defaultMediaProps}
         destination={{
           ...destination,
           tags: ['saved-tag'],
@@ -548,10 +813,10 @@ describe('DestinationProfile', () => {
       updatedAt: '2026-06-28T09:00:00.000Z',
     };
 
-    const { rerender } = render(<DestinationProfile destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    const { rerender } = render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={vi.fn()} onClose={vi.fn()} />);
 
     rerender(
-      <DestinationProfile
+      <DestinationProfile {...defaultMediaProps}
         destination={{
           ...destination,
           tags: ['saved-tag'],
@@ -587,16 +852,16 @@ describe('DestinationProfile', () => {
     };
 
     const { rerender } = render(
-      <DestinationProfile destination={firstDestination} onUpdate={vi.fn()} onClose={vi.fn()} />,
+      <DestinationProfile {...defaultMediaProps} destination={firstDestination} onUpdate={vi.fn()} onClose={vi.fn()} />,
     );
 
     await user.click(screen.getByRole('button', { name: 'Remove tag temples' }));
     await user.type(screen.getByLabelText('Add tag'), 'unsaved-draft{Enter}');
 
-    rerender(<DestinationProfile destination={secondDestination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    rerender(<DestinationProfile {...defaultMediaProps} destination={secondDestination} onUpdate={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Remove tag silk-road' })).toBeInTheDocument();
 
-    rerender(<DestinationProfile destination={firstDestination} onUpdate={vi.fn()} onClose={vi.fn()} />);
+    rerender(<DestinationProfile {...defaultMediaProps} destination={firstDestination} onUpdate={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Remove tag temples' })).toBeInTheDocument();
   });
 
@@ -609,7 +874,7 @@ describe('DestinationProfile', () => {
     });
     const onUpdate = vi.fn();
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText('Expected stay days'), { target: { value: '-2' } });
     await advanceAutosave();
@@ -642,7 +907,7 @@ describe('DestinationProfile', () => {
     const save = deferred<void>();
     const onUpdate = vi.fn(() => save.promise);
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     addTag('silk-road');
     await advanceAutosave();
@@ -673,7 +938,7 @@ describe('DestinationProfile', () => {
     });
     const onUpdate = vi.fn().mockRejectedValue(new Error('network unavailable'));
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     addTag('silk-road');
     await advanceAutosave();
@@ -698,7 +963,7 @@ describe('DestinationProfile', () => {
       .mockReturnValueOnce(firstSave.promise)
       .mockReturnValueOnce(secondSave.promise);
 
-    render(<DestinationProfile destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     addTag('first');
     await advanceAutosave();
@@ -742,7 +1007,7 @@ describe('DestinationProfile', () => {
       const [currentDestination, setCurrentDestination] = useState(destination);
 
       return (
-        <DestinationProfile
+        <DestinationProfile {...defaultMediaProps}
           destination={currentDestination}
           onUpdate={(_, patch) => {
             setCurrentDestination({

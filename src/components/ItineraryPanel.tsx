@@ -3,6 +3,7 @@ import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from
 import { useEffect, useRef, useState } from 'react';
 import { formatDestinationLocation, formatLocationParts } from '../domain/locations';
 import type { Destination, RouteLeg, RouteLegType } from '../domain/types';
+import { formatStopAccessibleLabel, formatStopMarker } from './stopLabels';
 
 type ItineraryPanelProps = {
   destinations: Destination[];
@@ -31,7 +32,6 @@ type PointerCoordinates = {
 
 const kmToMiles = 0.621371;
 const stopListStyle = { '--stop-list-gap': '8px' } as CSSProperties;
-const formatStopNumber = (stopNumber: number) => String(stopNumber).padStart(2, '0');
 
 function formatLegDistance(routeLeg: RouteLeg) {
   if (isRouteLegCalculating(routeLeg)) return null;
@@ -419,8 +419,8 @@ export function ItineraryPanel({
                   >
                     <GripVertical size={16} aria-hidden="true" />
                   </button>
-                  <span className="stop-number" aria-label={`Stop ${stopNumber}`}>
-                    {formatStopNumber(stopNumber)}
+                  <span className="stop-number" aria-label={formatStopAccessibleLabel(stopNumber)}>
+                    {formatStopMarker(stopNumber)}
                   </span>
                   <button
                     type="button"
