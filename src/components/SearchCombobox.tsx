@@ -44,6 +44,11 @@ export function SearchCombobox<Result>({
   const latestSearchId = useRef(0);
   const searchTimerRef = useRef<number | null>(null);
   const query = value ?? internalQuery;
+  const hasQuery = Boolean(query.trim());
+  const visibleResults = hasQuery ? results : [];
+  const visibleHighlightedIndex = hasQuery ? highlightedIndex : -1;
+  const visibleIsSearching = hasQuery ? isSearching : false;
+  const visibleError = hasQuery ? error : null;
 
   function setQuery(nextQuery: string) {
     if (value === undefined) {
@@ -87,10 +92,6 @@ export function SearchCombobox<Result>({
     const trimmed = query.trim();
     if (!trimmed) {
       latestSearchId.current += 1;
-      setResults([]);
-      setHighlightedIndex(-1);
-      setIsSearching(false);
-      setError(null);
       return;
     }
 
@@ -148,7 +149,7 @@ export function SearchCombobox<Result>({
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setHighlightedIndex((current) => Math.min(current + 1, results.length - 1));
+      setHighlightedIndex((current) => Math.min(current + 1, visibleResults.length - 1));
       return;
     }
 
@@ -158,9 +159,13 @@ export function SearchCombobox<Result>({
       return;
     }
 
-    if (event.key === 'Enter' && highlightedIndex >= 0 && results[highlightedIndex]) {
+    if (
+      event.key === 'Enter' &&
+      visibleHighlightedIndex >= 0 &&
+      visibleResults[visibleHighlightedIndex]
+    ) {
       event.preventDefault();
-      void selectResult(results[highlightedIndex]);
+      void selectResult(visibleResults[visibleHighlightedIndex]);
       return;
     }
 
@@ -171,8 +176,8 @@ export function SearchCombobox<Result>({
   }
 
   const activeResultId =
-    highlightedIndex >= 0 && results[highlightedIndex]
-      ? `${resultsId}-${getResultId(results[highlightedIndex])}`
+    visibleHighlightedIndex >= 0 && visibleResults[visibleHighlightedIndex]
+      ? `${resultsId}-${getResultId(visibleResults[visibleHighlightedIndex])}`
       : undefined;
 
   return (
@@ -210,12 +215,12 @@ export function SearchCombobox<Result>({
           </button>
         ) : null}
       </div>
-      {isSearching ? <div className="toolbar-status">Searching...</div> : null}
-      {error ? <div className="toolbar-error">{error}</div> : null}
-      {results.length > 0 ? (
+      {visibleIsSearching ? <div className="toolbar-status">Searching...</div> : null}
+      {visibleError ? <div className="toolbar-error">{visibleError}</div> : null}
+      {visibleResults.length > 0 ? (
         <div id={resultsId} className="search-results" role="listbox">
-          {results.map((result, index) => {
-            const isHighlighted = index === highlightedIndex;
+          {visibleResults.map((result, index) => {
+            const isHighlighted = index === visibleHighlightedIndex;
             const resultId = `${resultsId}-${getResultId(result)}`;
 
             return (
