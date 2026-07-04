@@ -1,10 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MediaItem } from '../domain/types';
 import { DestinationImagePreviewModal } from './DestinationImagePreviewModal';
-
-const autosaveDelayMs = 700;
-const savedStatusVisibleMs = 2400;
 
 function createMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
   return {
@@ -22,10 +19,6 @@ function createProps(overrides: Partial<React.ComponentProps<typeof DestinationI
     mediaItem: createMediaItem(),
     canMoveLeft: true,
     canMoveRight: true,
-    onUpdate: vi.fn(async (mediaId: string, patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>) => ({
-      ...createMediaItem({ id: mediaId }),
-      ...patch,
-    })),
     onDelete: vi.fn(),
     onMoveLeft: vi.fn(),
     onMoveRight: vi.fn(),
@@ -36,19 +29,11 @@ function createProps(overrides: Partial<React.ComponentProps<typeof DestinationI
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+  const promise = new Promise<T>((promiseResolve) => {
     resolve = promiseResolve;
-    reject = promiseReject;
   });
 
-  return { promise, resolve, reject };
-}
-
-async function advanceAutosave(ms = autosaveDelayMs) {
-  await act(async () => {
-    vi.advanceTimersByTime(ms);
-  });
+  return { promise, resolve };
 }
 
 async function flushPromises() {
@@ -58,12 +43,8 @@ async function flushPromises() {
   });
 }
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
 describe('DestinationImagePreviewModal', () => {
-  it('renders an accessible dialog with the image, caption, and credit fields', () => {
+  it('renders an accessible image-only preview without visible metadata fields', () => {
     render(<DestinationImagePreviewModal {...createProps()} />);
 
     const dialog = screen.getByRole('dialog', { name: 'Image preview' });
@@ -72,157 +53,16 @@ describe('DestinationImagePreviewModal', () => {
       'src',
       'https://example.com/media-1.jpg',
     );
-    expect(screen.getByLabelText('Caption')).toHaveValue('Sunset over the harbour');
-    expect(screen.getByLabelText('Credit')).toHaveValue('Example photographer');
+    expect(within(dialog).queryByRole('heading', { name: 'Image preview' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('Reference image')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Caption')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Credit')).not.toBeInTheDocument();
   });
 
   it('uses a useful generic image label when the media has no caption', () => {
     render(<DestinationImagePreviewModal {...createProps({ mediaItem: createMediaItem({ caption: '' }) })} />);
 
     expect(screen.getByRole('img', { name: 'Stop reference image' })).toBeInTheDocument();
-  });
-
-  it('autosaves changed caption and credit fields after the debounce, but not immediately', async () => {
-    vi.useFakeTimers();
-    const onUpdate = vi.fn(async (mediaId: string, patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>) => ({
-      ...createMediaItem({ id: mediaId }),
-      ...patch,
-    }));
-
-    render(<DestinationImagePreviewModal {...createProps({ onUpdate })} />);
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Morning light' } });
-    expect(onUpdate).not.toHaveBeenCalled();
-
-    await advanceAutosave();
-    expect(onUpdate).toHaveBeenCalledTimes(1);
-    expect(onUpdate).toHaveBeenLastCalledWith('media-1', { caption: 'Morning light' });
-
-    fireEvent.change(screen.getByLabelText('Credit'), { target: { value: 'Alex' } });
-    await advanceAutosave();
-    expect(onUpdate).toHaveBeenCalledTimes(2);
-    expect(onUpdate).toHaveBeenLastCalledWith('media-1', { credit: 'Alex' });
-  });
-
-  it('coalesces rapid typing into one save with the final value', async () => {
-    vi.useFakeTimers();
-    const onUpdate = vi.fn(async (mediaId: string, patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>) => ({
-      ...createMediaItem({ id: mediaId }),
-      ...patch,
-    }));
-
-    render(<DestinationImagePreviewModal {...createProps({ onUpdate })} />);
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'First' } });
-    await advanceAutosave(300);
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Second' } });
-    await advanceAutosave(300);
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Final' } });
-    await advanceAutosave();
-
-    expect(onUpdate).toHaveBeenCalledTimes(1);
-    expect(onUpdate).toHaveBeenCalledWith('media-1', { caption: 'Final' });
-  });
-
-  it('shows saving, saved, and clears saved feedback after autosave succeeds', async () => {
-    vi.useFakeTimers();
-    const save = deferred<MediaItem>();
-    const onUpdate = vi.fn(() => save.promise);
-
-    render(<DestinationImagePreviewModal {...createProps({ onUpdate })} />);
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Soft blue hour' } });
-    await advanceAutosave();
-
-    expect(screen.getByRole('status', { name: 'Saving...' })).toHaveClass(
-      'image-preview-save-status',
-      'is-saving',
-    );
-
-    save.resolve(createMediaItem({ caption: 'Soft blue hour' }));
-    await flushPromises();
-    expect(screen.getByRole('status', { name: 'Saved' })).toHaveClass(
-      'image-preview-save-status',
-      'is-saved',
-    );
-
-    await advanceAutosave(savedStatusVisibleMs);
-    expect(screen.queryByRole('status', { name: 'Saved' })).not.toBeInTheDocument();
-  });
-
-  it('shows unable to save feedback when autosave fails', async () => {
-    vi.useFakeTimers();
-    const onUpdate = vi.fn().mockRejectedValue(new Error('network unavailable'));
-
-    render(<DestinationImagePreviewModal {...createProps({ onUpdate })} />);
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Storm front' } });
-    await advanceAutosave();
-    await flushPromises();
-
-    expect(screen.getByRole('status', { name: 'Unable to save' })).toHaveClass(
-      'image-preview-save-status',
-      'is-error',
-    );
-  });
-
-  it('does not show saved feedback from a stale save after a newer edit has started', async () => {
-    vi.useFakeTimers();
-    const firstSave = deferred<MediaItem>();
-    const secondSave = deferred<MediaItem>();
-    const onUpdate = vi.fn()
-      .mockReturnValueOnce(firstSave.promise)
-      .mockReturnValueOnce(secondSave.promise);
-
-    render(<DestinationImagePreviewModal {...createProps({ onUpdate })} />);
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'First edit' } });
-    await advanceAutosave();
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Second edit' } });
-    await advanceAutosave();
-    expect(onUpdate).toHaveBeenCalledTimes(2);
-
-    firstSave.resolve(createMediaItem({ caption: 'First edit' }));
-    await flushPromises();
-
-    expect(screen.queryByRole('status', { name: 'Saved' })).not.toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Saving...' })).toBeInTheDocument();
-
-    secondSave.resolve(createMediaItem({ caption: 'Second edit' }));
-    await flushPromises();
-    expect(screen.getByRole('status', { name: 'Saved' })).toBeInTheDocument();
-  });
-
-  it('reconciles a pending edit that is reverted before the first save resolves', async () => {
-    vi.useFakeTimers();
-    const firstSave = deferred<MediaItem>();
-    const secondSave = deferred<MediaItem>();
-    const onUpdate = vi.fn()
-      .mockReturnValueOnce(firstSave.promise)
-      .mockReturnValueOnce(secondSave.promise);
-
-    render(<DestinationImagePreviewModal {...createProps({ onUpdate })} />);
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Temporary caption' } });
-    await advanceAutosave();
-    expect(screen.getByRole('status', { name: 'Saving...' })).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Sunset over the harbour' } });
-
-    firstSave.resolve(createMediaItem({ caption: 'Temporary caption' }));
-    await flushPromises();
-
-    expect(onUpdate).toHaveBeenCalledTimes(2);
-    expect(onUpdate).toHaveBeenLastCalledWith('media-1', { caption: 'Sunset over the harbour' });
-    expect(screen.getByRole('status', { name: 'Saving...' })).toBeInTheDocument();
-
-    secondSave.resolve(createMediaItem({ caption: 'Sunset over the harbour' }));
-    await flushPromises();
-
-    expect(screen.getByRole('status', { name: 'Saved' })).toBeInTheDocument();
-    await advanceAutosave(savedStatusVisibleMs);
-    expect(screen.queryByRole('status', { name: 'Saved' })).not.toBeInTheDocument();
   });
 
   it('moves left and right while respecting disabled move controls', () => {
@@ -265,17 +105,53 @@ describe('DestinationImagePreviewModal', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('requires confirmation before deleting an image', () => {
+  it('opens a confirmation popover before deleting an image', () => {
+    const onDelete = vi.fn();
+
+    render(<DestinationImagePreviewModal {...createProps({ onDelete })} />);
+
+    const deleteButton = screen.getByRole('button', { name: 'Delete image' });
+    expect(deleteButton).toHaveTextContent('');
+
+    fireEvent.click(deleteButton);
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByRole('alertdialog', { name: 'Delete image confirmation' })).toBeInTheDocument();
+    expect(screen.getByText('Delete this image?')).toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Delete image confirmation' })).getByRole('button', {
+        name: 'Delete image',
+      }),
+    );
+    expect(onDelete).toHaveBeenCalledWith('media-1');
+  });
+
+  it('cancels the delete confirmation without deleting', () => {
     const onDelete = vi.fn();
 
     render(<DestinationImagePreviewModal {...createProps({ onDelete })} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete image' }));
-    expect(onDelete).not.toHaveBeenCalled();
-    expect(screen.getByText('Delete this image?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete image' }));
-    expect(onDelete).toHaveBeenCalledWith('media-1');
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog', { name: 'Delete image confirmation' })).not.toBeInTheDocument();
+  });
+
+  it('uses Escape to close the confirmation popover before closing the preview', () => {
+    const onClose = vi.fn();
+
+    render(<DestinationImagePreviewModal {...createProps({ onClose })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete image' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog', { name: 'Delete image confirmation' })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('only calls delete once while a confirmed delete is pending', () => {
@@ -285,7 +161,10 @@ describe('DestinationImagePreviewModal', () => {
     render(<DestinationImagePreviewModal {...createProps({ onDelete })} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete image' }));
-    const confirmButton = screen.getByRole('button', { name: 'Confirm delete image' });
+    const confirmButton = within(screen.getByRole('alertdialog', { name: 'Delete image confirmation' })).getByRole(
+      'button',
+      { name: 'Delete image' },
+    );
 
     fireEvent.click(confirmButton);
     fireEvent.click(confirmButton);
@@ -300,33 +179,19 @@ describe('DestinationImagePreviewModal', () => {
     render(<DestinationImagePreviewModal {...createProps({ onDelete })} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete image' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete image' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Delete image confirmation' })).getByRole('button', {
+        name: 'Delete image',
+      }),
+    );
 
     await flushPromises();
 
     expect(screen.getByRole('alert')).toHaveTextContent('Unable to delete image.');
-    expect(screen.getByRole('button', { name: 'Confirm delete image' })).not.toBeDisabled();
-  });
-
-  it('resets draft fields when the media item changes', () => {
-    const { rerender } = render(<DestinationImagePreviewModal {...createProps()} />);
-
-    fireEvent.change(screen.getByLabelText('Caption'), { target: { value: 'Unsaved local edit' } });
-
-    rerender(
-      <DestinationImagePreviewModal
-        {...createProps({
-          mediaItem: createMediaItem({
-            id: 'media-2',
-            url: 'https://example.com/media-2.jpg',
-            caption: 'Fjord morning',
-            credit: 'Mina',
-          }),
-        })}
-      />,
-    );
-
-    expect(screen.getByLabelText('Caption')).toHaveValue('Fjord morning');
-    expect(screen.getByLabelText('Credit')).toHaveValue('Mina');
+    expect(
+      within(screen.getByRole('alertdialog', { name: 'Delete image confirmation' })).getByRole('button', {
+        name: 'Delete image',
+      }),
+    ).not.toBeDisabled();
   });
 });

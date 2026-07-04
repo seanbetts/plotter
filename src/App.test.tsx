@@ -1,11 +1,12 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
+import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
-import type { Destination, MediaItem, RouteLeg } from './domain/types';
+import type { Activity, Destination, MediaItem, RouteLeg } from './domain/types';
 import { createAppTripRepository } from './storage/appRepository';
 
 type Deferred<T> = {
@@ -84,11 +85,39 @@ const repositoryMock = vi.hoisted(() => {
         (leg) => leg.originDestinationId !== destinationId && leg.targetDestinationId !== destinationId,
       );
     }),
-    listActivities: vi.fn(async () => []),
-    createActivity: vi.fn(),
-    updateActivity: vi.fn(),
-    deleteActivity: vi.fn(),
-    reorderActivities: vi.fn(),
+    listActivities: vi.fn(async (): Promise<Activity[]> => []),
+    createActivity: vi.fn(async (input: { destinationId: string; title: string }): Promise<Activity> => ({
+      id: 'activity-mock',
+      destinationId: input.destinationId,
+      order: 0,
+      title: input.title,
+      description: '',
+      category: 'other',
+      status: 'idea',
+      priority: 'medium',
+      links: [],
+      notes: '',
+      tags: [],
+      createdAt: '2026-07-03T12:00:00.000Z',
+      updatedAt: '2026-07-03T12:00:00.000Z',
+    })),
+    updateActivity: vi.fn(async (): Promise<Activity> => ({
+      id: 'activity-mock',
+      destinationId: 'destination-mock',
+      order: 0,
+      title: 'Updated activity',
+      description: '',
+      category: 'other',
+      status: 'idea',
+      priority: 'medium',
+      links: [],
+      notes: '',
+      tags: [],
+      createdAt: '2026-07-03T12:00:00.000Z',
+      updatedAt: '2026-07-03T12:00:01.000Z',
+    })),
+    deleteActivity: vi.fn(async (): Promise<void> => undefined),
+    reorderActivities: vi.fn(async (): Promise<Activity[]> => []),
     listRouteLegs: vi.fn(async () => repository.initialRouteLegs),
     saveRouteLeg: vi.fn(async (routeLeg: RouteLeg) => {
       repository.routeLegs.push(routeLeg);
@@ -139,10 +168,19 @@ describe('App', () => {
     });
     repositoryMock.deleteDestination.mockClear();
     repositoryMock.listActivities.mockClear();
+    repositoryMock.listActivities.mockImplementation(async () => []);
     repositoryMock.createActivity.mockClear();
+    repositoryMock.createActivity.mockImplementation(async (input: { destinationId: string; title: string }) =>
+      createActivity({ ...input, order: 0 }),
+    );
     repositoryMock.updateActivity.mockClear();
+    repositoryMock.updateActivity.mockImplementation(async () => {
+      throw new Error('updateActivity mock implementation was not configured');
+    });
     repositoryMock.deleteActivity.mockClear();
+    repositoryMock.deleteActivity.mockImplementation(async () => undefined);
     repositoryMock.reorderActivities.mockClear();
+    repositoryMock.reorderActivities.mockImplementation(async () => []);
     repositoryMock.listRouteLegs.mockClear();
     repositoryMock.saveRouteLeg.mockClear();
     repositoryMock.deleteRouteLeg.mockClear();
@@ -561,6 +599,88 @@ describe('App', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Open hero image: Balcombe lane' })).toBeInTheDocument();
+  });
+
+  it('opens the image preview over the map stage instead of inside the stop pane', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listDestinationMedia.mockResolvedValue([
+      createMediaItem({
+        id: 'media-1',
+        url: '/balcombe.jpg',
+        caption: 'Balcombe lane',
+      }),
+    ]);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
+    await user.click(await screen.findByRole('button', { name: 'Open hero image: Balcombe lane' }));
+
+    const profile = screen.getByRole('complementary', { name: 'Balcombe profile' });
+    const mapStage = screen.getByRole('region', { name: 'World tour map workspace' });
+    const preview = screen.getByRole('dialog', { name: 'Image preview' });
+
+    expect(mapStage).toContainElement(preview);
+    expect(profile).not.toContainElement(preview);
+    expect(within(preview).queryByRole('heading', { name: 'Image preview' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Caption')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Credit')).not.toBeInTheDocument();
+
+    const wasNotCanceled = fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+
+    expect(wasNotCanceled).toBe(false);
+    expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
+  });
+
+  it('shows stop activities and selects a newly added activity', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const louvre = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    const bakery = createActivity({
+      destinationId: destination.id,
+      title: 'Bakery crawl',
+      order: 1,
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listActivities.mockResolvedValue([louvre] satisfies Activity[]);
+    repositoryMock.createActivity.mockResolvedValue(bakery);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+
+    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('New activity title'), 'Bakery crawl');
+    await user.click(screen.getByRole('button', { name: 'Add activity' }));
+
+    expect(repositoryMock.createActivity).toHaveBeenCalledWith({
+      destinationId: destination.id,
+      title: 'Bakery crawl',
+    });
+    expect(await screen.findByDisplayValue('Bakery crawl')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select activity Bakery crawl' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
   });
 
   it('keeps mutation actions unavailable while trip data is loading', async () => {

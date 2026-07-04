@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
+import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
 import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
@@ -183,6 +184,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   const {
     destinations,
     routeLegs,
+    activitiesByDestinationId,
     isLoading,
     error,
     addDestination,
@@ -190,8 +192,14 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     deleteDestination,
     reorderDestinations,
     updateRouteLeg,
+    createActivity,
+    updateActivity,
+    deleteActivity,
+    reorderActivities,
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [previewMediaId, setPreviewMediaId] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
   const pendingMapStopRequestIdRef = useRef(0);
   const activePendingMapStopIdRef = useRef<number | null>(null);
@@ -211,6 +219,15 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     return selectedDestinationIndex === -1 ? undefined : selectedDestinationIndex + 1;
   }, [destinations, selectedDestinationId]);
   const destinationMedia = useDestinationMedia(repository, selectedDestinationId);
+  const previewMediaIndex =
+    previewMediaId === null
+      ? -1
+      : destinationMedia.mediaItems.findIndex((mediaItem) => mediaItem.id === previewMediaId);
+  const previewMediaItem = previewMediaIndex === -1 ? null : destinationMedia.mediaItems[previewMediaIndex];
+  const selectedDestinationActivities = useMemo(
+    () => (selectedDestination ? activitiesByDestinationId[selectedDestination.id] ?? [] : []),
+    [activitiesByDestinationId, selectedDestination],
+  );
   const pendingMapStopPosition = pendingMapStop
     ? clampOverlayPosition(pendingMapStop.screenPosition, mapStopConfirmationApproxSize)
     : null;
@@ -255,7 +272,25 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   }, [isInteractionLocked, pendingMapStopId]);
 
   useEffect(() => {
-    if (pendingMapStop || !selectedDestination || isInteractionLocked) return undefined;
+    setPreviewMediaId(null);
+  }, [selectedDestinationId]);
+
+  useEffect(() => {
+    if (!selectedDestinationId) {
+      setSelectedActivityId(null);
+      return;
+    }
+
+    if (
+      selectedActivityId &&
+      !selectedDestinationActivities.some((activity) => activity.id === selectedActivityId)
+    ) {
+      setSelectedActivityId(null);
+    }
+  }, [selectedActivityId, selectedDestinationActivities, selectedDestinationId]);
+
+  useEffect(() => {
+    if (pendingMapStop || previewMediaItem || !selectedDestination || isInteractionLocked) return undefined;
 
     const handleWindowKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -268,7 +303,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-  }, [isInteractionLocked, pendingMapStop, selectedDestination]);
+  }, [isInteractionLocked, pendingMapStop, previewMediaItem, selectedDestination]);
 
   const handleAddDestination = useCallback(
     async (input: Parameters<typeof addDestination>[0]) => {
@@ -278,6 +313,11 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     },
     [addDestination, isInteractionLocked],
   );
+
+  const handleSelectDestination = useCallback((destinationId: string) => {
+    setSelectedDestinationId(destinationId);
+    setSelectedActivityId(null);
+  }, []);
 
   const openPendingMapStop = useCallback(
     async (request: MapAddStopRequest) => {
@@ -396,9 +436,57 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
       setSelectedDestinationId((currentDestinationId) =>
         currentDestinationId === destinationId ? null : currentDestinationId,
       );
+      setSelectedActivityId(null);
     },
     [deleteDestination, isInteractionLocked],
   );
+
+  const handleCloseDestinationProfile = useCallback(() => {
+    setSelectedDestinationId(null);
+    setSelectedActivityId(null);
+  }, []);
+
+  const handleCreateActivity = useCallback(
+    async (destinationId: string, title: string) => {
+      const activity = await createActivity({ destinationId, title });
+      setSelectedActivityId(activity.id);
+    },
+    [createActivity],
+  );
+
+  const handleDeleteActivity = useCallback(
+    async (activityId: string) => {
+      await deleteActivity(activityId);
+      setSelectedActivityId((currentActivityId) =>
+        currentActivityId === activityId ? null : currentActivityId,
+      );
+    },
+    [deleteActivity],
+  );
+
+  function reorderPreviewMedia(mediaId: string, direction: -1 | 1) {
+    const currentIndex = destinationMedia.mediaItems.findIndex((mediaItem) => mediaItem.id === mediaId);
+    const targetIndex = currentIndex + direction;
+
+    if (currentIndex === -1 || targetIndex < 0 || targetIndex >= destinationMedia.mediaItems.length) return;
+
+    const nextOrder = destinationMedia.mediaItems.map((mediaItem) => mediaItem.id);
+    const [movedMediaId] = nextOrder.splice(currentIndex, 1);
+    nextOrder.splice(targetIndex, 0, movedMediaId);
+    void Promise.resolve(destinationMedia.reorder(nextOrder)).catch(() => undefined);
+    setPreviewMediaId(mediaId);
+  }
+
+  async function deletePreviewMedia(mediaId: string) {
+    const currentIndex = destinationMedia.mediaItems.findIndex((mediaItem) => mediaItem.id === mediaId);
+    const nextPreviewMediaItem =
+      currentIndex === -1
+        ? null
+        : destinationMedia.mediaItems[currentIndex + 1] ?? destinationMedia.mediaItems[currentIndex - 1] ?? null;
+
+    await Promise.resolve(destinationMedia.deleteMedia(mediaId));
+    setPreviewMediaId(nextPreviewMediaItem?.id ?? null);
+  }
 
   return (
     <main className="app-shell">
@@ -407,7 +495,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
           destinations={destinations}
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
-          onSelectDestination={setSelectedDestinationId}
+          onSelectDestination={handleSelectDestination}
           onRequestAddStop={openPendingMapStop}
         />
         {!isInteractionLocked ? (
@@ -421,7 +509,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               destinations={destinations}
               routeLegs={routeLegs}
               selectedDestinationId={selectedDestinationId}
-              onSelectDestination={setSelectedDestinationId}
+              onSelectDestination={handleSelectDestination}
               onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
               onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
               onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
@@ -473,17 +561,34 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         {!isInteractionLocked && selectedDestination ? (
           <DestinationProfile
             destination={selectedDestination}
+            activities={selectedDestinationActivities}
+            selectedActivityId={selectedActivityId}
             stopNumber={selectedDestinationNumber}
             mediaItems={destinationMedia.mediaItems}
             isMediaLoading={destinationMedia.isLoading}
             isMediaUploading={destinationMedia.isUploading}
             mediaError={destinationMedia.error}
+            onSelectActivity={setSelectedActivityId}
+            onCreateActivity={handleCreateActivity}
+            onUpdateActivity={updateActivity}
+            onDeleteActivity={handleDeleteActivity}
+            onReorderActivities={reorderActivities}
             onUpdate={updateDestination}
             onUploadMedia={destinationMedia.uploadFiles}
-            onUpdateMedia={destinationMedia.updateMedia}
-            onDeleteMedia={destinationMedia.deleteMedia}
             onReorderMedia={destinationMedia.reorder}
-            onClose={() => setSelectedDestinationId(null)}
+            onOpenMediaPreview={setPreviewMediaId}
+            onClose={handleCloseDestinationProfile}
+          />
+        ) : null}
+        {!isInteractionLocked && previewMediaItem ? (
+          <DestinationImagePreviewModal
+            mediaItem={previewMediaItem}
+            canMoveLeft={previewMediaIndex > 0}
+            canMoveRight={previewMediaIndex < destinationMedia.mediaItems.length - 1}
+            onDelete={deletePreviewMedia}
+            onMoveLeft={(mediaId) => reorderPreviewMedia(mediaId, -1)}
+            onMoveRight={(mediaId) => reorderPreviewMedia(mediaId, 1)}
+            onClose={() => setPreviewMediaId(null)}
           />
         ) : null}
         {isInteractionLocked ? (

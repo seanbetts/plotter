@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createActivity } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import type { Destination, MediaItem } from '../domain/types';
 import { DestinationProfile } from './DestinationProfile';
@@ -18,14 +19,20 @@ function deferred<T>() {
 const autosaveDelayMs = 700;
 const savedStatusVisibleMs = 2400;
 const defaultMediaProps = {
+  activities: [],
+  selectedActivityId: null,
+  onSelectActivity: vi.fn(),
+  onCreateActivity: vi.fn(),
+  onUpdateActivity: vi.fn(),
+  onDeleteActivity: vi.fn(),
+  onReorderActivities: vi.fn(),
   mediaItems: [],
   isMediaLoading: false,
   isMediaUploading: false,
   mediaError: null,
   onUploadMedia: vi.fn(),
-  onUpdateMedia: vi.fn(),
-  onDeleteMedia: vi.fn(),
   onReorderMedia: vi.fn(),
+  onOpenMediaPreview: vi.fn(),
 };
 
 function createMediaItem(input: Partial<MediaItem> & Pick<MediaItem, 'id' | 'url'>): MediaItem {
@@ -357,15 +364,72 @@ describe('DestinationProfile', () => {
     expect(header.nextElementSibling).toBe(imageStrip);
   });
 
-  it('opens the image preview from the hero image and closes it after delete succeeds', async () => {
+  it('renders activities inside the stop profile', () => {
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const activity = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        activities={[activity]}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
+  });
+
+  it('surfaces activity mutation failures from the profile adapters', async () => {
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const activity = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        activities={[activity]}
+        onUpdateActivity={vi.fn().mockRejectedValue(new Error('Network unavailable'))}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('Louvre'), {
+      target: { value: 'Morning Louvre' },
+    });
+    fireEvent.blur(screen.getByDisplayValue('Morning Louvre'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to update activities.');
+    expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
+  });
+
+  it('requests the workspace image preview from the hero image', async () => {
     const user = userEvent.setup();
     const destination = createDestination({
       name: 'Balcombe',
       countryRegion: 'United Kingdom',
       coordinates: { lat: 51.0576, lng: -0.1342 },
     });
-    const deleteMedia = deferred<void>();
-    const onDeleteMedia = vi.fn(() => deleteMedia.promise);
+    const onOpenMediaPreview = vi.fn();
 
     render(
       <DestinationProfile
@@ -380,157 +444,12 @@ describe('DestinationProfile', () => {
         ]}
         onUpdate={vi.fn()}
         onClose={vi.fn()}
-        onDeleteMedia={onDeleteMedia}
+        onOpenMediaPreview={onOpenMediaPreview}
       />,
     );
 
     await user.click(screen.getByRole('button', { name: 'Open hero image: Home lane' }));
-    expect(screen.getByRole('dialog', { name: 'Image preview' })).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Delete image' }));
-    await user.click(screen.getByRole('button', { name: 'Confirm delete image' }));
-
-    expect(onDeleteMedia).toHaveBeenCalledWith('media-1');
-    expect(screen.getByRole('dialog', { name: 'Image preview' })).toBeInTheDocument();
-
-    await act(async () => {
-      deleteMedia.resolve();
-      await deleteMedia.promise;
-    });
-
-    expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
-  });
-
-  it('keeps the image preview open and shows an error when delete fails', async () => {
-    const user = userEvent.setup();
-    const destination = createDestination({
-      name: 'Bodo',
-      countryRegion: 'Norway',
-      coordinates: { lat: 67.2804, lng: 14.4049 },
-    });
-    const onDeleteMedia = vi.fn().mockRejectedValue(new Error('Storage delete failed.'));
-
-    render(
-      <DestinationProfile
-        {...defaultMediaProps}
-        destination={destination}
-        mediaItems={[
-          createMediaItem({
-            id: 'media-1',
-            url: '/bodo.jpg',
-            caption: 'Harbor view',
-          }),
-        ]}
-        onUpdate={vi.fn()}
-        onClose={vi.fn()}
-        onDeleteMedia={onDeleteMedia}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Open hero image: Harbor view' }));
-    await user.click(screen.getByRole('button', { name: 'Delete image' }));
-    await user.click(screen.getByRole('button', { name: 'Confirm delete image' }));
-
-    expect(onDeleteMedia).toHaveBeenCalledWith('media-1');
-    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to delete image.');
-    expect(screen.getByRole('dialog', { name: 'Image preview' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open hero image: Harbor view' })).toBeInTheDocument();
-  });
-
-  it('reorders media from the image preview move controls', async () => {
-    const user = userEvent.setup();
-    const destination = createDestination({
-      name: 'Paris',
-      countryRegion: 'France',
-      coordinates: { lat: 48.8566, lng: 2.3522 },
-    });
-    const onReorderMedia = vi.fn();
-    const initialMediaItems = [
-      createMediaItem({ id: 'media-1', url: '/first.jpg', caption: 'First' }),
-      createMediaItem({ id: 'media-2', url: '/second.jpg', caption: 'Second' }),
-      createMediaItem({ id: 'media-3', url: '/third.jpg', caption: 'Third' }),
-    ];
-
-    function ProfileHarness() {
-      const [mediaItems, setMediaItems] = useState(initialMediaItems);
-
-      return (
-        <DestinationProfile
-          {...defaultMediaProps}
-          destination={destination}
-          mediaItems={mediaItems}
-          onUpdate={vi.fn()}
-          onClose={vi.fn()}
-          onReorderMedia={(orderedMediaIds) => {
-            onReorderMedia(orderedMediaIds);
-            const mediaById = new Map(mediaItems.map((mediaItem) => [mediaItem.id, mediaItem]));
-            setMediaItems(
-              orderedMediaIds.map((mediaId, index) => ({
-                ...mediaById.get(mediaId)!,
-                sortOrder: index,
-              })),
-            );
-          }}
-        />
-      );
-    }
-
-    render(<ProfileHarness />);
-
-    await user.click(screen.getByRole('button', { name: 'Open image 2: Second' }));
-    await user.click(screen.getByRole('button', { name: 'Move image left' }));
-    expect(onReorderMedia).toHaveBeenLastCalledWith(['media-2', 'media-1', 'media-3']);
-    expect(
-      within(screen.getByRole('dialog', { name: 'Image preview' })).getByRole('img', {
-        name: 'Second',
-      }),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Move image right' }));
-    expect(onReorderMedia).toHaveBeenLastCalledWith(['media-1', 'media-2', 'media-3']);
-    expect(
-      within(screen.getByRole('dialog', { name: 'Image preview' })).getByRole('img', {
-        name: 'Second',
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it('closes the image preview when the selected media item disappears', async () => {
-    const user = userEvent.setup();
-    const destination = createDestination({
-      name: 'Oslo',
-      countryRegion: 'Norway',
-      coordinates: { lat: 59.9139, lng: 10.7522 },
-    });
-    const mediaItem = createMediaItem({
-      id: 'media-1',
-      url: '/oslo.jpg',
-      caption: 'Oslo harbor',
-    });
-
-    const { rerender } = render(
-      <DestinationProfile
-        {...defaultMediaProps}
-        destination={destination}
-        mediaItems={[mediaItem]}
-        onUpdate={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Open hero image: Oslo harbor' }));
-    expect(screen.getByRole('dialog', { name: 'Image preview' })).toBeInTheDocument();
-
-    rerender(
-      <DestinationProfile
-        {...defaultMediaProps}
-        destination={destination}
-        mediaItems={[]}
-        onUpdate={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-
+    expect(onOpenMediaPreview).toHaveBeenCalledWith('media-1');
     expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
   });
 
@@ -546,7 +465,7 @@ describe('DestinationProfile', () => {
     expect(screen.getByText('Start')).toBeInTheDocument();
   });
 
-  it('only shows editable fields for stay days and tags until the stop name is clicked', () => {
+  it('shows the compact editable stop fields until the stop name is clicked', () => {
     const destination = createDestination({
       name: 'Samarkand',
       countryRegion: 'Uzbekistan',
@@ -558,12 +477,13 @@ describe('DestinationProfile', () => {
     expect(screen.getByLabelText('Expected stay days')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Tags' })).toBeInTheDocument();
     expect(screen.getByLabelText('Add tag')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByLabelText('New activity title')).toBeInTheDocument();
     expect(screen.queryByLabelText('Why it matters')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Highlights')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Personal rationale')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Ideal months')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Research notes')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Activities')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Route notes')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save destination' })).not.toBeInTheDocument();
   });
