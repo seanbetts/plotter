@@ -533,7 +533,7 @@ git commit -m "refactor: share owned media hook"
 - Test: `src/components/ActivityImageStrip.test.tsx`
 - Test: `src/components/DestinationImagePreviewModal.test.tsx`
 
-- [ ] **Step 1: Create reusable media strip props**
+- [x] **Step 1: Create reusable media strip props**
 
 Create `src/components/MediaImageStrip.tsx` with:
 
@@ -562,7 +562,7 @@ export type MediaImageStripProps = {
 };
 ```
 
-- [ ] **Step 2: Move preview-first strip behavior**
+- [x] **Step 2: Move preview-first strip behavior**
 
 Move the current `DestinationImageStrip` behavior into `MediaImageStrip`:
 
@@ -576,7 +576,7 @@ Move the current `DestinationImageStrip` behavior into `MediaImageStrip`:
 
 Change reorder handling so it only calls `onReorder` when both the dragged item and target item have `canReorder: true`.
 
-- [ ] **Step 3: Keep destination wrapper**
+- [x] **Step 3: Keep destination wrapper**
 
 Replace `DestinationImageStrip` implementation with:
 
@@ -609,7 +609,7 @@ export function DestinationImageStrip(props: DestinationImageStripProps) {
 
 Keep the existing exported prop type so current consumers do not churn.
 
-- [ ] **Step 4: Add activity wrapper**
+- [x] **Step 4: Add activity wrapper**
 
 Create `ActivityImageStrip` with the same wrapper pattern and labels:
 
@@ -625,7 +625,7 @@ Create `ActivityImageStrip` with the same wrapper pattern and labels:
 />
 ```
 
-- [ ] **Step 5: Add rollup item support**
+- [x] **Step 5: Add rollup item support**
 
 When `DestinationImageStrip` receives rollup items in a later task, it should pass:
 
@@ -639,7 +639,7 @@ When `DestinationImageStrip` receives rollup items in a later task, it should pa
 
 Render attribution as compact visible text on activity-owned thumbnails and the selected preview.
 
-- [ ] **Step 6: Generalize modal labels**
+- [x] **Step 6: Generalize modal labels**
 
 In `DestinationImagePreviewModal`, add optional props:
 
@@ -651,7 +651,7 @@ onOpenActivity?: () => void;
 
 Use `imageFallbackAlt ?? 'Reference image'` when there is no caption. Render an `Open activity` button only when both `activityAttribution` and `onOpenActivity` are provided.
 
-- [ ] **Step 7: Run component tests**
+- [x] **Step 7: Run component tests**
 
 Run:
 
@@ -661,7 +661,7 @@ npm test -- src/components/MediaImageStrip.test.tsx src/components/DestinationIm
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit component generalization**
+- [x] **Step 8: Commit component generalization**
 
 Run:
 
