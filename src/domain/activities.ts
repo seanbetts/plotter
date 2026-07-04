@@ -1,9 +1,10 @@
-import type { Activity } from './types';
+import type { Activity, ActivityLocation } from './types';
 
 type CreateActivityInput = {
   destinationId: string;
   title: string;
   order?: number;
+  location?: ActivityLocation;
 };
 
 type ActivityPatch = Partial<Omit<Activity, 'id' | 'destinationId' | 'createdAt' | 'updatedAt'>>;
@@ -33,6 +34,7 @@ export function createActivity(input: CreateActivityInput): Activity {
     category: 'other',
     status: 'idea',
     priority: 'medium',
+    location: input.location,
     links: [],
     notes: '',
     tags: [],

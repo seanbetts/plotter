@@ -127,6 +127,7 @@ describe('supabase trip repository mappers', () => {
       notes: 'Go hungry.',
       tags: ['food', 'evening'],
     });
+    expect(row.location).toEqual(activity.location);
     expect(activityFromSupabaseRow(row)).toEqual(activity);
   });
 
@@ -368,6 +369,13 @@ describe('supabase trip repository mappers', () => {
     const destinationId = crypto.randomUUID();
     const activityId = crypto.randomUUID();
     const createdAt = '2026-07-03T12:00:00.000Z';
+    const location = {
+      name: 'Louvre Museum',
+      address: 'Rue de Rivoli',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler' as const,
+      sourceFeatureId: 'poi.123',
+    };
     const insertedRows: unknown[] = [];
     vi.setSystemTime(new Date(createdAt));
 
@@ -421,6 +429,7 @@ describe('supabase trip repository mappers', () => {
       destinationId,
       title: 'Night market',
       order: 4,
+      location,
     });
 
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({
@@ -435,12 +444,14 @@ describe('supabase trip repository mappers', () => {
       links: [],
       notes: '',
       tags: [],
+      location,
     }));
     expect(activity).toEqual(expect.objectContaining({
       id: activityId,
       destinationId,
       title: 'Night market',
       order: 4,
+      location,
     }));
     expect(insertedRows).toHaveLength(1);
 

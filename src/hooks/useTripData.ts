@@ -462,7 +462,12 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           updateRouteLegs((current) => current.filter((leg) => leg.id !== routeLegId));
         },
 
-        async createActivity(input: { destinationId: string; title: string; order?: number }) {
+        async createActivity(input: {
+          destinationId: string;
+          title: string;
+          order?: number;
+          location?: Activity['location'];
+        }) {
           if (!isActiveAction()) return createActivityModel(input);
 
           const activity = await repository.createActivity(input);

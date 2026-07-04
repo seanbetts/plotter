@@ -32,6 +32,24 @@ describe('activities', () => {
     expect(activity.id).toEqual(expect.any(String));
   });
 
+  it('creates an activity with exact location details', () => {
+    const location = {
+      name: 'Louvre Museum',
+      address: 'Rue de Rivoli',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler' as const,
+      sourceFeatureId: 'poi.123',
+    };
+
+    const activity = createActivity({
+      destinationId: 'destination-1',
+      title: 'Louvre',
+      location,
+    });
+
+    expect(activity.location).toEqual(location);
+  });
+
   it('updates an activity timestamp strictly after patching fields when the current clock is behind', () => {
     vi.setSystemTime(new Date('2026-07-03T12:00:00.000Z'));
     const activity = {

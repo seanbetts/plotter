@@ -838,6 +838,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       const activity = createActivity({
         ...input,
         order: input.order ?? nextOrder,
+        location: input.location,
       });
       const row = assertNoSupabaseError<SupabaseActivityRow>(
         await supabase

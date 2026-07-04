@@ -138,6 +138,48 @@ describe('useTripData', () => {
     ]);
   });
 
+  it('forwards activity location details when creating activities through hook actions', async () => {
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const location = {
+      name: 'Louvre Museum',
+      address: 'Rue de Rivoli',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler' as const,
+      sourceFeatureId: 'poi.123',
+    };
+    const createActivity = vi.fn(async (input: Parameters<TripRepository['createActivity']>[0]) =>
+      createActivityModel({
+        destinationId: input.destinationId,
+        title: input.title,
+        order: input.order,
+        location: input.location,
+      }),
+    );
+    const repository = createMemoryRepository(Promise.resolve([destination]), {
+      createActivity,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.createActivity({
+        destinationId: destination.id,
+        title: 'Louvre',
+        location,
+      });
+    });
+
+    expect(createActivity).toHaveBeenCalledWith({
+      destinationId: destination.id,
+      title: 'Louvre',
+      location,
+    });
+  });
+
   it('clears activity state when deleting a destination', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));
