@@ -1289,7 +1289,7 @@ export function MapCanvas({
               aria-label={`Open ${destinationLabel.name} stop details`}
               onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
             >
-              {destinationLabel.label} {destinationLabel.name}
+              {destinationLabel.label} - {destinationLabel.name}
             </button>
           ))}
         </div>
