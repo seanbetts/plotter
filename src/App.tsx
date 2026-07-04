@@ -33,6 +33,7 @@ import './styles.css';
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 const mobileWorkspacePanelsQuery = '(max-width: 760px)';
+const stopsPanelCollapsedStorageKey = 'world-tour:stops-panel-collapsed';
 
 type RepositoryError = {
   title: string;
@@ -103,6 +104,16 @@ function formatCoordinatePair(coordinates: Coordinates) {
 
 function getFullMediaImageUrl(mediaItem: { fullUrl?: string; previewUrl?: string; url: string }) {
   return mediaItem.fullUrl ?? mediaItem.previewUrl ?? mediaItem.url;
+}
+
+function readStopsPanelCollapsedPreference() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(stopsPanelCollapsedStorageKey) === 'true';
+  } catch {
+    return false;
+  }
 }
 
 function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, 'name' | 'location'> {
@@ -253,6 +264,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [isStopsPanelCollapsed, setIsStopsPanelCollapsed] = useState(readStopsPanelCollapsedPreference);
   const [previewMedia, setPreviewMedia] = useState<PreviewMediaSelection | null>(null);
   const [destinationMediaRollupItems, setDestinationMediaRollupItems] = useState<MediaRollupItem[]>([]);
   const [isDestinationMediaRollupLoading, setIsDestinationMediaRollupLoading] = useState(false);
@@ -360,6 +372,14 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   useEffect(() => {
     selectedDestinationIdRef.current = selectedDestinationId;
   }, [selectedDestinationId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(stopsPanelCollapsedStorageKey, String(isStopsPanelCollapsed));
+    } catch {
+      // Ignore private-mode or quota failures; the toggle should still work in-memory.
+    }
+  }, [isStopsPanelCollapsed]);
 
   useEffect(() => {
     setPreviewMedia(null);
@@ -792,6 +812,8 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               destinations={destinations}
               routeLegs={routeLegs}
               selectedDestinationId={selectedDestinationId}
+              isCollapsed={isStopsPanelCollapsed}
+              onToggleCollapsed={() => setIsStopsPanelCollapsed((isCollapsed) => !isCollapsed)}
               onSelectDestination={handleSelectDestination}
               onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
               onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}

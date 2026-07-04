@@ -230,6 +230,24 @@ describe('App', () => {
     maplibreMock.resetSources();
     maplibreMock.project.mockClear();
     vi.unstubAllGlobals();
+    const localStorageItems = new Map<string, string>();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        clear: vi.fn(() => localStorageItems.clear()),
+        getItem: vi.fn((key: string) => localStorageItems.get(key) ?? null),
+        key: vi.fn((index: number) => [...localStorageItems.keys()][index] ?? null),
+        removeItem: vi.fn((key: string) => {
+          localStorageItems.delete(key);
+        }),
+        setItem: vi.fn((key: string, value: string) => {
+          localStorageItems.set(key, value);
+        }),
+        get length() {
+          return localStorageItems.size;
+        },
+      },
+    });
     class FakeImage {
       onload: (() => void) | null = null;
       onerror: (() => void) | null = null;
@@ -305,6 +323,29 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: 'Kyoto, Japan' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Kyoto profile' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select Kyoto' })).not.toHaveClass('is-selected');
+  });
+
+  it('remembers when the stops panel is collapsed', async () => {
+    const destination = createDestination({
+      name: 'Brest',
+      countryRegion: 'France',
+      coordinates: { lat: 48.3904, lng: -4.4861 },
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    window.localStorage.setItem('world-tour:stops-panel-collapsed', 'true');
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+
+    expect(screen.getByLabelText('Itinerary')).toHaveClass('is-collapsed');
+    expect(screen.getByText('1 stop')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Brest, France' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Expand itinerary panel' }));
+
+    expect(screen.getByRole('button', { name: 'Brest, France' })).toBeInTheDocument();
+    expect(window.localStorage.getItem('world-tour:stops-panel-collapsed')).toBe('false');
   });
 
   it('adds a right-clicked map stop after reverse-geocoded confirmation and opens its profile', async () => {

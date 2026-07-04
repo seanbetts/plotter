@@ -134,7 +134,7 @@ describe('ItineraryPanel', () => {
     );
 
     expect(screen.getByLabelText('Itinerary')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Stops' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Itinerary' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Routes' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Istanbul, Turkey' })).toBeInTheDocument();
     expect(screen.getByText('ST')).toHaveAccessibleName('Start');

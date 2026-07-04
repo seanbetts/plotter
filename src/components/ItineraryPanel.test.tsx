@@ -6,6 +6,41 @@ import type { RouteLeg } from '../domain/types';
 import { ItineraryPanel } from './ItineraryPanel';
 
 describe('ItineraryPanel', () => {
+  it('can render as a collapsed same-panel summary', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Brest',
+      countryRegion: 'France',
+      coordinates: { lat: 48.3904, lng: -4.4861 },
+    });
+    const onToggleCollapsed = vi.fn();
+
+    render(
+      <ItineraryPanel
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        isCollapsed
+        onToggleCollapsed={onToggleCollapsed}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Itinerary')).toHaveClass('is-collapsed');
+    expect(screen.getByText('1 stop')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Brest, France' })).not.toBeInTheDocument();
+
+    const expandButton = screen.getByRole('button', { name: 'Expand itinerary panel' });
+    expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(expandButton);
+
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+  });
+
   it('shows a retry button for a failed driving route leg', async () => {
     const user = userEvent.setup();
     const origin = createDestination({

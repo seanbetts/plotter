@@ -166,6 +166,21 @@ describe('activity list styles', () => {
   });
 });
 
+describe('itinerary panel styles', () => {
+  it('keeps the stops panel width stable when collapsed', () => {
+    expect(styles).toMatch(/\.itinerary-panel\s*{[^}]*width:\s*min\(520px,\s*calc\(100vw - 32px\)\);/s);
+    expect(styles).toMatch(/\.itinerary-panel\.is-collapsed\s*{[^}]*gap:\s*0;[^}]*overflow:\s*visible;/s);
+    expect(styles).toMatch(
+      /\.itinerary-panel-header\s*{[^}]*display:\s*flex;[^}]*justify-content:\s*space-between;/s,
+    );
+    expect(styles).toMatch(
+      /\.itinerary-panel-actions\s*{[^}]*display:\s*flex;[^}]*justify-content:\s*end;[^}]*gap:\s*8px;/s,
+    );
+    expect(styles).toMatch(/\.itinerary-panel-count\s*{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/s);
+    expect(styles).toMatch(/\.itinerary-panel-toggle\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
+  });
+});
+
 describe('inline route connector styles', () => {
   it('keeps route rows compact and visually secondary between stops', () => {
     expect(styles).toMatch(
