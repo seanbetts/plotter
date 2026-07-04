@@ -86,6 +86,11 @@ describe('profile header styles', () => {
       /\.profile-stay-days-label\s*{[^}]*font-size:\s*0\.66rem;[^}]*text-transform:\s*uppercase;/s,
     );
   });
+
+  it('sizes save status feedback to match the close button', () => {
+    expect(styles).toMatch(/\.profile-close-button\s*{[^}]*width:\s*34px;[^}]*height:\s*34px;/s);
+    expect(styles).toMatch(/\.profile-save-status\s*{[^}]*width:\s*34px;[^}]*height:\s*34px;/s);
+  });
 });
 
 describe('panel coordinate editor styles', () => {

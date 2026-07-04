@@ -1005,6 +1005,10 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
+    const stayDays = screen.getByRole('group', { name: 'Expected stay days' });
+    expect(within(stayDays).getByText('Day')).toBeInTheDocument();
+    expect(within(stayDays).queryByText('Days')).not.toBeInTheDocument();
+
     const decrement = screen.getByRole('button', { name: 'Decrease expected stay days' });
     expect(decrement).toBeDisabled();
     fireEvent.click(decrement);
@@ -1013,6 +1017,7 @@ describe('DestinationProfile', () => {
     expect(onUpdate).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Increase expected stay days' }));
+    expect(within(stayDays).getByText('Days')).toBeInTheDocument();
     await advanceAutosave();
 
     expect(onUpdate).toHaveBeenLastCalledWith(

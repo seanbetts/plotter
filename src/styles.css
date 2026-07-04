@@ -1168,8 +1168,8 @@ select {
 
 .profile-save-status {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   place-items: center;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);

@@ -465,6 +465,7 @@ function DestinationProfileForm({
   const tagsLabel = `${destinationTitle.trim() || destination.name} Tags`;
   const activitiesLabel = `${destinationTitle.trim() || destination.name} Activities`;
   const expectedStayDays = normalizeExpectedStayDays(form.expectedStayDays);
+  const expectedStayDaysLabel = expectedStayDays === 1 ? 'Day' : 'Days';
   const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
     .filter(Boolean)
     .join(' ');
@@ -651,7 +652,7 @@ function DestinationProfileForm({
           <div className="profile-stay-days" role="group" aria-label="Expected stay days">
             <div className="profile-stay-days-readout" aria-live="polite">
               <span className="profile-stay-days-number">{expectedStayDays}</span>
-              <span className="profile-stay-days-label">Days</span>
+              <span className="profile-stay-days-label">{expectedStayDaysLabel}</span>
             </div>
             <div className="profile-stay-days-controls">
               <button
