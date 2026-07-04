@@ -188,8 +188,8 @@ function ActivityPanelForm({
           latestDraftRef.current = nextDraft;
           return nextDraft;
         });
+        setSaveError('Unable to update activity.');
       }
-      setSaveError('Unable to update activity.');
     }
   }
 

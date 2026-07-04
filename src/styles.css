@@ -771,6 +771,7 @@ select {
   right: auto;
   bottom: auto;
   z-index: auto;
+  min-width: 0;
   max-height: 100%;
 }
 

@@ -6,11 +6,13 @@ import { ActivityPanel } from './ActivityPanel';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((promiseResolve) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
     resolve = promiseResolve;
+    reject = promiseReject;
   });
 
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function createMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
@@ -184,6 +186,40 @@ describe('ActivityPanel', () => {
       />,
     );
 
+    expect(screen.getByLabelText('Activity title')).toHaveValue('Evening Louvre');
+  });
+
+  it('does not show an error when an older title save rejects after a newer save succeeds', async () => {
+    const activity = createActivity({
+      destinationId: 'destination-1',
+      title: 'Louvre',
+      order: 0,
+    });
+    const firstTitleSave = deferred<void>();
+    const secondTitleSave = deferred<void>();
+    const onUpdateActivity = vi
+      .fn()
+      .mockReturnValueOnce(firstTitleSave.promise)
+      .mockReturnValueOnce(secondTitleSave.promise);
+
+    render(<ActivityPanel {...createProps({ activity, onUpdateActivity })} />);
+
+    fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
+    fireEvent.blur(screen.getByLabelText('Activity title'));
+    fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Evening Louvre' } });
+    fireEvent.blur(screen.getByLabelText('Activity title'));
+
+    await act(async () => {
+      secondTitleSave.resolve(undefined);
+      await secondTitleSave.promise;
+    });
+
+    await act(async () => {
+      firstTitleSave.reject(new Error('Older save failed'));
+      await firstTitleSave.promise.catch(() => undefined);
+    });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Activity title')).toHaveValue('Evening Louvre');
   });
 });
