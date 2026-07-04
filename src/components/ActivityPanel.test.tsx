@@ -147,14 +147,50 @@ describe('ActivityPanel', () => {
     render(<ActivityPanel {...createProps({ activity, onUpdateActivity })} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit coordinates' }));
+    expect(screen.getByLabelText('Latitude')).toHaveFocus();
     fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '48.861' } });
     fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '2.337' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save coordinates' }));
+    fireEvent.keyDown(screen.getByLabelText('Longitude'), { key: 'Enter' });
 
     expect(onUpdateActivity).toHaveBeenCalledWith(activity.id, {
       location: {
         ...location,
         coordinates: { lat: 48.861, lng: 2.337 },
+      },
+    });
+  });
+
+  it('fills both activity coordinate fields from a pasted coordinate pair', () => {
+    const onUpdateActivity = vi.fn();
+    const location: ActivityLocation = {
+      name: 'Louvre Museum',
+      address: 'Rue de Rivoli, 75001 Paris, France',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler',
+      sourceFeatureId: 'poi.123',
+    };
+    const activity = {
+      ...createActivity({ destinationId: 'destination-1', title: 'Louvre', order: 0, location }),
+      location,
+    };
+
+    render(<ActivityPanel {...createProps({ activity, onUpdateActivity })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit coordinates' }));
+    fireEvent.paste(screen.getByLabelText('Latitude'), {
+      clipboardData: {
+        getData: () => '48.8566, 2.3522',
+      },
+    });
+    expect(screen.getByLabelText('Latitude')).toHaveValue('48.8566');
+    expect(screen.getByLabelText('Longitude')).toHaveValue('2.3522');
+
+    fireEvent.keyDown(screen.getByLabelText('Latitude'), { key: 'Enter' });
+
+    expect(onUpdateActivity).toHaveBeenCalledWith(activity.id, {
+      location: {
+        ...location,
+        coordinates: { lat: 48.8566, lng: 2.3522 },
       },
     });
   });

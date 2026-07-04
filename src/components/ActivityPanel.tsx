@@ -1,6 +1,6 @@
 import { Check, CircleAlert, Copy, Pencil, X } from 'lucide-react';
 import { forwardRef, useEffect, useRef, useState } from 'react';
-import type { CSSProperties, Ref } from 'react';
+import type { ClipboardEvent, CSSProperties, KeyboardEvent, Ref } from 'react';
 import { formatLocationContext } from '../domain/locations';
 import type { Activity, ActivityLocation, Coordinates, MediaItem } from '../domain/types';
 import { ActivityImageStrip } from './ActivityImageStrip';
@@ -106,6 +106,20 @@ function parseCoordinateDraft(draft: CoordinateDraft):
   return { type: 'valid', coordinates: { lat, lng } };
 }
 
+function parsePastedCoordinatePair(value: string): CoordinateDraft | null {
+  const parts = value
+    .trim()
+    .split(',')
+    .map((part) => part.trim());
+
+  if (parts.length !== 2 || parts.some((part) => part === '')) return null;
+
+  const parsed = parseCoordinateDraft({ lat: parts[0], lng: parts[1] });
+  if (parsed.type === 'error') return null;
+
+  return { lat: parts[0], lng: parts[1] };
+}
+
 function createManualActivityLocation(title: string, coordinates: Coordinates): ActivityLocation {
   return {
     name: title.trim() || 'Activity',
@@ -170,6 +184,7 @@ function ActivityPanelForm({
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
   const [saveError, setSaveError] = useState('');
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const latitudeInputRef = useRef<HTMLInputElement | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const latestDraftRef = useRef(createActivityDraft(activity));
   const dirtyFieldsRef = useRef(new Set<ActivityDraftField>());
@@ -241,6 +256,13 @@ function ActivityPanelForm({
       titleInputRef.current?.select();
     }
   }, [isEditingTitle]);
+
+  useEffect(() => {
+    if (isEditingCoordinates) {
+      latitudeInputRef.current?.focus();
+      latitudeInputRef.current?.select();
+    }
+  }, [isEditingCoordinates]);
 
   useEffect(
     () => () => {
@@ -372,6 +394,28 @@ function ActivityPanelForm({
     }
   }
 
+  function handleCoordinatePaste(event: ClipboardEvent<HTMLInputElement>) {
+    const pastedPair = parsePastedCoordinatePair(event.clipboardData.getData('text'));
+    if (!pastedPair) return;
+
+    event.preventDefault();
+    setCoordinateError('');
+    setCoordinateDraft(pastedPair);
+  }
+
+  function handleCoordinateInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void saveCoordinates();
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelEditingCoordinates();
+    }
+  }
+
   async function copyCoordinate(value: string) {
     if (!navigator.clipboard) return;
 
@@ -438,12 +482,15 @@ function ActivityPanelForm({
               <label className="profile-coordinate-input-pill profile-coordinate-field">
                 <span className="profile-coordinate-label">Latitude</span>
                 <input
+                  ref={latitudeInputRef}
                   aria-label="Latitude"
                   inputMode="decimal"
                   value={coordinateDraft.lat}
                   onChange={(event) =>
                     setCoordinateDraft((current) => ({ ...current, lat: event.target.value }))
                   }
+                  onPaste={handleCoordinatePaste}
+                  onKeyDown={handleCoordinateInputKeyDown}
                 />
               </label>
               <label className="profile-coordinate-input-pill profile-coordinate-field">
@@ -455,6 +502,8 @@ function ActivityPanelForm({
                   onChange={(event) =>
                     setCoordinateDraft((current) => ({ ...current, lng: event.target.value }))
                   }
+                  onPaste={handleCoordinatePaste}
+                  onKeyDown={handleCoordinateInputKeyDown}
                 />
               </label>
               <button

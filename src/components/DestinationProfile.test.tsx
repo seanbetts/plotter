@@ -316,9 +316,51 @@ describe('DestinationProfile', () => {
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     fireEvent.click(within(header).getByRole('button', { name: 'Edit coordinates' }));
+    expect(screen.getByLabelText('Latitude')).toHaveFocus();
     fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '51.0581123' } });
     fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '-0.1339876' } });
     fireEvent.keyDown(screen.getByLabelText('Longitude'), { key: 'Enter' });
+
+    expect(onUpdate).toHaveBeenCalledWith(destination.id, {
+      coordinates: { lat: 51.05811, lng: -0.13399 },
+    });
+  });
+
+  it('fills both coordinate fields from a pasted coordinate pair', async () => {
+    const destination = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+    const onUpdate = vi.fn();
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={onUpdate}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    fireEvent.click(within(header).getByRole('button', { name: 'Edit coordinates' }));
+    fireEvent.paste(screen.getByLabelText('Latitude'), {
+      clipboardData: {
+        getData: () => '51.0581123, -0.1339876',
+      },
+    });
+    expect(screen.getByLabelText('Latitude')).toHaveValue('51.0581123');
+    expect(screen.getByLabelText('Longitude')).toHaveValue('-0.1339876');
+
+    fireEvent.keyDown(screen.getByLabelText('Latitude'), { key: 'Enter' });
 
     expect(onUpdate).toHaveBeenCalledWith(destination.id, {
       coordinates: { lat: 51.05811, lng: -0.13399 },

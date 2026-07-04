@@ -56,4 +56,12 @@ describe('activity list styles', () => {
   it('keeps activity rows tightly spaced', () => {
     expect(styles).toMatch(/\.activity-list\s*{[^}]*gap:\s*2px;/s);
   });
+
+  it('uses the shared itinerary row hover treatment for stops and activities', () => {
+    expect(styles).toMatch(/\.stop-item,\s*\.activity-row\s*{[^}]*background:\s*var\(--surface-row\);/s);
+    expect(styles).toMatch(
+      /\.stop-item:hover,\s*\.stop-item:focus-within,\s*\.activity-row:hover,\s*\.activity-row:focus-within\s*{[^}]*border-color:\s*var\(--border-hover\);[^}]*background:\s*var\(--surface-control-hover\);/s,
+    );
+    expect(styles).not.toMatch(/\.activity-select:hover,\s*\.activity-select:focus-visible/s);
+  });
 });

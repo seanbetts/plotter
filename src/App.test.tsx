@@ -932,6 +932,138 @@ describe('App', () => {
     );
   });
 
+  it('reverse geocodes coordinates edited on a stop before saving the updated address', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'place-balcombe',
+      },
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'place-crawley',
+        label: 'Crawley, West Sussex, United Kingdom',
+        placeName: 'Crawley',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        coordinates: { lat: 51.1091, lng: -0.1872 },
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Select Balcombe' }));
+    const stopPanel = screen.getByRole('complementary', { name: 'Balcombe profile' });
+    await user.click(within(stopPanel).getByRole('button', { name: 'Edit coordinates' }));
+    await user.clear(within(stopPanel).getByLabelText('Latitude'));
+    await user.type(within(stopPanel).getByLabelText('Latitude'), '51.1091');
+    await user.clear(within(stopPanel).getByLabelText('Longitude'));
+    await user.type(within(stopPanel).getByLabelText('Longitude'), '-0.1872');
+    await user.keyboard('{Enter}');
+
+    expect(resolveMapTilerCoordinates).toHaveBeenCalledWith(
+      { lat: 51.1091, lng: -0.1872 },
+      { apiKey: expect.any(String), profile: 'stop' },
+    );
+    await waitFor(() =>
+      expect(repositoryMock.saveDestination).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: destination.id,
+          coordinates: { lat: 51.1091, lng: -0.1872 },
+          countryRegion: 'United Kingdom',
+          location: expect.objectContaining({
+            placeName: 'Crawley',
+            regionName: 'West Sussex',
+            countryName: 'United Kingdom',
+            sourceProvider: 'maptiler',
+            sourceFeatureId: 'place-crawley',
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('reverse geocodes coordinate edits for an existing activity location', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const location: ActivityLocation = {
+      name: 'Louvre Museum',
+      address: 'Rue de Rivoli, 75001 Paris, France',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler',
+      sourceFeatureId: 'poi-louvre',
+    };
+    const louvre = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+      location,
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listActivities.mockResolvedValue([louvre] satisfies Activity[]);
+    const updateActivityMock = repositoryMock.updateActivity as unknown as Mock<TripRepository['updateActivity']>;
+    updateActivityMock.mockImplementation(async (activityId, patch) => ({
+      ...louvre,
+      id: activityId,
+      ...patch,
+      updatedAt: '2026-07-04T12:00:00.000Z',
+    }));
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'reverse.75001',
+        label: '6 Place de l Hotel de Ville, 75004 Paris, France',
+        placeName: 'Hotel de Ville',
+        regionName: 'Ile-de-France',
+        countryName: 'France',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
+    const activityPanel = screen.getByRole('complementary', { name: 'Louvre activity' });
+    await user.click(within(activityPanel).getByRole('button', { name: 'Edit coordinates' }));
+    await user.clear(within(activityPanel).getByLabelText('Latitude'));
+    await user.type(within(activityPanel).getByLabelText('Latitude'), '48.8566');
+    await user.clear(within(activityPanel).getByLabelText('Longitude'));
+    await user.type(within(activityPanel).getByLabelText('Longitude'), '2.3522');
+    await user.keyboard('{Enter}');
+
+    expect(resolveMapTilerCoordinates).toHaveBeenCalledWith(
+      { lat: 48.8566, lng: 2.3522 },
+      { apiKey: expect.any(String), profile: 'activity' },
+    );
+    await waitFor(() =>
+      expect(repositoryMock.updateActivity).toHaveBeenCalledWith(louvre.id, {
+        location: {
+          name: 'Hotel de Ville',
+          address: 'Hotel de Ville, Ile-de-France, France',
+          coordinates: { lat: 48.8566, lng: 2.3522 },
+          sourceProvider: 'maptiler',
+          sourceFeatureId: 'reverse.75001',
+        },
+      }),
+    );
+  });
+
   it('closes only the activity panel with Escape', async () => {
     const user = userEvent.setup();
     const destination = createDestination({

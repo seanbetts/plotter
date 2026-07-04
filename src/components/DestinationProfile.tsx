@@ -1,6 +1,6 @@
 import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent } from 'react';
+import type { ClipboardEvent, CSSProperties, KeyboardEvent } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import { formatLocationContext, formatLocationParts } from '../domain/locations';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem } from '../domain/types';
@@ -114,6 +114,22 @@ const createCoordinateDraft = (destination: Destination): CoordinateDraft => ({
   lng: formatCoordinateValue(destination.coordinates.lng),
 });
 
+function parsePastedCoordinatePair(value: string): CoordinateDraft | null {
+  const parts = value
+    .trim()
+    .split(',')
+    .map((part) => part.trim());
+
+  if (parts.length !== 2 || parts.some((part) => part === '')) return null;
+
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null;
+
+  return { lat: parts[0], lng: parts[1] };
+}
+
 const createFormState = (destination: Destination): DestinationFormState => ({
   sourceKey: destinationSourceKey(destination),
   name: destination.name,
@@ -198,6 +214,7 @@ function DestinationProfileForm({
   const savedStatusTimerRef = useRef<number | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const latitudeInputRef = useRef<HTMLInputElement | null>(null);
   const editRevisionRef = useRef(0);
   const savedRevisionRef = useRef(0);
   const saveSequenceRef = useRef(0);
@@ -242,6 +259,13 @@ function DestinationProfileForm({
       nameInputRef.current?.select();
     }
   }, [isEditingName]);
+
+  useEffect(() => {
+    if (isEditingCoordinates) {
+      latitudeInputRef.current?.focus();
+      latitudeInputRef.current?.select();
+    }
+  }, [isEditingCoordinates]);
 
   const autosave = useCallback(
     async (
@@ -408,6 +432,15 @@ function DestinationProfileForm({
     }
   }
 
+  function handleCoordinatePaste(event: ClipboardEvent<HTMLInputElement>) {
+    const pastedPair = parsePastedCoordinatePair(event.clipboardData.getData('text'));
+    if (!pastedPair) return;
+
+    event.preventDefault();
+    setCoordinateError('');
+    setCoordinateDraft(pastedPair);
+  }
+
   const saveStatusText = statusTextForSaveStatus(saveStatus);
   const saveStatusClassName = ['profile-save-status', saveStatus !== 'idle' ? `is-${saveStatus}` : '']
     .filter(Boolean)
@@ -496,12 +529,14 @@ function DestinationProfileForm({
               <label className="profile-coordinate-input-pill profile-coordinate-field">
                 <span className="profile-coordinate-label">Latitude</span>
                 <input
+                  ref={latitudeInputRef}
                   aria-label="Latitude"
                   inputMode="decimal"
                   value={coordinateDraft.lat}
                   onChange={(event) =>
                     setCoordinateDraft((current) => ({ ...current, lat: event.target.value }))
                   }
+                  onPaste={handleCoordinatePaste}
                   onKeyDown={handleCoordinateInputKeyDown}
                 />
               </label>
@@ -514,6 +549,7 @@ function DestinationProfileForm({
                   onChange={(event) =>
                     setCoordinateDraft((current) => ({ ...current, lng: event.target.value }))
                   }
+                  onPaste={handleCoordinatePaste}
                   onKeyDown={handleCoordinateInputKeyDown}
                 />
               </label>

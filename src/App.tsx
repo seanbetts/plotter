@@ -14,7 +14,14 @@ import { MapCanvas } from './components/MapCanvas';
 import type { MapAddStopRequest } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
-import type { Activity, ActivityLocation, Coordinates, DestinationLocation, MediaRollupItem } from './domain/types';
+import type {
+  Activity,
+  ActivityLocation,
+  Coordinates,
+  Destination,
+  DestinationLocation,
+  MediaRollupItem,
+} from './domain/types';
 import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
@@ -122,10 +129,19 @@ function createActivityLocationFromPlaceResult(
   };
 }
 
+function createDestinationLocationFromPlaceResult(
+  result: Extract<PlaceSearchResult, { kind: 'place' }>,
+): DestinationLocation {
+  return {
+    ...result.location,
+    sourceProvider: 'maptiler',
+  };
+}
+
 function shouldResolveActivityLocation(location: ActivityLocation | undefined): location is ActivityLocation & {
   coordinates: Coordinates;
 } {
-  return Boolean(location?.coordinates && location.sourceProvider === 'manual');
+  return Boolean(location?.coordinates);
 }
 
 function clampOverlayPosition(
@@ -616,6 +632,35 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     setSelectedActivityId(null);
   }, []);
 
+  const handleUpdateDestinationPanel = useCallback(
+    async (
+      destinationId: string,
+      patch: Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>,
+    ) => {
+      let nextPatch = patch;
+
+      if (patch.coordinates) {
+        try {
+          const resolvedLocation = await resolveMapTilerCoordinates(patch.coordinates, {
+            apiKey: mapTilerApiKey,
+            profile: 'stop',
+          });
+          nextPatch = {
+            ...patch,
+            countryRegion: resolvedLocation.location.countryName,
+            coordinates: resolvedLocation.coordinates,
+            location: createDestinationLocationFromPlaceResult(resolvedLocation),
+          };
+        } catch {
+          nextPatch = patch;
+        }
+      }
+
+      await updateDestination(destinationId, nextPatch);
+    },
+    [updateDestination],
+  );
+
   const handleCreateActivity = useCallback(
     async (destinationId: string, input: { title: string; location?: ActivityLocation }) => {
       const activity = await createActivity({
@@ -826,7 +871,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               searchActivities={searchActivityPlaces}
               onDeleteActivity={handleDeleteActivity}
               onReorderActivities={reorderActivities}
-              onUpdate={updateDestination}
+              onUpdate={handleUpdateDestinationPanel}
               onUploadMedia={handleDestinationMediaUpload}
               onReorderMedia={handleDestinationMediaReorder}
               onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'destination-rollup' })}
