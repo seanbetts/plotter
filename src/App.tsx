@@ -44,6 +44,12 @@ type OverlayPosition = {
   y: number;
 };
 
+type PreviewMediaSource = 'destination-rollup' | 'activity' | 'destination';
+type PreviewMediaSelection = {
+  mediaId: string;
+  source: PreviewMediaSource;
+};
+
 const overlayViewportPaddingPx = 16;
 const mapStopConfirmationApproxSize = {
   width: 320,
@@ -206,11 +212,13 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
-  const [previewMediaId, setPreviewMediaId] = useState<string | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<PreviewMediaSelection | null>(null);
   const [destinationMediaRollupItems, setDestinationMediaRollupItems] = useState<MediaRollupItem[]>([]);
   const [isDestinationMediaRollupLoading, setIsDestinationMediaRollupLoading] = useState(false);
   const [destinationMediaRollupError, setDestinationMediaRollupError] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
+  const selectedDestinationIdRef = useRef<string | null>(null);
+  const rollupLoadSequenceRef = useRef(0);
   const pendingMapStopRequestIdRef = useRef(0);
   const activePendingMapStopIdRef = useRef<number | null>(null);
   const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
@@ -246,18 +254,19 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     selectedActivity?.id ?? null,
   );
   const previewMediaRollupItem =
-    previewMediaId === null
-      ? null
-      : destinationMediaRollupItems.find((rollupItem) => rollupItem.mediaItem.id === previewMediaId) ?? null;
-  const previewMediaNavigationItems = previewMediaRollupItem
-    ? destinationMediaRollupItems.map((rollupItem) => rollupItem.mediaItem)
-    : selectedActivity?.id && activityMedia.mediaItems.some((mediaItem) => mediaItem.id === previewMediaId)
-      ? activityMedia.mediaItems
-      : destinationMedia.mediaItems;
+    previewMedia?.source === 'destination-rollup'
+      ? destinationMediaRollupItems.find((rollupItem) => rollupItem.mediaItem.id === previewMedia.mediaId) ?? null
+      : null;
+  const previewMediaNavigationItems =
+    previewMedia?.source === 'destination-rollup'
+      ? destinationMediaRollupItems.map((rollupItem) => rollupItem.mediaItem)
+      : previewMedia?.source === 'activity'
+        ? activityMedia.mediaItems
+        : destinationMedia.mediaItems;
   const previewMediaIndex =
-    previewMediaId === null
+    previewMedia === null
       ? -1
-      : previewMediaNavigationItems.findIndex((mediaItem) => mediaItem.id === previewMediaId);
+      : previewMediaNavigationItems.findIndex((mediaItem) => mediaItem.id === previewMedia.mediaId);
   const previewMediaItem =
     previewMediaIndex === -1
       ? null
@@ -306,11 +315,21 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   }, [isInteractionLocked, pendingMapStopId]);
 
   useEffect(() => {
-    setPreviewMediaId(null);
+    selectedDestinationIdRef.current = selectedDestinationId;
   }, [selectedDestinationId]);
 
-  const reloadDestinationMediaRollup = useCallback(async () => {
-    if (!selectedDestinationId) {
+  useEffect(() => {
+    setPreviewMedia(null);
+  }, [selectedDestinationId]);
+
+  const loadDestinationMediaRollup = useCallback(async (destinationId: string | null) => {
+    const loadSequence = rollupLoadSequenceRef.current + 1;
+    rollupLoadSequenceRef.current = loadSequence;
+    const isCurrentLoad = () =>
+      rollupLoadSequenceRef.current === loadSequence &&
+      selectedDestinationIdRef.current === destinationId;
+
+    if (!destinationId) {
       setDestinationMediaRollupItems([]);
       setIsDestinationMediaRollupLoading(false);
       setDestinationMediaRollupError(null);
@@ -321,51 +340,30 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     setDestinationMediaRollupError(null);
 
     try {
-      setDestinationMediaRollupItems(await repository.listDestinationMediaRollup(selectedDestinationId));
+      const rollupItems = await repository.listDestinationMediaRollup(destinationId);
+      if (!isCurrentLoad()) return;
+
+      setDestinationMediaRollupItems(rollupItems);
     } catch (caught) {
+      if (!isCurrentLoad()) return;
+
       setDestinationMediaRollupError(
         caught instanceof Error ? caught.message : 'Unable to load images.',
       );
     } finally {
-      setIsDestinationMediaRollupLoading(false);
+      if (isCurrentLoad()) {
+        setIsDestinationMediaRollupLoading(false);
+      }
     }
-  }, [repository, selectedDestinationId]);
+  }, [repository]);
+
+  const reloadDestinationMediaRollup = useCallback(async () => {
+    await loadDestinationMediaRollup(selectedDestinationIdRef.current);
+  }, [loadDestinationMediaRollup]);
 
   useEffect(() => {
-    let isCancelled = false;
-
-    if (!selectedDestinationId) {
-      setDestinationMediaRollupItems([]);
-      setIsDestinationMediaRollupLoading(false);
-      setDestinationMediaRollupError(null);
-      return undefined;
-    }
-
-    setIsDestinationMediaRollupLoading(true);
-    setDestinationMediaRollupError(null);
-    repository.listDestinationMediaRollup(selectedDestinationId)
-      .then((rollupItems) => {
-        if (isCancelled) return;
-
-        setDestinationMediaRollupItems(rollupItems);
-      })
-      .catch((caught) => {
-        if (isCancelled) return;
-
-        setDestinationMediaRollupError(
-          caught instanceof Error ? caught.message : 'Unable to load images.',
-        );
-      })
-      .finally(() => {
-        if (isCancelled) return;
-
-        setIsDestinationMediaRollupLoading(false);
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [repository, selectedDestinationId]);
+    void loadDestinationMediaRollup(selectedDestinationId);
+  }, [loadDestinationMediaRollup, selectedDestinationId]);
 
   useEffect(() => {
     if (previewMediaIndex === -1 || previewMediaNavigationItems.length < 2) return;
@@ -601,12 +599,15 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
 
   function navigatePreviewMedia(mediaId: string, direction: -1 | 1) {
     const currentIndex = previewMediaNavigationItems.findIndex((mediaItem) => mediaItem.id === mediaId);
-    if (currentIndex === -1 || previewMediaNavigationItems.length === 0) return;
+    if (!previewMedia || currentIndex === -1 || previewMediaNavigationItems.length === 0) return;
 
     const targetIndex =
       (currentIndex + direction + previewMediaNavigationItems.length) % previewMediaNavigationItems.length;
 
-    setPreviewMediaId(previewMediaNavigationItems[targetIndex].id);
+    setPreviewMedia({
+      mediaId: previewMediaNavigationItems[targetIndex].id,
+      source: previewMedia.source,
+    });
   }
 
   async function deletePreviewMedia(mediaId: string) {
@@ -616,7 +617,9 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         ? null
         : previewMediaNavigationItems[currentIndex + 1] ?? previewMediaNavigationItems[currentIndex - 1] ?? null;
 
-    if (previewMediaRollupItem?.ownerType === 'activity') {
+    if (previewMedia?.source === 'activity') {
+      await Promise.resolve(activityMedia.deleteMedia(mediaId));
+    } else if (previewMediaRollupItem?.ownerType === 'activity') {
       await repository.deleteActivityMedia(mediaId);
       if (previewMediaRollupItem.activityId === selectedActivity?.id) {
         await activityMedia.reload();
@@ -625,7 +628,11 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
       await Promise.resolve(destinationMedia.deleteMedia(mediaId));
     }
     await reloadDestinationMediaRollup();
-    setPreviewMediaId(nextPreviewMediaItem?.id ?? null);
+    setPreviewMedia(
+      nextPreviewMediaItem && previewMedia
+        ? { mediaId: nextPreviewMediaItem.id, source: previewMedia.source }
+        : null,
+    );
   }
 
   return (
@@ -711,7 +718,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
                 onUpdateActivity={handleUpdateActivityPanel}
                 onUploadMedia={handleActivityMediaUpload}
                 onReorderMedia={handleActivityMediaReorder}
-                onOpenMediaPreview={setPreviewMediaId}
+                onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'activity' })}
               />
             ) : null}
             <DestinationProfile
@@ -732,7 +739,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               onUpdate={updateDestination}
               onUploadMedia={handleDestinationMediaUpload}
               onReorderMedia={handleDestinationMediaReorder}
-              onOpenMediaPreview={setPreviewMediaId}
+              onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'destination-rollup' })}
               onClose={handleCloseDestinationProfile}
             />
           </div>
@@ -751,7 +758,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
             onDelete={deletePreviewMedia}
             onNavigatePrevious={(mediaId) => navigatePreviewMedia(mediaId, -1)}
             onNavigateNext={(mediaId) => navigatePreviewMedia(mediaId, 1)}
-            onClose={() => setPreviewMediaId(null)}
+            onClose={() => setPreviewMedia(null)}
           />
         ) : null}
         {isInteractionLocked ? (

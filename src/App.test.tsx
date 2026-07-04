@@ -27,6 +27,7 @@ type MockMap = {
   getCanvas: Mock;
   getZoom: Mock;
   getCenter: Mock;
+  fitBounds: Mock;
   unproject: Mock;
   project: Mock;
 };
@@ -53,6 +54,7 @@ const maplibreMock = vi.hoisted(() => {
       getCanvas: vi.fn(() => ({ style: { cursor: '' } })),
       getZoom: vi.fn(() => 1.4),
       getCenter: vi.fn(() => ({ lat: 24, lng: 18 })),
+      fitBounds: vi.fn(),
       unproject: vi.fn(([x, y]: [number, number]) => ({ lng: (x - 1000) / 10, lat: (500 - y) / 10 })),
       project,
     };
@@ -85,7 +87,7 @@ const repositoryMock = vi.hoisted(() => {
         (leg) => leg.originDestinationId !== destinationId && leg.targetDestinationId !== destinationId,
       );
     }),
-    listActivities: vi.fn(async (): Promise<Activity[]> => []),
+    listActivities: vi.fn(async (_destinationId: string): Promise<Activity[]> => []),
     createActivity: vi.fn(async (input: { destinationId: string; title: string }): Promise<Activity> => ({
       id: 'activity-mock',
       destinationId: input.destinationId,
@@ -134,7 +136,7 @@ const repositoryMock = vi.hoisted(() => {
     updateDestinationMedia: vi.fn(),
     deleteDestinationMedia: vi.fn(),
     reorderDestinationMedia: vi.fn(),
-    listDestinationMediaRollup: vi.fn(async (): Promise<MediaRollupItem[]> => []),
+    listDestinationMediaRollup: vi.fn(async (_destinationId: string): Promise<MediaRollupItem[]> => []),
     listActivityMedia: vi.fn(async (): Promise<MediaItem[]> => []),
     uploadActivityMedia: vi.fn(),
     updateActivityMedia: vi.fn(),
@@ -946,6 +948,85 @@ describe('App', () => {
     expect(repositoryMock.reorderDestinationMedia).not.toHaveBeenCalled();
   });
 
+  it('keeps activity panel preview navigation scoped to activity media when the image also appears in stop rollup', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const louvre = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listActivities.mockResolvedValue([louvre] satisfies Activity[]);
+    repositoryMock.listActivityMedia.mockResolvedValue([
+      createMediaItem({
+        id: 'activity-media-1',
+        url: '/louvre.jpg',
+        caption: 'Museum wing',
+        fullUrl: '/louvre-full.jpg',
+        sortOrder: 0,
+      }),
+      createMediaItem({
+        id: 'activity-media-2',
+        url: '/louvre-detail.jpg',
+        caption: 'Activity detail',
+        fullUrl: '/louvre-detail-full.jpg',
+        sortOrder: 1,
+      }),
+    ]);
+    repositoryMock.listDestinationMediaRollup.mockResolvedValue([
+      {
+        mediaItem: createMediaItem({
+          id: 'stop-media-1',
+          url: '/paris.jpg',
+          caption: 'Paris street',
+          fullUrl: '/paris-full.jpg',
+          sortOrder: 0,
+        }),
+        ownerType: 'destination',
+        destinationId: destination.id,
+        canReorderInStopCarousel: true,
+      },
+      {
+        mediaItem: createMediaItem({
+          id: 'activity-media-1',
+          url: '/louvre.jpg',
+          caption: 'Museum wing',
+          fullUrl: '/louvre-full.jpg',
+          sortOrder: 0,
+        }),
+        ownerType: 'activity',
+        destinationId: destination.id,
+        activityId: louvre.id,
+        activityTitle: 'Louvre',
+        canReorderInStopCarousel: false,
+      },
+    ] satisfies MediaRollupItem[]);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
+    const activityPanel = screen.getByRole('complementary', { name: 'Louvre activity' });
+    await user.click(await within(activityPanel).findByRole('button', { name: 'Open full image: Museum wing' }));
+
+    const preview = screen.getByRole('dialog', { name: 'Image preview' });
+    expect(within(preview).queryByText('Louvre')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Next full image' }));
+
+    expect(within(preview).getByRole('img', { name: 'Activity detail' })).toHaveAttribute(
+      'src',
+      '/louvre-detail-full.jpg',
+    );
+    expect(repositoryMock.reorderDestinationMedia).not.toHaveBeenCalled();
+  });
+
   it('keeps modal previous and next navigation from reordering rollup images', async () => {
     const user = userEvent.setup();
     const destination = createDestination({
@@ -1003,6 +1084,88 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Previous full image' }));
     expect(within(preview).getByRole('img', { name: 'Paris street' })).toHaveAttribute('src', '/paris-full.jpg');
     expect(repositoryMock.reorderDestinationMedia).not.toHaveBeenCalled();
+  });
+
+  it('ignores stale stop rollup reloads after switching stops during activity media upload', async () => {
+    const user = userEvent.setup();
+    const paris = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+      order: 0,
+    });
+    const rome = createDestination({
+      name: 'Rome',
+      countryRegion: 'Italy',
+      coordinates: { lat: 41.9028, lng: 12.4964 },
+      order: 1,
+    });
+    const louvre = createActivity({
+      destinationId: paris.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    const upload = createDeferred<MediaItem>();
+    const file = new File(['image-bytes'], 'louvre.jpg', { type: 'image/jpeg' });
+    repositoryMock.initialDestinations = Promise.resolve([paris, rome]);
+    repositoryMock.listActivities.mockImplementation(async (destinationId: string) =>
+      destinationId === paris.id ? [louvre] : [],
+    );
+    repositoryMock.uploadActivityMedia.mockReturnValue(upload.promise);
+    repositoryMock.listDestinationMediaRollup.mockImplementation(async (destinationId: string) =>
+      destinationId === paris.id
+        ? [
+            {
+              mediaItem: createMediaItem({
+                id: 'paris-stale-media',
+                url: '/paris-stale.jpg',
+                caption: 'Paris stale',
+              }),
+              ownerType: 'destination',
+              destinationId: paris.id,
+              canReorderInStopCarousel: true,
+            },
+          ]
+        : [
+            {
+              mediaItem: createMediaItem({
+                id: 'rome-media',
+                url: '/rome.jpg',
+                caption: 'Rome street',
+              }),
+              ownerType: 'destination',
+              destinationId: rome.id,
+              canReorderInStopCarousel: true,
+            },
+          ],
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
+    await user.upload(
+      screen.getByLabelText('Choose activity images file input') as HTMLInputElement,
+      file,
+    );
+    await user.click(screen.getByRole('button', { name: 'Rome, Italy' }));
+
+    expect(await screen.findByRole('button', { name: 'Open full image: Rome street' })).toBeInTheDocument();
+
+    await act(async () => {
+      upload.resolve(
+        createMediaItem({
+          id: 'activity-uploaded',
+          url: '/louvre.jpg',
+          caption: 'Uploaded Louvre',
+        }),
+      );
+      await upload.promise;
+    });
+
+    expect(screen.getByRole('button', { name: 'Open full image: Rome street' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open full image: Paris stale' })).not.toBeInTheDocument();
   });
 
   it('keeps mutation actions unavailable while trip data is loading', async () => {

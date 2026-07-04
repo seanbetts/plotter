@@ -99,7 +99,14 @@ function ActivityPanelForm({
   useEffect(() => {
     setDraft(createActivityDraft(activity));
     setSaveError('');
-  }, [activity, sourceKey]);
+  }, [
+    activity.description,
+    activity.notes,
+    activity.priority,
+    activity.status,
+    activity.title,
+    sourceKey,
+  ]);
 
   function updateDraft<Field extends ActivityDraftField>(field: Field, value: ActivityDraft[Field]) {
     setSaveError('');
