@@ -872,6 +872,66 @@ describe('App', () => {
     expect(repositoryMock.listActivityMedia).toHaveBeenCalledWith(louvre.id);
   });
 
+  it('reverse geocodes coordinates entered for a manual activity location', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const bakery = createActivity({
+      destinationId: destination.id,
+      title: 'Bakery crawl',
+      order: 0,
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listActivities.mockResolvedValue([bakery] satisfies Activity[]);
+    const updateActivityMock = repositoryMock.updateActivity as unknown as Mock<TripRepository['updateActivity']>;
+    updateActivityMock.mockImplementation(async (activityId, patch) => ({
+      ...bakery,
+      id: activityId,
+      ...patch,
+      updatedAt: '2026-07-04T12:00:00.000Z',
+    }));
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'reverse.75001',
+        label: 'Rue de Rivoli, 75001 Paris, France',
+        placeName: 'Rue de Rivoli',
+        regionName: 'Ile-de-France',
+        countryName: 'France',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.click(await screen.findByRole('button', { name: 'Select activity Bakery crawl' }));
+    const activityPanel = screen.getByRole('complementary', { name: 'Bakery crawl activity' });
+    await user.click(within(activityPanel).getByRole('button', { name: 'Edit coordinates' }));
+    await user.type(within(activityPanel).getByLabelText('Latitude'), '48.8566');
+    await user.type(within(activityPanel).getByLabelText('Longitude'), '2.3522');
+    await user.click(within(activityPanel).getByRole('button', { name: 'Save coordinates' }));
+
+    expect(resolveMapTilerCoordinates).toHaveBeenCalledWith(
+      { lat: 48.8566, lng: 2.3522 },
+      { apiKey: expect.any(String), profile: 'activity' },
+    );
+    await waitFor(() =>
+      expect(repositoryMock.updateActivity).toHaveBeenCalledWith(bakery.id, {
+        location: {
+          name: 'Rue de Rivoli',
+          address: 'Rue de Rivoli, Ile-de-France, France',
+          coordinates: { lat: 48.8566, lng: 2.3522 },
+          sourceProvider: 'maptiler',
+          sourceFeatureId: 'reverse.75001',
+        },
+      }),
+    );
+  });
+
   it('closes only the activity panel with Escape', async () => {
     const user = userEvent.setup();
     const destination = createDestination({

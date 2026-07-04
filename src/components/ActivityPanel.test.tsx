@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createActivity } from '../domain/activities';
 import type { ActivityLocation, MediaItem } from '../domain/types';
@@ -152,6 +152,39 @@ describe('ActivityPanel', () => {
       location: {
         ...location,
         coordinates: { lat: 48.861, lng: 2.337 },
+      },
+    });
+  });
+
+  it('shows TBC location fields for a manual activity and saves new coordinates', () => {
+    const onUpdateActivity = vi.fn();
+    const activity = createActivity({
+      destinationId: 'destination-1',
+      title: 'Bakery crawl',
+      order: 0,
+    });
+
+    render(<ActivityPanel {...createProps({ activity, onUpdateActivity })} />);
+
+    const panel = screen.getByRole('complementary', { name: 'Bakery crawl activity' });
+    expect(panel.querySelector('.activity-location-address')).toHaveTextContent('TBC');
+    expect(within(panel).getByLabelText('Coordinates')).toHaveTextContent('LatitudeTBC');
+    expect(within(panel).getByLabelText('Coordinates')).toHaveTextContent('LongitudeTBC');
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Edit coordinates' }));
+    expect(within(panel).getByLabelText('Latitude')).toHaveValue('');
+    expect(within(panel).getByLabelText('Longitude')).toHaveValue('');
+
+    fireEvent.change(within(panel).getByLabelText('Latitude'), { target: { value: '48.8566' } });
+    fireEvent.change(within(panel).getByLabelText('Longitude'), { target: { value: '2.3522' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Save coordinates' }));
+
+    expect(onUpdateActivity).toHaveBeenCalledWith(activity.id, {
+      location: {
+        name: 'Bakery crawl',
+        address: 'TBC',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+        sourceProvider: 'manual',
       },
     });
   });

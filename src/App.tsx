@@ -4,6 +4,7 @@ import {
   resolveMapTilerCoordinates,
   searchMapTilerPlaces,
 } from './adapters/geocoding';
+import type { PlaceSearchResult } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
 import { ActivityPanel } from './components/ActivityPanel';
 import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
@@ -107,6 +108,24 @@ function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, '
       countryRegion: formatCoordinatePair(coordinates),
     }),
   };
+}
+
+function createActivityLocationFromPlaceResult(
+  result: Extract<PlaceSearchResult, { kind: 'place' }>,
+): ActivityLocation {
+  return {
+    name: result.location.placeName,
+    address: result.address ?? result.location.sourceLabel,
+    coordinates: result.coordinates,
+    sourceProvider: 'maptiler',
+    sourceFeatureId: result.location.sourceFeatureId,
+  };
+}
+
+function shouldResolveActivityLocation(location: ActivityLocation | undefined): location is ActivityLocation & {
+  coordinates: Coordinates;
+} {
+  return Boolean(location?.coordinates && location.sourceProvider === 'manual');
 }
 
 function clampOverlayPosition(
@@ -624,7 +643,24 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
       activityId: string,
       patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority' | 'tags' | 'location'>>,
     ) => {
-      await updateActivity(activityId, patch);
+      let nextPatch = patch;
+
+      if (shouldResolveActivityLocation(patch.location)) {
+        try {
+          const resolvedLocation = await resolveMapTilerCoordinates(patch.location.coordinates, {
+            apiKey: mapTilerApiKey,
+            profile: 'activity',
+          });
+          nextPatch = {
+            ...patch,
+            location: createActivityLocationFromPlaceResult(resolvedLocation),
+          };
+        } catch {
+          nextPatch = patch;
+        }
+      }
+
+      await updateActivity(activityId, nextPatch);
     },
     [updateActivity],
   );

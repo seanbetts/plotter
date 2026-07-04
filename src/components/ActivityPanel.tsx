@@ -2,7 +2,7 @@ import { Check, CircleAlert, Copy, Pencil, X } from 'lucide-react';
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, Ref } from 'react';
 import { formatLocationContext } from '../domain/locations';
-import type { Activity, Coordinates, MediaItem } from '../domain/types';
+import type { Activity, ActivityLocation, Coordinates, MediaItem } from '../domain/types';
 import { ActivityImageStrip } from './ActivityImageStrip';
 
 type ActivityPanelProps = {
@@ -72,6 +72,7 @@ const profileTitleControlStyle = {
   '--profile-title-block-padding': '0px',
   '--profile-title-inline-padding': '0px',
 } as CSSProperties;
+const missingLocationText = 'TBC';
 
 function formatCoordinate(value: number) {
   return value.toFixed(4);
@@ -103,6 +104,15 @@ function parseCoordinateDraft(draft: CoordinateDraft):
   }
 
   return { type: 'valid', coordinates: { lat, lng } };
+}
+
+function createManualActivityLocation(title: string, coordinates: Coordinates): ActivityLocation {
+  return {
+    name: title.trim() || 'Activity',
+    address: missingLocationText,
+    coordinates,
+    sourceProvider: 'manual',
+  };
 }
 
 export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(function ActivityPanel({
@@ -186,6 +196,7 @@ function ActivityPanelForm({
   const activityAddressContext = activityLocation?.address
     ? formatLocationContext(activityLocation.address, activityDisplayTitle)
     : '';
+  const activityAddressText = activityAddressContext || missingLocationText;
 
   useEffect(() => {
     setDraft((current) => {
@@ -337,8 +348,6 @@ function ActivityPanelForm({
   }
 
   async function saveCoordinates() {
-    if (!activityLocation) return;
-
     const parsed = parseCoordinateDraft(coordinateDraft);
     if (parsed.type === 'error') {
       setCoordinateError(parsed.error);
@@ -349,10 +358,12 @@ function ActivityPanelForm({
     try {
       await Promise.resolve(
         onUpdateActivity(activity.id, {
-          location: {
-            ...activityLocation,
-            coordinates: parsed.coordinates,
-          },
+          location: activityLocation
+            ? {
+                ...activityLocation,
+                coordinates: parsed.coordinates,
+              }
+            : createManualActivityLocation(activityDisplayTitle, parsed.coordinates),
         }),
       );
       setIsEditingCoordinates(false);
@@ -380,8 +391,8 @@ function ActivityPanelForm({
   }
 
   const coordinatesText = activityCoordinates ? formatCoordinatePair(activityCoordinates) : '';
-  const latitudeText = activityCoordinates ? formatCoordinate(activityCoordinates.lat) : '';
-  const longitudeText = activityCoordinates ? formatCoordinate(activityCoordinates.lng) : '';
+  const latitudeText = activityCoordinates ? formatCoordinate(activityCoordinates.lat) : missingLocationText;
+  const longitudeText = activityCoordinates ? formatCoordinate(activityCoordinates.lng) : missingLocationText;
   const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
     .filter(Boolean)
     .join(' ');
@@ -421,77 +432,75 @@ function ActivityPanelForm({
               <h1>{activityDisplayTitle}</h1>
             </button>
           )}
-          {activityAddressContext ? (
-            <p className="activity-location-address">{activityAddressContext}</p>
-          ) : null}
-          {activityCoordinates ? (
-            isEditingCoordinates ? (
-              <div className="profile-coordinate-editor" aria-label="Edit coordinates">
-                <label className="profile-coordinate-input-pill profile-coordinate-field">
-                  <span className="profile-coordinate-label">Latitude</span>
-                  <input
-                    aria-label="Latitude"
-                    inputMode="decimal"
-                    value={coordinateDraft.lat}
-                    onChange={(event) =>
-                      setCoordinateDraft((current) => ({ ...current, lat: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="profile-coordinate-input-pill profile-coordinate-field">
-                  <span className="profile-coordinate-label">Longitude</span>
-                  <input
-                    aria-label="Longitude"
-                    inputMode="decimal"
-                    value={coordinateDraft.lng}
-                    onChange={(event) =>
-                      setCoordinateDraft((current) => ({ ...current, lng: event.target.value }))
-                    }
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="profile-coordinate-action"
-                  aria-label="Save coordinates"
-                  title="Save coordinates"
-                  onClick={() => void saveCoordinates()}
-                >
-                  <Check size={13} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="profile-coordinate-action"
-                  aria-label="Cancel coordinate edits"
-                  title="Cancel coordinate edits"
-                  onClick={cancelEditingCoordinates}
-                >
-                  <X size={13} aria-hidden="true" />
-                </button>
-                {coordinateError ? (
-                  <p className="profile-coordinate-error" role="alert">
-                    {coordinateError}
-                  </p>
-                ) : null}
-              </div>
-            ) : (
-              <div className="profile-coordinates" aria-label="Coordinates">
-                <span className="profile-coordinate-pill profile-coordinate-field">
-                  <span className="profile-coordinate-label">Latitude</span>
-                  <span className="profile-coordinate-value">{latitudeText}</span>
-                </span>
-                <span className="profile-coordinate-pill profile-coordinate-field">
-                  <span className="profile-coordinate-label">Longitude</span>
-                  <span className="profile-coordinate-value">{longitudeText}</span>
-                </span>
-                <button
-                  type="button"
-                  className="profile-coordinate-action"
-                  aria-label="Edit coordinates"
-                  title="Edit coordinates"
-                  onClick={startEditingCoordinates}
-                >
-                  <Pencil size={13} aria-hidden="true" />
-                </button>
+          <p className="activity-location-address">{activityAddressText}</p>
+          {isEditingCoordinates ? (
+            <div className="profile-coordinate-editor" aria-label="Edit coordinates">
+              <label className="profile-coordinate-input-pill profile-coordinate-field">
+                <span className="profile-coordinate-label">Latitude</span>
+                <input
+                  aria-label="Latitude"
+                  inputMode="decimal"
+                  value={coordinateDraft.lat}
+                  onChange={(event) =>
+                    setCoordinateDraft((current) => ({ ...current, lat: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="profile-coordinate-input-pill profile-coordinate-field">
+                <span className="profile-coordinate-label">Longitude</span>
+                <input
+                  aria-label="Longitude"
+                  inputMode="decimal"
+                  value={coordinateDraft.lng}
+                  onChange={(event) =>
+                    setCoordinateDraft((current) => ({ ...current, lng: event.target.value }))
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="profile-coordinate-action"
+                aria-label="Save coordinates"
+                title="Save coordinates"
+                onClick={() => void saveCoordinates()}
+              >
+                <Check size={13} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="profile-coordinate-action"
+                aria-label="Cancel coordinate edits"
+                title="Cancel coordinate edits"
+                onClick={cancelEditingCoordinates}
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+              {coordinateError ? (
+                <p className="profile-coordinate-error" role="alert">
+                  {coordinateError}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="profile-coordinates" aria-label="Coordinates">
+              <span className="profile-coordinate-pill profile-coordinate-field">
+                <span className="profile-coordinate-label">Latitude</span>
+                <span className="profile-coordinate-value">{latitudeText}</span>
+              </span>
+              <span className="profile-coordinate-pill profile-coordinate-field">
+                <span className="profile-coordinate-label">Longitude</span>
+                <span className="profile-coordinate-value">{longitudeText}</span>
+              </span>
+              <button
+                type="button"
+                className="profile-coordinate-action"
+                aria-label="Edit coordinates"
+                title="Edit coordinates"
+                onClick={startEditingCoordinates}
+              >
+                <Pencil size={13} aria-hidden="true" />
+              </button>
+              {activityCoordinates ? (
                 <button
                   type="button"
                   className={copyButtonClassName}
@@ -505,9 +514,9 @@ function ActivityPanelForm({
                     <Copy size={13} aria-hidden="true" />
                   )}
                 </button>
-              </div>
-            )
-          ) : null}
+              ) : null}
+            </div>
+          )}
         </div>
         <button
           type="button"
