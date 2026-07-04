@@ -146,15 +146,17 @@ export function MediaImageStrip({
 
   useEffect(() => {
     if (heroImageUrl === null) {
-      setReadyHeroImageUrl(null);
       return;
     }
 
     let isCurrent = true;
-    setReadyHeroImageUrl((currentUrl) => (currentUrl === heroImageUrl ? currentUrl : null));
 
     if (typeof globalThis.Image !== 'function') {
-      setReadyHeroImageUrl(heroImageUrl);
+      queueMicrotask(() => {
+        if (isCurrent) {
+          setReadyHeroImageUrl(heroImageUrl);
+        }
+      });
       return;
     }
 
