@@ -80,7 +80,10 @@ describe('ActivityPanel', () => {
 
     render(<ActivityPanel {...createProps({ activity })} />);
 
-    expect(screen.getByText('Rue de Rivoli, 75001 Paris, France')).toBeInTheDocument();
+    expect(screen.getByText('Rue de Rivoli, 75001 Paris, France')).toHaveClass(
+      'profile-location-address',
+      'activity-location-address',
+    );
     expect(screen.getByLabelText('Coordinates')).toBeInTheDocument();
     expect(screen.getByText('48.8606')).toBeInTheDocument();
     expect(screen.getByText('2.3364')).toBeInTheDocument();

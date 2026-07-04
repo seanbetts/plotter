@@ -460,7 +460,7 @@ function DestinationProfileForm({
   return (
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
       <header className="profile-header" aria-label="Stop detail header">
-        <div>
+        <div className="profile-header-main">
           {stopNumber ? <span className="profile-stop-number">{formatStopHeaderLabel(stopNumber)}</span> : null}
           {isEditingName ? (
             <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
@@ -488,7 +488,9 @@ function DestinationProfileForm({
               <h1>{destinationTitle}</h1>
             </button>
           )}
-          <p>{destinationLocationLabel ? destinationLocationContext : 'Unassigned location'}</p>
+          <p className="profile-location-address">
+            {destinationLocationLabel ? destinationLocationContext : 'Unassigned location'}
+          </p>
           {isEditingCoordinates ? (
             <div className="profile-coordinate-editor" aria-label="Edit coordinates">
               <label className="profile-coordinate-input-pill profile-coordinate-field">

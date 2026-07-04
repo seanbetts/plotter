@@ -17,6 +17,18 @@ describe('panel tag editor styles', () => {
   });
 });
 
+describe('profile header styles', () => {
+  it('keeps long location text inside the fixed-width profile panels', () => {
+    expect(styles).toMatch(
+      /\.profile-header\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/s,
+    );
+    expect(styles).toMatch(/\.profile-header-main\s*{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;/s);
+    expect(styles).toMatch(
+      /\.profile-location-address\s*{[^}]*max-width:\s*100%;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
+    );
+  });
+});
+
 describe('panel coordinate editor styles', () => {
   it('keeps coordinate edit inputs visually integrated with their metric pills', () => {
     expect(styles).toMatch(

@@ -401,7 +401,7 @@ function ActivityPanelForm({
   return (
     <aside ref={panelRef} className="activity-panel" aria-label={`${activity.title} activity`}>
       <header className="profile-header" aria-label="Activity detail header">
-        <div>
+        <div className="profile-header-main">
           <span className="profile-stop-number">{stopName}</span>
           {isEditingTitle ? (
             <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
@@ -432,7 +432,7 @@ function ActivityPanelForm({
               <h1>{activityDisplayTitle}</h1>
             </button>
           )}
-          <p className="activity-location-address">{activityAddressText}</p>
+          <p className="profile-location-address activity-location-address">{activityAddressText}</p>
           {isEditingCoordinates ? (
             <div className="profile-coordinate-editor" aria-label="Edit coordinates">
               <label className="profile-coordinate-input-pill profile-coordinate-field">

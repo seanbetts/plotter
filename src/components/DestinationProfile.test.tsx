@@ -98,7 +98,9 @@ describe('DestinationProfile', () => {
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     expect(within(header).getByRole('button', { name: 'Edit stop name Balcombe' })).toBeInTheDocument();
-    expect(within(header).getByText('West Sussex, United Kingdom')).toBeInTheDocument();
+    expect(within(header).getByText('West Sussex, United Kingdom')).toHaveClass(
+      'profile-location-address',
+    );
     expect(within(header).queryByText('Balcombe, West Sussex, United Kingdom')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Stop name')).not.toBeInTheDocument();
   });

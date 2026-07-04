@@ -879,10 +879,15 @@ select {
 }
 
 .profile-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 12px;
+}
+
+.profile-header-main {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .profile-header p {
@@ -971,7 +976,7 @@ select {
   outline: 0;
 }
 
-.activity-location-address {
+.profile-location-address {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
