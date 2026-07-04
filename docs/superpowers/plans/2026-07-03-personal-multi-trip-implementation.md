@@ -13,13 +13,13 @@
 ## File Structure
 
 - Create `src/storage/tripDirectoryRepository.ts`: shared trip metadata types plus Supabase and local directory implementations.
-- Modify `src/storage/tripDb.ts`: add `trips`, trip-scoped destination records, and trip-scoped route-leg records.
-- Modify `src/storage/tripRepository.ts`: accept a trip id and filter all local destination, route-leg, and media work by trip.
+- Modify `src/storage/tripDb.ts`: add `trips`, trip-scoped destination records, route-leg records, activities, and activity media records.
+- Modify `src/storage/tripRepository.ts`: accept a trip id and filter all local destination, route-leg, activity, destination-media, rollup, and activity-media work by trip.
 - Modify `src/storage/tripRepository.test.ts`: prove local trip isolation and local directory lifecycle behavior.
 - Modify `src/storage/supabaseTripRepository.ts`: require an explicit trip id and remove hidden trip discovery.
 - Modify `src/storage/supabaseTripRepository.test.ts`: cover explicit trip ids and remove planning-count selection expectations.
 - Modify `src/storage/appRepository.ts`: replace single-repository bootstrap with app storage bootstrap that returns a directory plus a trip-repository factory.
-- Modify `src/storage/appRepository.test.ts`: cover app storage bootstrap, e2e-local storage, and migration into the selected default trip.
+- Modify `src/storage/appRepository.test.ts`: cover app storage bootstrap and e2e-local storage.
 - Create `src/hooks/useTripWorkspace.ts`: load trips, restore selection, create repositories, and expose select/create/rename/delete actions.
 - Create `src/hooks/useTripWorkspace.test.tsx`: cover boot flow and trip lifecycle state.
 - Create `src/components/TripSelector.tsx`: top-left dropdown for selecting, creating, renaming, and deleting trips.
@@ -452,10 +452,12 @@ export function createLocalTripDirectoryRepository(db: TripDb): TripDirectoryRep
     },
 
     async deleteTrip(tripId) {
-      await db.transaction('rw', db.trips, db.destinations, db.routeLegs, async () => {
+      await db.transaction('rw', db.trips, db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
         await db.trips.delete(tripId);
         await db.destinations.where('tripId').equals(tripId).delete();
         await db.routeLegs.where('tripId').equals(tripId).delete();
+        await db.activities.where('tripId').equals(tripId).delete();
+        await db.activityMedia.where('tripId').equals(tripId).delete();
       });
     },
   };
@@ -698,7 +700,7 @@ Run:
 npm test -- src/storage/tripRepository.test.ts
 ```
 
-Expected: FAIL because `TripDb` has no `trips` table and destinations/route legs are not trip-scoped.
+Expected: FAIL because `TripDb` has no `trips` table and destinations, route legs, activities, and activity media are not trip-scoped.
 
 - [ ] **Step 3: Extend the Dexie schema**
 
@@ -706,7 +708,7 @@ Modify `src/storage/tripDb.ts`:
 
 ```ts
 import Dexie, { type EntityTable } from 'dexie';
-import type { Destination, RouteLeg } from '../domain/types';
+import type { Activity, ActivityMediaRecord, Destination, RouteLeg } from '../domain/types';
 import type { TripSummary } from './tripDirectoryRepository';
 
 export type StoredDestination = Destination & {
@@ -717,10 +719,20 @@ export type StoredRouteLeg = RouteLeg & {
   tripId: string;
 };
 
+export type StoredActivity = Activity & {
+  tripId: string;
+};
+
+export type StoredActivityMediaRecord = ActivityMediaRecord & {
+  tripId: string;
+};
+
 export type TripDb = Dexie & {
   trips: EntityTable<TripSummary, 'id'>;
   destinations: EntityTable<StoredDestination, 'id'>;
   routeLegs: EntityTable<StoredRouteLeg, 'id'>;
+  activities: EntityTable<StoredActivity, 'id'>;
+  activityMedia: EntityTable<StoredActivityMediaRecord, 'id'>;
 };
 
 export function createTripDb(name = 'world-tour-planner'): TripDb {
@@ -737,9 +749,24 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
   });
 
   db.version(3).stores({
+    destinations: 'id, order, name, countryRegion, status, priority, updatedAt',
+    routeLegs: 'id, originDestinationId, targetDestinationId, type, status, routeKey, updatedAt',
+    activities: 'id, destinationId, order, title, status, priority, updatedAt',
+  });
+
+  db.version(4).stores({
+    destinations: 'id, order, name, countryRegion, status, priority, updatedAt',
+    routeLegs: 'id, originDestinationId, targetDestinationId, type, status, routeKey, updatedAt',
+    activities: 'id, destinationId, order, title, status, priority, updatedAt',
+    activityMedia: 'id, activityId, destinationId, sortOrder, uploadedAt',
+  });
+
+  db.version(5).stores({
     trips: 'id, name, updatedAt, createdAt',
     destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
     routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, type, status, routeKey, updatedAt',
+    activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
+    activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
   });
 
   return db;
@@ -776,6 +803,39 @@ const routeLegs = await db.routeLegs.where('tripId').equals(tripId).toArray();
 await db.routeLegs.put({ ...routeLeg, tripId });
 ```
 
+Scope activity reads and writes the same way:
+
+```ts
+const activities = await db.activities
+  .where('[tripId+destinationId]')
+  .equals([tripId, destinationId])
+  .toArray();
+```
+
+```ts
+await db.activities.put({ ...activity, tripId });
+```
+
+```ts
+const activity = await db.activities.get(activityId);
+if (!activity || activity.tripId !== tripId) {
+  throw new Error('Activity not found.');
+}
+```
+
+Scope activity media reads and writes by `tripId` as well:
+
+```ts
+const activityMedia = await db.activityMedia
+  .where('[tripId+activityId]')
+  .equals([tripId, activityId])
+  .toArray();
+```
+
+```ts
+await db.activityMedia.put({ ...mediaRecord, tripId });
+```
+
 For deletes, add trip filtering:
 
 ```ts
@@ -800,7 +860,7 @@ if (routeLeg?.tripId === tripId) {
 }
 ```
 
-In `deleteDestination`, only bulk-delete attached legs from this trip:
+In `deleteDestination`, only bulk-delete attached legs, activities, and activity media from this trip:
 
 ```ts
 const attachedLegs = (await db.routeLegs.where('tripId').equals(tripId).toArray()).filter(
@@ -808,6 +868,14 @@ const attachedLegs = (await db.routeLegs.where('tripId').equals(tripId).toArray(
     leg.originDestinationId === destinationId ||
     leg.targetDestinationId === destinationId,
 );
+const attachedActivities = await db.activities
+  .where('[tripId+destinationId]')
+  .equals([tripId, destinationId])
+  .toArray();
+const attachedActivityMedia = await db.activityMedia
+  .where('[tripId+destinationId]')
+  .equals([tripId, destinationId])
+  .toArray();
 ```
 
 In `replaceTripData`, clear only the selected trip:
@@ -815,16 +883,23 @@ In `replaceTripData`, clear only the selected trip:
 ```ts
 const existingDestinations = await db.destinations.where('tripId').equals(tripId).toArray();
 const existingRouteLegs = await db.routeLegs.where('tripId').equals(tripId).toArray();
+const existingActivities = await db.activities.where('tripId').equals(tripId).toArray();
+const existingActivityMedia = await db.activityMedia.where('tripId').equals(tripId).toArray();
 await db.destinations.bulkDelete(existingDestinations.map((destination) => destination.id));
 await db.routeLegs.bulkDelete(existingRouteLegs.map((routeLeg) => routeLeg.id));
+await db.activities.bulkDelete(existingActivities.map((activity) => activity.id));
+await db.activityMedia.bulkDelete(existingActivityMedia.map((mediaItem) => mediaItem.id));
 await db.destinations.bulkPut(snapshot.destinations.map((destination, index) => ({
   ...normalizeDestination(destination, index),
   tripId,
 })));
 await db.routeLegs.bulkPut(snapshot.routeLegs.map((routeLeg) => ({ ...routeLeg, tripId })));
+if (snapshot.activities) {
+  await db.activities.bulkPut(snapshot.activities.map((activity) => ({ ...activity, tripId })));
+}
 ```
 
-For media methods, get the destination and reject cross-trip access:
+For destination media methods and destination media rollups, get the destination and reject cross-trip access:
 
 ```ts
 const destination = await db.destinations.get(destinationId);
@@ -833,16 +908,17 @@ if (!destination || destination.tripId !== tripId) {
 }
 ```
 
-- [ ] **Step 5: Run local tests and build**
+For `listDestinationMediaRollup`, use the trip-scoped destination media, trip-scoped activities, and trip-scoped activity media. Do not call unscoped Dexie queries inside the rollup path.
+
+- [ ] **Step 5: Run local tests**
 
 Run:
 
 ```bash
 npm test -- src/storage/tripRepository.test.ts
-npm run build
 ```
 
-Expected: local tests pass; build passes or reports app bootstrap failures that are addressed in the next task.
+Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1095,11 +1171,22 @@ function createRepository(): TripRepository {
     listDestinations: vi.fn(async () => []),
     saveDestination: vi.fn(),
     deleteDestination: vi.fn(),
+    listActivities: vi.fn(async () => []),
+    createActivity: vi.fn(),
+    updateActivity: vi.fn(),
+    deleteActivity: vi.fn(),
+    reorderActivities: vi.fn(),
     listDestinationMedia: vi.fn(async () => []),
     uploadDestinationMedia: vi.fn(),
     updateDestinationMedia: vi.fn(),
     deleteDestinationMedia: vi.fn(),
     reorderDestinationMedia: vi.fn(),
+    listDestinationMediaRollup: vi.fn(async () => []),
+    listActivityMedia: vi.fn(async () => []),
+    uploadActivityMedia: vi.fn(),
+    updateActivityMedia: vi.fn(),
+    deleteActivityMedia: vi.fn(),
+    reorderActivityMedia: vi.fn(),
     listRouteLegs: vi.fn(async () => []),
     saveRouteLeg: vi.fn(),
     deleteRouteLeg: vi.fn(),
@@ -1824,6 +1911,8 @@ function mockTripWorkspace(overrides: Partial<ReturnType<typeof useTripWorkspace
 }
 ```
 
+Keep the current expanded `repositoryMock` methods for activities, destination media rollups, and activity media. Do not replace it with the smaller pre-activity-media mock from older tests.
+
 In `beforeEach`, call:
 
 ```ts
@@ -2001,7 +2090,7 @@ Import `TripSummary`:
 import type { TripSummary } from './storage/tripDirectoryRepository';
 ```
 
-Render the selector above `ItineraryPanel`:
+Render the selector above `ItineraryPanel` while leaving `TopToolbar`, `ActivityPanel`, `DestinationProfile`, and `DestinationImagePreviewModal` wired as they are in the current file:
 
 ```tsx
 <div className="workspace-left-stack">
@@ -2018,7 +2107,7 @@ Render the selector above `ItineraryPanel`:
     destinations={destinations}
     routeLegs={routeLegs}
     selectedDestinationId={selectedDestinationId}
-    onSelectDestination={setSelectedDestinationId}
+    onSelectDestination={handleSelectDestination}
     onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
     onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
     onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
@@ -2027,6 +2116,8 @@ Render the selector above `ItineraryPanel`:
 ```
 
 Remove the standalone `ItineraryPanel` render that the stack replaces.
+
+Do not remove the existing `workspace-panels` block. It owns the selected `ActivityPanel`, `DestinationProfile`, destination media rollup, activity media, and `DestinationImagePreviewModal` behavior added by the activity media work.
 
 Set interaction locking to include workspace loading:
 
@@ -2050,6 +2141,12 @@ Add to `src/styles.css`:
   flex-direction: column;
   gap: 10px;
   pointer-events: none;
+}
+
+.workspace-left-stack .itinerary-panel {
+  position: static;
+  width: 100%;
+  max-height: min(58vh, calc(100vh - 88px));
 }
 
 .workspace-left-stack > * {
@@ -2139,6 +2236,17 @@ Add to `src/styles.css`:
   margin: 8px 4px 0;
   color: var(--color-danger);
   font-size: 0.875rem;
+}
+
+@media (max-width: 760px) {
+  .workspace-left-stack {
+    inset: 12px 12px auto;
+    width: auto;
+  }
+
+  .workspace-left-stack .itinerary-panel {
+    max-height: var(--mobile-itinerary-panel-clearance);
+  }
 }
 ```
 
