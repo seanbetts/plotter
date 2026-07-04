@@ -94,7 +94,15 @@ function ActivityPanelForm({
 }: ActivityPanelProps) {
   const [draft, setDraft] = useState(() => createActivityDraft(activity));
   const [saveError, setSaveError] = useState('');
+  const latestDraftRef = useRef(createActivityDraft(activity));
   const dirtyFieldsRef = useRef(new Set<ActivityDraftField>());
+  const fieldEditRevisionRef = useRef<Record<ActivityDraftField, number>>({
+    title: 0,
+    description: 0,
+    notes: 0,
+    status: 0,
+    priority: 0,
+  });
   const fieldSaveRevisionRef = useRef<Record<ActivityDraftField, number>>({
     title: 0,
     description: 0,
@@ -118,13 +126,16 @@ function ActivityPanelForm({
       if (!shouldPreserveDraft('status')) usePersistedField('status');
       if (!shouldPreserveDraft('priority')) usePersistedField('priority');
 
-      return {
+      const nextDraft = {
         title: dirtyFieldsRef.current.has('title') ? current.title : activity.title,
         description: dirtyFieldsRef.current.has('description') ? current.description : activity.description,
         notes: dirtyFieldsRef.current.has('notes') ? current.notes : activity.notes,
         status: dirtyFieldsRef.current.has('status') ? current.status : activity.status,
         priority: dirtyFieldsRef.current.has('priority') ? current.priority : activity.priority,
       };
+
+      latestDraftRef.current = nextDraft;
+      return nextDraft;
     });
     setSaveError('');
   }, [
@@ -139,14 +150,19 @@ function ActivityPanelForm({
   function updateDraft<Field extends ActivityDraftField>(field: Field, value: ActivityDraft[Field]) {
     setSaveError('');
     dirtyFieldsRef.current.add(field);
-    setDraft((current) => ({
-      ...current,
-      [field]: value,
-    }));
+    fieldEditRevisionRef.current[field] += 1;
+    setDraft((current) => {
+      const nextDraft = {
+        ...current,
+        [field]: value,
+      };
+      latestDraftRef.current = nextDraft;
+      return nextDraft;
+    });
   }
 
   async function commitDraft<Field extends ActivityDraftField>(field: Field) {
-    const nextValue = draft[field];
+    const nextValue = latestDraftRef.current[field];
     if (nextValue === activity[field]) {
       dirtyFieldsRef.current.delete(field);
       return;
@@ -154,22 +170,40 @@ function ActivityPanelForm({
 
     const saveRevision = fieldSaveRevisionRef.current[field] + 1;
     fieldSaveRevisionRef.current[field] = saveRevision;
+    const editRevision = fieldEditRevisionRef.current[field];
     setSaveError('');
     try {
       await Promise.resolve(onUpdateActivity(activity.id, { [field]: nextValue }));
-      if (fieldSaveRevisionRef.current[field] === saveRevision) {
+      if (canApplySaveResult(field, saveRevision, editRevision, nextValue)) {
         dirtyFieldsRef.current.delete(field);
       }
     } catch {
-      if (fieldSaveRevisionRef.current[field] === saveRevision) {
+      if (canApplySaveResult(field, saveRevision, editRevision, nextValue)) {
         dirtyFieldsRef.current.delete(field);
-        setDraft((current) => ({
-          ...current,
-          [field]: activity[field],
-        }));
+        setDraft((current) => {
+          const nextDraft = {
+            ...current,
+            [field]: activity[field],
+          };
+          latestDraftRef.current = nextDraft;
+          return nextDraft;
+        });
       }
       setSaveError('Unable to update activity.');
     }
+  }
+
+  function canApplySaveResult<Field extends ActivityDraftField>(
+    field: Field,
+    saveRevision: number,
+    editRevision: number,
+    submittedValue: ActivityDraft[Field],
+  ) {
+    return (
+      fieldSaveRevisionRef.current[field] === saveRevision &&
+      fieldEditRevisionRef.current[field] === editRevision &&
+      latestDraftRef.current[field] === submittedValue
+    );
   }
 
   return (

@@ -148,4 +148,42 @@ describe('ActivityPanel', () => {
     expect(screen.getByLabelText('Activity title')).toHaveValue('Morning Louvre');
     expect(screen.getByLabelText('Activity notes')).toHaveValue('Check Friday late opening.');
   });
+
+  it('preserves a newer title draft when an earlier title save rerender arrives', async () => {
+    const activity = createActivity({
+      destinationId: 'destination-1',
+      title: 'Louvre',
+      order: 0,
+    });
+    const titleSave = deferred<void>();
+    const onUpdateActivity = vi.fn(() => titleSave.promise);
+
+    const { rerender } = render(
+      <ActivityPanel {...createProps({ activity, onUpdateActivity })} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
+    fireEvent.blur(screen.getByLabelText('Activity title'));
+    fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Evening Louvre' } });
+
+    await act(async () => {
+      titleSave.resolve(undefined);
+      await titleSave.promise;
+    });
+
+    rerender(
+      <ActivityPanel
+        {...createProps({
+          activity: {
+            ...activity,
+            title: 'Morning Louvre',
+            updatedAt: '2026-07-04T12:00:00.000Z',
+          },
+          onUpdateActivity,
+        })}
+      />,
+    );
+
+    expect(screen.getByLabelText('Activity title')).toHaveValue('Evening Louvre');
+  });
 });
