@@ -28,6 +28,12 @@ describe('image preview styles', () => {
     expect(styles).toMatch(/\.destination-image-empty\s*{[^}]*border-style:\s*solid;/s);
     expect(styles).not.toMatch(/\.destination-image-empty\s*{[^}]*border-style:\s*dashed;/s);
   });
+
+  it('keeps only the top divider on stop image strips', () => {
+    expect(styles).toMatch(/\.destination-image-strip\s*{[^}]*border-top:\s*1px solid var\(--border-subtle\);/s);
+    expect(styles).not.toMatch(/\.destination-image-strip\s*{[^}]*border-block:/s);
+    expect(styles).not.toMatch(/\.destination-image-strip\s*{[^}]*border-bottom:/s);
+  });
 });
 
 describe('panel tag editor styles', () => {

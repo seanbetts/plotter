@@ -2317,7 +2317,7 @@ button.image-preview-activity-attribution:focus-visible {
   display: grid;
   gap: 10px;
   padding: 10px 0 14px;
-  border-block: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .destination-image-strip.is-drag-over {
