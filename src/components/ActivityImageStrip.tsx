@@ -15,7 +15,7 @@ export function ActivityImageStrip(props: ActivityImageStripProps) {
   return (
     <MediaImageStrip
       regionLabel="Activity images"
-      emptyLabel="No activity images yet"
+      emptyLabel="No images yet"
       emptyHint="Drop images here or click to add."
       chooseFilesLabel="Choose activity images"
       uploadingLabel="Uploading activity images"

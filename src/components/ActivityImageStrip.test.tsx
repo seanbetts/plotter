@@ -40,7 +40,7 @@ describe('ActivityImageStrip', () => {
     render(<ActivityImageStrip {...createProps({ mediaItems: [] })} />);
 
     const region = screen.getByRole('region', { name: 'Activity images' });
-    expect(region).toHaveTextContent('No activity images yet');
+    expect(region).toHaveTextContent('No images yet');
     expect(region).toHaveTextContent('Drop images here or click to add.');
     expect(screen.getByRole('button', { name: 'Choose activity images' })).toBeInTheDocument();
   });

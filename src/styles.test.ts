@@ -9,6 +9,25 @@ describe('image preview styles', () => {
   it('renders full-screen preview images full bleed instead of letterboxed', () => {
     expect(styles).toMatch(/\.image-preview-frame img\s*{[^}]*object-fit:\s*cover;/s);
   });
+
+  it('mirrors populated image strip structure for empty image strips', () => {
+    expect(styles).toMatch(
+      /\.destination-image-strip\s*{[^}]*--destination-image-hero-height:\s*clamp\(156px,\s*22vh,\s*240px\);[^}]*--destination-image-carousel-height:\s*60px;/s,
+    );
+    expect(styles).toMatch(/\.destination-image-empty\s*{[^}]*min-height:\s*var\(--destination-image-hero-height\);/s);
+    expect(styles).toMatch(/\.destination-image-hero\s*{[^}]*height:\s*var\(--destination-image-hero-height\);/s);
+    expect(styles).toMatch(
+      /\.destination-image-carousel\s*{[^}]*min-height:\s*var\(--destination-image-carousel-height\);/s,
+    );
+    expect(styles).toMatch(/\.destination-image-carousel\.is-empty\s*{[^}]*overflow:\s*hidden;/s);
+    expect(styles).toMatch(/\.destination-image-empty-graphic\s*{[^}]*width:\s*42px;[^}]*height:\s*42px;/s);
+    expect(styles).toMatch(/\.destination-image-loading-spinner\s*{[^}]*animation:\s*route-spin 900ms linear infinite;/s);
+    expect(styles).toMatch(
+      /\.destination-image-thumbnail-placeholder\s*{[^}]*background:\s*rgb\(var\(--color-text-rgb\) \/ 0\.045\);[^}]*cursor:\s*default;/s,
+    );
+    expect(styles).toMatch(/\.destination-image-empty\s*{[^}]*border-style:\s*solid;/s);
+    expect(styles).not.toMatch(/\.destination-image-empty\s*{[^}]*border-style:\s*dashed;/s);
+  });
 });
 
 describe('panel tag editor styles', () => {
