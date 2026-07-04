@@ -158,3 +158,19 @@ describe('activity list styles', () => {
     );
   });
 });
+
+describe('inline route connector styles', () => {
+  it('keeps route rows compact and visually secondary between stops', () => {
+    expect(styles).toMatch(
+      /\.inline-route-leg\s*{[^}]*grid-template-columns:\s*30px 1px minmax\(0,\s*1fr\);[^}]*gap:\s*10px;[^}]*min-height:\s*42px;[^}]*padding:\s*4px 36px 4px 36px;/s,
+    );
+    expect(styles).toMatch(/\.inline-route-rail\s*{[^}]*height:\s*30px;/s);
+    expect(styles).toMatch(/\.inline-route-type\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
+    expect(styles).toMatch(
+      /\.inline-route-metrics\s*{[^}]*display:\s*flex;[^}]*gap:\s*6px;[^}]*min-width:\s*0;/s,
+    );
+    expect(styles).toMatch(/\.inline-route-metric \+ \.inline-route-metric::before\s*{[^}]*content:\s*"·";/s);
+    expect(styles).toMatch(/\.inline-route-border-crossing\s*{[^}]*margin-left:\s*auto;/s);
+    expect(styles).toMatch(/\.inline-route-retry \+ \.inline-route-border-crossing\s*{[^}]*margin-left:\s*0;/s);
+  });
+});
