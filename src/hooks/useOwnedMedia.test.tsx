@@ -138,6 +138,50 @@ describe('useOwnedMedia', () => {
     expect(repository.upload).toHaveBeenCalledWith(normalizedFile);
   });
 
+  it('uploads with the repository that was active before delayed normalization', async () => {
+    const originalFile = createFile('owner-a.jpg', 'image/jpeg');
+    const normalizedFile = createFile('owner-a-normalized.jpg', 'image/jpeg');
+    const normalization = createDeferred(normalizedFile);
+    vi.mocked(normalizeImageFile).mockReturnValueOnce(normalization.promise);
+    const ownerARepository = createOwnedMediaRepository({
+      list: vi.fn().mockResolvedValue([]),
+      upload: vi.fn().mockResolvedValue(createMediaItem('owner-a-upload', 0)),
+    });
+    const ownerBRepository = createOwnedMediaRepository({
+      list: vi.fn().mockResolvedValue([]),
+      upload: vi.fn().mockResolvedValue(createMediaItem('owner-b-upload', 0)),
+    });
+
+    const { result, rerender } = renderHook(
+      ({ ownerId, repository }) =>
+        useOwnedMedia({ ownerId, repository, migrationErrorNeedle: 'media_assets.sort_order' }),
+      {
+        initialProps: {
+          ownerId: 'owner-a' as string | null,
+          repository: ownerARepository,
+        },
+      },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let uploadPromise!: Promise<void>;
+    act(() => {
+      uploadPromise = result.current.uploadFiles([originalFile]);
+    });
+    await waitFor(() => expect(normalizeImageFile).toHaveBeenCalledWith(originalFile));
+
+    rerender({ ownerId: 'owner-b', repository: ownerBRepository });
+
+    await act(async () => {
+      normalization.resolve();
+      await uploadPromise;
+    });
+
+    expect(ownerARepository.upload).toHaveBeenCalledWith(normalizedFile);
+    expect(ownerBRepository.upload).not.toHaveBeenCalled();
+  });
+
   it('rejects all-invalid uploads with an image type error', async () => {
     const repository = createOwnedMediaRepository({
       list: vi.fn().mockResolvedValue([]),
@@ -450,7 +494,7 @@ describe('useOwnedMedia', () => {
     expect(repository.reorder).not.toHaveBeenCalled();
     expect(result.current.mediaItems).toEqual(existing);
     expect(result.current.error).toBe(
-      'Media order must include each destination media item exactly once. Missing media-1; extra unknown-media.',
+      'Media order must include each media item exactly once. Missing media-1; extra unknown-media.',
     );
   });
 });

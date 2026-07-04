@@ -66,7 +66,7 @@ function validateMediaOrder(currentMediaIds: string[], orderedMediaIds: string[]
     return null;
   }
 
-  return `Media order must include each destination media item exactly once. Missing ${missingIds.join(', ') || 'none'}; extra ${extraIds.join(', ') || 'none'}.`;
+  return `Media order must include each media item exactly once. Missing ${missingIds.join(', ') || 'none'}; extra ${extraIds.join(', ') || 'none'}.`;
 }
 
 export function useOwnedMedia({
@@ -179,13 +179,14 @@ export function useOwnedMedia({
     }
 
     const generation = generationRef.current;
+    const activeRepository = repositoryRef.current;
     setUploadingCount((count) => count + 1);
     setError(null);
 
     try {
       const uploadedMediaItems = await Promise.all(
         validFiles.map(async (file) =>
-          repositoryRef.current.upload(await normalizeImageFile(file)),
+          activeRepository.upload(await normalizeImageFile(file)),
         ),
       );
 
