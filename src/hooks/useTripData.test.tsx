@@ -1,6 +1,7 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
@@ -693,6 +694,66 @@ describe('useTripData', () => {
     });
 
     expect(result.current.destinations).toEqual([]);
+  });
+
+  it('does not write stale activity actions after the repository changes', async () => {
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const activity = createActivityModel({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    const createActivity = vi.fn(async () =>
+      createActivityModel({
+        destinationId: destination.id,
+        title: 'Bakery crawl',
+        order: 1,
+      }),
+    );
+    const updateActivity = vi.fn(async () => ({
+      ...activity,
+      title: 'Morning Louvre',
+    }));
+    const deleteActivity = vi.fn(async () => {});
+    const reorderActivities = vi.fn(async () => [activity]);
+    const oldRepository = createMemoryRepository(Promise.resolve([destination]), {
+      listActivities: async () => [activity],
+      createActivity,
+      updateActivity,
+      deleteActivity,
+      reorderActivities,
+    });
+    const newRepository = createMemoryRepository(Promise.resolve([]));
+    const { result, rerender } = renderHook(
+      ({ repository }) => useTripData(repository),
+      { initialProps: { repository: oldRepository } },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    const capturedActions = result.current;
+
+    rerender({ repository: newRepository });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await capturedActions.createActivity({
+        destinationId: destination.id,
+        title: 'Bakery crawl',
+      });
+      await capturedActions.updateActivity(activity.id, { title: 'Morning Louvre' });
+      await capturedActions.deleteActivity(activity.id);
+      await capturedActions.reorderActivities(destination.id, [activity.id]);
+    });
+
+    expect(createActivity).not.toHaveBeenCalled();
+    expect(updateActivity).not.toHaveBeenCalled();
+    expect(deleteActivity).not.toHaveBeenCalled();
+    expect(reorderActivities).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
 import { findBestDestinationInsertionIndex, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
@@ -461,6 +462,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         },
 
         async createActivity(input: { destinationId: string; title: string; order?: number }) {
+          if (!isActiveAction()) return createActivityModel(input);
+
           const activity = await repository.createActivity(input);
           if (!isActiveAction()) return activity;
 
@@ -478,6 +481,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           activityId: string,
           patch: Partial<Omit<Activity, 'id' | 'destinationId' | 'createdAt' | 'updatedAt'>>,
         ) {
+          if (!isActiveAction()) return;
+
           const updated = await repository.updateActivity(activityId, patch);
           if (!isActiveAction()) return updated;
 
@@ -491,6 +496,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         },
 
         async deleteActivity(activityId: string) {
+          if (!isActiveAction()) return;
+
           let destinationId = '';
           for (const [candidateDestinationId, activities] of Object.entries(
             activitiesByDestinationIdRef.current,
@@ -513,6 +520,10 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         },
 
         async reorderActivities(destinationId: string, orderedActivityIds: string[]) {
+          if (!isActiveAction()) {
+            return activitiesByDestinationIdRef.current[destinationId] ?? [];
+          }
+
           const orderedActivities = await repository.reorderActivities(
             destinationId,
             orderedActivityIds,
