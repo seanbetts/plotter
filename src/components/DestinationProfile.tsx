@@ -723,6 +723,13 @@ function DestinationProfileForm({
         onOpenPreview={onOpenMediaPreview}
       />
 
+      <LinkPreviewGrid
+        label={`${(form.name || destination.name).trim() || 'Stop'} Links`}
+        links={form.links}
+        previewClient={linkPreviewClient}
+        onChange={(links) => updateForm({ links })}
+      />
+
       <ActivityList
         title={activitiesLabel}
         activities={activities}
@@ -773,13 +780,6 @@ function DestinationProfileForm({
           />
         </div>
       </fieldset>
-
-      <LinkPreviewGrid
-        label="Links"
-        links={form.links}
-        previewClient={linkPreviewClient}
-        onChange={(links) => updateForm({ links })}
-      />
     </aside>
   );
 }

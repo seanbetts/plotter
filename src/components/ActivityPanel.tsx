@@ -451,6 +451,7 @@ function ActivityPanelForm({
     .filter(Boolean)
     .join(' ');
   const tagsLabel = `${activityDisplayTitle.trim() || 'Activity'} Tags`;
+  const linksLabel = `${activityDisplayTitle.trim() || 'Activity'} Links`;
 
   return (
     <aside ref={panelRef} className="activity-panel" aria-label={`${activity.title} activity`}>
@@ -604,6 +605,16 @@ function ActivityPanelForm({
         onOpenPreview={onOpenMediaPreview}
       />
 
+      <LinkPreviewGrid
+        label={linksLabel}
+        links={draft.links}
+        previewClient={linkPreviewClient}
+        onChange={(links) => {
+          updateDraft('links', links);
+          return commitDraft('links');
+        }}
+      />
+
       <label>
         {draft.title.trim() || 'Activity'} Description
         <textarea
@@ -661,15 +672,6 @@ function ActivityPanelForm({
           />
         </div>
       </fieldset>
-      <LinkPreviewGrid
-        label="Links"
-        links={draft.links}
-        previewClient={linkPreviewClient}
-        onChange={(links) => {
-          updateDraft('links', links);
-          return commitDraft('links');
-        }}
-      />
     </aside>
   );
 }

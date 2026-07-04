@@ -232,6 +232,9 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
 
   return (
     <section className="link-preview-section" aria-label={label}>
+      <div className="link-preview-header">
+        <h2>{label}</h2>
+      </div>
       <form className="link-preview-add-form" aria-label="Add link" onSubmit={handleSubmit}>
         <label htmlFor={inputId}>Add link URL</label>
         <div className="link-preview-add-row">

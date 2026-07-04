@@ -290,6 +290,25 @@ describe('ActivityPanel', () => {
     expect(notes.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('places contextual activity links below the image strip before description, notes, and tags', () => {
+    const props = createProps();
+
+    render(<ActivityPanel {...props} />);
+
+    const panel = screen.getByRole('complementary', { name: 'Louvre activity' });
+    const imageRegion = within(panel).getByRole('region', { name: 'Activity images' });
+    const linksSection = within(panel).getByRole('region', { name: 'Louvre Links' });
+    const description = within(panel).getByLabelText('Louvre Description');
+    const notes = within(panel).getByLabelText('Louvre Notes');
+    const tagsGroup = within(panel).getByRole('group', { name: 'Louvre Tags' });
+
+    expect(within(linksSection).getByText('Louvre Links')).toBeInTheDocument();
+    expect(imageRegion.compareDocumentPosition(linksSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(linksSection.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(linksSection.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(linksSection.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('saves description and notes with labels based on the activity title', () => {
     const props = createProps();
 

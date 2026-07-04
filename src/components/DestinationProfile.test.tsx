@@ -185,6 +185,34 @@ describe('DestinationProfile', () => {
     expect(activitiesHeading.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('places contextual stop links below the image strip before activities and tags', () => {
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const profile = screen.getByRole('complementary', { name: 'Samarkand profile' });
+    const imageRegion = within(profile).getByRole('region', { name: 'Stop images' });
+    const linksSection = within(profile).getByRole('region', { name: 'Samarkand Links' });
+    const activitiesHeading = within(profile).getByRole('heading', { name: 'Samarkand Activities' });
+    const tagsGroup = within(profile).getByRole('group', { name: 'Samarkand Tags' });
+
+    expect(within(linksSection).getByText('Samarkand Links')).toBeInTheDocument();
+    expect(imageRegion.compareDocumentPosition(linksSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(linksSection.compareDocumentPosition(activitiesHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(linksSection.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('shows latitude and longitude as separate pills with a one-click copy button', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
