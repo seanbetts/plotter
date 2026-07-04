@@ -97,8 +97,21 @@ function normalizeRouteLeg(routeLeg: LegacyRouteLeg): RouteLeg {
 }
 
 function stripActivityMediaOwner(record: ActivityMediaRecord): MediaItem {
-  const { activityId: _activityId, destinationId: _destinationId, ...mediaItem } = record;
-  return mediaItem;
+  return {
+    id: record.id,
+    url: record.url,
+    thumbnailUrl: record.thumbnailUrl,
+    previewUrl: record.previewUrl,
+    fullUrl: record.fullUrl,
+    caption: record.caption,
+    credit: record.credit,
+    sortOrder: record.sortOrder,
+    bucketId: record.bucketId,
+    objectPath: record.objectPath,
+    contentType: record.contentType,
+    sizeBytes: record.sizeBytes,
+    uploadedAt: record.uploadedAt,
+  };
 }
 
 function sortMediaItems(left: MediaItem, right: MediaItem) {

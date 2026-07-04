@@ -114,27 +114,34 @@ function ActivityPanelForm({
     priority: 0,
   });
   const sourceKey = activitySourceKey(activity);
+  const activityTitle = activity.title;
+  const activityDescription = activity.description;
+  const activityNotes = activity.notes;
+  const activityStatus = activity.status;
+  const activityPriority = activity.priority;
 
   useEffect(() => {
     setDraft((current) => {
-      const shouldPreserveDraft = (field: ActivityDraftField) =>
-        dirtyFieldsRef.current.has(field) && current[field] !== activity[field];
-      const usePersistedField = (field: ActivityDraftField) => {
+      const shouldPreserveDraft = <Field extends ActivityDraftField>(
+        field: Field,
+        persistedValue: ActivityDraft[Field],
+      ) => dirtyFieldsRef.current.has(field) && current[field] !== persistedValue;
+      const acceptPersistedField = (field: ActivityDraftField) => {
         dirtyFieldsRef.current.delete(field);
       };
 
-      if (!shouldPreserveDraft('title')) usePersistedField('title');
-      if (!shouldPreserveDraft('description')) usePersistedField('description');
-      if (!shouldPreserveDraft('notes')) usePersistedField('notes');
-      if (!shouldPreserveDraft('status')) usePersistedField('status');
-      if (!shouldPreserveDraft('priority')) usePersistedField('priority');
+      if (!shouldPreserveDraft('title', activityTitle)) acceptPersistedField('title');
+      if (!shouldPreserveDraft('description', activityDescription)) acceptPersistedField('description');
+      if (!shouldPreserveDraft('notes', activityNotes)) acceptPersistedField('notes');
+      if (!shouldPreserveDraft('status', activityStatus)) acceptPersistedField('status');
+      if (!shouldPreserveDraft('priority', activityPriority)) acceptPersistedField('priority');
 
       const nextDraft = {
-        title: dirtyFieldsRef.current.has('title') ? current.title : activity.title,
-        description: dirtyFieldsRef.current.has('description') ? current.description : activity.description,
-        notes: dirtyFieldsRef.current.has('notes') ? current.notes : activity.notes,
-        status: dirtyFieldsRef.current.has('status') ? current.status : activity.status,
-        priority: dirtyFieldsRef.current.has('priority') ? current.priority : activity.priority,
+        title: dirtyFieldsRef.current.has('title') ? current.title : activityTitle,
+        description: dirtyFieldsRef.current.has('description') ? current.description : activityDescription,
+        notes: dirtyFieldsRef.current.has('notes') ? current.notes : activityNotes,
+        status: dirtyFieldsRef.current.has('status') ? current.status : activityStatus,
+        priority: dirtyFieldsRef.current.has('priority') ? current.priority : activityPriority,
       };
 
       latestDraftRef.current = nextDraft;
@@ -142,11 +149,11 @@ function ActivityPanelForm({
     });
     setSaveError('');
   }, [
-    activity.description,
-    activity.notes,
-    activity.priority,
-    activity.status,
-    activity.title,
+    activityDescription,
+    activityNotes,
+    activityPriority,
+    activityStatus,
+    activityTitle,
     sourceKey,
   ]);
 

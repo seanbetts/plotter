@@ -85,8 +85,6 @@ export function useOwnedMedia({
   const reorderSequenceRef = useRef(0);
   const updateSequencesRef = useRef(new Map<string, number>());
 
-  repositoryRef.current = repository;
-
   const replaceMediaItems = useCallback((nextMediaItems: MediaItem[]) => {
     mediaItemsRef.current = nextMediaItems;
     setMediaItems(nextMediaItems);
@@ -103,6 +101,10 @@ export function useOwnedMedia({
     (generation: number) => isMountedRef.current && generationRef.current === generation,
     [],
   );
+
+  useLayoutEffect(() => {
+    repositoryRef.current = repository;
+  }, [repository]);
 
   useLayoutEffect(() => {
     isMountedRef.current = true;

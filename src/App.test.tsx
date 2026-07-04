@@ -8,6 +8,7 @@ import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import type { Activity, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
 import { createAppTripRepository } from './storage/appRepository';
+import type { TripRepository } from './storage/tripRepository';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -87,7 +88,7 @@ const repositoryMock = vi.hoisted(() => {
         (leg) => leg.originDestinationId !== destinationId && leg.targetDestinationId !== destinationId,
       );
     }),
-    listActivities: vi.fn(async (_destinationId: string): Promise<Activity[]> => []),
+    listActivities: vi.fn<TripRepository['listActivities']>(async () => []),
     createActivity: vi.fn(async (input: { destinationId: string; title: string }): Promise<Activity> => ({
       id: 'activity-mock',
       destinationId: input.destinationId,
@@ -136,7 +137,7 @@ const repositoryMock = vi.hoisted(() => {
     updateDestinationMedia: vi.fn(),
     deleteDestinationMedia: vi.fn(),
     reorderDestinationMedia: vi.fn(),
-    listDestinationMediaRollup: vi.fn(async (_destinationId: string): Promise<MediaRollupItem[]> => []),
+    listDestinationMediaRollup: vi.fn<TripRepository['listDestinationMediaRollup']>(async () => []),
     listActivityMedia: vi.fn(async (): Promise<MediaItem[]> => []),
     uploadActivityMedia: vi.fn(),
     updateActivityMedia: vi.fn(),
