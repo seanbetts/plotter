@@ -775,7 +775,10 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
           destinations={destinations}
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
+          focusedActivities={selectedDestinationActivities}
+          selectedActivityId={selectedActivityId}
           onSelectDestination={handleSelectDestination}
+          onSelectActivity={setSelectedActivityId}
           onRequestAddStop={openPendingMapStop}
         />
         {!isInteractionLocked ? (

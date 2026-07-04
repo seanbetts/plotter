@@ -1409,6 +1409,19 @@ export function MapCanvas({
     const handleDestinationMouseLeave = () => {
       map.getCanvas().style.cursor = '';
     };
+    const handleActivityClick = (event: maplibregl.MapLayerMouseEvent) => {
+      const activityId = event.features?.[0]?.properties?.id;
+
+      if (typeof activityId === 'string') {
+        onSelectActivityRef.current?.(activityId);
+      }
+    };
+    const handleActivityMouseEnter = () => {
+      map.getCanvas().style.cursor = 'pointer';
+    };
+    const handleActivityMouseLeave = () => {
+      map.getCanvas().style.cursor = '';
+    };
     const handleContextMenu = (event: maplibregl.MapMouseEvent) => {
       if (!onRequestAddStopRef.current) return;
 
@@ -1428,6 +1441,9 @@ export function MapCanvas({
     map.on('click', destinationPointsLayerId, handleDestinationClick);
     map.on('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
     map.on('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
+    map.on('click', activityPointsLayerId, handleActivityClick);
+    map.on('mouseenter', activityPointsLayerId, handleActivityMouseEnter);
+    map.on('mouseleave', activityPointsLayerId, handleActivityMouseLeave);
     map.on('contextmenu', handleContextMenu);
 
     mapRef.current = map;
@@ -1441,6 +1457,9 @@ export function MapCanvas({
       map.off('click', destinationPointsLayerId, handleDestinationClick);
       map.off('mouseenter', destinationPointsLayerId, handleDestinationMouseEnter);
       map.off('mouseleave', destinationPointsLayerId, handleDestinationMouseLeave);
+      map.off('click', activityPointsLayerId, handleActivityClick);
+      map.off('mouseenter', activityPointsLayerId, handleActivityMouseEnter);
+      map.off('mouseleave', activityPointsLayerId, handleActivityMouseLeave);
       map.off('contextmenu', handleContextMenu);
       longPressStartRef.current = null;
       clearLongPressTimer();

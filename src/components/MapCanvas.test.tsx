@@ -637,6 +637,35 @@ describe('MapCanvas', () => {
     });
   });
 
+  it('fires onSelectActivity when an activity pin is clicked', () => {
+    const onSelectActivity = vi.fn();
+
+    render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[louvreActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={onSelectActivity}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const activityClickHandler = map.on.mock.calls.find(
+      ([eventName, layerId]) => eventName === 'click' && layerId === 'world-tour-activity-points',
+    )?.[2];
+
+    act(() => {
+      activityClickHandler({
+        features: [{ properties: { id: louvreActivity.id } }],
+      });
+    });
+
+    expect(onSelectActivity).toHaveBeenCalledWith(louvreActivity.id);
+  });
+
   it('populates focused activity features only for selected-stop activities with coordinates', () => {
     const otherDestinationActivity = {
       ...louvreActivity,

@@ -26,9 +26,11 @@ type MockMap = {
   getLayer: Mock;
   addLayer: Mock;
   getCanvas: Mock;
+  getContainer: Mock;
   getZoom: Mock;
   getCenter: Mock;
   fitBounds: Mock;
+  easeTo: Mock;
   unproject: Mock;
   project: Mock;
 };
@@ -59,9 +61,15 @@ const maplibreMock = vi.hoisted(() => {
       getLayer: vi.fn(),
       addLayer: vi.fn(),
       getCanvas: vi.fn(() => ({ style: { cursor: '' } })),
+      getContainer: vi.fn(() => ({
+        clientWidth: 1280,
+        clientHeight: 720,
+        getBoundingClientRect: () => ({ width: 1280, height: 720 }),
+      })),
       getZoom: vi.fn(() => 1.4),
       getCenter: vi.fn(() => ({ lat: 24, lng: 18 })),
       fitBounds: vi.fn(),
+      easeTo: vi.fn(),
       unproject: vi.fn(([x, y]: [number, number]) => ({ lng: (x - 1000) / 10, lat: (500 - y) / 10 })),
       project,
     };
@@ -222,6 +230,22 @@ describe('App', () => {
     maplibreMock.resetSources();
     maplibreMock.project.mockClear();
     vi.unstubAllGlobals();
+    class FakeImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      complete = true;
+      #src = '';
+
+      get src() {
+        return this.#src;
+      }
+
+      set src(value: string) {
+        this.#src = value;
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal('Image', FakeImage);
   });
 
   it('shows a storage bootstrap error when the app repository cannot be prepared', async () => {
@@ -766,7 +790,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
 
-    expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Paris Activities' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select activity Louvre' })).toHaveTextContent('Louvre');
     expect(screen.queryByDisplayValue('Louvre')).not.toBeInTheDocument();
 
@@ -870,6 +894,41 @@ describe('App', () => {
     expect(screen.getByRole('complementary', { name: 'Louvre activity' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Paris profile' })).toBeInTheDocument();
     expect(repositoryMock.listActivityMedia).toHaveBeenCalledWith(louvre.id);
+  });
+
+  it('opens the activity panel when a focused activity map pin is clicked', async () => {
+    const destination = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const louvre = createActivity({
+      destinationId: destination.id,
+      title: 'Louvre Museum',
+      order: 0,
+      location: {
+        name: 'Louvre Museum',
+        address: 'Rue de Rivoli, 75001 Paris, France',
+        coordinates: { lat: 48.8606, lng: 2.3376 },
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi-louvre',
+      },
+    });
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.listActivities.mockResolvedValue([louvre]);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await screen.findByRole('complementary', { name: 'Paris profile' });
+
+    const map = maplibreMock.mapInstances.at(-1)!;
+    triggerMapLayerEvent(map, 'click', 'world-tour-activity-points', {
+      features: [{ properties: { id: louvre.id } }],
+    });
+
+    expect(await screen.findByRole('complementary', { name: 'Louvre Museum activity' })).toBeInTheDocument();
   });
 
   it('reverse geocodes coordinates entered for a manual activity location', async () => {
@@ -1646,6 +1705,21 @@ function getMapEventHandler(map: MockMap, eventName: string): (...args: unknown[
   expect(handler).toEqual(expect.any(Function));
 
   return handler as (...args: unknown[]) => void;
+}
+
+function triggerMapLayerEvent(map: MockMap, eventName: string, layerId: string, event: unknown) {
+  const handler = map.on.mock.calls.find(
+    ([candidateEventName, candidateLayerId]) =>
+      candidateEventName === eventName && candidateLayerId === layerId,
+  )?.[2];
+
+  if (typeof handler !== 'function') {
+    throw new Error(`No ${eventName} handler registered for ${layerId}`);
+  }
+
+  act(() => {
+    handler(event);
+  });
 }
 
 async function openContextMenuMapStop(coordinates: Destination['coordinates']) {
