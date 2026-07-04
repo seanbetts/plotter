@@ -57,6 +57,115 @@ describe('useTripData', () => {
     expect(result.current.destinations).toEqual([]);
   });
 
+  it('loads activities for loaded destinations', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.activitiesByDestinationId[destination.id].map((activity) => activity.title)).toEqual([
+      'Louvre',
+    ]);
+  });
+
+  it('adds, updates, reorders, and deletes activities through hook actions', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let destinationId = '';
+    await act(async () => {
+      const destination = await result.current.addDestination({
+        name: 'Paris',
+        countryRegion: 'France',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      });
+      destinationId = destination.id;
+    });
+
+    let louvreId = '';
+    let bakeryId = '';
+    await act(async () => {
+      const louvre = await result.current.createActivity({
+        destinationId,
+        title: 'Louvre',
+      });
+      const bakery = await result.current.createActivity({
+        destinationId,
+        title: 'Bakery crawl',
+      });
+      louvreId = louvre.id;
+      bakeryId = bakery.id;
+    });
+
+    await act(async () => {
+      await result.current.updateActivity(louvreId, { title: 'Morning Louvre' });
+      await result.current.reorderActivities(destinationId, [bakeryId, louvreId]);
+    });
+
+    expect(result.current.activitiesByDestinationId[destinationId].map((activity) => activity.title)).toEqual([
+      'Bakery crawl',
+      'Morning Louvre',
+    ]);
+
+    expect((await repository.listActivities(destinationId)).map((activity) => activity.title)).toEqual([
+      'Bakery crawl',
+      'Morning Louvre',
+    ]);
+
+    await act(async () => {
+      await result.current.deleteActivity(bakeryId);
+    });
+
+    expect(result.current.activitiesByDestinationId[destinationId].map((activity) => activity.title)).toEqual([
+      'Morning Louvre',
+    ]);
+    expect((await repository.listActivities(destinationId)).map((activity) => activity.title)).toEqual([
+      'Morning Louvre',
+    ]);
+  });
+
+  it('clears activity state when deleting a destination', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let destinationId = '';
+    await act(async () => {
+      const destination = await result.current.addDestination({
+        name: 'Paris',
+        countryRegion: 'France',
+        coordinates: { lat: 48.8566, lng: 2.3522 },
+      });
+      destinationId = destination.id;
+      await result.current.createActivity({
+        destinationId,
+        title: 'Louvre',
+      });
+    });
+
+    expect(result.current.activitiesByDestinationId[destinationId]).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.deleteDestination(destinationId);
+    });
+
+    expect(result.current.activitiesByDestinationId).not.toHaveProperty(destinationId);
+  });
+
   it('updates a destination through an action object captured before the destination was added', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));
