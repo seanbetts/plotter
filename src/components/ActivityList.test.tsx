@@ -188,7 +188,7 @@ describe('ActivityList', () => {
 
     expect(screen.getByRole('button', { name: 'Move Louvre up' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Move Bakery crawl down' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Select activity Bakery crawl' }).closest('li')).toHaveClass(
+    expect(screen.getByRole('button', { name: 'Select activity Bakery crawl' })).toHaveClass(
       'is-selected',
     );
 
@@ -202,5 +202,48 @@ describe('ActivityList', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete Bakery crawl' }));
     expect(onDeleteActivity).toHaveBeenCalledWith(bakery.id);
+  });
+
+  it('renders the activity search before the existing activity list', () => {
+    const louvre = createActivity({ destinationId: 'destination-1', title: 'Louvre', order: 0 });
+
+    render(
+      <ActivityList
+        activities={[louvre]}
+        selectedActivityId={null}
+        onSelectActivity={vi.fn()}
+        onCreateActivity={vi.fn()}
+        searchActivities={vi.fn().mockResolvedValue([])}
+        onDeleteActivity={vi.fn()}
+        onReorderActivities={vi.fn()}
+      />,
+    );
+
+    const searchInput = screen.getByLabelText('Search for an activity');
+    const activityRow = screen.getByRole('button', { name: 'Select activity Louvre' });
+    expect(searchInput.compareDocumentPosition(activityRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('only marks the selected activity select control as selected', () => {
+    const louvre = createActivity({ destinationId: 'destination-1', title: 'Louvre', order: 0 });
+
+    render(
+      <ActivityList
+        activities={[louvre]}
+        selectedActivityId={louvre.id}
+        onSelectActivity={vi.fn()}
+        onCreateActivity={vi.fn()}
+        searchActivities={vi.fn().mockResolvedValue([])}
+        onDeleteActivity={vi.fn()}
+        onReorderActivities={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Select activity Louvre' })).toHaveClass('is-selected');
+    expect(screen.getByRole('button', { name: 'Select activity Louvre' }).closest('li')).not.toHaveClass(
+      'is-selected',
+    );
   });
 });

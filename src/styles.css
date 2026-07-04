@@ -584,9 +584,31 @@ select {
 }
 
 .activity-search-group {
+  display: grid;
   position: relative;
   min-width: 0;
   flex: 1 1 auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--surface-control);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.activity-search-group:focus-within {
+  border-color: var(--border-selected);
+  background: var(--surface-control-focus);
+  box-shadow: 0 0 0 3px rgb(var(--color-accent-rgb) / 0.18);
+}
+
+.activity-search-group .search-input-shell,
+.activity-search-group .search-input-shell:focus-within {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .activity-search-group .search-results {
@@ -921,13 +943,13 @@ select {
   min-height: 36px;
 }
 
-.destination-profile .profile-coordinate-input-pill {
+.profile-coordinate-input-pill {
   gap: 3px;
   color: rgb(var(--color-text-rgb) / 0.78);
   font-size: inherit;
 }
 
-.destination-profile .profile-coordinate-input-pill input {
+.profile-coordinate-input-pill input {
   width: 100%;
   min-width: 0;
   border: 0;
@@ -938,6 +960,13 @@ select {
   font-size: 0.72rem;
   line-height: 1;
   outline: 0;
+}
+
+.activity-location-address {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profile-coordinate-error {
@@ -1243,12 +1272,6 @@ select {
   border-radius: var(--radius-control);
 }
 
-.activity-row.is-selected {
-  border-color: rgb(var(--color-accent-rgb) / 0.5);
-  background: rgb(var(--color-accent-rgb) / 0.1);
-  box-shadow: 0 0 0 1px rgb(var(--color-accent-rgb) / 0.18);
-}
-
 .activity-add-row {
   grid-template-columns: minmax(0, 1fr) 34px;
 }
@@ -1304,7 +1327,8 @@ select {
   white-space: nowrap;
 }
 
-.activity-select[aria-current='true'] {
+.activity-select[aria-current='true'],
+.activity-select.is-selected {
   border-color: rgb(var(--color-accent-rgb) / 0.28);
   color: var(--color-accent-strong);
   background: rgb(var(--color-accent-rgb) / 0.08);

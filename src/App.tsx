@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
+import {
+  createBoundingBoxAroundCoordinates,
+  resolveMapTilerCoordinates,
+  searchMapTilerPlaces,
+} from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
 import { ActivityPanel } from './components/ActivityPanel';
 import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
@@ -52,6 +56,7 @@ type PreviewMediaSelection = {
 };
 
 const overlayViewportPaddingPx = 16;
+const activitySearchRadiusKm = 100;
 const mapStopConfirmationApproxSize = {
   width: 320,
   height: 260,
@@ -553,6 +558,15 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         apiKey: mapTilerApiKey,
         profile: 'activity',
         proximity: selectedDestination?.coordinates,
+        ...(selectedDestination?.coordinates
+          ? {
+              bbox: createBoundingBoxAroundCoordinates(
+                selectedDestination.coordinates,
+                activitySearchRadiusKm,
+              ),
+              fallbackWithoutBbox: true,
+            }
+          : {}),
       }),
     [selectedDestination?.coordinates],
   );
@@ -608,7 +622,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   const handleUpdateActivityPanel = useCallback(
     async (
       activityId: string,
-      patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority' | 'tags'>>,
+      patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority' | 'tags' | 'location'>>,
     ) => {
       await updateActivity(activityId, patch);
     },

@@ -98,8 +98,37 @@ describe('DestinationProfile', () => {
 
     const header = screen.getByRole('banner', { name: 'Stop detail header' });
     expect(within(header).getByRole('button', { name: 'Edit stop name Balcombe' })).toBeInTheDocument();
-    expect(within(header).getByText('Balcombe, West Sussex, United Kingdom')).toBeInTheDocument();
+    expect(within(header).getByText('West Sussex, United Kingdom')).toBeInTheDocument();
+    expect(within(header).queryByText('Balcombe, West Sussex, United Kingdom')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Stop name')).not.toBeInTheDocument();
+  });
+
+  it('keeps the place name in the address when the stop has been renamed', () => {
+    const destination = createDestination({
+      name: 'Home',
+      coordinates: { lat: 51.0576, lng: -0.1342 },
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'gb',
+        sourceLabel: 'Balcombe, West Sussex, England, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const header = screen.getByRole('banner', { name: 'Stop detail header' });
+    expect(within(header).getByRole('button', { name: 'Edit stop name Home' })).toBeInTheDocument();
+    expect(within(header).getByText('Balcombe, West Sussex, United Kingdom')).toBeInTheDocument();
   });
 
   it('labels the tags group with the stop name', () => {

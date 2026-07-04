@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createActivity } from '../domain/activities';
-import type { MediaItem } from '../domain/types';
+import type { ActivityLocation, MediaItem } from '../domain/types';
 import { ActivityPanel } from './ActivityPanel';
 
 function deferred<T>() {
@@ -61,6 +61,101 @@ function addTag(tag: string) {
 }
 
 describe('ActivityPanel', () => {
+  it('renders activity address and copyable coordinates when a location is present', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+    const location: ActivityLocation = {
+      name: 'Louvre Museum',
+      address: 'Rue de Rivoli, 75001 Paris, France',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler',
+      sourceFeatureId: 'poi.123',
+    };
+    const activity = {
+      ...createActivity({ destinationId: 'destination-1', title: 'Louvre', order: 0, location }),
+      location,
+    };
+
+    render(<ActivityPanel {...createProps({ activity })} />);
+
+    expect(screen.getByText('Rue de Rivoli, 75001 Paris, France')).toBeInTheDocument();
+    expect(screen.getByLabelText('Coordinates')).toBeInTheDocument();
+    expect(screen.getByText('48.8606')).toBeInTheDocument();
+    expect(screen.getByText('2.3364')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy coordinates 48.8606, 2.3364' }));
+
+    expect(writeText).toHaveBeenCalledWith('48.8606, 2.3364');
+  });
+
+  it('removes a repeated activity name from the displayed address', () => {
+    const location: ActivityLocation = {
+      name: 'Louvre Museum',
+      address: 'Louvre Museum, 75001 Paris, France',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler',
+      sourceFeatureId: 'poi.123',
+    };
+    const activity = {
+      ...createActivity({ destinationId: 'destination-1', title: 'Louvre Museum', order: 0, location }),
+      location,
+    };
+
+    render(<ActivityPanel {...createProps({ activity })} />);
+
+    expect(screen.getByText('75001 Paris, France')).toBeInTheDocument();
+    expect(screen.queryByText('Louvre Museum, 75001 Paris, France')).not.toBeInTheDocument();
+  });
+
+  it('keeps the place name in the address when the activity has been renamed', () => {
+    const location: ActivityLocation = {
+      name: 'Louvre Museum',
+      address: 'Louvre Museum, 75001 Paris, France',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler',
+      sourceFeatureId: 'poi.123',
+    };
+    const activity = {
+      ...createActivity({ destinationId: 'destination-1', title: 'Morning visit', order: 0, location }),
+      location,
+    };
+
+    render(<ActivityPanel {...createProps({ activity })} />);
+
+    expect(screen.getByText('Louvre Museum, 75001 Paris, France')).toBeInTheDocument();
+  });
+
+  it('edits activity location coordinates while preserving address details', () => {
+    const onUpdateActivity = vi.fn();
+    const location: ActivityLocation = {
+      name: 'Louvre Museum',
+      address: 'Rue de Rivoli, 75001 Paris, France',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler',
+      sourceFeatureId: 'poi.123',
+    };
+    const activity = {
+      ...createActivity({ destinationId: 'destination-1', title: 'Louvre', order: 0, location }),
+      location,
+    };
+
+    render(<ActivityPanel {...createProps({ activity, onUpdateActivity })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit coordinates' }));
+    fireEvent.change(screen.getByLabelText('Latitude'), { target: { value: '48.861' } });
+    fireEvent.change(screen.getByLabelText('Longitude'), { target: { value: '2.337' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save coordinates' }));
+
+    expect(onUpdateActivity).toHaveBeenCalledWith(activity.id, {
+      location: {
+        ...location,
+        coordinates: { lat: 48.861, lng: 2.337 },
+      },
+    });
+  });
+
   it('renders the parent stop name and edits the title like a stop name', () => {
     const props = createProps();
 
@@ -107,14 +202,14 @@ describe('ActivityPanel', () => {
     expect(screen.queryByLabelText('Activity status')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Activity priority')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Louvre description'), {
+    fireEvent.change(screen.getByLabelText('Louvre Description'), {
       target: { value: 'Spend the morning in the galleries.' },
     });
-    fireEvent.blur(screen.getByLabelText('Louvre description'));
-    fireEvent.change(screen.getByLabelText('Louvre notes'), {
+    fireEvent.blur(screen.getByLabelText('Louvre Description'));
+    fireEvent.change(screen.getByLabelText('Louvre Notes'), {
       target: { value: 'Check Friday late opening.' },
     });
-    fireEvent.blur(screen.getByLabelText('Louvre notes'));
+    fireEvent.blur(screen.getByLabelText('Louvre Notes'));
 
     expect(props.onUpdateActivity).toHaveBeenNthCalledWith(1, props.activity.id, {
       description: 'Spend the morning in the galleries.',
@@ -210,7 +305,7 @@ describe('ActivityPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit activity title Louvre' }));
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
     fireEvent.blur(screen.getByLabelText('Activity title'));
-    fireEvent.change(screen.getByLabelText('Morning Louvre notes'), {
+    fireEvent.change(screen.getByLabelText('Morning Louvre Notes'), {
       target: { value: 'Check Friday late opening.' },
     });
 
@@ -233,7 +328,7 @@ describe('ActivityPanel', () => {
     );
 
     expect(screen.getByLabelText('Activity title')).toHaveValue('Morning Louvre');
-    expect(screen.getByLabelText('Morning Louvre notes')).toHaveValue('Check Friday late opening.');
+    expect(screen.getByLabelText('Morning Louvre Notes')).toHaveValue('Check Friday late opening.');
   });
 
   it('preserves a newer title draft when an earlier title save rerender arrives', async () => {

@@ -160,6 +160,7 @@ vi.mock('./storage/appRepository', () => ({
 }));
 
 vi.mock('./adapters/geocoding', () => ({
+  createBoundingBoxAroundCoordinates: vi.fn(() => [0.9869, 47.9583, 3.7175, 49.7549]),
   resolveMapTilerCoordinates: vi.fn(),
   searchMapTilerPlaces: vi.fn(),
 }));
@@ -828,6 +829,8 @@ describe('App', () => {
       apiKey: expect.any(String),
       profile: 'activity',
       proximity: { lat: 48.8566, lng: 2.3522 },
+      bbox: [0.9869, 47.9583, 3.7175, 49.7549],
+      fallbackWithoutBbox: true,
     });
     expect(repositoryMock.createActivity).toHaveBeenCalledWith({
       destinationId: destination.id,

@@ -157,6 +157,45 @@ export function ActivityList({
         <h2>Activities</h2>
       </div>
 
+      <div className="activity-add-row">
+        <SearchCombobox<PlaceSearchResult>
+          label="Search for an activity"
+          placeholder="Find a place, venue, or address"
+          inputId="activity-search"
+          resultsId="activity-search-results"
+          className="activity-search-group"
+          value={newActivityTitle}
+          onValueChange={setNewActivityTitle}
+          search={searchActivities}
+          getResultId={(result) => result.id}
+          getResultLabel={(result) => result.label}
+          onSelectResult={createActivityFromSearchResult}
+          onSubmitQuery={createManualActivity}
+          renderResult={(result) => {
+            const context = formatActivitySearchContext(result);
+            const distance = formatDistance(result.distanceFromProximityKm);
+
+            return (
+              <span className="activity-search-result">
+                <span className="activity-search-result__primary">
+                  <span className="search-result-title">
+                    {result.kind === 'coordinates' ? 'Use coordinates' : result.location.placeName}
+                  </span>
+                  <span className="search-result-badge">{formatTypeBadge(result)}</span>
+                </span>
+                <span className="activity-search-result__meta">
+                  {context ? <span className="search-result-subtitle">{context}</span> : null}
+                  {distance ? <span className="search-result-distance">{distance}</span> : null}
+                </span>
+              </span>
+            );
+          }}
+        />
+        <button type="button" aria-label="Add activity" onClick={submitNewActivity}>
+          <Plus size={15} aria-hidden="true" />
+        </button>
+      </div>
+
       {activities.length === 0 ? (
         <p className="activity-empty-state">No activities yet</p>
       ) : (
@@ -166,13 +205,10 @@ export function ActivityList({
             const title = activity.title;
 
             return (
-              <li
-                key={activity.id}
-                className={isSelected ? 'activity-row is-selected' : 'activity-row'}
-              >
+              <li key={activity.id} className="activity-row">
                 <button
                   type="button"
-                  className="activity-select"
+                  className={isSelected ? 'activity-select is-selected' : 'activity-select'}
                   aria-label={`Select activity ${title}`}
                   aria-current={isSelected ? 'true' : undefined}
                   onClick={() => onSelectActivity(activity.id)}
@@ -216,45 +252,6 @@ export function ActivityList({
           })}
         </ol>
       )}
-
-      <div className="activity-add-row">
-        <SearchCombobox<PlaceSearchResult>
-          label="Search for an activity"
-          placeholder="Find a place, venue, or address"
-          inputId="activity-search"
-          resultsId="activity-search-results"
-          className="activity-search-group"
-          value={newActivityTitle}
-          onValueChange={setNewActivityTitle}
-          search={searchActivities}
-          getResultId={(result) => result.id}
-          getResultLabel={(result) => result.label}
-          onSelectResult={createActivityFromSearchResult}
-          onSubmitQuery={createManualActivity}
-          renderResult={(result) => {
-            const context = formatActivitySearchContext(result);
-            const distance = formatDistance(result.distanceFromProximityKm);
-
-            return (
-              <span className="activity-search-result">
-                <span className="activity-search-result__primary">
-                  <span className="search-result-title">
-                    {result.kind === 'coordinates' ? 'Use coordinates' : result.location.placeName}
-                  </span>
-                  <span className="search-result-badge">{formatTypeBadge(result)}</span>
-                </span>
-                <span className="activity-search-result__meta">
-                  {context ? <span className="search-result-subtitle">{context}</span> : null}
-                  {distance ? <span className="search-result-distance">{distance}</span> : null}
-                </span>
-              </span>
-            );
-          }}
-        />
-        <button type="button" aria-label="Add activity" onClick={submitNewActivity}>
-          <Plus size={15} aria-hidden="true" />
-        </button>
-      </div>
       {mutationError ? (
         <p className="activity-error" role="alert">
           {mutationError}

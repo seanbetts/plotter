@@ -2,7 +2,7 @@ import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
-import { formatLocationParts } from '../domain/locations';
+import { formatLocationContext, formatLocationParts } from '../domain/locations';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem } from '../domain/types';
 import { ActivityList } from './ActivityList';
 import { DestinationImageStrip } from './DestinationImageStrip';
@@ -415,7 +415,12 @@ function DestinationProfileForm({
   const latitudeText = formatCoordinateValue(destination.coordinates.lat);
   const longitudeText = formatCoordinateValue(destination.coordinates.lng);
   const coordinatesText = `${latitudeText}, ${longitudeText}`;
-  const tagsLabel = `${(form.name || destination.name).trim() || destination.name} Tags`;
+  const destinationTitle = form.name || destination.name;
+  const destinationLocationLabel = formatLocationParts(destination.location);
+  const destinationLocationContext = destinationLocationLabel
+    ? formatLocationContext(destinationLocationLabel, destinationTitle)
+    : '';
+  const tagsLabel = `${destinationTitle.trim() || destination.name} Tags`;
   const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
     .filter(Boolean)
     .join(' ');
@@ -477,13 +482,13 @@ function DestinationProfileForm({
               type="button"
               className="profile-title-button profile-title-control"
               style={profileTitleControlStyle}
-              aria-label={`Edit stop name ${form.name || destination.name}`}
+              aria-label={`Edit stop name ${destinationTitle}`}
               onClick={() => setIsEditingName(true)}
             >
-              <h1>{form.name || destination.name}</h1>
+              <h1>{destinationTitle}</h1>
             </button>
           )}
-          <p>{formatLocationParts(destination.location) || 'Unassigned location'}</p>
+          <p>{destinationLocationLabel ? destinationLocationContext : 'Unassigned location'}</p>
           {isEditingCoordinates ? (
             <div className="profile-coordinate-editor" aria-label="Edit coordinates">
               <label className="profile-coordinate-input-pill profile-coordinate-field">
