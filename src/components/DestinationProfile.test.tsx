@@ -23,6 +23,7 @@ const defaultMediaProps = {
   selectedActivityId: null,
   onSelectActivity: vi.fn(),
   onCreateActivity: vi.fn(),
+  searchActivities: vi.fn().mockResolvedValue([]),
   onDeleteActivity: vi.fn(),
   onReorderActivities: vi.fn(),
   mediaItems: [],
@@ -396,24 +397,26 @@ describe('DestinationProfile', () => {
       countryRegion: 'France',
       coordinates: { lat: 48.8566, lng: 2.3522 },
     });
+    const onCreateActivity = vi.fn().mockRejectedValue(new Error('Network unavailable'));
 
     render(
       <DestinationProfile
         {...defaultMediaProps}
         destination={destination}
-        onCreateActivity={vi.fn().mockRejectedValue(new Error('Network unavailable'))}
+        onCreateActivity={onCreateActivity}
         onUpdate={vi.fn()}
         onClose={vi.fn()}
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('New activity title'), {
+    fireEvent.change(screen.getByLabelText('Search for an activity'), {
       target: { value: 'Louvre' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add activity' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Unable to update activities.');
-    expect(screen.getByLabelText('New activity title')).toHaveValue('Louvre');
+    expect(onCreateActivity).toHaveBeenCalledWith(destination.id, { title: 'Louvre' });
+    expect(screen.getByLabelText('Search for an activity')).toHaveValue('Louvre');
   });
 
   it('requests the workspace full image preview from the pane preview image', async () => {
@@ -523,7 +526,7 @@ describe('DestinationProfile', () => {
     expect(screen.getByRole('group', { name: 'Tags' })).toBeInTheDocument();
     expect(screen.getByLabelText('Add tag')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
-    expect(screen.getByLabelText('New activity title')).toBeInTheDocument();
+    expect(screen.getByLabelText('Search for an activity')).toBeInTheDocument();
     expect(screen.queryByLabelText('Why it matters')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Highlights')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Personal rationale')).not.toBeInTheDocument();

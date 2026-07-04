@@ -19,6 +19,7 @@ export type TripRepository = {
     destinationId: string;
     title: string;
     order?: number;
+    location?: Activity['location'];
   }): Promise<Activity>;
   updateActivity(
     activityId: string,
@@ -180,6 +181,7 @@ export function createTripRepository(db: TripDb): TripRepository {
       destinationId: string;
       title: string;
       order?: number;
+      location?: Activity['location'];
     }): Promise<Activity> {
       const destination = await db.destinations.get(input.destinationId);
       if (!destination) {
@@ -192,6 +194,7 @@ export function createTripRepository(db: TripDb): TripRepository {
       const activity = createActivity({
         ...input,
         order: input.order ?? nextOrder,
+        location: input.location,
       });
 
       await db.activities.put(activity);

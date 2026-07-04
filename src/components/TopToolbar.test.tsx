@@ -57,7 +57,7 @@ describe('TopToolbar', () => {
       />,
     );
 
-    expect(screen.getByPlaceholderText('Find a city, landmark, or paste coordinates')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Find a city, town, or region')).toBeInTheDocument();
   });
 
   it('shows live search results and adds the selected result', async () => {
@@ -88,6 +88,32 @@ describe('TopToolbar', () => {
       coordinates: { lat: 51.0576, lng: -0.1342 },
     });
     expect(screen.getByLabelText('Search for a destination')).toHaveValue('');
+  });
+
+  it('renders simple stop results without type badges', async () => {
+    const user = userEvent.setup();
+    const searchPlaces = vi.fn().mockResolvedValue([
+      {
+        ...balcombeResult,
+        placeTypes: ['municipal_district'],
+        placeTypeNames: ['Civil parish'],
+      },
+    ]);
+
+    render(
+      <TopToolbar
+        onAddDestination={vi.fn()}
+        resolveSearchResult={vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>)}
+        searchPlaces={searchPlaces}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('Search for a destination'), 'Sagres');
+
+    expect(
+      await screen.findByRole('option', { name: 'Balcombe, West Sussex, England, United Kingdom' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Civil parish')).not.toBeInTheDocument();
   });
 
   it('moves through results with arrow keys and selects the highlighted option', async () => {

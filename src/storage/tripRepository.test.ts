@@ -404,6 +404,33 @@ describe('trip repository', () => {
     ]);
   });
 
+  it('creates local activities with supplied location details', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const location = {
+      name: 'Louvre Museum',
+      address: 'Rue de Rivoli',
+      coordinates: { lat: 48.8606, lng: 2.3364 },
+      sourceProvider: 'maptiler' as const,
+      sourceFeatureId: 'poi.123',
+    };
+
+    await repository.saveDestination(destination);
+    const activity = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+      location,
+    });
+
+    expect(activity.location).toEqual(location);
+    await expect(repository.listActivities(destination.id)).resolves.toEqual([
+      expect.objectContaining({ id: activity.id, location }),
+    ]);
+  });
+
   it('deletes activities when their destination is deleted', async () => {
     const repository = createTestRepository();
     const destination = createDestination({

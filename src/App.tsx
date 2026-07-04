@@ -9,7 +9,7 @@ import { MapCanvas } from './components/MapCanvas';
 import type { MapAddStopRequest } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
-import type { Activity, Coordinates, DestinationLocation, MediaRollupItem } from './domain/types';
+import type { Activity, ActivityLocation, Coordinates, DestinationLocation, MediaRollupItem } from './domain/types';
 import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
@@ -543,15 +543,24 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
     }
   }, [handleAddDestination, isInteractionLocked, pendingMapStop]);
 
-  const searchPlaces = useCallback(
-    (query: string) => searchMapTilerPlaces(query, { apiKey: mapTilerApiKey }),
+  const searchStopPlaces = useCallback(
+    (query: string) => searchMapTilerPlaces(query, { apiKey: mapTilerApiKey, profile: 'stop' }),
     [],
+  );
+  const searchActivityPlaces = useCallback(
+    (query: string) =>
+      searchMapTilerPlaces(query, {
+        apiKey: mapTilerApiKey,
+        profile: 'activity',
+        proximity: selectedDestination?.coordinates,
+      }),
+    [selectedDestination?.coordinates],
   );
   const resolveSearchResult = useCallback(
     (result: Awaited<ReturnType<typeof searchMapTilerPlaces>>[number]) => {
       if (result.kind === 'place') return Promise.resolve(result);
 
-      return resolveMapTilerCoordinates(result.coordinates, { apiKey: mapTilerApiKey });
+      return resolveMapTilerCoordinates(result.coordinates, { apiKey: mapTilerApiKey, profile: 'stop' });
     },
     [],
   );
@@ -575,8 +584,12 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
   }, []);
 
   const handleCreateActivity = useCallback(
-    async (destinationId: string, title: string) => {
-      const activity = await createActivity({ destinationId, title });
+    async (destinationId: string, input: { title: string; location?: ActivityLocation }) => {
+      const activity = await createActivity({
+        destinationId,
+        title: input.title,
+        location: input.location,
+      });
       setSelectedActivityId(activity.id);
     },
     [createActivity],
@@ -673,7 +686,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
         {!isInteractionLocked ? (
           <>
             <TopToolbar
-              searchPlaces={searchPlaces}
+              searchPlaces={searchStopPlaces}
               resolveSearchResult={resolveSearchResult}
               onAddDestination={handleAddDestination}
             />
@@ -760,6 +773,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               mediaError={destinationMedia.error ?? destinationMediaRollupError}
               onSelectActivity={setSelectedActivityId}
               onCreateActivity={handleCreateActivity}
+              searchActivities={searchActivityPlaces}
               onDeleteActivity={handleDeleteActivity}
               onReorderActivities={reorderActivities}
               onUpdate={updateDestination}

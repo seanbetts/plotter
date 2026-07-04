@@ -1,8 +1,9 @@
 import { Check, CircleAlert, Copy, LoaderCircle, Pencil, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
+import type { PlaceSearchResult } from '../adapters/geocoding';
 import { formatLocationParts } from '../domain/locations';
-import type { Activity, Destination, MediaItem, MediaRollupItem } from '../domain/types';
+import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem } from '../domain/types';
 import { ActivityList } from './ActivityList';
 import { DestinationImageStrip } from './DestinationImageStrip';
 import { formatStopHeaderLabel } from './stopLabels';
@@ -17,6 +18,11 @@ type DestinationFormState = {
   tagInput: string;
 };
 
+type CreateActivityInput = { title: string; location?: ActivityLocation };
+type CreateActivityHandler =
+  | ((destinationId: string, input: CreateActivityInput) => Promise<void> | void)
+  | ((destinationId: string, title: string) => Promise<void> | void);
+
 type DestinationProfileProps = {
   destination: Destination;
   activities: Activity[];
@@ -28,7 +34,8 @@ type DestinationProfileProps = {
   isMediaUploading: boolean;
   mediaError: string | null;
   onSelectActivity: (activityId: string) => void;
-  onCreateActivity: (destinationId: string, title: string) => Promise<void> | void;
+  onCreateActivity: CreateActivityHandler;
+  searchActivities?: (query: string) => Promise<PlaceSearchResult[]>;
   onDeleteActivity: (activityId: string) => Promise<void> | void;
   onReorderActivities: (
     destinationId: string,
@@ -53,6 +60,7 @@ type CoordinateDraftResult =
 const autosaveDelayMs = 700;
 const savedStatusVisibleMs = 2400;
 const copiedStatusVisibleMs = 1600;
+const emptyActivitySearch = async (): Promise<PlaceSearchResult[]> => [];
 
 const splitTagInput = (value: string) =>
   value
@@ -170,6 +178,7 @@ function DestinationProfileForm({
   mediaError,
   onSelectActivity,
   onCreateActivity,
+  searchActivities,
   onDeleteActivity,
   onReorderActivities,
   onUpdate,
@@ -428,6 +437,20 @@ function DestinationProfileForm({
     }
   }
 
+  function createProfileActivity(input: CreateActivityInput) {
+    if (!searchActivities && !input.location) {
+      return (onCreateActivity as (destinationId: string, title: string) => Promise<void> | void)(
+        destination.id,
+        input.title,
+      );
+    }
+
+    return (onCreateActivity as (destinationId: string, input: CreateActivityInput) => Promise<void> | void)(
+      destination.id,
+      input,
+    );
+  }
+
   return (
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
       <header className="profile-header" aria-label="Stop detail header">
@@ -634,7 +657,8 @@ function DestinationProfileForm({
         activities={activities}
         selectedActivityId={selectedActivityId}
         onSelectActivity={onSelectActivity}
-        onCreateActivity={(title) => onCreateActivity(destination.id, title)}
+        onCreateActivity={createProfileActivity}
+        searchActivities={searchActivities ?? emptyActivitySearch}
         onDeleteActivity={(activityId) => onDeleteActivity(activityId)}
         onReorderActivities={(orderedActivityIds) =>
           onReorderActivities(destination.id, orderedActivityIds)
