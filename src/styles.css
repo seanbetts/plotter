@@ -2236,11 +2236,21 @@ select {
   right: 10px;
 }
 
-.destination-image-hero-status {
+.destination-image-hero-footer {
   position: absolute;
   right: 10px;
   bottom: 10px;
+  left: 10px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.destination-image-hero-status {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
@@ -2260,10 +2270,9 @@ select {
 }
 
 .destination-image-attribution {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
-  max-width: calc(100% - 20px);
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
   overflow: hidden;
   padding: 5px 7px;
   border: 1px solid rgb(255 255 255 / 0.56);
@@ -2277,7 +2286,6 @@ select {
   white-space: nowrap;
   -webkit-backdrop-filter: blur(10px) saturate(1.12);
   backdrop-filter: blur(10px) saturate(1.12);
-  pointer-events: none;
 }
 
 .destination-image-carousel {

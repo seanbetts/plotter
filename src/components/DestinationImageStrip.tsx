@@ -30,6 +30,20 @@ function getMediaStripItems(props: DestinationImageStripProps): MediaStripItem[]
 }
 
 export function DestinationImageStrip(props: DestinationImageStripProps) {
+  const handleReorder = (orderedMediaIds: string[]) => {
+    if (!props.mediaRollupItems) {
+      return props.onReorder(orderedMediaIds);
+    }
+
+    const reorderableDestinationMediaIds = new Set(
+      props.mediaRollupItems
+        .filter((rollupItem) => rollupItem.ownerType === 'destination' && rollupItem.canReorderInStopCarousel)
+        .map((rollupItem) => rollupItem.mediaItem.id),
+    );
+
+    return props.onReorder(orderedMediaIds.filter((mediaId) => reorderableDestinationMediaIds.has(mediaId)));
+  };
+
   return (
     <MediaImageStrip
       regionLabel="Stop images"
@@ -42,7 +56,7 @@ export function DestinationImageStrip(props: DestinationImageStripProps) {
       isUploading={props.isUploading}
       error={props.error}
       onUploadFiles={props.onUploadFiles}
-      onReorder={props.onReorder}
+      onReorder={handleReorder}
       onOpenPreview={props.onOpenPreview}
     />
   );

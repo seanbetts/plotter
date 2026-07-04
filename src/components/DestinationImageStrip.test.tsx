@@ -186,4 +186,68 @@ describe('DestinationImageStrip', () => {
 
     expect(onReorder).not.toHaveBeenCalled();
   });
+
+  it('filters rollup reorder payloads to reorderable stop-owned media ids', () => {
+    const onReorder = vi.fn();
+    render(
+      <DestinationImageStrip
+        {...createProps({
+          onReorder,
+          mediaRollupItems: [
+            createMediaRollupItem({
+              mediaItem: createMediaItem({
+                id: 'stop-media-1',
+                caption: 'Stop hero',
+              }),
+            }),
+            createMediaRollupItem({
+              mediaItem: createMediaItem({
+                id: 'stop-media-2',
+                url: 'https://example.com/stop-media-2.jpg',
+                caption: 'Stop detail',
+                sortOrder: 1,
+              }),
+            }),
+            createMediaRollupItem({
+              mediaItem: createMediaItem({
+                id: 'activity-media-1',
+                url: 'https://example.com/activity-media-1.jpg',
+                caption: 'Market lane',
+                sortOrder: 2,
+              }),
+              ownerType: 'activity',
+              activityId: 'activity-1',
+              activityTitle: 'Night market',
+              canReorderInStopCarousel: false,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const secondStopThumbnail = screen.getByRole('button', { name: 'Show image 2: Stop detail' });
+    vi.spyOn(secondStopThumbnail, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 0,
+      width: 80,
+      height: 60,
+      top: 0,
+      right: 180,
+      bottom: 60,
+      left: 100,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Show image 1: Stop hero' }));
+
+    const dragOverEvent = new Event('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(dragOverEvent, 'clientX', { value: 170 });
+    fireEvent(secondStopThumbnail, dragOverEvent);
+
+    const dropEvent = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(dropEvent, 'clientX', { value: 170 });
+    fireEvent(secondStopThumbnail, dropEvent);
+
+    expect(onReorder).toHaveBeenCalledWith(['stop-media-2', 'stop-media-1']);
+  });
 });

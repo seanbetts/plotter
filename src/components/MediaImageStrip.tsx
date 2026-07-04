@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Image, LoaderCircle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, DragEvent } from 'react';
+import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
 import type { MediaItem } from '../domain/types';
 import { preloadImageUrls } from '../media/imagePreloading';
 
@@ -281,25 +281,16 @@ export function MediaImageStrip({
     [items, safePreviewMediaIndex],
   );
 
-  useEffect(() => {
-    if (items.length < 2) return undefined;
+  const handleStripKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (items.length < 2) return;
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (isEditableKeyboardTarget(event.target instanceof Element ? event.target : null)) return;
 
-    const handleWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing) return;
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      if (event.altKey || event.ctrlKey || event.metaKey) return;
-      if (isEditableKeyboardTarget(document.activeElement)) return;
-
-      event.preventDefault();
-      selectAdjacentPreview(event.key === 'ArrowLeft' ? -1 : 1);
-    };
-
-    window.addEventListener('keydown', handleWindowKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', handleWindowKeyDown);
-    };
-  }, [items.length, selectAdjacentPreview]);
+    event.preventDefault();
+    selectAdjacentPreview(event.key === 'ArrowLeft' ? -1 : 1);
+  };
 
   return (
     <section
@@ -309,6 +300,8 @@ export function MediaImageStrip({
       onDragOver={handleStripDragOver}
       onDragLeave={handleStripDragLeave}
       onDrop={handleStripDrop}
+      onKeyDown={handleStripKeyDown}
+      tabIndex={-1}
     >
       <input
         ref={fileInputRef}
@@ -365,9 +358,6 @@ export function MediaImageStrip({
           >
             <img src={getHeroImageUrl(heroMediaItem)} alt={mediaLabel(heroMediaItem, safePreviewMediaIndex)} />
           </button>
-          {heroItem.attribution ? (
-            <span className="destination-image-attribution">{heroItem.attribution}</span>
-          ) : null}
           <button
             type="button"
             className="destination-image-preview-nav is-previous"
@@ -388,11 +378,18 @@ export function MediaImageStrip({
           >
             <ChevronRight size={18} aria-hidden="true" />
           </button>
-          {isUploading ? (
-            <span className="destination-image-hero-status" role="status" aria-label={uploadingLabel}>
-              <LoaderCircle size={14} aria-hidden="true" />
-              Uploading
-            </span>
+          {heroItem.attribution || isUploading ? (
+            <div className="destination-image-hero-footer">
+              {heroItem.attribution ? (
+                <span className="destination-image-attribution">{heroItem.attribution}</span>
+              ) : null}
+              {isUploading ? (
+                <span className="destination-image-hero-status" role="status" aria-label={uploadingLabel}>
+                  <LoaderCircle size={14} aria-hidden="true" />
+                  Uploading
+                </span>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}

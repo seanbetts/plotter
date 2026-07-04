@@ -167,7 +167,7 @@ describe('MediaImageStrip', () => {
     expect(screen.getByRole('button', { name: 'Open full image' })).toBeInTheDocument();
   });
 
-  it('loops the selected preview image with overlay arrows and arrow keys', () => {
+  it('loops the selected preview image with overlay arrows and focused strip arrow keys', () => {
     const onOpenPreview = vi.fn();
     render(<MediaImageStrip {...createProps({ onOpenPreview })} />);
 
@@ -177,12 +177,58 @@ describe('MediaImageStrip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next preview image' }));
     expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' }), {
+      key: 'ArrowRight',
+    });
     expect(screen.getByRole('button', { name: 'Open full image: Mountain trail' })).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open full image: Mountain trail' }), {
+      key: 'ArrowLeft',
+    });
     expect(screen.getByRole('button', { name: 'Open full image: Sunset over the harbour' })).toBeInTheDocument();
     expect(onOpenPreview).not.toHaveBeenCalled();
+  });
+
+  it('only advances the strip that contains keyboard focus when multiple strips are mounted', () => {
+    render(
+      <>
+        <MediaImageStrip {...createProps({ regionLabel: 'Stop images' })} />
+        <MediaImageStrip
+          {...createProps({
+            regionLabel: 'Activity images',
+            chooseFilesLabel: 'Choose activity images',
+            uploadingLabel: 'Uploading activity images',
+            items: [
+              {
+                mediaItem: createMediaItem({
+                  id: 'activity-media-1',
+                  url: 'https://example.com/activity-media-1.jpg',
+                  caption: 'Activity hero',
+                }),
+                canReorder: true,
+              },
+              {
+                mediaItem: createMediaItem({
+                  id: 'activity-media-2',
+                  url: 'https://example.com/activity-media-2.jpg',
+                  caption: 'Activity detail',
+                }),
+                canReorder: true,
+              },
+            ],
+          })}
+        />
+      </>,
+    );
+
+    const stopRegion = screen.getByRole('region', { name: 'Stop images' });
+    const activityRegion = screen.getByRole('region', { name: 'Activity images' });
+
+    stopRegion.focus();
+    fireEvent.keyDown(stopRegion, { key: 'ArrowRight' });
+
+    expect(within(stopRegion).getByRole('button', { name: 'Open full image: Mountain trail' })).toBeInTheDocument();
+    expect(within(activityRegion).getByRole('button', { name: 'Open full image: Activity hero' })).toBeInTheDocument();
   });
 
   it('does not hijack left and right arrow keys from editable controls', () => {
