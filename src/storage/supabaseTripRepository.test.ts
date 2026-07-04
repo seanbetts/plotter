@@ -918,11 +918,13 @@ describe('supabase trip repository mappers', () => {
   it('lists destination media with signed URLs', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();
+    const activityId = crypto.randomUUID();
     const rows = [
       {
         id: crypto.randomUUID(),
         trip_id: tripId,
         destination_id: destinationId,
+        activity_id: null,
         bucket_id: 'trip-media',
         object_path: `${tripId}/${destinationId}/asset-b.webp`,
         caption: 'Later created but first sorted',
@@ -938,6 +940,7 @@ describe('supabase trip repository mappers', () => {
         id: crypto.randomUUID(),
         trip_id: tripId,
         destination_id: destinationId,
+        activity_id: null,
         bucket_id: 'trip-media',
         object_path: `${tripId}/${destinationId}/asset-a.webp`,
         caption: 'Earlier created but second sorted',
@@ -997,6 +1000,19 @@ describe('supabase trip repository mappers', () => {
         thumbnailUrl: 'https://signed.example/asset.webp',
         previewUrl: 'https://signed.example/asset.webp',
         fullUrl: 'https://signed.example/asset.webp',
+        sortOrder: rows[0].sort_order,
+      }),
+    );
+
+    expect(
+      mediaAssetFromSupabaseRow(
+        { ...rows[0], activity_id: activityId },
+        'https://signed.example/activity-asset.webp',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        id: rows[0].id,
+        url: 'https://signed.example/activity-asset.webp',
         sortOrder: rows[0].sort_order,
       }),
     );

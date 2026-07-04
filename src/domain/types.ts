@@ -36,6 +36,22 @@ export type MediaItem = {
   uploadedAt?: string;
 };
 
+export type MediaOwnerType = 'destination' | 'activity';
+
+export type MediaRollupItem = {
+  mediaItem: MediaItem;
+  ownerType: MediaOwnerType;
+  destinationId: string;
+  activityId?: string;
+  activityTitle?: string;
+  canReorderInStopCarousel: boolean;
+};
+
+export type ActivityMediaRecord = MediaItem & {
+  activityId: string;
+  destinationId: string;
+};
+
 export type ResearchLink = {
   id: string;
   title: string;

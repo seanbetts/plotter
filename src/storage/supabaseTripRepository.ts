@@ -90,6 +90,7 @@ type SupabaseMediaAssetRow = {
   id: string;
   trip_id: string;
   destination_id: string | null;
+  activity_id: string | null;
   bucket_id: string;
   object_path: string;
   caption: string;
@@ -141,6 +142,7 @@ function isDestinationMediaSortOrderConflict(errorMessage: string | undefined) {
 
   return (
     errorMessage.includes('media_assets_trip_destination_sort_order_key') ||
+    errorMessage.includes('media_assets_destination_owned_sort_order_key') ||
     errorMessage.includes('duplicate key value')
   );
 }
