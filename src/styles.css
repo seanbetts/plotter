@@ -1870,6 +1870,18 @@ select {
   border-color: rgb(var(--color-accent-rgb) / 0.48);
 }
 
+.destination-image-strip.is-drag-over .destination-image-empty {
+  border-color: var(--border-drop-target);
+  color: var(--color-accent);
+  background:
+    linear-gradient(
+      135deg,
+      rgb(var(--color-accent-rgb) / 0.12),
+      rgb(255 255 255 / 0.4)
+    );
+  box-shadow: inset 0 0 0 1px rgb(var(--color-accent-rgb) / 0.16);
+}
+
 .destination-image-file-input {
   position: absolute;
   width: 1px;
@@ -1928,24 +1940,40 @@ select {
 
 .destination-image-empty {
   display: grid;
-  min-height: 112px;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  justify-content: start;
-  gap: 3px 10px;
-  padding: 12px;
-  text-align: left;
+  min-height: 132px;
+  place-items: center;
+  gap: 8px;
+  padding: 20px 18px;
+  border-style: dashed;
+  border-color: rgb(var(--color-text-rgb) / 0.2);
+  background:
+    linear-gradient(
+      135deg,
+      rgb(255 255 255 / 0.22),
+      rgb(var(--color-text-rgb) / 0.045)
+    );
+  text-align: center;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
 }
 
 .destination-image-empty svg {
-  grid-row: span 2;
-  color: var(--text-muted);
+  width: 30px;
+  height: 30px;
+  padding: 5px;
+  border: 1px solid rgb(var(--color-text-rgb) / 0.14);
+  border-radius: var(--radius-control);
+  color: var(--text-soft);
+  background: rgb(255 255 255 / 0.3);
 }
 
 .destination-image-empty span {
   min-width: 0;
   overflow: hidden;
-  font-size: 0.86rem;
+  font-size: 0.9rem;
   font-weight: 850;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1959,6 +1987,19 @@ select {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.destination-image-empty:hover,
+.destination-image-empty:focus-visible {
+  border-color: var(--border-selected);
+  background:
+    linear-gradient(
+      135deg,
+      rgb(var(--color-accent-rgb) / 0.1),
+      rgb(255 255 255 / 0.46)
+    );
+  box-shadow: inset 0 0 0 1px rgb(var(--color-accent-rgb) / 0.12);
+  transform: translateY(-1px);
 }
 
 .destination-image-hero {
