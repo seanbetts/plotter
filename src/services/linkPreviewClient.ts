@@ -21,7 +21,13 @@ type LinkPreviewFunctionData = {
 
 type LinkPreviewFunctionResponse = {
   data?: LinkPreviewFunctionData | null;
-  error?: { message?: string } | null;
+  error?: LinkPreviewFunctionError | null;
+};
+
+type LinkPreviewFunctionError = {
+  message?: string;
+  context?: unknown;
+  response?: unknown;
 };
 
 type LinkPreviewSupabaseClient = {
@@ -34,6 +40,27 @@ type LinkPreviewSupabaseClient = {
 };
 
 const fallbackErrorMessage = 'Unable to fetch link preview.';
+
+function getResponseFromErrorTarget(target: unknown): Response | undefined {
+  return target instanceof Response ? target : undefined;
+}
+
+async function extractFunctionErrorMessage(error: LinkPreviewFunctionError): Promise<string> {
+  const response = getResponseFromErrorTarget(error.context) ?? getResponseFromErrorTarget(error.response);
+
+  if (response) {
+    try {
+      const body = (await response.clone().json()) as { error?: unknown };
+      if (typeof body.error === 'string' && body.error.trim()) {
+        return body.error;
+      }
+    } catch {
+      // Fall through to the Supabase error message when the body is not readable JSON.
+    }
+  }
+
+  return error.message || fallbackErrorMessage;
+}
 
 function normalizePreviewData(data: LinkPreviewFunctionData): LinkPreviewResult {
   if (!data.url) {
@@ -60,7 +87,7 @@ export function createSupabaseLinkPreviewClient(supabase: LinkPreviewSupabaseCli
       });
 
       if (response.error) {
-        throw new Error(response.error.message || fallbackErrorMessage);
+        throw new Error(await extractFunctionErrorMessage(response.error));
       }
 
       if (!response.data) {

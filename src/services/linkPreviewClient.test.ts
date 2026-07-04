@@ -60,6 +60,25 @@ describe('linkPreviewClient', () => {
     await expect(client.fetchPreview('localhost:5173')).rejects.toThrow('Enter a public URL.');
   });
 
+  it('throws the JSON response error from Supabase Function HTTP errors', async () => {
+    const client = createSupabaseLinkPreviewClient({
+      functions: {
+        invoke: vi.fn().mockResolvedValue({
+          data: null,
+          error: {
+            message: 'Edge Function returned a non-2xx status code',
+            context: new Response(JSON.stringify({ error: 'Enter a public URL.' }), {
+              status: 400,
+              headers: { 'content-type': 'application/json' },
+            }),
+          },
+        }),
+      },
+    });
+
+    await expect(client.fetchPreview('localhost:5173')).rejects.toThrow('Enter a public URL.');
+  });
+
   it('creates deterministic local fallback previews for e2e-local storage', async () => {
     const client = createLocalLinkPreviewClient();
 
