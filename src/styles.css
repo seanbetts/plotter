@@ -1353,19 +1353,29 @@ select {
   padding-top: 10px;
 }
 
-.link-preview-header {
+.activity-details-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+}
+
+.link-preview-header,
+.activity-details-header {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.link-preview-header::after {
+.link-preview-header::after,
+.activity-details-header::after {
   flex: 1 1 auto;
   border-top: 1px solid var(--border-subtle);
   content: '';
 }
 
-.link-preview-header h2 {
+.link-preview-header h2,
+.activity-details-header h2 {
   margin: 0;
   color: var(--text-secondary);
   font-size: 0.82rem;

@@ -290,7 +290,7 @@ describe('ActivityPanel', () => {
     expect(notes.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('places contextual activity links below the image strip before description, notes, and tags', () => {
+  it('places contextual activity links before the details section and tags', () => {
     const props = createProps();
 
     render(<ActivityPanel {...props} />);
@@ -298,15 +298,17 @@ describe('ActivityPanel', () => {
     const panel = screen.getByRole('complementary', { name: 'Louvre activity' });
     const imageRegion = within(panel).getByRole('region', { name: 'Activity images' });
     const linksSection = within(panel).getByRole('region', { name: 'Louvre Links' });
-    const description = within(panel).getByLabelText('Louvre Description');
-    const notes = within(panel).getByLabelText('Louvre Notes');
+    const detailsSection = within(panel).getByRole('region', { name: 'Louvre Details' });
+    const description = within(detailsSection).getByLabelText('Louvre Description');
+    const notes = within(detailsSection).getByLabelText('Louvre Notes');
     const tagsGroup = within(panel).getByRole('group', { name: 'Louvre Tags' });
 
     expect(within(linksSection).getByText('Louvre Links')).toBeInTheDocument();
+    expect(within(detailsSection).getByText('Louvre Details')).toBeInTheDocument();
     expect(imageRegion.compareDocumentPosition(linksSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(linksSection.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(linksSection.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(linksSection.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(linksSection.compareDocumentPosition(detailsSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(description.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(detailsSection.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('saves description and notes with labels based on the activity title', () => {

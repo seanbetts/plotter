@@ -452,6 +452,7 @@ function ActivityPanelForm({
     .join(' ');
   const tagsLabel = `${activityDisplayTitle.trim() || 'Activity'} Tags`;
   const linksLabel = `${activityDisplayTitle.trim() || 'Activity'} Links`;
+  const detailsLabel = `${activityDisplayTitle.trim() || 'Activity'} Details`;
 
   return (
     <aside ref={panelRef} className="activity-panel" aria-label={`${activity.title} activity`}>
@@ -615,24 +616,29 @@ function ActivityPanelForm({
         }}
       />
 
-      <label>
-        {draft.title.trim() || 'Activity'} Description
-        <textarea
-          aria-label={`${draft.title.trim() || 'Activity'} Description`}
-          value={draft.description}
-          onChange={(event) => updateDraft('description', event.target.value)}
-          onBlur={() => void commitDraft('description')}
-        />
-      </label>
-      <label>
-        {draft.title.trim() || 'Activity'} Notes
-        <textarea
-          aria-label={`${draft.title.trim() || 'Activity'} Notes`}
-          value={draft.notes}
-          onChange={(event) => updateDraft('notes', event.target.value)}
-          onBlur={() => void commitDraft('notes')}
-        />
-      </label>
+      <section className="activity-details-section" aria-label={detailsLabel}>
+        <div className="activity-details-header">
+          <h2>{detailsLabel}</h2>
+        </div>
+        <label>
+          {draft.title.trim() || 'Activity'} Description
+          <textarea
+            aria-label={`${draft.title.trim() || 'Activity'} Description`}
+            value={draft.description}
+            onChange={(event) => updateDraft('description', event.target.value)}
+            onBlur={() => void commitDraft('description')}
+          />
+        </label>
+        <label>
+          {draft.title.trim() || 'Activity'} Notes
+          <textarea
+            aria-label={`${draft.title.trim() || 'Activity'} Notes`}
+            value={draft.notes}
+            onChange={(event) => updateDraft('notes', event.target.value)}
+            onBlur={() => void commitDraft('notes')}
+          />
+        </label>
+      </section>
       <fieldset className="tag-editor" aria-label={tagsLabel}>
         <legend>{tagsLabel}</legend>
         <div className="tag-pill-list">
