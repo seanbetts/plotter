@@ -683,7 +683,7 @@ git commit -m "refactor: share media image strip"
 - Modify: `src/components/DestinationProfile.test.tsx`
 - Modify: `src/styles.css`
 
-- [ ] **Step 1: Create `ActivityPanel` props**
+- [x] **Step 1: Create `ActivityPanel` props**
 
 Create `src/components/ActivityPanel.tsx` with:
 
@@ -704,7 +704,7 @@ type ActivityPanelProps = {
 };
 ```
 
-- [ ] **Step 2: Render basic rich activity fields**
+- [x] **Step 2: Render basic rich activity fields**
 
 The first activity panel should include:
 
@@ -718,7 +718,7 @@ The first activity panel should include:
 
 Use the existing stop profile save style: local drafts, save on blur, and accessible alert text when an update fails.
 
-- [ ] **Step 3: Add activity panel tests**
+- [x] **Step 3: Add activity panel tests**
 
 In `ActivityPanel.test.tsx`, cover:
 
@@ -730,7 +730,7 @@ fireEvent.blur(screen.getByLabelText('Activity title'));
 expect(onUpdateActivity).toHaveBeenCalledWith(activity.id, { title: 'Morning Louvre' });
 ```
 
-- [ ] **Step 4: Load selected activity media in `App`**
+- [x] **Step 4: Load selected activity media in `App`**
 
 In `src/App.tsx`:
 
@@ -739,7 +739,7 @@ In `src/App.tsx`:
 - pass activity media handlers into `ActivityPanel`
 - clear selected activity when selected destination closes or changes
 
-- [ ] **Step 5: Load stop rollup media in `App`**
+- [x] **Step 5: Load stop rollup media in `App`**
 
 Replace the stop panel's displayed media source with rollup media:
 
@@ -748,7 +748,7 @@ Replace the stop panel's displayed media source with rollup media:
 - pass activity-owned rollup attribution into `DestinationImageStrip`
 - keep destination-owned reorder limited to destination-owned thumbnails
 
-- [ ] **Step 6: Render side-by-side panels**
+- [x] **Step 6: Render side-by-side panels**
 
 Update the app shell markup so the selected activity panel renders immediately to the left of the stop panel:
 
@@ -761,7 +761,7 @@ Update the app shell markup so the selected activity panel renders immediately t
 
 On narrow screens, stack the activity panel above the stop panel.
 
-- [ ] **Step 7: Add app-level tests**
+- [x] **Step 7: Add app-level tests**
 
 In `src/App.test.tsx`, add tests that cover:
 
@@ -771,7 +771,7 @@ In `src/App.test.tsx`, add tests that cover:
 - clicking an activity-owned rollup image opens the modal without calling `reorderDestinationMedia`
 - modal previous/next does not reorder images
 
-- [ ] **Step 8: Run app and component tests**
+- [x] **Step 8: Run app and component tests**
 
 Run:
 
@@ -781,7 +781,7 @@ npm test -- src/components/ActivityPanel.test.tsx src/components/DestinationProf
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit panel wiring**
+- [x] **Step 9: Commit panel wiring**
 
 Run:
 
