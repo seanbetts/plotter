@@ -489,12 +489,13 @@ const addStopMenuApproxSize = {
   width: 180,
   height: 112,
 };
-const stopFocusPadding = {
+const stopFocusPreferredPadding = {
   top: 96,
   right: 760,
   bottom: 96,
   left: 96,
 };
+const stopFocusMinimumViewportPx = 48;
 const stopFocusMaxZoom = 13;
 const mapViewportTransitionMs = 700;
 const defaultFocusedActivities: Activity[] = [];
@@ -519,6 +520,33 @@ function readCssToken(tokenName: keyof typeof mapColorTokenFallbacks) {
     window.getComputedStyle(document.documentElement).getPropertyValue(tokenName).trim() ||
     mapColorTokenFallbacks[tokenName]
   );
+}
+
+function clampPaddingPair(leading: number, trailing: number, viewportSize: number): [number, number] {
+  if (!Number.isFinite(viewportSize) || viewportSize <= 0) {
+    return [leading, trailing];
+  }
+
+  const preferredTotal = leading + trailing;
+  const maxTotal = Math.max(0, Math.floor(viewportSize - stopFocusMinimumViewportPx));
+  if (preferredTotal <= maxTotal) {
+    return [leading, trailing];
+  }
+
+  const scale = maxTotal / preferredTotal;
+  const nextLeading = Math.floor(leading * scale);
+  return [nextLeading, maxTotal - nextLeading];
+}
+
+function stopFocusPaddingForMap(map: Pick<maplibregl.Map, 'getContainer'>) {
+  const container = map.getContainer();
+  const bounds = container.getBoundingClientRect();
+  const width = container.clientWidth || bounds.width;
+  const height = container.clientHeight || bounds.height;
+  const [left, right] = clampPaddingPair(stopFocusPreferredPadding.left, stopFocusPreferredPadding.right, width);
+  const [top, bottom] = clampPaddingPair(stopFocusPreferredPadding.top, stopFocusPreferredPadding.bottom, height);
+
+  return { top, right, bottom, left };
 }
 
 function readCssRgbToken(tokenName: keyof typeof mapColorTokenFallbacks, alpha: number) {
@@ -1063,7 +1091,7 @@ export function MapCanvas({
         [Math.max(...lngs), Math.max(...lats)],
       ],
       {
-        padding: stopFocusPadding,
+        padding: stopFocusPaddingForMap(map),
         maxZoom: stopFocusMaxZoom,
         duration: mapViewportTransitionMs,
       },

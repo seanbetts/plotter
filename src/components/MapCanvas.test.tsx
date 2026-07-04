@@ -21,6 +21,7 @@ type MockMap = {
   getStyle: Mock;
   setLayoutProperty: Mock;
   setPaintProperty: Mock;
+  getContainer: Mock;
   getCanvas: Mock;
   fitBounds: Mock;
   easeTo: Mock;
@@ -36,6 +37,7 @@ const maplibreMock = vi.hoisted(() => {
   const mapInstances: MockMap[] = [];
   const sources = new globalThis.Map<string, MockGeoJsonSource>();
   let zoom = 1.4;
+  let containerSize = { width: 1280, height: 720 };
   const project = vi.fn(([lng, lat]: [number, number]) => ({ x: lng * 10 + 1000, y: lat * -10 + 500 }));
   const Map = vi.fn(function () {
     const map = {
@@ -72,6 +74,14 @@ const maplibreMock = vi.hoisted(() => {
       })),
       setLayoutProperty: vi.fn(),
       setPaintProperty: vi.fn(),
+      getContainer: vi.fn(() => ({
+        clientWidth: containerSize.width,
+        clientHeight: containerSize.height,
+        getBoundingClientRect: () => ({
+          width: containerSize.width,
+          height: containerSize.height,
+        }),
+      })),
       getCanvas: vi.fn(() => ({ style: { cursor: '' } })),
       fitBounds: vi.fn(),
       easeTo: vi.fn(),
@@ -87,12 +97,15 @@ const maplibreMock = vi.hoisted(() => {
   const setZoom = (nextZoom: number) => {
     zoom = nextZoom;
   };
+  const setContainerSize = (width: number, height: number) => {
+    containerSize = { width, height };
+  };
   const resetSources = () => {
     sources.clear();
   };
   const getSource = (sourceId: string) => sources.get(sourceId);
 
-  return { Map, NavigationControl, mapInstances, project, setZoom, resetSources, getSource };
+  return { Map, NavigationControl, mapInstances, project, setZoom, setContainerSize, resetSources, getSource };
 });
 
 vi.mock('maplibre-gl', () => ({
@@ -200,6 +213,7 @@ describe('MapCanvas', () => {
     maplibreMock.mapInstances.length = 0;
     maplibreMock.resetSources();
     maplibreMock.setZoom(1.4);
+    maplibreMock.setContainerSize(1280, 720);
     maplibreMock.project.mockClear();
     maplibreMock.project.mockImplementation(([lng, lat]: [number, number]) => ({
       x: lng * 10 + 1000,
@@ -1306,6 +1320,49 @@ describe('MapCanvas', () => {
         duration: 700,
       }),
     );
+  });
+
+  it('clamps stop focus padding inside narrow map containers', () => {
+    maplibreMock.setContainerSize(360, 220);
+
+    const { rerender } = render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        focusedActivities={[]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    const map = maplibreMock.mapInstances[0];
+
+    rerender(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[louvreActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const padding = map.fitBounds.mock.lastCall?.[1].padding;
+
+    expect(padding).toEqual(
+      expect.objectContaining({
+        top: expect.any(Number),
+        right: expect.any(Number),
+        bottom: expect.any(Number),
+        left: expect.any(Number),
+      }),
+    );
+    expect(padding.left + padding.right).toBeLessThan(360);
+    expect(padding.top + padding.bottom).toBeLessThan(220);
+    expect(padding.right).toBeGreaterThan(padding.left);
   });
 
   it('zooms toward a selected stop with no mappable activities', () => {
