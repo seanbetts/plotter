@@ -80,7 +80,47 @@ describe('DestinationImagePreviewModal', () => {
   it('uses a useful generic image label when the media has no caption', () => {
     render(<DestinationImagePreviewModal {...createProps({ mediaItem: createMediaItem({ caption: '' }) })} />);
 
-    expect(screen.getByRole('img', { name: 'Stop reference image' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Reference image' })).toBeInTheDocument();
+  });
+
+  it('allows the fallback image label to be customized', () => {
+    render(
+      <DestinationImagePreviewModal
+        {...createProps({
+          mediaItem: createMediaItem({ caption: '' }),
+          imageFallbackAlt: 'Activity reference image',
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: 'Activity reference image' })).toBeInTheDocument();
+  });
+
+  it('renders an open activity action only when attribution and a handler are provided', () => {
+    const onOpenActivity = vi.fn();
+    const { rerender } = render(
+      <DestinationImagePreviewModal
+        {...createProps({
+          activityAttribution: 'Night market',
+        })}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Open activity' })).not.toBeInTheDocument();
+
+    rerender(
+      <DestinationImagePreviewModal
+        {...createProps({
+          activityAttribution: 'Night market',
+          onOpenActivity,
+        })}
+      />,
+    );
+
+    expect(screen.getByText('Night market')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open activity' }));
+
+    expect(onOpenActivity).toHaveBeenCalledTimes(1);
   });
 
   it('navigates left and right while respecting disabled controls', () => {

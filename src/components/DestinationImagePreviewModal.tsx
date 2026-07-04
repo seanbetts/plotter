@@ -6,6 +6,9 @@ type DestinationImagePreviewModalProps = {
   mediaItem: MediaItem;
   canMoveLeft: boolean;
   canMoveRight: boolean;
+  imageFallbackAlt?: string;
+  activityAttribution?: string;
+  onOpenActivity?: () => void;
   onDelete: (mediaId: string) => Promise<void> | void;
   onNavigatePrevious: (mediaId: string) => Promise<void> | void;
   onNavigateNext: (mediaId: string) => Promise<void> | void;
@@ -16,6 +19,9 @@ export function DestinationImagePreviewModal({
   mediaItem,
   canMoveLeft,
   canMoveRight,
+  imageFallbackAlt,
+  activityAttribution,
+  onOpenActivity,
   onDelete,
   onNavigatePrevious,
   onNavigateNext,
@@ -25,8 +31,9 @@ export function DestinationImagePreviewModal({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const isDeletingRef = useRef(false);
-  const imageAlt = mediaItem.caption.trim() || 'Stop reference image';
+  const imageAlt = mediaItem.caption.trim() || imageFallbackAlt || 'Reference image';
   const imageUrl = mediaItem.fullUrl ?? mediaItem.previewUrl ?? mediaItem.url;
+  const canOpenActivity = Boolean(activityAttribution && onOpenActivity);
 
   useEffect(() => {
     const handleDocumentKeyDown = (event: KeyboardEvent) => {
@@ -176,6 +183,14 @@ export function DestinationImagePreviewModal({
               {isDeleting ? <LoaderCircle size={18} aria-hidden="true" /> : <Trash2 size={18} aria-hidden="true" />}
             </button>
           </div>
+          {canOpenActivity ? (
+            <div className="image-preview-activity-control">
+              <span>{activityAttribution}</span>
+              <button type="button" onClick={onOpenActivity}>
+                Open activity
+              </button>
+            </div>
+          ) : null}
         </div>
       </section>
     </div>

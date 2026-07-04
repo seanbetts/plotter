@@ -1,8 +1,7 @@
 import type { MediaItem } from '../domain/types';
 import { MediaImageStrip } from './MediaImageStrip';
 
-export type DestinationImageStripProps = {
-  destinationName: string;
+export type ActivityImageStripProps = {
   mediaItems: MediaItem[];
   isLoading: boolean;
   isUploading: boolean;
@@ -12,14 +11,14 @@ export type DestinationImageStripProps = {
   onOpenPreview: (mediaId: string) => void;
 };
 
-export function DestinationImageStrip(props: DestinationImageStripProps) {
+export function ActivityImageStrip(props: ActivityImageStripProps) {
   return (
     <MediaImageStrip
-      regionLabel="Stop images"
-      emptyLabel="No images yet"
+      regionLabel="Activity images"
+      emptyLabel="No activity images yet"
       emptyHint="Drop images here or click to add."
-      chooseFilesLabel="Choose stop images"
-      uploadingLabel="Uploading stop images"
+      chooseFilesLabel="Choose activity images"
+      uploadingLabel="Uploading activity images"
       items={props.mediaItems.map((mediaItem) => ({
         mediaItem,
         canReorder: true,

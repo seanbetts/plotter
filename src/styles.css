@@ -1815,7 +1815,8 @@ select {
 }
 
 .image-preview-floating-button:focus-visible,
-.image-preview-delete-popover button:focus-visible {
+.image-preview-delete-popover button:focus-visible,
+.image-preview-activity-control button:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
@@ -1927,6 +1928,45 @@ select {
   border-color: rgb(var(--color-danger-rgb) / 0.34);
   color: var(--color-danger);
   background: var(--surface-danger-subtle);
+}
+
+.image-preview-activity-control {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  display: inline-flex;
+  max-width: min(420px, calc(100% - 92px));
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 10px;
+  border: 1px solid rgb(255 255 255 / 0.62);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: rgb(255 255 255 / 0.76);
+  box-shadow: 0 8px 24px rgb(var(--color-text-rgb) / 0.16);
+  font-size: 0.76rem;
+  font-weight: 800;
+  -webkit-backdrop-filter: blur(14px) saturate(1.18);
+  backdrop-filter: blur(14px) saturate(1.18);
+}
+
+.image-preview-activity-control span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-preview-activity-control button {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  padding: 5px 8px;
+  color: var(--color-text);
+  background: var(--surface-control);
+  font-size: 0.74rem;
+  font-weight: 850;
+  cursor: pointer;
 }
 
 .destination-image-strip {
@@ -2219,6 +2259,27 @@ select {
   animation: route-spin 900ms linear infinite;
 }
 
+.destination-image-attribution {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  max-width: calc(100% - 20px);
+  overflow: hidden;
+  padding: 5px 7px;
+  border: 1px solid rgb(255 255 255 / 0.56);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: rgb(255 255 255 / 0.78);
+  box-shadow: 0 8px 24px rgb(var(--color-text-rgb) / 0.14);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(10px) saturate(1.12);
+  backdrop-filter: blur(10px) saturate(1.12);
+  pointer-events: none;
+}
+
 .destination-image-carousel {
   display: grid;
   grid-auto-flow: column;
@@ -2244,6 +2305,24 @@ select {
 
 .destination-image-thumbnail {
   background: rgb(var(--color-text-rgb) / 0.06);
+}
+
+.destination-image-thumbnail-attribution {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  left: 3px;
+  overflow: hidden;
+  padding: 2px 4px;
+  border-radius: calc(var(--radius-control) - 3px);
+  color: var(--color-text);
+  background: rgb(255 255 255 / 0.82);
+  font-size: 0.58rem;
+  font-weight: 850;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .destination-image-thumbnail.is-drop-before::before,
