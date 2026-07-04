@@ -798,7 +798,7 @@ git commit -m "feat: add activity media panel"
 - Modify: `tests/world-tour.spec.ts`
 - No source files unless verification exposes a bug.
 
-- [ ] **Step 1: Add e2e smoke coverage**
+- [x] **Step 1: Add e2e smoke coverage**
 
 In `tests/world-tour.spec.ts`, add an e2e-local smoke test that:
 
@@ -810,7 +810,7 @@ In `tests/world-tour.spec.ts`, add an e2e-local smoke test that:
 
 Use `VITE_TRIP_STORAGE=e2e-local` through the existing `npm run test:e2e` setup.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -828,7 +828,7 @@ Expected:
 - Build passes, allowing the existing Vite large-chunk warning.
 - Playwright e2e passes.
 
-- [ ] **Step 3: Verify remote migration visibility**
+- [x] **Step 3: Verify remote migration visibility**
 
 After applying the migration to the linked project, run:
 
@@ -842,7 +842,7 @@ Expected:
 - Dry run says `Remote database is up to date.`
 - REST request returns `HTTP/2 200`.
 
-- [ ] **Step 4: Commit e2e coverage**
+- [x] **Step 4: Commit e2e coverage**
 
 Run:
 
