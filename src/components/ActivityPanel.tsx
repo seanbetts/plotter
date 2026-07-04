@@ -6,6 +6,7 @@ import { ActivityImageStrip } from './ActivityImageStrip';
 
 type ActivityPanelProps = {
   activity: Activity;
+  stopName: string;
   mediaItems: MediaItem[];
   mediaError: string | null;
   isMediaLoading: boolean;
@@ -13,38 +14,21 @@ type ActivityPanelProps = {
   onClose: () => void;
   onUpdateActivity: (
     activityId: string,
-    patch: Partial<Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority'>>,
+    patch: Partial<Pick<Activity, 'title' | 'description' | 'notes'>>,
   ) => Promise<void> | void;
   onUploadMedia: (files: File[]) => Promise<void> | void;
   onReorderMedia: (orderedMediaIds: string[]) => Promise<void> | void;
   onOpenMediaPreview: (mediaId: string) => void;
 };
 
-type ActivityDraft = Pick<Activity, 'title' | 'description' | 'notes' | 'status' | 'priority'>;
+type ActivityDraft = Pick<Activity, 'title' | 'description' | 'notes'>;
 type ActivityDraftField = keyof ActivityDraft;
-
-const activityStatusOptions: Array<{ value: Activity['status']; label: string }> = [
-  { value: 'idea', label: 'Idea' },
-  { value: 'planned', label: 'Planned' },
-  { value: 'booked', label: 'Booked' },
-  { value: 'done', label: 'Done' },
-  { value: 'skipped', label: 'Skipped' },
-];
-
-const activityPriorityOptions: Array<{ value: Activity['priority']; label: string }> = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'must-do', label: 'Must-do' },
-];
 
 function createActivityDraft(activity: Activity): ActivityDraft {
   return {
     title: activity.title,
     description: activity.description,
     notes: activity.notes,
-    status: activity.status,
-    priority: activity.priority,
   };
 }
 
@@ -54,6 +38,7 @@ function activitySourceKey(activity: Activity) {
 
 export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(function ActivityPanel({
   activity,
+  stopName,
   mediaItems,
   mediaError,
   isMediaLoading,
@@ -69,6 +54,7 @@ export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(functio
       key={activity.id}
       panelRef={ref}
       activity={activity}
+      stopName={stopName}
       mediaItems={mediaItems}
       mediaError={mediaError}
       isMediaLoading={isMediaLoading}
@@ -85,6 +71,7 @@ export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(functio
 function ActivityPanelForm({
   panelRef,
   activity,
+  stopName,
   mediaItems,
   mediaError,
   isMediaLoading,
@@ -103,22 +90,16 @@ function ActivityPanelForm({
     title: 0,
     description: 0,
     notes: 0,
-    status: 0,
-    priority: 0,
   });
   const fieldSaveRevisionRef = useRef<Record<ActivityDraftField, number>>({
     title: 0,
     description: 0,
     notes: 0,
-    status: 0,
-    priority: 0,
   });
   const sourceKey = activitySourceKey(activity);
   const activityTitle = activity.title;
   const activityDescription = activity.description;
   const activityNotes = activity.notes;
-  const activityStatus = activity.status;
-  const activityPriority = activity.priority;
 
   useEffect(() => {
     setDraft((current) => {
@@ -133,15 +114,11 @@ function ActivityPanelForm({
       if (!shouldPreserveDraft('title', activityTitle)) acceptPersistedField('title');
       if (!shouldPreserveDraft('description', activityDescription)) acceptPersistedField('description');
       if (!shouldPreserveDraft('notes', activityNotes)) acceptPersistedField('notes');
-      if (!shouldPreserveDraft('status', activityStatus)) acceptPersistedField('status');
-      if (!shouldPreserveDraft('priority', activityPriority)) acceptPersistedField('priority');
 
       const nextDraft = {
         title: dirtyFieldsRef.current.has('title') ? current.title : activityTitle,
         description: dirtyFieldsRef.current.has('description') ? current.description : activityDescription,
         notes: dirtyFieldsRef.current.has('notes') ? current.notes : activityNotes,
-        status: dirtyFieldsRef.current.has('status') ? current.status : activityStatus,
-        priority: dirtyFieldsRef.current.has('priority') ? current.priority : activityPriority,
       };
 
       latestDraftRef.current = nextDraft;
@@ -151,8 +128,6 @@ function ActivityPanelForm({
   }, [
     activityDescription,
     activityNotes,
-    activityPriority,
-    activityStatus,
     activityTitle,
     sourceKey,
   ]);
@@ -220,7 +195,7 @@ function ActivityPanelForm({
     <aside ref={panelRef} className="activity-panel" aria-label={`${activity.title} activity`}>
       <header className="profile-header" aria-label="Activity detail header">
         <div>
-          <span className="profile-stop-number">Activity</span>
+          <span className="profile-stop-number">{stopName}</span>
           <label className="activity-title-field">
             <span className="sr-only">Activity title</span>
             <input
@@ -265,52 +240,19 @@ function ActivityPanelForm({
         onOpenPreview={onOpenMediaPreview}
       />
 
-      <div className="activity-panel-field-grid">
-        <label>
-          Activity status
-          <select
-            aria-label="Activity status"
-            value={draft.status}
-            onChange={(event) => updateDraft('status', event.target.value as Activity['status'])}
-            onBlur={() => void commitDraft('status')}
-          >
-            {activityStatusOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Activity priority
-          <select
-            aria-label="Activity priority"
-            value={draft.priority}
-            onChange={(event) => updateDraft('priority', event.target.value as Activity['priority'])}
-            onBlur={() => void commitDraft('priority')}
-          >
-            {activityPriorityOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
       <label>
-        Activity description
+        {draft.title.trim() || 'Activity'} description
         <textarea
-          aria-label="Activity description"
+          aria-label={`${draft.title.trim() || 'Activity'} description`}
           value={draft.description}
           onChange={(event) => updateDraft('description', event.target.value)}
           onBlur={() => void commitDraft('description')}
         />
       </label>
       <label>
-        Activity notes
+        {draft.title.trim() || 'Activity'} notes
         <textarea
-          aria-label="Activity notes"
+          aria-label={`${draft.title.trim() || 'Activity'} notes`}
           value={draft.notes}
           onChange={(event) => updateDraft('notes', event.target.value)}
           onBlur={() => void commitDraft('notes')}

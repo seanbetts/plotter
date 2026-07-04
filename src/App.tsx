@@ -723,6 +723,7 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               <ActivityPanel
                 ref={activityPanelRef}
                 activity={selectedActivity}
+                stopName={selectedDestination.name}
                 mediaItems={activityMedia.mediaItems}
                 mediaError={activityMedia.error}
                 isMediaLoading={activityMedia.isLoading}
@@ -746,7 +747,6 @@ function TripWorkspace({ repository }: { repository: TripRepository }) {
               mediaError={destinationMedia.error ?? destinationMediaRollupError}
               onSelectActivity={setSelectedActivityId}
               onCreateActivity={handleCreateActivity}
-              onUpdateActivity={updateActivity}
               onDeleteActivity={handleDeleteActivity}
               onReorderActivities={reorderActivities}
               onUpdate={updateDestination}

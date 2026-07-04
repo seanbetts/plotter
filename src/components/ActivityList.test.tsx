@@ -13,7 +13,6 @@ describe('ActivityList', () => {
         selectedActivityId={null}
         onSelectActivity={vi.fn()}
         onCreateActivity={onCreateActivity}
-        onUpdateActivity={vi.fn()}
         onDeleteActivity={vi.fn()}
         onReorderActivities={vi.fn()}
       />,
@@ -30,11 +29,10 @@ describe('ActivityList', () => {
     await waitFor(() => expect(screen.getByLabelText('New activity title')).toHaveValue(''));
   });
 
-  it('selects, renames, reorders, and deletes activities', () => {
+  it('selects, reorders, and deletes activities without inline title editing', () => {
     const louvre = createActivity({ destinationId: 'destination-1', title: 'Louvre', order: 0 });
     const bakery = createActivity({ destinationId: 'destination-1', title: 'Bakery crawl', order: 1 });
     const onSelectActivity = vi.fn();
-    const onUpdateActivity = vi.fn();
     const onDeleteActivity = vi.fn();
     const onReorderActivities = vi.fn();
 
@@ -44,7 +42,6 @@ describe('ActivityList', () => {
         selectedActivityId={bakery.id}
         onSelectActivity={onSelectActivity}
         onCreateActivity={vi.fn()}
-        onUpdateActivity={onUpdateActivity}
         onDeleteActivity={onDeleteActivity}
         onReorderActivities={onReorderActivities}
       />,
@@ -55,13 +52,8 @@ describe('ActivityList', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Select activity Louvre' }));
     expect(onSelectActivity).toHaveBeenCalledWith(louvre.id);
-
-    fireEvent.change(screen.getByDisplayValue('Louvre'), {
-      target: { value: 'Morning Louvre' },
-    });
-    expect(onUpdateActivity).not.toHaveBeenCalled();
-    fireEvent.blur(screen.getByDisplayValue('Morning Louvre'));
-    expect(onUpdateActivity).toHaveBeenCalledWith(louvre.id, { title: 'Morning Louvre' });
+    expect(screen.getByRole('button', { name: 'Select activity Louvre' })).toHaveTextContent('Louvre');
+    expect(screen.queryByDisplayValue('Louvre')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Move Bakery crawl up' }));
     expect(onReorderActivities).toHaveBeenCalledWith([bakery.id, louvre.id]);

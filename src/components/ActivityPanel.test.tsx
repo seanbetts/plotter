@@ -39,6 +39,7 @@ function createProps(overrides: Partial<React.ComponentProps<typeof ActivityPane
 
   return {
     activity,
+    stopName: 'Paris',
     mediaItems: [createMediaItem()],
     mediaError: null,
     isMediaLoading: false,
@@ -53,42 +54,40 @@ function createProps(overrides: Partial<React.ComponentProps<typeof ActivityPane
 }
 
 describe('ActivityPanel', () => {
-  it('renders rich activity fields and saves title drafts on blur', () => {
+  it('renders the parent stop name and saves title drafts on blur', () => {
     const props = createProps();
 
     render(<ActivityPanel {...props} />);
 
     expect(screen.getByRole('complementary', { name: 'Louvre activity' })).toBeInTheDocument();
+    expect(screen.getByText('Paris')).toHaveClass('profile-stop-number');
     expect(screen.getByRole('region', { name: 'Activity images' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
     fireEvent.blur(screen.getByLabelText('Activity title'));
     expect(props.onUpdateActivity).toHaveBeenCalledWith(props.activity.id, { title: 'Morning Louvre' });
   });
 
-  it('saves status, priority, description, and notes changes on blur', () => {
+  it('saves description and notes with labels based on the activity title', () => {
     const props = createProps();
 
     render(<ActivityPanel {...props} />);
 
-    fireEvent.change(screen.getByLabelText('Activity status'), { target: { value: 'planned' } });
-    fireEvent.blur(screen.getByLabelText('Activity status'));
-    fireEvent.change(screen.getByLabelText('Activity priority'), { target: { value: 'must-do' } });
-    fireEvent.blur(screen.getByLabelText('Activity priority'));
-    fireEvent.change(screen.getByLabelText('Activity description'), {
+    expect(screen.queryByLabelText('Activity status')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Activity priority')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Louvre description'), {
       target: { value: 'Spend the morning in the galleries.' },
     });
-    fireEvent.blur(screen.getByLabelText('Activity description'));
-    fireEvent.change(screen.getByLabelText('Activity notes'), {
+    fireEvent.blur(screen.getByLabelText('Louvre description'));
+    fireEvent.change(screen.getByLabelText('Louvre notes'), {
       target: { value: 'Check Friday late opening.' },
     });
-    fireEvent.blur(screen.getByLabelText('Activity notes'));
+    fireEvent.blur(screen.getByLabelText('Louvre notes'));
 
-    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(1, props.activity.id, { status: 'planned' });
-    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(2, props.activity.id, { priority: 'must-do' });
-    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(3, props.activity.id, {
+    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(1, props.activity.id, {
       description: 'Spend the morning in the galleries.',
     });
-    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(4, props.activity.id, {
+    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(2, props.activity.id, {
       notes: 'Check Friday late opening.',
     });
   });
@@ -125,7 +124,7 @@ describe('ActivityPanel', () => {
 
     fireEvent.change(screen.getByLabelText('Activity title'), { target: { value: 'Morning Louvre' } });
     fireEvent.blur(screen.getByLabelText('Activity title'));
-    fireEvent.change(screen.getByLabelText('Activity notes'), {
+    fireEvent.change(screen.getByLabelText('Morning Louvre notes'), {
       target: { value: 'Check Friday late opening.' },
     });
 
@@ -148,7 +147,7 @@ describe('ActivityPanel', () => {
     );
 
     expect(screen.getByLabelText('Activity title')).toHaveValue('Morning Louvre');
-    expect(screen.getByLabelText('Activity notes')).toHaveValue('Check Friday late opening.');
+    expect(screen.getByLabelText('Morning Louvre notes')).toHaveValue('Check Friday late opening.');
   });
 
   it('preserves a newer title draft when an earlier title save rerender arrives', async () => {

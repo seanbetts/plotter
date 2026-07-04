@@ -29,10 +29,6 @@ type DestinationProfileProps = {
   mediaError: string | null;
   onSelectActivity: (activityId: string) => void;
   onCreateActivity: (destinationId: string, title: string) => Promise<void> | void;
-  onUpdateActivity: (
-    activityId: string,
-    patch: Partial<Pick<Activity, 'title'>>,
-  ) => Promise<unknown> | unknown;
   onDeleteActivity: (activityId: string) => Promise<void> | void;
   onReorderActivities: (
     destinationId: string,
@@ -174,7 +170,6 @@ function DestinationProfileForm({
   mediaError,
   onSelectActivity,
   onCreateActivity,
-  onUpdateActivity,
   onDeleteActivity,
   onReorderActivities,
   onUpdate,
@@ -640,7 +635,6 @@ function DestinationProfileForm({
         selectedActivityId={selectedActivityId}
         onSelectActivity={onSelectActivity}
         onCreateActivity={(title) => onCreateActivity(destination.id, title)}
-        onUpdateActivity={(activityId, patch) => onUpdateActivity(activityId, patch)}
         onDeleteActivity={(activityId) => onDeleteActivity(activityId)}
         onReorderActivities={(orderedActivityIds) =>
           onReorderActivities(destination.id, orderedActivityIds)

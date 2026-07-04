@@ -23,7 +23,6 @@ const defaultMediaProps = {
   selectedActivityId: null,
   onSelectActivity: vi.fn(),
   onCreateActivity: vi.fn(),
-  onUpdateActivity: vi.fn(),
   onDeleteActivity: vi.fn(),
   onReorderActivities: vi.fn(),
   mediaItems: [],
@@ -387,39 +386,34 @@ describe('DestinationProfile', () => {
     );
 
     expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select activity Louvre' })).toHaveTextContent('Louvre');
+    expect(screen.queryByDisplayValue('Louvre')).not.toBeInTheDocument();
   });
 
-  it('surfaces activity mutation failures from the profile adapters', async () => {
+  it('surfaces activity creation failures from the profile adapters', async () => {
     const destination = createDestination({
       name: 'Paris',
       countryRegion: 'France',
       coordinates: { lat: 48.8566, lng: 2.3522 },
-    });
-    const activity = createActivity({
-      destinationId: destination.id,
-      title: 'Louvre',
-      order: 0,
     });
 
     render(
       <DestinationProfile
         {...defaultMediaProps}
         destination={destination}
-        activities={[activity]}
-        onUpdateActivity={vi.fn().mockRejectedValue(new Error('Network unavailable'))}
+        onCreateActivity={vi.fn().mockRejectedValue(new Error('Network unavailable'))}
         onUpdate={vi.fn()}
         onClose={vi.fn()}
       />,
     );
 
-    fireEvent.change(screen.getByDisplayValue('Louvre'), {
-      target: { value: 'Morning Louvre' },
+    fireEvent.change(screen.getByLabelText('New activity title'), {
+      target: { value: 'Louvre' },
     });
-    fireEvent.blur(screen.getByDisplayValue('Morning Louvre'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add activity' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Unable to update activities.');
-    expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
+    expect(screen.getByLabelText('New activity title')).toHaveValue('Louvre');
   });
 
   it('requests the workspace full image preview from the pane preview image', async () => {

@@ -758,7 +758,8 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
 
     expect(screen.getByRole('heading', { name: 'Activities' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Louvre')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select activity Louvre' })).toHaveTextContent('Louvre');
+    expect(screen.queryByDisplayValue('Louvre')).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText('New activity title'), 'Bakery crawl');
     await user.click(screen.getByRole('button', { name: 'Add activity' }));

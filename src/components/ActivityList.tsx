@@ -7,7 +7,6 @@ type ActivityListProps = {
   selectedActivityId: string | null;
   onSelectActivity: (activityId: string) => void;
   onCreateActivity: (title: string) => Promise<unknown> | unknown;
-  onUpdateActivity: (activityId: string, patch: Partial<Pick<Activity, 'title'>>) => Promise<unknown> | unknown;
   onDeleteActivity: (activityId: string) => Promise<unknown> | unknown;
   onReorderActivities: (orderedActivityIds: string[]) => Promise<unknown> | unknown;
 };
@@ -31,12 +30,10 @@ export function ActivityList({
   selectedActivityId,
   onSelectActivity,
   onCreateActivity,
-  onUpdateActivity,
   onDeleteActivity,
   onReorderActivities,
 }: ActivityListProps) {
   const [newActivityTitle, setNewActivityTitle] = useState('');
-  const [draftTitles, setDraftTitles] = useState<Record<string, string>>({});
   const [mutationError, setMutationError] = useState('');
   const orderedActivityIds = activities.map((activity) => activity.id);
 
@@ -69,45 +66,6 @@ export function ActivityList({
     }
   }
 
-  function displayTitle(activity: Activity) {
-    return draftTitles[activity.id] ?? activity.title;
-  }
-
-  function commitTitle(activity: Activity) {
-    const title = displayTitle(activity);
-    if (title === activity.title) return;
-
-    setMutationError('');
-    let updateResult: Promise<unknown> | unknown;
-
-    try {
-      updateResult = onUpdateActivity(activity.id, { title });
-    } catch {
-      setDraftTitles((current) => ({
-        ...current,
-        [activity.id]: activity.title,
-      }));
-      setMutationError('Unable to update activities.');
-      return;
-    }
-
-    void Promise.resolve(updateResult)
-      .then(() => {
-        setDraftTitles((current) => {
-          const nextDraftTitles = { ...current };
-          delete nextDraftTitles[activity.id];
-          return nextDraftTitles;
-        });
-      })
-      .catch(() => {
-        setDraftTitles((current) => ({
-          ...current,
-          [activity.id]: activity.title,
-        }));
-        setMutationError('Unable to update activities.');
-      });
-  }
-
   return (
     <section className="activity-list-section" aria-label="Activities">
       <div className="activity-list-header">
@@ -120,7 +78,7 @@ export function ActivityList({
         <ol className="activity-list">
           {activities.map((activity, index) => {
             const isSelected = activity.id === selectedActivityId;
-            const title = displayTitle(activity);
+            const title = activity.title;
 
             return (
               <li
@@ -134,26 +92,9 @@ export function ActivityList({
                   aria-current={isSelected ? 'true' : undefined}
                   onClick={() => onSelectActivity(activity.id)}
                 >
-                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <span className="activity-row-number">{String(index + 1).padStart(2, '0')}</span>
+                  <span className="activity-row-title">{title}</span>
                 </button>
-                <input
-                  aria-label={`Activity title ${title}`}
-                  value={title}
-                  onChange={(event) => {
-                    const nextTitle = event.target.value;
-                    setDraftTitles((current) => ({
-                      ...current,
-                      [activity.id]: nextTitle,
-                    }));
-                  }}
-                  onBlur={() => commitTitle(activity)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      commitTitle(activity);
-                    }
-                  }}
-                />
                 <button
                   type="button"
                   aria-label={`Move ${title} up`}
