@@ -245,6 +245,89 @@ describe('LinkPreviewGrid', () => {
     expect(screen.getByRole('link', { name: /Fetched cafe/ })).toBeInTheDocument();
   });
 
+  it('keeps add locked until async onChange settles before accepting another submit', async () => {
+    vi.setSystemTime(new Date('2026-07-04T12:45:00.000Z'));
+    vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000004')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000005');
+    const firstSave = deferred<void>();
+    const secondSave = deferred<void>();
+    const previewClient = createPreviewClient({
+      fetchPreview: vi
+        .fn()
+        .mockResolvedValueOnce({
+          title: 'First cafe',
+          url: 'https://first.example/visit',
+          domain: 'first.example',
+        })
+        .mockResolvedValueOnce({
+          title: 'Second cafe',
+          url: 'https://second.example/visit',
+          domain: 'second.example',
+        }),
+    });
+    const saveRequests: ResearchLink[][] = [];
+
+    function Harness() {
+      const [links, setLinks] = useState<ResearchLink[]>([]);
+
+      return (
+        <LinkPreviewGrid
+          label="Research links"
+          links={links}
+          previewClient={previewClient}
+          onChange={(nextLinks) => {
+            saveRequests.push(nextLinks);
+            const save = saveRequests.length === 1 ? firstSave : secondSave;
+
+            return save.promise.then(() => setLinks(nextLinks));
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.change(screen.getByLabelText('Add link URL'), {
+      target: { value: 'https://first.example/visit' },
+    });
+    fireEvent.submit(screen.getByRole('form', { name: 'Add link' }));
+
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+    expect(previewClient.fetchPreview).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Add link URL')).toBeDisabled();
+
+    fireEvent.submit(screen.getByRole('form', { name: 'Add link' }));
+    expect(previewClient.fetchPreview).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstSave.resolve();
+      await firstSave.promise;
+    });
+
+    expect(screen.getByRole('link', { name: /First cafe/ })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Add link URL'), {
+      target: { value: 'https://second.example/visit' },
+    });
+    fireEvent.submit(screen.getByRole('form', { name: 'Add link' }));
+
+    await waitFor(() => expect(saveRequests).toHaveLength(2));
+    expect(previewClient.fetchPreview).toHaveBeenCalledTimes(2);
+    expect(saveRequests[1]).toEqual([
+      expect.objectContaining({ title: 'First cafe', sortOrder: 0 }),
+      expect.objectContaining({ title: 'Second cafe', sortOrder: 1 }),
+    ]);
+
+    await act(async () => {
+      secondSave.resolve();
+      await secondSave.promise;
+    });
+
+    expect(screen.getByRole('link', { name: /First cafe/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Second cafe/ })).toBeInTheDocument();
+  });
+
   it('shows an inline validation error for invalid URLs and does not call onChange', () => {
     const previewClient = createPreviewClient();
     const onChange = vi.fn();

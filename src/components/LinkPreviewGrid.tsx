@@ -87,8 +87,17 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
     latestSortedLinksRef.current = sortedLinks;
   }, [sortedLinks]);
 
-  const updateLinks = (nextLinks: ResearchLink[]) => {
-    void Promise.resolve(onChange(nextLinks)).catch(() => undefined);
+  const commitLinks = async (nextLinks: ResearchLink[]) => {
+    const previousLinks = latestSortedLinksRef.current;
+
+    latestSortedLinksRef.current = nextLinks;
+
+    try {
+      await onChange(nextLinks);
+    } catch (error) {
+      latestSortedLinksRef.current = previousLinks;
+      throw error;
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -108,31 +117,33 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
     setIsAdding(true);
 
     try {
-      const preview = await previewClient.fetchPreview(linkInput);
-      const previewUrl = normalizeResearchLinkUrl(preview.url);
-      const domain = preview.domain.trim() || deriveLinkDomain(previewUrl);
-      const title = preview.title.trim() || domain;
-      const currentLinks = latestSortedLinksRef.current;
+      let createNewLink: (sortOrder: number) => ResearchLink;
 
-      updateLinks([
-        ...currentLinks,
-        {
+      try {
+        const preview = await previewClient.fetchPreview(linkInput);
+        const previewUrl = normalizeResearchLinkUrl(preview.url);
+        const domain = preview.domain.trim() || deriveLinkDomain(previewUrl);
+        const title = preview.title.trim() || domain;
+
+        createNewLink = (sortOrder) => ({
           id: crypto.randomUUID(),
           title,
           url: previewUrl,
           domain,
           ...(preview.imageUrl ? { imageUrl: preview.imageUrl } : {}),
-          sortOrder: getNextSortOrder(currentLinks),
+          sortOrder,
           previewFetchedAt: new Date().toISOString(),
-        },
-      ]);
-    } catch {
+        });
+      } catch {
+        createNewLink = (sortOrder) => createFallbackResearchLink(normalizedUrl, { sortOrder });
+      }
+
       const currentLinks = latestSortedLinksRef.current;
-      updateLinks([
+      const newLink = createNewLink(getNextSortOrder(currentLinks));
+
+      await commitLinks([
         ...currentLinks,
-        createFallbackResearchLink(normalizedUrl, {
-          sortOrder: getNextSortOrder(currentLinks),
-        }),
+        newLink,
       ]);
     } finally {
       setLinkInput('');
@@ -144,7 +155,7 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
   const deleteLink = (linkId: string) => {
     if (isAddingRef.current) return;
 
-    updateLinks(denseSortOrders(sortedLinks.filter((link) => link.id !== linkId)));
+    void commitLinks(denseSortOrders(sortedLinks.filter((link) => link.id !== linkId))).catch(() => undefined);
   };
 
   const moveLink = (linkId: string, direction: -1 | 1) => {
@@ -158,7 +169,7 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
     const nextLinks = [...sortedLinks];
     const [movedLink] = nextLinks.splice(linkIndex, 1);
     nextLinks.splice(targetIndex, 0, movedLink);
-    updateLinks(denseSortOrders(nextLinks));
+    void commitLinks(denseSortOrders(nextLinks)).catch(() => undefined);
   };
 
   const canDropOnLink = (linkId: string) => Boolean(!isAddingRef.current && draggedLinkId && draggedLinkId !== linkId);
@@ -198,7 +209,7 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
     const orderedIds = orderAroundTarget(sortedLinks, draggedLinkId, targetLinkId, getDropSide(event));
     setDraggedLinkId(null);
     setDropTarget(null);
-    updateLinks(reorderResearchLinks(sortedLinks, orderedIds));
+    void commitLinks(reorderResearchLinks(sortedLinks, orderedIds)).catch(() => undefined);
   };
 
   return (
