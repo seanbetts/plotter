@@ -1429,6 +1429,53 @@ describe('MapCanvas', () => {
     );
   });
 
+  it('restores the route overview instead of startup camera when leaving initial stop focus', () => {
+    const { rerender } = render(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[louvreActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+    map.fitBounds.mockClear();
+    map.easeTo.mockClear();
+
+    rerender(
+      <MapCanvas
+        destinations={[destination, targetDestination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        focusedActivities={[]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    expect(map.fitBounds).toHaveBeenLastCalledWith(
+      [
+        [34.8289, 38.6431],
+        [44.8271, 41.7151],
+      ],
+      expect.objectContaining({
+        padding: 92,
+        maxZoom: 6,
+        duration: 700,
+      }),
+    );
+    expect(map.easeTo).not.toHaveBeenCalled();
+  });
+
   it('does not refit focused maps when equivalent destination and activity data rerenders', () => {
     const { rerender } = render(
       <MapCanvas
@@ -1462,6 +1509,65 @@ describe('MapCanvas', () => {
     );
 
     expect(map.fitBounds).toHaveBeenCalledTimes(fitCountAfterFocus);
+  });
+
+  it('refits focused maps when activity coordinates materially change', () => {
+    const movedActivity: Activity = {
+      ...louvreActivity,
+      location: {
+        ...louvreActivity.location!,
+        coordinates: { lat: 48.8738, lng: 2.295 },
+      },
+    };
+
+    const { rerender } = render(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[louvreActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+
+    act(() => {
+      loadHandler();
+    });
+    const fitCountAfterFocus = map.fitBounds.mock.calls.length;
+
+    rerender(
+      <MapCanvas
+        destinations={[destination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[movedActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    expect(map.fitBounds).toHaveBeenCalledTimes(fitCountAfterFocus + 1);
+    expect(map.fitBounds).toHaveBeenLastCalledWith(
+      [
+        [2.295, 38.6431],
+        [34.8289, 48.8738],
+      ],
+      expect.objectContaining({
+        padding: expect.objectContaining({
+          top: 96,
+          right: 760,
+          bottom: 96,
+          left: 96,
+        }),
+        maxZoom: 13,
+        duration: 700,
+      }),
+    );
   });
 
   it('clears the saved route viewport after restoring it when leaving focus', () => {

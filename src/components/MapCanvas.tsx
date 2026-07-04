@@ -887,6 +887,7 @@ export function MapCanvas({
     mapY: number;
   } | null>(null);
   const previousDestinationCountRef = useRef(0);
+  const previousSelectedDestinationIdRef = useRef(selectedDestinationId);
   const routeViewportBeforeFocusRef = useRef<MapViewport | null>(null);
   const appliedStopFocusKeyRef = useRef<string | null>(null);
   const [selectedZoomStep, setSelectedZoomStep] = useState(1);
@@ -1083,7 +1084,9 @@ export function MapCanvas({
 
     if (selectedDestination && nextStopFocusKey) {
       if (!appliedStopFocusKeyRef.current && !routeViewportBeforeFocusRef.current) {
-        routeViewportBeforeFocusRef.current = mapViewport(map);
+        if (previousSelectedDestinationIdRef.current === null) {
+          routeViewportBeforeFocusRef.current = mapViewport(map);
+        }
       }
       if (appliedStopFocusKeyRef.current !== nextStopFocusKey) {
         fitMapToStopFocus(selectedDestination, latestFocusedActivitiesRef.current);
@@ -1092,17 +1095,21 @@ export function MapCanvas({
       return;
     }
 
-    if (appliedStopFocusKeyRef.current && routeViewportBeforeFocusRef.current) {
-      map.easeTo({
-        center: routeViewportBeforeFocusRef.current.center,
-        zoom: routeViewportBeforeFocusRef.current.zoom,
-        duration: mapViewportTransitionMs,
-      });
+    if (appliedStopFocusKeyRef.current) {
+      if (routeViewportBeforeFocusRef.current) {
+        map.easeTo({
+          center: routeViewportBeforeFocusRef.current.center,
+          zoom: routeViewportBeforeFocusRef.current.zoom,
+          duration: mapViewportTransitionMs,
+        });
+      } else {
+        fitMapToDestinations(latestDestinationsRef.current);
+      }
     }
 
     routeViewportBeforeFocusRef.current = null;
     appliedStopFocusKeyRef.current = null;
-  }, [fitMapToStopFocus]);
+  }, [fitMapToDestinations, fitMapToStopFocus]);
 
   useEffect(() => {
     const previousDestinationCount = previousDestinationCountRef.current;
@@ -1124,6 +1131,7 @@ export function MapCanvas({
     if (mapRef.current) {
       previousDestinationCountRef.current = destinations.length;
     }
+    previousSelectedDestinationIdRef.current = selectedDestinationId;
   }, [
     destinations,
     routeLegs,
