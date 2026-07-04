@@ -31,7 +31,7 @@ type PointerCoordinates = {
 };
 
 const kmToMiles = 0.621371;
-const stopListStyle = { '--stop-list-gap': '8px' } as CSSProperties;
+const stopListStyle = { '--stop-list-gap': '6px' } as CSSProperties;
 
 function formatLegDistance(routeLeg: RouteLeg) {
   if (isRouteLegCalculating(routeLeg)) return null;

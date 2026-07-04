@@ -338,7 +338,7 @@ describe('ItineraryPanel', () => {
     );
 
     expect(screen.getByLabelText('Itinerary').querySelector('.stop-list')).toHaveStyle(
-      '--stop-list-gap: 8px',
+      '--stop-list-gap: 6px',
     );
   });
 

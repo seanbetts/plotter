@@ -127,6 +127,8 @@ describe('activity list styles', () => {
     expect(styles).toMatch(
       /\.stop-item\s*{[^}]*grid-template-columns:\s*28px 28px minmax\(0,\s*1fr\) auto 32px;[^}]*gap:\s*4px;/s,
     );
-    expect(styles).toMatch(/\.stop-select\s*{[^}]*gap:\s*2px;[^}]*padding:\s*7px 8px;/s);
+    expect(styles).toMatch(
+      /\.stop-select\s*{[^}]*align-content:\s*center;[^}]*gap:\s*0;[^}]*padding:\s*10px 8px;/s,
+    );
   });
 });
