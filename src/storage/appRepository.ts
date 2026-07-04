@@ -3,6 +3,7 @@ import { createSupabaseTripRepository } from './supabaseTripRepository';
 import { tripDb } from './tripDb';
 import { createTripRepository } from './tripRepository';
 import type { TripRepository } from './tripRepository';
+import type { Activity } from '../domain/types';
 
 type BrowserSupabaseClient = ReturnType<typeof createBrowserSupabaseClient>;
 
@@ -77,10 +78,17 @@ async function migrateLocalTripDataOnce(input: {
     input.localRepository.listDestinations(),
     input.localRepository.listRouteLegs(),
   ]);
-  if (localDestinations.length > 0 || localRouteLegs.length > 0) {
+  const localActivities: Activity[] = (
+    await Promise.all(
+      localDestinations.map((destination) => input.localRepository.listActivities(destination.id)),
+    )
+  ).flat();
+
+  if (localDestinations.length > 0 || localRouteLegs.length > 0 || localActivities.length > 0) {
     await input.cloudRepository.replaceTripData({
       destinations: localDestinations,
       routeLegs: localRouteLegs,
+      activities: localActivities,
     });
   }
 

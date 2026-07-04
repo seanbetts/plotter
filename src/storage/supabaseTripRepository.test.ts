@@ -550,6 +550,84 @@ describe('supabase trip repository mappers', () => {
     ]);
   });
 
+  it('replaces trip data with activity snapshots after destinations', async () => {
+    const tripId = crypto.randomUUID();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: destination.id,
+      targetDestinationId: crypto.randomUUID(),
+      type: 'driving-auto',
+    });
+    const activity = createActivityModel({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    const calls: string[] = [];
+    const inserts: Record<string, unknown[]> = {};
+    const createTableMock = (tableName: string) => ({
+      delete: vi.fn(() => ({
+        eq: vi.fn(async (column: string, value: string) => {
+          calls.push(`delete:${tableName}:${column}:${value}`);
+          return { error: null };
+        }),
+      })),
+      insert: vi.fn(async (rows: unknown[]) => {
+        calls.push(`insert:${tableName}`);
+        inserts[tableName] = rows;
+        return { error: null };
+      }),
+    });
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: crypto.randomUUID() } },
+          error: null,
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+          ]);
+        }
+
+        if (tableName === 'destinations' || tableName === 'route_legs' || tableName === 'activities') {
+          return createTableMock(tableName);
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await repository.replaceTripData({
+      destinations: [destination],
+      routeLegs: [routeLeg],
+      activities: [activity],
+    });
+
+    expect(calls).toEqual([
+      `delete:route_legs:trip_id:${tripId}`,
+      `delete:activities:trip_id:${tripId}`,
+      `delete:destinations:trip_id:${tripId}`,
+      'insert:destinations',
+      'insert:activities',
+      'insert:route_legs',
+    ]);
+    expect(inserts.activities).toEqual([
+      expect.objectContaining({
+        id: activity.id,
+        trip_id: tripId,
+        destination_id: destination.id,
+        title: 'Louvre',
+      }),
+    ]);
+  });
+
   it('uses the visible trip with planning data instead of a newer empty anonymous trip', async () => {
     const emptyTripId = crypto.randomUUID();
     const plannedTripId = crypto.randomUUID();

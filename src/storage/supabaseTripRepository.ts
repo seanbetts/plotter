@@ -833,10 +833,17 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       const routeLegRows = snapshot.routeLegs.map((routeLeg) =>
         routeLegToSupabaseRow(routeLeg, tripId),
       );
+      const activityRows = (snapshot.activities ?? []).map((activity) =>
+        activityToSupabaseRow(activity, tripId),
+      );
 
       assertSupabaseWriteSucceeded(
         await supabase.from('route_legs').delete().eq('trip_id', tripId),
         'Unable to clear route legs.',
+      );
+      assertSupabaseWriteSucceeded(
+        await supabase.from('activities').delete().eq('trip_id', tripId),
+        'Unable to clear activities.',
       );
       assertSupabaseWriteSucceeded(
         await supabase.from('destinations').delete().eq('trip_id', tripId),
@@ -847,6 +854,13 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         assertSupabaseWriteSucceeded(
           await supabase.from('destinations').insert(destinationRows),
           'Unable to replace destinations.',
+        );
+      }
+
+      if (activityRows.length > 0) {
+        assertSupabaseWriteSucceeded(
+          await supabase.from('activities').insert(activityRows),
+          'Unable to replace activities.',
         );
       }
 

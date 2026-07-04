@@ -370,7 +370,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             current.filter((destination) => destination.id !== destinationId),
           );
           updateActivitiesByDestinationId((current) => {
-            const { [destinationId]: _removed, ...remaining } = current;
+            const remaining = { ...current };
+            delete remaining[destinationId];
             return remaining;
           });
           const remainingRouteLegs = updateRouteLegs((current) =>
