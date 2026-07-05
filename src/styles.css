@@ -102,6 +102,8 @@ select {
 }
 
 .map-stage {
+  --trip-selector-anchor-width: min(260px, calc(100vw - 32px));
+
   position: relative;
   min-height: 100vh;
   overflow: hidden;
@@ -1908,6 +1910,7 @@ select {
   display: flex;
   width: min(520px, calc(100vw - 32px));
   flex-direction: column;
+  justify-content: flex-end;
   gap: 10px;
   pointer-events: none;
 }
@@ -1920,6 +1923,15 @@ select {
   position: static;
   width: 100%;
   max-height: min(58vh, calc(100vh - 84px));
+}
+
+.trip-selector-anchor {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 12;
+  width: var(--trip-selector-anchor-width);
+  pointer-events: auto;
 }
 
 .trip-selector {
@@ -2011,6 +2023,12 @@ select {
   margin: 8px 4px 0;
   color: var(--color-danger);
   font-size: 0.875rem;
+}
+
+@media (max-width: 1263px) {
+  .trip-selector-anchor {
+    top: 88px;
+  }
 }
 
 .itinerary-panel {
@@ -2809,6 +2827,13 @@ select {
     right: 12px;
     left: 12px;
     max-width: none;
+  }
+
+  .trip-selector-anchor {
+    top: 92px;
+    right: 12px;
+    left: 12px;
+    width: auto;
   }
 
   .workspace-left-stack {

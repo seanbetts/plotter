@@ -1033,7 +1033,7 @@ function TripWorkspace({
               resolveSearchResult={resolveSearchResult}
               onAddDestination={handleAddDestination}
             />
-            <div className="workspace-left-stack">
+            <div className="trip-selector-anchor">
               <TripSelector
                 trips={trips}
                 activeTrip={activeTrip}
@@ -1043,6 +1043,8 @@ function TripWorkspace({
                 onRenameActiveTrip={onRenameActiveTrip}
                 onDeleteTrip={onDeleteTrip}
               />
+            </div>
+            <div className="workspace-left-stack">
               <ItineraryPanel
                 destinations={destinations}
                 routeLegs={routeLegs}
