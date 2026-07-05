@@ -1140,6 +1140,10 @@ describe('supabase trip repository mappers', () => {
           data: { user: { id: userId } },
           error: null,
         })),
+        getSession: vi.fn(async () => ({
+          data: { session: { access_token: 'session-access-token' } },
+          error: null,
+        })),
       },
       storage: {
         from: vi.fn(() => ({
@@ -1278,6 +1282,10 @@ describe('supabase trip repository mappers', () => {
       auth: {
         getUser: vi.fn(async () => ({
           data: { user: { id: userId } },
+          error: null,
+        })),
+        getSession: vi.fn(async () => ({
+          data: { session: { access_token: 'session-access-token' } },
           error: null,
         })),
       },
@@ -1497,10 +1505,7 @@ describe('supabase trip repository mappers', () => {
       created_at: '2026-06-29T12:00:00.000Z',
       updated_at: '2026-06-29T12:00:00.000Z',
     };
-    const invoke = vi.fn(async () => ({
-      data: { mediaAsset: row },
-      error: null,
-    }));
+    const fetcher = vi.fn(async () => Response.json({ mediaAsset: row }));
     const createSignedUrl = vi.fn(async (_path: string, _expiresIn: number, options?: { transform?: { width: number } }) => ({
       data: { signedUrl: `https://signed.example/imported-${options?.transform?.width ?? 'original'}.jpg` },
       error: null,
@@ -1511,9 +1516,10 @@ describe('supabase trip repository mappers', () => {
           data: { user: { id: userId } },
           error: null,
         })),
-      },
-      functions: {
-        invoke,
+        getSession: vi.fn(async () => ({
+          data: { session: { access_token: 'session-access-token' } },
+          error: null,
+        })),
       },
       storage: {
         from: vi.fn(() => ({ createSignedUrl })),
@@ -1528,7 +1534,11 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, {
+      importImageFunctionUrl: 'https://project.supabase.co/functions/v1/import-image',
+      publishableKey: 'publishable-key',
+      fetcher,
+    });
 
     await expect(repository.importDestinationMediaFromSearch({
       destinationId,
@@ -1545,8 +1555,14 @@ describe('supabase trip repository mappers', () => {
         sortOrder: 0,
       }),
     );
-    expect(invoke).toHaveBeenCalledWith('import-image', {
-      body: { tripId, destinationId, result },
+    expect(fetcher).toHaveBeenCalledWith('https://project.supabase.co/functions/v1/import-image', {
+      method: 'POST',
+      headers: {
+        apikey: 'publishable-key',
+        Authorization: 'Bearer session-access-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ tripId, destinationId, result }),
     });
     expect(supabase.storage.from).toHaveBeenCalledWith('trip-media');
   });
@@ -1581,10 +1597,7 @@ describe('supabase trip repository mappers', () => {
       created_at: '2026-06-29T12:00:00.000Z',
       updated_at: '2026-06-29T12:00:00.000Z',
     };
-    const invoke = vi.fn(async () => ({
-      data: { mediaAsset: row },
-      error: null,
-    }));
+    const fetcher = vi.fn(async () => Response.json({ mediaAsset: row }));
     const createSignedUrl = vi.fn(async (_path: string, _expiresIn: number, options?: { transform?: { width: number } }) => ({
       data: { signedUrl: `https://signed.example/imported-${options?.transform?.width ?? 'original'}.jpg` },
       error: null,
@@ -1595,9 +1608,10 @@ describe('supabase trip repository mappers', () => {
           data: { user: { id: userId } },
           error: null,
         })),
-      },
-      functions: {
-        invoke,
+        getSession: vi.fn(async () => ({
+          data: { session: { access_token: 'session-access-token' } },
+          error: null,
+        })),
       },
       storage: {
         from: vi.fn(() => ({ createSignedUrl })),
@@ -1612,7 +1626,11 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, {
+      importImageFunctionUrl: 'https://project.supabase.co/functions/v1/import-image',
+      publishableKey: 'publishable-key',
+      fetcher,
+    });
 
     await expect(repository.importActivityMediaFromSearch({
       destinationId,
@@ -1630,8 +1648,14 @@ describe('supabase trip repository mappers', () => {
         sortOrder: 0,
       }),
     );
-    expect(invoke).toHaveBeenCalledWith('import-image', {
-      body: { tripId, destinationId, activityId, result },
+    expect(fetcher).toHaveBeenCalledWith('https://project.supabase.co/functions/v1/import-image', {
+      method: 'POST',
+      headers: {
+        apikey: 'publishable-key',
+        Authorization: 'Bearer session-access-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ tripId, destinationId, activityId, result }),
     });
     expect(supabase.storage.from).toHaveBeenCalledWith('trip-media');
   });
@@ -1648,25 +1672,20 @@ describe('supabase trip repository mappers', () => {
       thumbnailUrl: 'https://images.example.com/paris-mural-thumb.jpg',
       imageUrl: 'https://images.example.com/paris-mural.jpg',
     };
-    const invoke = vi.fn(async () => ({
-      data: null,
-      error: {
-        message: 'Edge Function returned a non-2xx status code',
-        context: new Response(JSON.stringify({ error: 'Selected image is too large.' }), {
-          status: 400,
-          headers: { 'content-type': 'application/json' },
-        }),
-      },
-    }));
+    const fetcher = vi.fn(async () => Response.json(
+      { error: 'Selected image is too large.' },
+      { status: 400 },
+    ));
     const supabase = {
       auth: {
         getUser: vi.fn(async () => ({
           data: { user: { id: userId } },
           error: null,
         })),
-      },
-      functions: {
-        invoke,
+        getSession: vi.fn(async () => ({
+          data: { session: { access_token: 'session-access-token' } },
+          error: null,
+        })),
       },
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
@@ -1678,14 +1697,24 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, {
+      importImageFunctionUrl: 'https://project.supabase.co/functions/v1/import-image',
+      publishableKey: 'publishable-key',
+      fetcher,
+    });
 
     await expect(repository.importDestinationMediaFromSearch({
       destinationId,
       result,
     })).rejects.toThrow('Selected image is too large.');
-    expect(invoke).toHaveBeenCalledWith('import-image', {
-      body: { tripId, destinationId, result },
+    expect(fetcher).toHaveBeenCalledWith('https://project.supabase.co/functions/v1/import-image', {
+      method: 'POST',
+      headers: {
+        apikey: 'publishable-key',
+        Authorization: 'Bearer session-access-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ tripId, destinationId, result }),
     });
   });
 
@@ -1701,15 +1730,9 @@ describe('supabase trip repository mappers', () => {
       thumbnailUrl: 'https://images.example.com/paris-mural-thumb.jpg',
       imageUrl: 'https://images.example.com/paris-mural.jpg',
     };
-    const invoke = vi.fn(async () => ({
-      data: null,
-      error: {
-        message: '',
-        context: new Response('not json', {
-          status: 500,
-          headers: { 'content-type': 'text/plain' },
-        }),
-      },
+    const fetcher = vi.fn(async () => new Response('not json', {
+      status: 500,
+      headers: { 'content-type': 'text/plain' },
     }));
     const supabase = {
       auth: {
@@ -1717,9 +1740,10 @@ describe('supabase trip repository mappers', () => {
           data: { user: { id: userId } },
           error: null,
         })),
-      },
-      functions: {
-        invoke,
+        getSession: vi.fn(async () => ({
+          data: { session: { access_token: 'session-access-token' } },
+          error: null,
+        })),
       },
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
@@ -1731,7 +1755,11 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, {
+      importImageFunctionUrl: 'https://project.supabase.co/functions/v1/import-image',
+      publishableKey: 'publishable-key',
+      fetcher,
+    });
 
     await expect(repository.importDestinationMediaFromSearch({
       destinationId,

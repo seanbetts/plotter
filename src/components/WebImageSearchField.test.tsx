@@ -86,6 +86,38 @@ describe('WebImageSearchField', () => {
     expect(input).toHaveValue('');
   });
 
+  it('does not propagate result clicks to surrounding upload controls', async () => {
+    const user = userEvent.setup();
+    const onOuterPointerDown = vi.fn();
+    const onOuterMouseDown = vi.fn();
+    const onOuterClick = vi.fn();
+    const onImportImage = vi.fn(async () => undefined);
+    render(
+      <div
+        onPointerDown={onOuterPointerDown}
+        onMouseDown={onOuterMouseDown}
+        onClick={onOuterClick}
+      >
+        <WebImageSearchField
+          context={context}
+          client={createClient()}
+          onImportImage={onImportImage}
+        />
+      </div>,
+    );
+
+    await user.type(screen.getByLabelText('Search web images'), 'mural');
+    onOuterPointerDown.mockClear();
+    onOuterMouseDown.mockClear();
+    onOuterClick.mockClear();
+    await user.click(await screen.findByRole('option', { name: 'Import Paris mural from Example Source' }));
+
+    expect(onImportImage).toHaveBeenCalledWith(result);
+    expect(onOuterPointerDown).not.toHaveBeenCalled();
+    expect(onOuterMouseDown).not.toHaveBeenCalled();
+    expect(onOuterClick).not.toHaveBeenCalled();
+  });
+
   it('keeps results open when import fails', async () => {
     const user = userEvent.setup();
     render(

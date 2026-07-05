@@ -16,6 +16,7 @@ import type {
 import { sortResearchLinks } from '../domain/researchLinks';
 import { mediaImageVariants } from '../media/imageOptimization';
 import type { WebImageSearchResult } from '../services/webImageSearchClient';
+import { supabasePublishableKey, supabaseUrl } from './supabaseClient';
 import type { TripRepository } from './tripRepository';
 
 type SupabaseDestinationRow = {
@@ -122,26 +123,31 @@ type SupabaseWriteResponse = {
   error: { message: string } | null;
 };
 
-type ImportImageFunctionResponse = {
-  data: { mediaAsset?: SupabaseMediaAssetRow } | null;
-  error: { message?: string; context?: unknown; response?: unknown } | null;
-};
-
 type ImportImageSupabaseClient = {
-  functions: {
-    invoke(
-      functionName: 'import-image',
-      options: {
-        body: {
-          tripId: string;
-          destinationId: string;
-          activityId?: string;
-          result: WebImageSearchResult;
-        };
-      },
-    ): Promise<ImportImageFunctionResponse>;
+  auth: {
+    getSession(): Promise<{
+      data: { session: { access_token?: string } | null };
+      error: { message: string } | null;
+    }>;
   };
 };
+
+type ImportImageFunctionBody = {
+  tripId: string;
+  destinationId: string;
+  activityId?: string;
+  result: WebImageSearchResult;
+};
+
+type ImportImageFetcher = (input: string, init: RequestInit) => Promise<Response>;
+
+type SupabaseTripRepositoryOptions = {
+  importImageFunctionUrl?: string;
+  publishableKey?: string;
+  fetcher?: ImportImageFetcher;
+};
+
+const defaultImportImageFetcher: ImportImageFetcher = (input, init) => globalThis.fetch(input, init);
 
 function assertNoSupabaseError<T>(response: SupabaseResponse<T>, fallbackMessage: string): T {
   if (response.error) {
@@ -161,28 +167,67 @@ function assertSupabaseWriteSucceeded(response: SupabaseWriteResponse, fallbackM
   }
 }
 
-function getResponseFromErrorTarget(target: unknown): Response | undefined {
-  return target instanceof Response ? target : undefined;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-async function extractFunctionErrorMessage(
-  error: NonNullable<ImportImageFunctionResponse['error']>,
-  fallbackMessage: string,
-): Promise<string> {
-  const response = getResponseFromErrorTarget(error.context) ?? getResponseFromErrorTarget(error.response);
-
-  if (response) {
-    try {
-      const body = (await response.clone().json()) as { error?: unknown };
-      if (typeof body.error === 'string' && body.error.trim()) {
-        return body.error;
-      }
-    } catch {
-      // Fall through to the Supabase error message when the body is not readable JSON.
-    }
+async function parseImportImageResponse(response: Response, fallbackMessage: string) {
+  let body: unknown;
+  try {
+    body = await response.clone().json();
+  } catch {
+    throw new Error(fallbackMessage);
   }
 
-  return error.message || fallbackMessage;
+  if (!response.ok) {
+    const error = isRecord(body) && typeof body.error === 'string' ? body.error.trim() : '';
+    throw new Error(error || fallbackMessage);
+  }
+
+  if (!isRecord(body) || !isRecord(body.mediaAsset)) {
+    throw new Error(fallbackMessage);
+  }
+
+  return body.mediaAsset as SupabaseMediaAssetRow;
+}
+
+async function getImportImageAccessToken(supabase: ImportImageSupabaseClient) {
+  const response = await supabase.auth.getSession();
+  const accessToken = response.data.session?.access_token;
+
+  if (response.error || !accessToken) {
+    throw new Error(response.error?.message || 'Sign in before importing images.');
+  }
+
+  return accessToken;
+}
+
+async function invokeImportImageFunction(
+  body: ImportImageFunctionBody,
+  accessToken: string,
+  options: SupabaseTripRepositoryOptions,
+  fallbackMessage = 'Unable to import image.',
+) {
+  const importImageFunctionUrl = options.importImageFunctionUrl ?? (
+    supabaseUrl ? `${supabaseUrl}/functions/v1/import-image` : ''
+  );
+  const publishableKey = options.publishableKey ?? supabasePublishableKey;
+
+  if (!importImageFunctionUrl || !publishableKey) {
+    throw new Error(fallbackMessage);
+  }
+
+  const response = await (options.fetcher ?? defaultImportImageFetcher)(importImageFunctionUrl, {
+    method: 'POST',
+    headers: {
+      apikey: publishableKey,
+      Authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  return parseImportImageResponse(response, fallbackMessage);
 }
 
 function isMediaSortOrderConflict(errorMessage: string | undefined) {
@@ -388,7 +433,10 @@ export function mediaAssetFromSupabaseRow(
   };
 }
 
-export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepository {
+export function createSupabaseTripRepository(
+  supabase: SupabaseClient,
+  options: SupabaseTripRepositoryOptions = {},
+): TripRepository {
   let activeTripId: string | null = null;
 
   async function chooseTripWithPlanningData(trips: SupabaseTripRow[]) {
@@ -1033,23 +1081,14 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
     async importDestinationMediaFromSearch(input) {
       const tripId = await getActiveTripId();
-      const response = await (supabase as ImportImageSupabaseClient).functions.invoke('import-image', {
-        body: {
-          tripId,
-          destinationId: input.destinationId,
-          result: input.result,
-        },
-      });
+      const importImageSupabase = supabase as ImportImageSupabaseClient;
+      const mediaAsset = await invokeImportImageFunction({
+        tripId,
+        destinationId: input.destinationId,
+        result: input.result,
+      }, await getImportImageAccessToken(importImageSupabase), options);
 
-      if (response.error) {
-        throw new Error(await extractFunctionErrorMessage(response.error, 'Unable to import image.'));
-      }
-
-      if (!response.data?.mediaAsset) {
-        throw new Error('Unable to import image.');
-      }
-
-      return createSignedMediaItem(response.data.mediaAsset);
+      return createSignedMediaItem(mediaAsset);
     },
 
     async listDestinationMediaRollup(destinationId): Promise<MediaRollupItem[]> {
@@ -1150,24 +1189,15 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
 
     async importActivityMediaFromSearch(input) {
       const tripId = await getActiveTripId();
-      const response = await (supabase as ImportImageSupabaseClient).functions.invoke('import-image', {
-        body: {
-          tripId,
-          destinationId: input.destinationId,
-          activityId: input.activityId,
-          result: input.result,
-        },
-      });
+      const importImageSupabase = supabase as ImportImageSupabaseClient;
+      const mediaAsset = await invokeImportImageFunction({
+        tripId,
+        destinationId: input.destinationId,
+        activityId: input.activityId,
+        result: input.result,
+      }, await getImportImageAccessToken(importImageSupabase), options);
 
-      if (response.error) {
-        throw new Error(await extractFunctionErrorMessage(response.error, 'Unable to import image.'));
-      }
-
-      if (!response.data?.mediaAsset) {
-        throw new Error('Unable to import image.');
-      }
-
-      return createSignedMediaItem(response.data.mediaAsset);
+      return createSignedMediaItem(mediaAsset);
     },
 
     async updateDestinationMedia(mediaId, patch) {

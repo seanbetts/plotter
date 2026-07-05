@@ -2,7 +2,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.108.2";
 import {
   createImportedImageObjectPath,
   fetchImportImage,
+  fetchImportUser,
   normalizeImportResult,
+  requireBearerJwt,
 } from "./metadata.ts";
 
 const corsHeaders = {
@@ -19,7 +21,25 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type SupabaseTableClient = {
-  from: (tableName: string) => any;
+  from: (tableName: string) => SupabaseQueryBuilder;
+};
+
+type SupabaseQueryResponse<T = unknown> = {
+  data: T | null;
+  error: { message?: string } | null;
+};
+
+type SupabaseQueryBuilder = {
+  select: (columns: string) => SupabaseQueryBuilder;
+  eq: (column: string, value: string) => SupabaseQueryBuilder;
+  is: (column: string, value: null) => SupabaseQueryBuilder;
+  insert: (values: Record<string, unknown>) => SupabaseQueryBuilder;
+  maybeSingle: () => Promise<SupabaseQueryResponse>;
+  single: () => Promise<SupabaseQueryResponse>;
+  then<TResult1 = SupabaseQueryResponse<{ sort_order: number }[]>, TResult2 = never>(
+    onfulfilled?: ((value: SupabaseQueryResponse<{ sort_order: number }[]>) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): PromiseLike<TResult1 | TResult2>;
 };
 
 Deno.serve(async (request) => {
@@ -36,17 +56,17 @@ Deno.serve(async (request) => {
 
   try {
     const authorization = request.headers.get("authorization") ?? "";
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    requireBearerJwt(authorization);
+    const apiKey = request.headers.get("apikey") ?? supabaseAnonKey;
+    const user = await fetchImportUser({
+      supabaseUrl,
+      apiKey,
+      authorization,
+    });
+    const supabase = createClient(supabaseUrl, apiKey, {
       global: { headers: { authorization } },
     });
-
-    const userResponse = await supabase.auth.getUser();
-    const user = userResponse.data.user;
-    if (userResponse.error || !user) {
-      throw new Error(
-        userResponse.error?.message || "Sign in before importing images.",
-      );
-    }
+    const supabaseTables = supabase as unknown as SupabaseTableClient;
 
     const body = await request.json();
     const tripId = typeof body.tripId === "string" ? body.tripId.trim() : "";
@@ -62,12 +82,12 @@ Deno.serve(async (request) => {
 
     const result = normalizeImportResult(body.result);
 
-    await assertDestinationAccess(supabase, tripId, destinationId);
+    await assertDestinationAccess(supabaseTables, tripId, destinationId);
     if (activityId) {
-      await assertActivityAccess(supabase, tripId, destinationId, activityId);
+      await assertActivityAccess(supabaseTables, tripId, destinationId, activityId);
     }
     const existingRows = await listExistingMediaSortOrders(
-      supabase,
+      supabaseTables,
       tripId,
       destinationId,
       activityId || null,
@@ -98,7 +118,7 @@ Deno.serve(async (request) => {
 
     let mediaAsset;
     try {
-      mediaAsset = await insertMediaMetadataWithRetry(supabase, {
+      mediaAsset = await insertMediaMetadataWithRetry(supabaseTables, {
         tripId,
         destinationId,
         activityId: activityId || null,

@@ -143,11 +143,9 @@ test('opens an activity panel with image region beside the selected stop', async
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
     const url = new URL(route.request().url());
 
-    expect(url.pathname).toBe('/geocoding/Paris.json');
-
     await route.fulfill({
       contentType: 'application/json',
-      json: { features: parisResult },
+      json: { features: url.pathname === '/geocoding/Paris.json' ? parisResult : [] },
     });
   });
 
@@ -177,6 +175,17 @@ test('opens an activity panel with image region beside the selected stop', async
   await expect(activityPanel).toBeVisible();
   await expect(stopPanel).toBeVisible();
   await expect(activityPanel.getByRole('region', { name: 'Activity images' })).toBeVisible();
+
+  let openedFileChooser = false;
+  page.on('filechooser', () => {
+    openedFileChooser = true;
+  });
+
+  await activityPanel.getByLabel('Search web images').fill('mural');
+  await activityPanel.getByRole('option', { name: 'Import mural in Paris from Local image search' }).click();
+
+  await expect(activityPanel.getByRole('button', { name: 'Open full image: mural in Paris' })).toBeVisible();
+  expect(openedFileChooser).toBe(false);
 
   const activityBox = await activityPanel.boundingBox();
   const stopBox = await stopPanel.boundingBox();

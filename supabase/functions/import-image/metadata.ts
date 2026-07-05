@@ -18,6 +18,13 @@ type FetchImportImageInput = {
   resolver?: Resolver;
 };
 
+type FetchImportUserInput = {
+  supabaseUrl: string;
+  apiKey: string;
+  authorization: string;
+  fetcher?: Fetcher;
+};
+
 const allowedProtocols = new Set(["http:", "https:"]);
 const allowedImageTypes = new Set([
   "image/jpeg",
@@ -29,6 +36,9 @@ const maxImageBytes = 50 * 1024 * 1024;
 const maxRedirects = 3;
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
 const userAgent = "WorldTourImageImport/1.0";
+const bearerTokenPattern = /^Bearer\s+(.+)$/i;
+const defaultFetcher: Fetcher = (input, init) => globalThis.fetch(input, init);
+const defaultUuid = () => globalThis.crypto.randomUUID();
 
 export function normalizeImportResult(value: unknown): ImportImageResult {
   if (!isRecord(value)) {
@@ -67,6 +77,57 @@ export function normalizeImportResult(value: unknown): ImportImageResult {
   return result;
 }
 
+export function requireBearerJwt(authorization: string) {
+  const token = authorization.match(bearerTokenPattern)?.[1]?.trim() ?? "";
+
+  if (!token.startsWith("eyJ")) {
+    throw new Error("Sign in before importing images.");
+  }
+
+  return token;
+}
+
+export async function fetchImportUser({
+  supabaseUrl,
+  apiKey,
+  authorization,
+  fetcher = defaultFetcher,
+}: FetchImportUserInput) {
+  if (!supabaseUrl || !apiKey) {
+    throw new Error("Sign in before importing images.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetcher(new URL("/auth/v1/user", supabaseUrl), {
+      headers: {
+        apikey: apiKey,
+        authorization,
+      },
+    });
+  } catch {
+    throw new Error("Sign in before importing images.");
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error("Sign in before importing images.");
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error("Sign in before importing images.");
+  }
+
+  if (!response.ok || !isRecord(body) || typeof body.id !== "string" || !body.id) {
+    throw new Error("Sign in before importing images.");
+  }
+
+  return { id: body.id };
+}
+
 export async function validatePublicImageUrl(
   rawUrl: string,
   resolver: Resolver = resolveHostname,
@@ -102,7 +163,7 @@ export async function validatePublicImageUrl(
 
 export async function fetchImportImage({
   imageUrl,
-  fetcher = fetch,
+  fetcher = defaultFetcher,
   resolver = resolveHostname,
 }: FetchImportImageInput) {
   const response = await fetchImportImageResponse(imageUrl, fetcher, resolver);
@@ -220,7 +281,7 @@ export function createImportedImageObjectPath(input: {
   contentType: string;
   uuid?: () => string;
 }) {
-  const uuid = input.uuid ?? crypto.randomUUID;
+  const uuid = input.uuid ?? defaultUuid;
   const extension = extensionForContentType(input.contentType);
   const slug = slugify(input.title);
   const ownerPath = input.activityId ? `${input.destinationId}/${input.activityId}` : input.destinationId;

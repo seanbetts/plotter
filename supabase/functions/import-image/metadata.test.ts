@@ -2,11 +2,14 @@
 import {
   assertEquals,
   assertRejects,
+  assertThrows,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   createImportedImageObjectPath,
   fetchImportImage,
+  fetchImportUser,
   normalizeImportResult,
+  requireBearerJwt,
   validatePublicImageUrl,
 } from "./metadata.ts";
 
@@ -63,6 +66,88 @@ Deno.test("normalizes selected result metadata", () => {
   );
 });
 
+Deno.test("requires a bearer JWT for authenticated image imports", () => {
+  assertEquals(requireBearerJwt("Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature"), "eyJhbGciOiJIUzI1NiJ9.payload.signature");
+
+  assertThrows(
+    () => requireBearerJwt("Bearer sb_publishable_123"),
+    Error,
+    "Sign in before importing images.",
+  );
+});
+
+Deno.test("fetchImportUser validates a bearer token with Supabase auth", async () => {
+  const user = await fetchImportUser({
+    supabaseUrl: "https://project.supabase.co",
+    apiKey: "publishable-key",
+    authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
+    fetcher: (input, init) => {
+      assertEquals(input.toString(), "https://project.supabase.co/auth/v1/user");
+      assertEquals(init?.headers, {
+        apikey: "publishable-key",
+        authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
+      });
+
+      return Promise.resolve(
+        Response.json({ id: "11111111-1111-4111-8111-111111111111" }),
+      );
+    },
+  });
+
+  assertEquals(user.id, "11111111-1111-4111-8111-111111111111");
+});
+
+Deno.test("fetchImportUser hides non-json auth responses", async () => {
+  await assertRejects(
+    () =>
+      fetchImportUser({
+        supabaseUrl: "https://project.supabase.co",
+        apiKey: "publishable-key",
+        authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
+        fetcher: () =>
+          Promise.resolve(
+            new Response("<html><h1>Not JSON</h1></html>", {
+              headers: { "content-type": "text/html" },
+            }),
+          ),
+      }),
+    Error,
+    "Sign in before importing images.",
+  );
+});
+
+Deno.test("fetchImportUser keeps the default fetch binding intact", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = function (
+      this: typeof globalThis,
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) {
+      assertEquals(this, globalThis);
+      assertEquals(input.toString(), "https://project.supabase.co/auth/v1/user");
+      assertEquals(init?.headers, {
+        apikey: "publishable-key",
+        authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
+      });
+
+      return Promise.resolve(
+        Response.json({ id: "11111111-1111-4111-8111-111111111111" }),
+      );
+    } as typeof fetch;
+
+    const user = await fetchImportUser({
+      supabaseUrl: "https://project.supabase.co",
+      apiKey: "publishable-key",
+      authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
+    });
+
+    assertEquals(user.id, "11111111-1111-4111-8111-111111111111");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 Deno.test("creates trip and destination scoped object paths", () => {
   const path = createImportedImageObjectPath({
     tripId: "11111111-1111-4111-8111-111111111111",
@@ -75,6 +160,20 @@ Deno.test("creates trip and destination scoped object paths", () => {
   assertEquals(
     path,
     "11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/33333333-3333-4333-8333-333333333333-paris-mural-old-town.jpg",
+  );
+});
+
+Deno.test("creates imported image object paths with the default UUID binding intact", () => {
+  const path = createImportedImageObjectPath({
+    tripId: "11111111-1111-4111-8111-111111111111",
+    destinationId: "22222222-2222-4222-8222-222222222222",
+    title: "Paris mural",
+    contentType: "image/jpeg",
+  });
+
+  assertEquals(
+    /^11111111-1111-4111-8111-111111111111\/22222222-2222-4222-8222-222222222222\/[0-9a-f-]{36}-paris-mural\.jpg$/.test(path),
+    true,
   );
 });
 
@@ -126,6 +225,37 @@ Deno.test("fetchImportImage returns image bytes and content type", async () => {
 
   assertEquals(imported.contentType, "image/jpeg");
   assertEquals(imported.bytes.byteLength, 3);
+});
+
+Deno.test("fetchImportImage keeps the default fetch binding intact", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = function (
+      this: typeof globalThis,
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) {
+      assertEquals(this, globalThis);
+      assertEquals(input.toString(), "https://example.com/image.jpg");
+      assertEquals(init?.redirect, "manual");
+
+      return Promise.resolve(
+        new Response(new Uint8Array([1, 2, 3]), {
+          headers: { "content-type": "image/jpeg" },
+        }),
+      );
+    } as typeof fetch;
+
+    const imported = await fetchImportImage({
+      imageUrl: "https://example.com/image.jpg",
+      resolver: publicResolver,
+    });
+
+    assertEquals(imported.contentType, "image/jpeg");
+    assertEquals(imported.bytes.byteLength, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 Deno.test("fetchImportImage rejects oversized content-length without reading the body", async () => {

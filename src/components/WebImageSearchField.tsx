@@ -1,5 +1,15 @@
 import { Image as ImageIcon, LoaderCircle, Plus, X } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from 'react';
 import type {
   WebImageSearchClient,
   WebImageSearchResult,
@@ -65,13 +75,7 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
       window.clearTimeout(searchTimerRef.current);
     }
 
-    if (!trimmedQuery) {
-      latestSearchId.current += 1;
-      setResults([]);
-      setIsSearching(false);
-      setError('');
-      return;
-    }
+    if (!trimmedQuery) return;
 
     searchTimerRef.current = window.setTimeout(() => {
       searchImages(trimmedQuery);
@@ -99,13 +103,28 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
     }
   }
 
+  function handleResultClick(event: MouseEvent<HTMLButtonElement>, result: WebImageSearchResult) {
+    event.preventDefault();
+    event.stopPropagation();
+    void importResult(result);
+  }
+
+  function stopResultPointerEvent(event: MouseEvent<HTMLButtonElement> | PointerEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+  }
+
   function handleQueryChange(event: ChangeEvent<HTMLInputElement>) {
     const nextQuery = event.target.value;
+    const nextTrimmedQuery = nextQuery.trim();
 
-    if (nextQuery.trim() !== trimmedQuery) {
+    if (nextTrimmedQuery !== trimmedQuery) {
       latestSearchId.current += 1;
       setResults([]);
       setError('');
+    }
+
+    if (!nextTrimmedQuery) {
+      setIsSearching(false);
     }
 
     setQuery(nextQuery);
@@ -196,7 +215,9 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
                     aria-label={`Import ${result.title} from ${result.sourceName}`}
                     className="web-image-result-tile"
                     disabled={Boolean(importingId)}
-                    onClick={() => void importResult(result)}
+                    onPointerDown={stopResultPointerEvent}
+                    onMouseDown={stopResultPointerEvent}
+                    onClick={(event) => handleResultClick(event, result)}
                   >
                     <img src={result.thumbnailUrl} alt="" />
                     <span className="web-image-result-meta">
