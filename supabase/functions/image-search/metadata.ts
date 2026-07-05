@@ -41,7 +41,6 @@ type SearchWebImagesInput = {
   fetcher?: typeof fetch;
 };
 
-const largePhotoFilter = "itp:photos,isz:l";
 const minLongEdge = 1200;
 const minShortEdge = 700;
 const providerSearchErrorMessage = "Unable to search web images.";
@@ -100,13 +99,14 @@ export function buildSerpApiImageSearchUrl(input: {
   context: ImageSearchStopContext;
 }) {
   const url = new URL("https://serpapi.com/search.json");
-  url.searchParams.set("engine", "google_images");
+  url.searchParams.set("engine", "google_images_light");
   url.searchParams.set("q", buildProviderQuery(input.query, input.context));
   url.searchParams.set("api_key", input.apiKey);
   url.searchParams.set("hl", "en");
   url.searchParams.set("gl", normalizedCountryCode(input.context));
   url.searchParams.set("device", "desktop");
-  url.searchParams.set("tbs", largePhotoFilter);
+  url.searchParams.set("imgsz", "l");
+  url.searchParams.set("image_type", "photo");
 
   return url;
 }

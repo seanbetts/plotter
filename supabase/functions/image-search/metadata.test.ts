@@ -10,7 +10,7 @@ import {
   searchWebImages,
 } from "./metadata.ts";
 
-Deno.test("builds a SerpApi URL with contextual query and large photo filters", () => {
+Deno.test("builds a SerpApi Light URL with contextual query and large photo filters", () => {
   const url = buildSerpApiImageSearchUrl({
     apiKey: "secret",
     query: "street art",
@@ -23,12 +23,14 @@ Deno.test("builds a SerpApi URL with contextual query and large photo filters", 
 
   assertEquals(url.origin, "https://serpapi.com");
   assertEquals(url.pathname, "/search.json");
-  assertEquals(url.searchParams.get("engine"), "google_images");
+  assertEquals(url.searchParams.get("engine"), "google_images_light");
   assertEquals(url.searchParams.get("q"), "street art Paris France");
   assertEquals(url.searchParams.get("api_key"), "secret");
   assertEquals(url.searchParams.get("hl"), "en");
   assertEquals(url.searchParams.get("gl"), "fr");
-  assertEquals(url.searchParams.get("tbs"), "itp:photos,isz:l");
+  assertEquals(url.searchParams.get("imgsz"), "l");
+  assertEquals(url.searchParams.get("image_type"), "photo");
+  assertEquals(url.searchParams.get("tbs"), null);
   assertEquals(url.searchParams.get("location"), null);
 });
 

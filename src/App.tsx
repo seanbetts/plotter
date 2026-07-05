@@ -127,6 +127,13 @@ function createWebImageSearchContext(destination: Destination): WebImageSearchSt
   };
 }
 
+function createActivityWebImageSearchContext(destination: Destination, activity: Activity): WebImageSearchStopContext {
+  return {
+    ...createWebImageSearchContext(destination),
+    stopName: activity.title,
+  };
+}
+
 function readStopsPanelCollapsedPreference() {
   if (typeof window === 'undefined') return false;
 
@@ -983,7 +990,7 @@ function TripWorkspace({
                 onReorderMedia={handleActivityMediaReorder}
                 onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'activity' })}
                 webImageSearchClient={webImageSearchClient}
-                webImageSearchContext={createWebImageSearchContext(selectedDestination)}
+                webImageSearchContext={createActivityWebImageSearchContext(selectedDestination, selectedActivity)}
                 onImportWebImage={handleActivityWebImageImport}
               />
             ) : null}

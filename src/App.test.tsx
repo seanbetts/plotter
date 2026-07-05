@@ -815,6 +815,74 @@ describe('App', () => {
     });
   });
 
+  it('searches activity images with activity subject and stop location context', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Home',
+      location: {
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        countryCode: 'GB',
+        sourceLabel: 'Balcombe, West Sussex, United Kingdom',
+        sourceProvider: 'maptiler',
+      },
+      coordinates: { lat: 51.0562, lng: -0.1307 },
+    });
+    const activity = createActivity({
+      destinationId: destination.id,
+      title: 'Ouse Valley Viaduct',
+      order: 0,
+    });
+    const selectedResult: WebImageSearchResult = {
+      id: 'web-image-ouse-valley',
+      title: 'Ouse Valley Viaduct',
+      sourceName: 'Example Source',
+      sourceUrl: 'https://example.com/ouse-valley',
+      thumbnailUrl: 'https://example.com/ouse-valley-thumb.jpg',
+      imageUrl: 'https://example.com/ouse-valley.jpg',
+      width: 1600,
+      height: 1000,
+    };
+    const webImageSearchClient: WebImageSearchClient = {
+      searchImages: vi.fn(async () => [selectedResult]),
+    };
+    repositoryMock.initialDestinations = Promise.resolve([{ ...destination, activities: [activity] }]);
+    repositoryMock.listActivities.mockResolvedValue([activity]);
+    repositoryMock.listActivityMedia.mockResolvedValue([]);
+    repositoryMock.importActivityMediaFromSearch.mockResolvedValue(
+      createMediaItem({
+        id: 'imported-ouse-valley',
+        url: selectedResult.imageUrl,
+        caption: selectedResult.title,
+      }),
+    );
+
+    render(<App webImageSearchClient={webImageSearchClient} />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Home, Balcombe, West Sussex, United Kingdom' }));
+    await user.click(await screen.findByRole('button', { name: 'Select activity Ouse Valley Viaduct' }));
+    const activityPanel = await screen.findByRole('complementary', { name: 'Ouse Valley Viaduct activity' });
+
+    await user.type(within(activityPanel).getByLabelText('Search web images'), 'arches');
+    await user.click(await within(activityPanel).findByRole('option', {
+      name: 'Import Ouse Valley Viaduct from Example Source',
+    }));
+
+    expect(webImageSearchClient.searchImages).toHaveBeenCalledWith('arches', {
+      stopName: 'Ouse Valley Viaduct',
+      regionName: 'West Sussex',
+      countryName: 'United Kingdom',
+      countryCode: 'GB',
+    });
+    expect(repositoryMock.importActivityMediaFromSearch).toHaveBeenCalledWith({
+      destinationId: destination.id,
+      activityId: activity.id,
+      result: selectedResult,
+    });
+  });
+
   it('does not reload stale stop media when selected stop changes during web image import', async () => {
     const user = userEvent.setup();
     const paris = createDestination({
