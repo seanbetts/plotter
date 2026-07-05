@@ -349,6 +349,7 @@ describe('useTripData', () => {
         [18.7712, 42.4247],
       ],
     };
+    const selectedCalculatedAt = '2026-07-04T12:00:00.000Z';
     const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -379,7 +380,7 @@ describe('useTripData', () => {
         provider: 'openrouteservice',
         profile: 'driving-car',
         routeKey: 'selected-alternative-key',
-        calculatedAt: '2026-07-04T12:00:00.000Z',
+        calculatedAt: selectedCalculatedAt,
         error: undefined,
       });
     });
@@ -392,8 +393,105 @@ describe('useTripData', () => {
       distanceKm: 140,
       travelTimeHours: 3.1,
       geometry: selectedGeometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
       routeKey: 'selected-alternative-key',
+      calculatedAt: selectedCalculatedAt,
       error: undefined,
+    });
+  });
+
+  it('recalculates incomplete ready route legs without calculatedAt', async () => {
+    const repository = createTestRepository();
+    const calculateRoute = vi
+      .fn()
+      .mockResolvedValueOnce({
+        distanceKm: 123.4,
+        travelTimeHours: 2.5,
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [19.0342, 43.1306],
+            [18.7712, 42.4247],
+          ],
+        },
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+      })
+      .mockResolvedValueOnce({
+        distanceKm: 141.2,
+        travelTimeHours: 3.2,
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [19.0342, 43.1306],
+            [18.8, 42.8],
+            [18.7712, 42.4247],
+          ],
+        },
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+      });
+    const selectedGeometry = {
+      type: 'LineString' as const,
+      coordinates: [
+        [19.0342, 43.1306],
+        [18.9, 42.9],
+        [18.7712, 42.4247],
+      ],
+    };
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'Durmitor',
+        countryRegion: 'Montenegro',
+        coordinates: { lat: 43.1306, lng: 19.0342 },
+      });
+      await result.current.addDestination({
+        name: 'Kotor',
+        countryRegion: 'Montenegro',
+        coordinates: { lat: 42.4247, lng: 18.7712 },
+      });
+    });
+
+    const [routeLeg] = result.current.routeLegs;
+    calculateRoute.mockClear();
+
+    await act(async () => {
+      await result.current.updateRouteLeg(routeLeg.id, {
+        type: 'driving-auto',
+        status: 'ready',
+        distanceKm: 140,
+        travelTimeHours: 3.1,
+        geometry: selectedGeometry,
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+        routeKey: 'selected-alternative-key',
+        calculatedAt: undefined,
+        error: undefined,
+      });
+    });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(result.current.routeLegs[0]).toMatchObject({
+      id: routeLeg.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 141.2,
+      travelTimeHours: 3.2,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [19.0342, 43.1306],
+          [18.8, 42.8],
+          [18.7712, 42.4247],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
     });
   });
 

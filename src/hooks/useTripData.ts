@@ -268,7 +268,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           routeLeg.travelTimeHours !== undefined &&
           routeLeg.provider &&
           routeLeg.profile &&
-          routeLeg.routeKey
+          routeLeg.routeKey &&
+          routeLeg.calculatedAt
         ) {
           return {
             ...routeLeg,
