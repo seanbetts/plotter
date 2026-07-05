@@ -1,5 +1,5 @@
 import { LoaderCircle, Search, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import type {
   WebImageSearchClient,
   WebImageSearchResult,
@@ -93,6 +93,17 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
     }
   }
 
+  function handleQueryChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextQuery = event.target.value;
+
+    if (nextQuery.trim() !== trimmedQuery) {
+      setResults([]);
+      setError('');
+    }
+
+    setQuery(nextQuery);
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -111,7 +122,7 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
         <input
           id="web-image-search-input"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={handleQueryChange}
           onKeyDown={handleKeyDown}
           placeholder="Search web images"
           role="combobox"

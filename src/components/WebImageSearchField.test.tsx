@@ -164,4 +164,62 @@ describe('WebImageSearchField', () => {
       screen.queryByRole('option', { name: 'Import Paris mural from Example Source' }),
     ).not.toBeInTheDocument();
   });
+
+  it('hides rendered results immediately when the query changes', async () => {
+    vi.useFakeTimers();
+    const muralSearch = createDeferred<WebImageSearchResult[]>();
+    const bridgeSearch = createDeferred<WebImageSearchResult[]>();
+    const bridgeResult: WebImageSearchResult = {
+      ...result,
+      id: 'image-2',
+      title: 'Paris bridge',
+      sourceName: 'Bridge Source',
+    };
+    const client: WebImageSearchClient = {
+      searchImages: vi.fn((query: string) => {
+        if (query === 'mural') return muralSearch.promise;
+        return bridgeSearch.promise;
+      }),
+    };
+    render(
+      <WebImageSearchField
+        context={context}
+        client={client}
+        onImportImage={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText('Search web images');
+    fireEvent.change(input, { target: { value: 'mural' } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await act(async () => {
+      muralSearch.resolve([result]);
+    });
+
+    expect(
+      screen.getByRole('option', { name: 'Import Paris mural from Example Source' }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'bridge' } });
+
+    expect(
+      screen.queryByRole('option', { name: 'Import Paris mural from Example Source' }),
+    ).not.toBeInTheDocument();
+    expect(client.searchImages).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    await act(async () => {
+      bridgeSearch.resolve([bridgeResult]);
+    });
+
+    expect(
+      screen.getByRole('option', { name: 'Import Paris bridge from Bridge Source' }),
+    ).toBeInTheDocument();
+  });
 });
