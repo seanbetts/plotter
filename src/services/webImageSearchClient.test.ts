@@ -31,6 +31,30 @@ describe('webImageSearchClient', () => {
     })).toBe('Paris street art Ile-de-France');
   });
 
+  it('adds activity address locality without duplicating the typed activity name', () => {
+    expect(buildWebImageProviderQuery('volume 1 climbing', {
+      stopName: 'Volume 1 Climbing',
+      locationName: 'Volume 1 Climbing',
+      address: 'Unit 3, Kingstanding Way, Tunbridge Wells TN2 3UP, United Kingdom',
+      latitude: 51.1426,
+      longitude: 0.2639,
+      countryName: 'United Kingdom',
+      countryCode: 'GB',
+    })).toBe('volume 1 climbing Kingstanding Way Tunbridge Wells United Kingdom');
+  });
+
+  it('keeps locality when an activity address starts with the venue name', () => {
+    expect(buildWebImageProviderQuery('volume 1 climbing', {
+      stopName: 'Volume 1 Climbing',
+      locationName: 'Volume 1 Climbing',
+      address: 'Volume 1 Climbing, Unit 12 Hills Road, East Grinstead RH19 1XZ, United Kingdom',
+      latitude: 51.13552738990131,
+      longitude: -0.0390885158662968,
+      countryName: 'United Kingdom',
+      countryCode: 'GB',
+    })).toBe('volume 1 climbing Hills Road East Grinstead United Kingdom');
+  });
+
   it('normalizes function result fields and filters invalid rows', () => {
     expect(normalizeWebImageSearchResults([
       {

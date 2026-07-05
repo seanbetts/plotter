@@ -128,9 +128,15 @@ function createWebImageSearchContext(destination: Destination): WebImageSearchSt
 }
 
 function createActivityWebImageSearchContext(destination: Destination, activity: Activity): WebImageSearchStopContext {
+  const location = activity.location;
+  const coordinates = location?.coordinates;
+
   return {
     ...createWebImageSearchContext(destination),
     stopName: activity.title,
+    ...(location?.name ? { locationName: location.name } : {}),
+    ...(location?.address ? { address: location.address } : {}),
+    ...(coordinates ? { latitude: coordinates.lat, longitude: coordinates.lng } : {}),
   };
 }
 

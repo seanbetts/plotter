@@ -2,6 +2,10 @@ import { createBrowserSupabaseClient } from '../storage/supabaseClient';
 
 export type WebImageSearchStopContext = {
   stopName: string;
+  locationName?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
   regionName?: string;
   countryName?: string;
   countryCode?: string;
@@ -68,12 +72,36 @@ function appendContextPart(parts: string[], seenWords: Set<string>, value: strin
   }
 }
 
+function removePostalCode(value: string) {
+  return value.replace(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/gi, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeAddressPart(value: string) {
+  return removePostalCode(value.trim())
+    .replace(/^(unit|suite|floor|building|room)\s+[a-z0-9-]+\s*/i, '')
+    .trim();
+}
+
+function addressPartsForSearch(address: string | undefined) {
+  if (!address?.trim()) return [];
+
+  return address
+    .split(',')
+    .map(normalizeAddressPart)
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
 export function buildWebImageProviderQuery(query: string, context: WebImageSearchStopContext) {
   const trimmedQuery = query.trim().replace(/\s+/g, ' ');
   const parts = trimmedQuery ? [trimmedQuery] : [];
   const seenWords = new Set(wordsForDeduplication(trimmedQuery));
 
   appendContextPart(parts, seenWords, context.stopName);
+  appendContextPart(parts, seenWords, context.locationName);
+  for (const addressPart of addressPartsForSearch(context.address)) {
+    appendContextPart(parts, seenWords, addressPart);
+  }
   appendContextPart(parts, seenWords, context.countryName || context.regionName);
 
   return parts.join(' ');

@@ -31,6 +31,18 @@ Deno.serve(async (request) => {
       query,
       context: {
         stopName: typeof context.stopName === "string" ? context.stopName : "",
+        locationName: typeof context.locationName === "string"
+          ? context.locationName
+          : undefined,
+        address: typeof context.address === "string"
+          ? context.address
+          : undefined,
+        latitude: typeof context.latitude === "number"
+          ? context.latitude
+          : undefined,
+        longitude: typeof context.longitude === "number"
+          ? context.longitude
+          : undefined,
         regionName: typeof context.regionName === "string"
           ? context.regionName
           : undefined,

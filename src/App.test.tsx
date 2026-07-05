@@ -833,6 +833,13 @@ describe('App', () => {
       destinationId: destination.id,
       title: 'Ouse Valley Viaduct',
       order: 0,
+      location: {
+        name: 'Ouse Valley Viaduct',
+        address: 'Borde Hill Lane, Haywards Heath RH16 1XP, United Kingdom',
+        coordinates: { lat: 51.0299, lng: -0.1162 },
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'activity-location-1',
+      },
     });
     const selectedResult: WebImageSearchResult = {
       id: 'web-image-ouse-valley',
@@ -872,6 +879,10 @@ describe('App', () => {
 
     expect(webImageSearchClient.searchImages).toHaveBeenCalledWith('arches', {
       stopName: 'Ouse Valley Viaduct',
+      locationName: 'Ouse Valley Viaduct',
+      address: 'Borde Hill Lane, Haywards Heath RH16 1XP, United Kingdom',
+      latitude: 51.0299,
+      longitude: -0.1162,
       regionName: 'West Sussex',
       countryName: 'United Kingdom',
       countryCode: 'GB',

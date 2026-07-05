@@ -34,6 +34,50 @@ Deno.test("builds a SerpApi Light URL with contextual query and large photo filt
   assertEquals(url.searchParams.get("location"), null);
 });
 
+Deno.test("builds provider queries with activity address locality", () => {
+  const url = buildSerpApiImageSearchUrl({
+    apiKey: "secret",
+    query: "volume 1 climbing",
+    context: {
+      stopName: "Volume 1 Climbing",
+      locationName: "Volume 1 Climbing",
+      address:
+        "Unit 3, Kingstanding Way, Tunbridge Wells TN2 3UP, United Kingdom",
+      latitude: 51.1426,
+      longitude: 0.2639,
+      countryName: "United Kingdom",
+      countryCode: "GB",
+    },
+  });
+
+  assertEquals(
+    url.searchParams.get("q"),
+    "volume 1 climbing Kingstanding Way Tunbridge Wells United Kingdom",
+  );
+});
+
+Deno.test("keeps locality when an activity address starts with the venue name", () => {
+  const url = buildSerpApiImageSearchUrl({
+    apiKey: "secret",
+    query: "volume 1 climbing",
+    context: {
+      stopName: "Volume 1 Climbing",
+      locationName: "Volume 1 Climbing",
+      address:
+        "Volume 1 Climbing, Unit 12 Hills Road, East Grinstead RH19 1XZ, United Kingdom",
+      latitude: 51.13552738990131,
+      longitude: -0.0390885158662968,
+      countryName: "United Kingdom",
+      countryCode: "GB",
+    },
+  });
+
+  assertEquals(
+    url.searchParams.get("q"),
+    "volume 1 climbing Hills Road East Grinstead United Kingdom",
+  );
+});
+
 Deno.test("maps SerpApi image results and keeps source metadata", () => {
   assertEquals(
     mapSerpApiImageResults({
