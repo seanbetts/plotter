@@ -49,6 +49,21 @@ function routeGeometryMatchesCoordinates(routeLeg: RouteLeg, origin: Destination
   );
 }
 
+function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg) {
+  return (
+    routeLeg.type === 'driving-auto' &&
+    routeLeg.status === 'ready' &&
+    routeLeg.geometry &&
+    routeLeg.distanceKm !== undefined &&
+    routeLeg.travelTimeHours !== undefined &&
+    routeLeg.provider &&
+    routeLeg.profile === 'driving-car' &&
+    routeLeg.routeKey &&
+    routeLeg.calculatedAt &&
+    !routeLeg.error
+  );
+}
+
 function refreshRouteLegForDestinationCoordinates(
   routeLeg: RouteLeg,
   origin: Destination,
@@ -68,6 +83,33 @@ function refreshRouteLegForDestinationCoordinates(
       provider: undefined,
       profile: undefined,
       routeKey: undefined,
+      calculatedAt: undefined,
+      error: undefined,
+      updatedAt: createTimestamp(),
+    };
+  }
+
+  if (routeLeg.status === 'ready') {
+    if (
+      hasCompleteAppImplementableDrivingRouteData(routeLeg) &&
+      routeGeometryMatchesCoordinates(routeLeg, origin, target)
+    ) {
+      return routeLeg;
+    }
+
+    return {
+      ...routeLeg,
+      status: 'pending',
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: undefined,
+      provider: undefined,
+      profile: 'driving-car',
+      routeKey: createRouteKey({
+        origin: origin.coordinates,
+        target: target.coordinates,
+        profile: 'driving-car',
+      }),
       calculatedAt: undefined,
       error: undefined,
       updatedAt: createTimestamp(),
