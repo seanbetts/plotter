@@ -184,6 +184,7 @@ test('opens an activity panel with image region beside the selected stop', async
     throw new Error('Expected activity and stop panels to have layout boxes.');
   }
 
+  expect(activityBox.width).toBe(stopBox.width);
   expect(activityBox.x + activityBox.width).toBeLessThanOrEqual(stopBox.x);
 });
 

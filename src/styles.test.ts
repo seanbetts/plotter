@@ -217,8 +217,11 @@ describe('activity list styles', () => {
 });
 
 describe('itinerary panel styles', () => {
-  it('keeps the stops panel width stable when collapsed', () => {
+  it('keeps the stops list and activity detail panel widths stable', () => {
     expect(styles).toMatch(/\.itinerary-panel\s*{[^}]*width:\s*min\(520px,\s*calc\(100vw - 32px\)\);/s);
+    expect(styles).toMatch(
+      /\.workspace-panels \.activity-panel\s*{[^}]*width:\s*min\(430px,\s*calc\(100vw - 32px\)\);/s,
+    );
     expect(styles).toMatch(/\.itinerary-panel\.is-collapsed\s*{[^}]*gap:\s*0;[^}]*overflow:\s*visible;/s);
     expect(styles).toMatch(
       /\.itinerary-panel-header\s*{[^}]*display:\s*flex;[^}]*justify-content:\s*space-between;/s,

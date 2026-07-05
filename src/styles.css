@@ -880,7 +880,7 @@ select {
 }
 
 .workspace-panels .activity-panel {
-  width: min(520px, calc(100vw - 32px));
+  width: min(430px, calc(100vw - 32px));
 }
 
 .profile-header {
