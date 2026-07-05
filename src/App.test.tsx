@@ -854,7 +854,7 @@ describe('App', () => {
     const webImageSearchClient: WebImageSearchClient = {
       searchImages: vi.fn(async () => [selectedResult]),
     };
-    repositoryMock.initialDestinations = Promise.resolve([{ ...destination, activities: [activity] }]);
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
     repositoryMock.listActivities.mockResolvedValue([activity]);
     repositoryMock.listActivityMedia.mockResolvedValue([]);
     repositoryMock.importActivityMediaFromSearch.mockResolvedValue(
