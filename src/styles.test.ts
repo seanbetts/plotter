@@ -36,6 +36,16 @@ describe('image preview styles', () => {
   });
 });
 
+describe('web image search styles', () => {
+  it('uses fixed image tile dimensions inside the popover grid', () => {
+    expect(styles).toMatch(
+      /\.web-image-result-grid\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/s,
+    );
+    expect(styles).toMatch(/\.web-image-result-tile\s*{[^}]*grid-template-rows:\s*88px auto;/s);
+    expect(styles).toMatch(/\.web-image-result-tile img\s*{[^}]*height:\s*88px;[^}]*object-fit:\s*cover;/s);
+  });
+});
+
 describe('panel tag editor styles', () => {
   it('matches label-to-control spacing for tag legends', () => {
     expect(styles).toMatch(/\.tag-editor legend\s*{[^}]*margin-bottom:\s*6px;/s);
