@@ -257,6 +257,41 @@ describe('ItineraryPanel', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('does not show the edit route button without an edit handler', () => {
+    const origin = createDestination({
+      name: 'Bilbao',
+      countryRegion: 'Spain',
+      coordinates: { lat: 43.263, lng: -2.935 },
+    });
+    const target = createDestination({
+      name: 'Porto',
+      countryRegion: 'Portugal',
+      coordinates: { lat: 41.1579, lng: -8.6291 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'ready',
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Edit route from Bilbao to Porto' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows a retry button for a failed driving route leg', async () => {
     const user = userEvent.setup();
     const origin = createDestination({

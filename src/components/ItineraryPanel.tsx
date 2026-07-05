@@ -171,7 +171,7 @@ export function ItineraryPanel({
   onDeleteDestination,
   onReorderDestinations,
   onUpdateRouteLeg,
-  onEditRouteLeg = () => undefined,
+  onEditRouteLeg,
 }: ItineraryPanelProps) {
   const [draggedDestinationId, setDraggedDestinationId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
@@ -556,7 +556,7 @@ export function ItineraryPanel({
                       {routeLeg.type === 'shipping-manual' ? <Ship size={15} /> : <Car size={15} />}
                     </button>
                     <span className="inline-route-summary">
-                      {routeLeg.type === 'driving-auto' ? (
+                      {routeLeg.type === 'driving-auto' && onEditRouteLeg ? (
                         <button
                           type="button"
                           className="inline-route-edit"
