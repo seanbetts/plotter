@@ -341,6 +341,59 @@ describe('route planner helpers', () => {
     ]);
   });
 
+  it('marks selected driving alternatives pending after small coordinate edits within endpoint tolerance', () => {
+    const origin = createDestination({
+      name: 'Durmitor',
+      coordinates: { lat: 43.1306, lng: 19.0342 },
+      order: 0,
+    });
+    const target = createDestination({
+      name: 'Kotor',
+      coordinates: { lat: 42.4247, lng: 18.7712 },
+      order: 1,
+    });
+    const slightlyMovedOrigin = {
+      ...origin,
+      coordinates: { lat: 43.1307, lng: 19.0343 },
+    };
+    const selectedAlternativeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 140,
+      travelTimeHours: 3.1,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [19.0342, 43.1306],
+          [18.9, 42.9],
+          [18.7712, 42.4247],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      calculatedAt: '2026-07-04T12:00:00.000Z',
+    });
+
+    const result = reconcileRouteLegsForDestinations([slightlyMovedOrigin, target], [selectedAlternativeLeg]);
+
+    expect(result.routeLegs[0]).toMatchObject({
+      id: selectedAlternativeLeg.id,
+      type: 'driving-auto',
+      status: 'pending',
+      geometry: undefined,
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      provider: undefined,
+      profile: 'driving-car',
+      routeKey: 'driving-car:19.03430,43.13070:18.77120,42.42470',
+      calculatedAt: undefined,
+      error: undefined,
+    });
+  });
+
   it('marks incomplete ready driving route data pending during reconciliation', () => {
     const origin = createDestination({
       name: 'Durmitor',

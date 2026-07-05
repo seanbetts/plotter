@@ -74,6 +74,19 @@ function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg) {
   );
 }
 
+function routeKeyMatchesCurrentDrivingEndpoints(routeLeg: RouteLeg, origin: Destination, target: Destination) {
+  const routeKey = routeLeg.routeKey;
+  if (!routeKey) return false;
+
+  const currentRouteKey = createRouteKey({
+    origin: origin.coordinates,
+    target: target.coordinates,
+    profile: 'driving-car',
+  });
+
+  return routeKey === currentRouteKey || routeKey.startsWith(`${currentRouteKey}:`);
+}
+
 function refreshRouteLegForDestinationCoordinates(
   routeLeg: RouteLeg,
   origin: Destination,
@@ -102,6 +115,7 @@ function refreshRouteLegForDestinationCoordinates(
   if (routeLeg.status === 'ready') {
     if (
       hasCompleteAppImplementableDrivingRouteData(routeLeg) &&
+      routeKeyMatchesCurrentDrivingEndpoints(routeLeg, origin, target) &&
       routeGeometryMatchesCoordinates(routeLeg, origin, target, drivingGeometryEndpointTolerance)
     ) {
       return routeLeg;
