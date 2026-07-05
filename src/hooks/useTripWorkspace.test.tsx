@@ -149,9 +149,15 @@ describe('useTripWorkspace', () => {
     expect(result.current.activeTrip?.name).toBe('Third');
 
     await act(async () => {
-      await result.current.renameActiveTrip('Renamed third');
+      await result.current.renameTrip(result.current.activeTrip!.id, 'Renamed third');
     });
     expect(result.current.activeTrip?.name).toBe('Renamed third');
+
+    await act(async () => {
+      await result.current.renameTrip(first.id, 'Renamed first');
+    });
+    expect(result.current.activeTrip?.name).toBe('Renamed third');
+    expect(result.current.trips.find((trip) => trip.id === first.id)?.name).toBe('Renamed first');
 
     await act(async () => {
       await result.current.deleteTrip(result.current.activeTrip!.id);

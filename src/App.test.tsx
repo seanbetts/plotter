@@ -206,7 +206,7 @@ function mockTripWorkspace(overrides: Partial<ReturnType<typeof useTripWorkspace
     actionError: null,
     selectTrip: vi.fn(),
     createTrip: vi.fn(),
-    renameActiveTrip: vi.fn(),
+    renameTrip: vi.fn(),
     deleteTrip: vi.fn(),
     ...overrides,
   });
@@ -439,7 +439,7 @@ describe('App', () => {
       actionError: null,
       selectTrip: vi.fn(),
       createTrip: vi.fn(),
-      renameActiveTrip: vi.fn(),
+      renameTrip: vi.fn(),
       deleteTrip: vi.fn(),
     });
     rerender(<App />);

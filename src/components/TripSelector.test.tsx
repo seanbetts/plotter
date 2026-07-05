@@ -28,7 +28,7 @@ function renderSelector(overrides: Partial<Parameters<typeof TripSelector>[0]> =
     actionError: null,
     onSelectTrip: vi.fn(),
     onCreateTrip: vi.fn(),
-    onRenameActiveTrip: vi.fn(),
+    onRenameTrip: vi.fn(),
     onDeleteTrip: vi.fn(),
     ...overrides,
   };
@@ -49,36 +49,35 @@ describe('TripSelector', () => {
   it('creates a named trip', async () => {
     const props = renderSelector();
 
-    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'New trip' }));
+    await userEvent.click(screen.getByRole('button', { name: 'New trip' }));
     await userEvent.type(screen.getByLabelText('Trip name'), 'South America');
     await userEvent.click(screen.getByRole('button', { name: 'Create trip' }));
 
     expect(props.onCreateTrip).toHaveBeenCalledWith('South America');
   });
 
-  it('renames the active trip', async () => {
+  it('renames a trip from its list row', async () => {
     const props = renderSelector();
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename trip' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename Japan winter' }));
     await userEvent.clear(screen.getByLabelText('Trip name'));
     await userEvent.type(screen.getByLabelText('Trip name'), 'Renamed tour');
     await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
 
-    expect(props.onRenameActiveTrip).toHaveBeenCalledWith('Renamed tour');
+    expect(props.onRenameTrip).toHaveBeenCalledWith('trip-two', 'Renamed tour');
   });
 
   it('requires delete confirmation that names the trip', async () => {
     const props = renderSelector();
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete trip' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete Japan winter' }));
 
-    expect(screen.getByRole('dialog', { name: 'Delete trip' })).toHaveTextContent('World tour');
-    await userEvent.click(screen.getByRole('button', { name: 'Delete World tour' }));
+    expect(screen.getByRole('dialog', { name: 'Delete trip' })).toHaveTextContent('Japan winter');
+    await userEvent.click(screen.getByRole('button', { name: 'Delete Japan winter' }));
 
-    expect(props.onDeleteTrip).toHaveBeenCalledWith('trip-one');
+    expect(props.onDeleteTrip).toHaveBeenCalledWith('trip-two');
   });
 
   it('keeps the dialog open when an action reports failure', async () => {
@@ -88,7 +87,7 @@ describe('TripSelector', () => {
     });
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete trip' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete World tour' }));
     await userEvent.click(screen.getByRole('button', { name: 'Delete World tour' }));
 
     expect(props.onDeleteTrip).toHaveBeenCalledWith('trip-one');

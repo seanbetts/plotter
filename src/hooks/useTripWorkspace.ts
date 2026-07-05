@@ -141,22 +141,22 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     }
   }, [activateTrip, storage]);
 
-  const renameActiveTrip = useCallback(async (name: string) => {
-    if (!storage || !activeTrip) return false;
+  const renameTrip = useCallback(async (tripId: string, name: string) => {
+    if (!storage) return false;
 
     setActionError(null);
     try {
-      const updatedTrip = await storage.directory.updateTrip(activeTrip.id, { name });
+      const updatedTrip = await storage.directory.updateTrip(tripId, { name });
       setTrips((current) =>
         current.map((trip) => (trip.id === updatedTrip.id ? updatedTrip : trip)),
       );
-      setActiveTrip(updatedTrip);
+      setActiveTrip((current) => (current?.id === updatedTrip.id ? updatedTrip : current));
       return true;
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : 'Unable to rename trip');
       return false;
     }
-  }, [activeTrip, storage]);
+  }, [storage]);
 
   const deleteTrip = useCallback(async (tripId: string) => {
     if (!storage) return false;
@@ -189,7 +189,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     actionError,
     selectTrip,
     createTrip,
-    renameActiveTrip,
+    renameTrip,
     deleteTrip,
   }), [
     actionError,
@@ -199,7 +199,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     error,
     isLoading,
     repository,
-    renameActiveTrip,
+    renameTrip,
     selectTrip,
     trips,
   ]);

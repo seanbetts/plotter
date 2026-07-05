@@ -213,7 +213,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     actionError,
     selectTrip,
     createTrip,
-    renameActiveTrip,
+    renameTrip,
     deleteTrip,
   } = useTripWorkspace();
 
@@ -269,7 +269,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
       tripActionError={actionError}
       onSelectTrip={selectTrip}
       onCreateTrip={createTrip}
-      onRenameActiveTrip={renameActiveTrip}
+      onRenameTrip={renameTrip}
       onDeleteTrip={deleteTrip}
       isTripWorkspaceLoading={isLoading}
     />
@@ -285,7 +285,7 @@ function TripWorkspace({
   tripActionError,
   onSelectTrip,
   onCreateTrip,
-  onRenameActiveTrip,
+  onRenameTrip,
   onDeleteTrip,
   isTripWorkspaceLoading,
 }: {
@@ -297,7 +297,7 @@ function TripWorkspace({
   tripActionError: string | null;
   onSelectTrip: (tripId: string) => void;
   onCreateTrip: (name: string) => Promise<boolean | void> | boolean | void;
-  onRenameActiveTrip: (name: string) => Promise<boolean | void> | boolean | void;
+  onRenameTrip: (tripId: string, name: string) => Promise<boolean | void> | boolean | void;
   onDeleteTrip: (tripId: string) => Promise<boolean | void> | boolean | void;
   isTripWorkspaceLoading: boolean;
 }) {
@@ -1040,7 +1040,7 @@ function TripWorkspace({
                 actionError={tripActionError}
                 onSelectTrip={onSelectTrip}
                 onCreateTrip={onCreateTrip}
-                onRenameActiveTrip={onRenameActiveTrip}
+                onRenameTrip={onRenameTrip}
                 onDeleteTrip={onDeleteTrip}
               />
             </div>

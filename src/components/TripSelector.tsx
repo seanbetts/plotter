@@ -8,7 +8,7 @@ type TripSelectorProps = {
   actionError: string | null;
   onSelectTrip: (tripId: string) => void;
   onCreateTrip: (name: string) => Promise<boolean | void> | boolean | void;
-  onRenameActiveTrip: (name: string) => Promise<boolean | void> | boolean | void;
+  onRenameTrip: (tripId: string, name: string) => Promise<boolean | void> | boolean | void;
   onDeleteTrip: (tripId: string) => Promise<boolean | void> | boolean | void;
 };
 
@@ -20,12 +20,13 @@ export function TripSelector({
   actionError,
   onSelectTrip,
   onCreateTrip,
-  onRenameActiveTrip,
+  onRenameTrip,
   onDeleteTrip,
 }: TripSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [tripName, setTripName] = useState('');
+  const [targetTrip, setTargetTrip] = useState<TripSummary | null>(null);
   const selectorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -51,9 +52,11 @@ export function TripSelector({
     };
   }, [isOpen]);
 
-  const openDialog = (mode: DialogMode) => {
+  const openDialog = (mode: DialogMode, trip: TripSummary | null = null) => {
     setDialogMode(mode);
-    setTripName(mode === 'rename' ? activeTrip?.name ?? '' : '');
+    setTargetTrip(trip);
+    setTripName(mode === 'rename' ? trip?.name ?? '' : '');
+    setIsOpen(false);
   };
 
   const submitName = async () => {
@@ -62,72 +65,90 @@ export function TripSelector({
 
     const succeeded = dialogMode === 'create'
       ? await onCreateTrip(trimmedName)
-      : await onRenameActiveTrip(trimmedName);
+      : targetTrip
+        ? await onRenameTrip(targetTrip.id, trimmedName)
+        : false;
 
     if (succeeded === false) return;
 
     setDialogMode(null);
+    setTargetTrip(null);
     setIsOpen(false);
   };
 
   const confirmDelete = async () => {
-    if (!activeTrip) return;
+    if (!targetTrip) return;
 
-    const succeeded = await onDeleteTrip(activeTrip.id);
+    const succeeded = await onDeleteTrip(targetTrip.id);
     if (succeeded === false) return;
 
     setDialogMode(null);
+    setTargetTrip(null);
     setIsOpen(false);
   };
 
   return (
     <div className="trip-selector" ref={selectorRef}>
-      <button
-        type="button"
-        className="trip-selector__trigger"
-        aria-haspopup="menu"
-        aria-expanded={isOpen}
-        aria-label={`Current trip: ${activeTrip?.name ?? 'Loading trips'}`}
-        onClick={() => setIsOpen((current) => !current)}
-      >
-        <span>{activeTrip?.name ?? 'Loading trips'}</span>
-        <ChevronDown size={16} aria-hidden="true" />
-      </button>
+      <div className="trip-selector__controls">
+        <button
+          type="button"
+          className="trip-selector__trigger"
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+          aria-label={`Current trip: ${activeTrip?.name ?? 'Loading trips'}`}
+          onClick={() => setIsOpen((current) => !current)}
+        >
+          <span>{activeTrip?.name ?? 'Loading trips'}</span>
+          <ChevronDown size={16} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="trip-selector__create-button"
+          aria-label="New trip"
+          onClick={() => openDialog('create')}
+        >
+          <Plus size={18} aria-hidden="true" />
+        </button>
+      </div>
 
       {isOpen ? (
         <div className="trip-selector__menu" role="menu" aria-label="Trips">
           <div className="trip-selector__list">
             {trips.map((trip) => (
-              <button
-                key={trip.id}
-                type="button"
-                role="menuitemradio"
-                aria-checked={trip.id === activeTrip?.id}
-                className={trip.id === activeTrip?.id ? 'is-active' : undefined}
-                onClick={() => {
-                  onSelectTrip(trip.id);
-                  setIsOpen(false);
-                }}
-              >
-                {trip.name}
-              </button>
+              <div className="trip-selector__row" key={trip.id}>
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={trip.id === activeTrip?.id}
+                  className={trip.id === activeTrip?.id ? 'is-active' : undefined}
+                  onClick={() => {
+                    onSelectTrip(trip.id);
+                    setIsOpen(false);
+                  }}
+                >
+                  <span>{trip.name}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="trip-selector__row-action"
+                  aria-label={`Rename ${trip.name}`}
+                  onClick={() => openDialog('rename', trip)}
+                >
+                  <Pencil size={15} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="trip-selector__row-action"
+                  aria-label={`Delete ${trip.name}`}
+                  onClick={() => openDialog('delete', trip)}
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                </button>
+              </div>
             ))}
           </div>
-          <div className="trip-selector__actions">
-            <button type="button" role="menuitem" onClick={() => openDialog('create')}>
-              <Plus size={16} aria-hidden="true" />
-              <span>New trip</span>
-            </button>
-            <button type="button" role="menuitem" disabled={!activeTrip} onClick={() => openDialog('rename')}>
-              <Pencil size={16} aria-hidden="true" />
-              <span>Rename trip</span>
-            </button>
-            <button type="button" role="menuitem" disabled={!activeTrip} onClick={() => openDialog('delete')}>
-              <Trash2 size={16} aria-hidden="true" />
-              <span>Delete trip</span>
-            </button>
-          </div>
-          {actionError ? <p className="trip-selector__error">{actionError}</p> : null}
         </div>
       ) : null}
 
@@ -145,7 +166,10 @@ export function TripSelector({
             onChange={(event) => setTripName(event.target.value)}
           />
           <div className="trip-selector__dialog-actions">
-            <button type="button" onClick={() => setDialogMode(null)}>
+            <button type="button" onClick={() => {
+              setDialogMode(null);
+              setTargetTrip(null);
+            }}>
               Cancel
             </button>
             <button type="button" onClick={() => void submitName()}>
@@ -155,19 +179,24 @@ export function TripSelector({
         </section>
       ) : null}
 
-      {dialogMode === 'delete' && activeTrip ? (
+      {dialogMode === 'delete' && targetTrip ? (
         <section className="trip-selector__dialog" role="dialog" aria-modal="true" aria-label="Delete trip">
-          <p>Delete {activeTrip.name}?</p>
+          <p>Delete {targetTrip.name}?</p>
           <div className="trip-selector__dialog-actions">
-            <button type="button" onClick={() => setDialogMode(null)}>
+            <button type="button" onClick={() => {
+              setDialogMode(null);
+              setTargetTrip(null);
+            }}>
               Cancel
             </button>
             <button type="button" onClick={() => void confirmDelete()}>
-              Delete {activeTrip.name}
+              Delete {targetTrip.name}
             </button>
           </div>
         </section>
       ) : null}
+
+      {actionError ? <p className="trip-selector__error">{actionError}</p> : null}
     </div>
   );
 }

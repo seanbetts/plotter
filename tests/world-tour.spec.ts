@@ -178,8 +178,7 @@ test('creates and switches personal trips without Supabase', async ({ baseURL, c
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
 
-  await page.getByRole('button', { name: /current trip/i }).click();
-  await page.getByRole('menuitem', { name: 'New trip' }).click();
+  await page.getByRole('button', { name: 'New trip' }).click();
   await page.getByLabel('Trip name').fill('Japan winter');
   await page.getByRole('button', { name: 'Create trip' }).click();
 

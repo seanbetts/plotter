@@ -102,7 +102,7 @@ select {
 }
 
 .map-stage {
-  --trip-selector-anchor-width: min(260px, calc(100vw - 32px));
+  --trip-selector-anchor-width: min(520px, calc(100vw - 32px));
 
   position: relative;
   min-height: 100vh;
@@ -1938,14 +1938,34 @@ select {
   position: relative;
 }
 
+.trip-selector__controls {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
 .trip-selector__trigger {
   display: flex;
   width: 100%;
   min-height: 42px;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 0 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-panel);
+  color: var(--color-text);
+  background: var(--surface-overlay-menu);
+  box-shadow: var(--shadow-panel);
+}
+
+.trip-selector__create-button {
+  display: grid;
+  width: 42px;
+  min-height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-panel);
   color: var(--color-text);
@@ -1975,14 +1995,12 @@ select {
 }
 
 .trip-selector__list,
-.trip-selector__actions,
 .trip-selector__dialog-actions {
   display: grid;
   gap: 4px;
 }
 
 .trip-selector__list button,
-.trip-selector__actions button,
 .trip-selector__dialog-actions button {
   display: flex;
   min-height: 36px;
@@ -1996,15 +2014,32 @@ select {
   text-align: left;
 }
 
-.trip-selector__list button:hover,
-.trip-selector__list button.is-active,
-.trip-selector__actions button:hover {
-  background: var(--surface-action-subtle);
+.trip-selector__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px 36px;
+  gap: 4px;
+  align-items: center;
 }
 
-.trip-selector__actions button:disabled {
-  cursor: default;
-  opacity: 0.46;
+.trip-selector__row > [role='menuitemradio'] span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trip-selector__row-action {
+  justify-content: center;
+  padding: 0;
+}
+
+.trip-selector__create-button:hover,
+.trip-selector__create-button:focus-visible,
+.trip-selector__list button:hover,
+.trip-selector__list button.is-active,
+.trip-selector__row-action:hover,
+.trip-selector__row-action:focus-visible {
+  background: var(--surface-action-subtle);
 }
 
 .trip-selector__dialog {
@@ -2025,7 +2060,7 @@ select {
   font-size: 0.875rem;
 }
 
-@media (max-width: 1263px) {
+@media (max-width: 1783px) {
   .trip-selector-anchor {
     top: 88px;
   }
