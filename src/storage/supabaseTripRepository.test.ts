@@ -1551,6 +1551,109 @@ describe('supabase trip repository mappers', () => {
     expect(supabase.storage.from).toHaveBeenCalledWith('trip-media');
   });
 
+  it('surfaces import-image JSON error bodies over generic Edge Function messages', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const result = {
+      id: 'image-result-1',
+      title: 'Paris mural',
+      sourceName: 'Example Source',
+      sourceUrl: 'https://example.com/paris-mural',
+      thumbnailUrl: 'https://images.example.com/paris-mural-thumb.jpg',
+      imageUrl: 'https://images.example.com/paris-mural.jpg',
+    };
+    const invoke = vi.fn(async () => ({
+      data: null,
+      error: {
+        message: 'Edge Function returned a non-2xx status code',
+        context: new Response(JSON.stringify({ error: 'Selected image is too large.' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        }),
+      },
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: userId } },
+          error: null,
+        })),
+      },
+      functions: {
+        invoke,
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: userId, name: 'World tour' },
+          ]);
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.importDestinationMediaFromSearch({
+      destinationId,
+      result,
+    })).rejects.toThrow('Selected image is too large.');
+    expect(invoke).toHaveBeenCalledWith('import-image', {
+      body: { tripId, destinationId, result },
+    });
+  });
+
+  it('uses the image import fallback when the function error has no readable message', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const result = {
+      id: 'image-result-1',
+      title: 'Paris mural',
+      sourceName: 'Example Source',
+      sourceUrl: 'https://example.com/paris-mural',
+      thumbnailUrl: 'https://images.example.com/paris-mural-thumb.jpg',
+      imageUrl: 'https://images.example.com/paris-mural.jpg',
+    };
+    const invoke = vi.fn(async () => ({
+      data: null,
+      error: {
+        message: '',
+        context: new Response('not json', {
+          status: 500,
+          headers: { 'content-type': 'text/plain' },
+        }),
+      },
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: userId } },
+          error: null,
+        })),
+      },
+      functions: {
+        invoke,
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: userId, name: 'World tour' },
+          ]);
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.importDestinationMediaFromSearch({
+      destinationId,
+      result,
+    })).rejects.toThrow('Unable to import image.');
+  });
+
   it('lists destination media with signed URLs', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();

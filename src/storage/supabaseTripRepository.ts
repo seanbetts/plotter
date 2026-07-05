@@ -124,7 +124,7 @@ type SupabaseWriteResponse = {
 
 type ImportImageFunctionResponse = {
   data: { mediaAsset?: SupabaseMediaAssetRow } | null;
-  error: { message?: string } | null;
+  error: { message?: string; context?: unknown; response?: unknown } | null;
 };
 
 type ImportImageSupabaseClient = {
@@ -152,6 +152,30 @@ function assertSupabaseWriteSucceeded(response: SupabaseWriteResponse, fallbackM
   if (response.error) {
     throw new Error(response.error.message || fallbackMessage);
   }
+}
+
+function getResponseFromErrorTarget(target: unknown): Response | undefined {
+  return target instanceof Response ? target : undefined;
+}
+
+async function extractFunctionErrorMessage(
+  error: NonNullable<ImportImageFunctionResponse['error']>,
+  fallbackMessage: string,
+): Promise<string> {
+  const response = getResponseFromErrorTarget(error.context) ?? getResponseFromErrorTarget(error.response);
+
+  if (response) {
+    try {
+      const body = (await response.clone().json()) as { error?: unknown };
+      if (typeof body.error === 'string' && body.error.trim()) {
+        return body.error;
+      }
+    } catch {
+      // Fall through to the Supabase error message when the body is not readable JSON.
+    }
+  }
+
+  return error.message || fallbackMessage;
 }
 
 function isMediaSortOrderConflict(errorMessage: string | undefined) {
@@ -1011,7 +1035,7 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
       });
 
       if (response.error) {
-        throw new Error(response.error.message || 'Unable to import image.');
+        throw new Error(await extractFunctionErrorMessage(response.error, 'Unable to import image.'));
       }
 
       if (!response.data?.mediaAsset) {
