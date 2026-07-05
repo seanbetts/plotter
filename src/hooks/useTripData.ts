@@ -248,6 +248,17 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             calculatedRouteLegs.push({
               ...leg,
               status: 'failed',
+              distanceKm: undefined,
+              travelTimeHours: undefined,
+              geometry: undefined,
+              provider: undefined,
+              profile: 'driving-car',
+              routeKey: createRouteKey({
+                origin: origin.coordinates,
+                target: target.coordinates,
+                profile: 'driving-car',
+              }),
+              calculatedAt: undefined,
               error: caught instanceof Error ? caught.message : 'Route calculation failed',
               updatedAt: createTimestamp(),
             });

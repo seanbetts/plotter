@@ -248,6 +248,44 @@ describe('route planner helpers', () => {
     expect(result.removedRouteLegIds).toEqual([]);
   });
 
+  it('preserves complete selected driving alternatives with slightly snapped geometry endpoints', () => {
+    const origin = createDestination({
+      name: 'Durmitor',
+      coordinates: { lat: 43.1306, lng: 19.0342 },
+      order: 0,
+    });
+    const target = createDestination({
+      name: 'Kotor',
+      coordinates: { lat: 42.4247, lng: 18.7712 },
+      order: 1,
+    });
+    const selectedAlternativeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 140,
+      travelTimeHours: 3.1,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [19.03425, 43.13055],
+          [18.9, 42.9],
+          [18.77124, 42.42466],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      calculatedAt: '2026-07-04T12:00:00.000Z',
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, target], [selectedAlternativeLeg]);
+
+    expect(result.routeLegs).toEqual([selectedAlternativeLeg]);
+    expect(result.removedRouteLegIds).toEqual([]);
+  });
+
   it('marks selected driving alternatives pending when endpoints no longer match', () => {
     const origin = createDestination({
       name: 'Durmitor',

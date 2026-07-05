@@ -18,6 +18,7 @@ function routePairKey(originDestinationId: string, targetDestinationId: string) 
 }
 
 const createTimestamp = () => new Date().toISOString();
+const drivingGeometryEndpointTolerance = 0.001;
 
 function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
@@ -36,16 +37,25 @@ function distanceKm(left: Coordinates, right: Coordinates) {
   return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
-function routeGeometryMatchesCoordinates(routeLeg: RouteLeg, origin: Destination, target: Destination) {
+function coordinateMatches(value: number | undefined, expected: number, tolerance = 0) {
+  return value !== undefined && Math.abs(value - expected) <= tolerance;
+}
+
+function routeGeometryMatchesCoordinates(
+  routeLeg: RouteLeg,
+  origin: Destination,
+  target: Destination,
+  tolerance = 0,
+) {
   const coordinates = routeLeg.geometry?.coordinates;
   const firstCoordinate = coordinates?.[0];
   const lastCoordinate = coordinates?.at(-1);
 
   return (
-    firstCoordinate?.[0] === origin.coordinates.lng &&
-    firstCoordinate?.[1] === origin.coordinates.lat &&
-    lastCoordinate?.[0] === target.coordinates.lng &&
-    lastCoordinate?.[1] === target.coordinates.lat
+    coordinateMatches(firstCoordinate?.[0], origin.coordinates.lng, tolerance) &&
+    coordinateMatches(firstCoordinate?.[1], origin.coordinates.lat, tolerance) &&
+    coordinateMatches(lastCoordinate?.[0], target.coordinates.lng, tolerance) &&
+    coordinateMatches(lastCoordinate?.[1], target.coordinates.lat, tolerance)
   );
 }
 
@@ -92,7 +102,7 @@ function refreshRouteLegForDestinationCoordinates(
   if (routeLeg.status === 'ready') {
     if (
       hasCompleteAppImplementableDrivingRouteData(routeLeg) &&
-      routeGeometryMatchesCoordinates(routeLeg, origin, target)
+      routeGeometryMatchesCoordinates(routeLeg, origin, target, drivingGeometryEndpointTolerance)
     ) {
       return routeLeg;
     }

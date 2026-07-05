@@ -892,6 +892,83 @@ describe('useTripData', () => {
     });
   });
 
+  it('clears invalid selected route data when recalculation fails', async () => {
+    const repository = createTestRepository();
+    const calculateRoute = vi
+      .fn()
+      .mockResolvedValueOnce({
+        distanceKm: 123.4,
+        travelTimeHours: 2.5,
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [19.0342, 43.1306],
+            [18.7712, 42.4247],
+          ],
+        },
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+      })
+      .mockRejectedValueOnce(new Error('Route calculation failed'));
+    const selectedGeometry = {
+      type: 'LineString' as const,
+      coordinates: [
+        [19.0342, 43.1306],
+        [18.9, 42.9],
+        [18.7712, 42.4247],
+      ],
+    };
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'Durmitor',
+        countryRegion: 'Montenegro',
+        coordinates: { lat: 43.1306, lng: 19.0342 },
+      });
+      await result.current.addDestination({
+        name: 'Kotor',
+        countryRegion: 'Montenegro',
+        coordinates: { lat: 42.4247, lng: 18.7712 },
+      });
+    });
+
+    const [routeLeg] = result.current.routeLegs;
+    calculateRoute.mockClear();
+
+    await act(async () => {
+      await result.current.updateRouteLeg(routeLeg.id, {
+        type: 'driving-auto',
+        status: 'ready',
+        distanceKm: 140,
+        travelTimeHours: 3.1,
+        geometry: selectedGeometry,
+        provider: 'openrouteservice',
+        profile: 'cycling-regular',
+        routeKey: 'selected-cycling-alternative-key',
+        calculatedAt: '2026-07-04T12:00:00.000Z',
+        error: undefined,
+      });
+    });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(result.current.routeLegs[0]).toMatchObject({
+      id: routeLeg.id,
+      type: 'driving-auto',
+      status: 'failed',
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: undefined,
+      provider: undefined,
+      profile: 'driving-car',
+      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470',
+      calculatedAt: undefined,
+      error: 'Route calculation failed',
+    });
+  });
+
   it('recalculates affected driving route legs after destination coordinates change', async () => {
     const repository = createTestRepository();
     const calculateRoute = vi
