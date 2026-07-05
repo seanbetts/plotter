@@ -6,6 +6,9 @@ import type { Activity, ActivityLocation, Coordinates, MediaItem } from '../doma
 import type { LinkPreviewClient } from '../services/linkPreviewClient';
 import { ActivityImageStrip } from './ActivityImageStrip';
 import { LinkPreviewGrid } from './LinkPreviewGrid';
+import { TagEditor } from './TagEditor';
+import { listsMatch } from './tagEditorModel';
+import type { TagSuggestion } from './tagEditorModel';
 
 type ActivityPanelProps = {
   activity: Activity;
@@ -14,6 +17,7 @@ type ActivityPanelProps = {
   mediaError: string | null;
   isMediaLoading: boolean;
   isMediaUploading: boolean;
+  tagSuggestions?: TagSuggestion[];
   linkPreviewClient: LinkPreviewClient;
   onClose: () => void;
   onUpdateActivity: (
@@ -46,17 +50,6 @@ function activitySourceKey(activity: Activity) {
   return `${activity.id}:${activity.updatedAt}`;
 }
 
-const splitTagInput = (value: string) =>
-  value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-const tagKey = (tag: string) => tag.toLocaleLowerCase();
-
-const listsMatch = (left: string[], right: string[]) =>
-  left.length === right.length && left.every((item, index) => item === right[index]);
-
 function draftValuesMatch(left: ActivityDraft[ActivityDraftField], right: ActivityDraft[ActivityDraftField]) {
   if (Array.isArray(left) && Array.isArray(right)) {
     return JSON.stringify(left) === JSON.stringify(right);
@@ -64,21 +57,6 @@ function draftValuesMatch(left: ActivityDraft[ActivityDraftField], right: Activi
 
   return left === right;
 }
-
-const addUniqueTags = (currentTags: string[], newTags: string[]) => {
-  const existingTags = new Set(currentTags.map(tagKey));
-  const additions = newTags.filter((tag) => {
-    const key = tagKey(tag);
-    if (existingTags.has(key)) {
-      return false;
-    }
-
-    existingTags.add(key);
-    return true;
-  });
-
-  return [...currentTags, ...additions];
-};
 
 const profileTitleControlStyle = {
   '--profile-title-block-padding': '0px',
@@ -148,6 +126,7 @@ export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(functio
   mediaError,
   isMediaLoading,
   isMediaUploading,
+  tagSuggestions = [],
   linkPreviewClient,
   onClose,
   onUpdateActivity,
@@ -165,6 +144,7 @@ export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(functio
       mediaError={mediaError}
       isMediaLoading={isMediaLoading}
       isMediaUploading={isMediaUploading}
+      tagSuggestions={tagSuggestions}
       linkPreviewClient={linkPreviewClient}
       onClose={onClose}
       onUpdateActivity={onUpdateActivity}
@@ -183,6 +163,7 @@ function ActivityPanelForm({
   mediaError,
   isMediaLoading,
   isMediaUploading,
+  tagSuggestions = [],
   linkPreviewClient,
   onClose,
   onUpdateActivity,
@@ -191,7 +172,6 @@ function ActivityPanelForm({
   onOpenMediaPreview,
 }: ActivityPanelProps & { panelRef: Ref<HTMLElement> }) {
   const [draft, setDraft] = useState(() => createActivityDraft(activity));
-  const [tagInput, setTagInput] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingCoordinates, setIsEditingCoordinates] = useState(false);
   const [coordinateDraft, setCoordinateDraft] = useState(() => createCoordinateDraft(activity.location?.coordinates));
@@ -351,19 +331,10 @@ function ActivityPanelForm({
     );
   }
 
-  function commitTagInput() {
-    const nextTags = addUniqueTags(draft.tags, splitTagInput(tagInput));
-    setTagInput('');
+  function updateTags(tags: string[]) {
+    if (listsMatch(tags, latestDraftRef.current.tags)) return;
 
-    if (listsMatch(nextTags, draft.tags)) return;
-
-    updateDraft('tags', nextTags);
-    void commitDraft('tags');
-  }
-
-  function removeTag(tagToRemove: string) {
-    const nextTags = draft.tags.filter((tag) => tag !== tagToRemove);
-    updateDraft('tags', nextTags);
+    updateDraft('tags', tags);
     void commitDraft('tags');
   }
 
@@ -639,45 +610,12 @@ function ActivityPanelForm({
           />
         </label>
       </section>
-      <fieldset className="tag-editor" aria-label={tagsLabel}>
-        <legend>{tagsLabel}</legend>
-        <div className="tag-pill-list">
-          {draft.tags.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              className="tag-pill"
-              aria-label={`Remove tag ${tag}`}
-              onClick={() => removeTag(tag)}
-            >
-              <span>{tag}</span>
-              <X size={13} aria-hidden="true" />
-            </button>
-          ))}
-          <input
-            className="tag-pill-input"
-            aria-label="Add tag"
-            placeholder="Add tag"
-            value={tagInput}
-            onChange={(event) => setTagInput(event.target.value)}
-            onBlur={commitTagInput}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ',') {
-                event.preventDefault();
-                commitTagInput();
-                return;
-              }
-
-              if (event.key === 'Backspace' && tagInput === '' && draft.tags.length > 0) {
-                event.preventDefault();
-                const nextTags = draft.tags.slice(0, -1);
-                updateDraft('tags', nextTags);
-                void commitDraft('tags');
-              }
-            }}
-          />
-        </div>
-      </fieldset>
+      <TagEditor
+        label={tagsLabel}
+        tags={draft.tags}
+        suggestions={tagSuggestions}
+        onChange={updateTags}
+      />
     </aside>
   );
 }

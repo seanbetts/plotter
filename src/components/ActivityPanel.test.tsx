@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { createActivity } from '../domain/activities';
 import type { ActivityLocation, MediaItem, ResearchLink } from '../domain/types';
@@ -56,6 +57,7 @@ function createProps(overrides: Partial<React.ComponentProps<typeof ActivityPane
     mediaError: null,
     isMediaLoading: false,
     isMediaUploading: false,
+    tagSuggestions: [],
     linkPreviewClient: createLinkPreviewClient(),
     onClose: vi.fn(),
     onUpdateActivity: vi.fn(),
@@ -66,11 +68,11 @@ function createProps(overrides: Partial<React.ComponentProps<typeof ActivityPane
   };
 }
 
-function addTag(tag: string) {
-  const input = screen.getByLabelText('Add tag');
+async function addTag(tag: string) {
+  const user = userEvent.setup();
 
-  fireEvent.change(input, { target: { value: tag } });
-  fireEvent.keyDown(input, { key: 'Enter' });
+  await user.click(screen.getByRole('button', { name: 'Add tag' }));
+  await user.type(screen.getByRole('textbox', { name: 'Add tag' }), `${tag}{Enter}`);
 }
 
 describe('ActivityPanel', () => {
@@ -290,6 +292,33 @@ describe('ActivityPanel', () => {
     expect(notes.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('shows shared tag suggestions from an empty activity tag section', async () => {
+    const user = userEvent.setup();
+    const props = createProps({
+      activity: {
+        ...createActivity({
+          destinationId: 'destination-1',
+          title: 'Louvre',
+          order: 0,
+        }),
+        tags: [],
+      },
+      tagSuggestions: [
+        { tag: 'museum', count: 3 },
+        { tag: 'food', count: 2 },
+      ],
+    });
+
+    render(<ActivityPanel {...props} />);
+
+    expect(screen.getByText('No tags yet')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Add tag' }));
+
+    expect(screen.getByRole('button', { name: 'Add tag suggestion museum' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add tag suggestion food' })).toBeInTheDocument();
+  });
+
   it('places contextual activity links before the details section and tags', () => {
     const props = createProps();
 
@@ -336,7 +365,7 @@ describe('ActivityPanel', () => {
     });
   });
 
-  it('renders tags as removable pills and deduplicates new tags', () => {
+  it('renders tags as removable pills and deduplicates new tags', async () => {
     const activity = {
       ...createActivity({
         destinationId: 'destination-1',
@@ -351,22 +380,25 @@ describe('ActivityPanel', () => {
 
     expect(screen.getByRole('button', { name: 'Remove tag museum' })).toBeInTheDocument();
 
-    addTag('Museum');
-    addTag('art, morning');
+    await addTag('Museum');
+    await addTag('art, morning');
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag museum' }));
 
     expect(screen.queryByRole('button', { name: 'Remove tag museum' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove tag art' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove tag morning' })).toBeInTheDocument();
     expect(props.onUpdateActivity).toHaveBeenNthCalledWith(1, activity.id, {
-      tags: ['museum', 'art', 'morning'],
+      tags: ['museum', 'art'],
     });
     expect(props.onUpdateActivity).toHaveBeenNthCalledWith(2, activity.id, {
+      tags: ['museum', 'art', 'morning'],
+    });
+    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(3, activity.id, {
       tags: ['art', 'morning'],
     });
   });
 
-  it('removes the last activity tag with backspace when the tag input is empty', () => {
+  it('removes activity tags through removable pills', () => {
     const activity = {
       ...createActivity({
         destinationId: 'destination-1',
@@ -379,7 +411,7 @@ describe('ActivityPanel', () => {
 
     render(<ActivityPanel {...props} />);
 
-    fireEvent.keyDown(screen.getByLabelText('Add tag'), { key: 'Backspace' });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag morning' }));
 
     expect(screen.getByRole('button', { name: 'Remove tag museum' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove tag morning' })).not.toBeInTheDocument();
