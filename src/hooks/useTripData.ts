@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
 import { findBestDestinationInsertionIndex, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
-import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
+import { createRouteKey, createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
 import type { Activity, Coordinates, Destination, DestinationLocation, RouteLeg, RouteLegType } from '../domain/types';
 import type { TripRepository } from '../storage/tripRepository';
 
@@ -235,6 +235,11 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               ...leg,
               ...route,
               status: 'ready',
+              routeKey: createRouteKey({
+                origin: origin.coordinates,
+                target: target.coordinates,
+                profile: 'driving-car',
+              }),
               error: undefined,
               calculatedAt: createTimestamp(),
               updatedAt: createTimestamp(),
@@ -467,8 +472,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             updatedAt,
           };
           const isIncompleteReadyDrivingPatch =
-            patch.type === 'driving-auto' &&
             patch.status === 'ready' &&
+            mergedRouteLeg.type === 'driving-auto' &&
             !hasPreservableDrivingRouteData(patch);
           const updated = await finalizeRouteLeg(
             isIncompleteReadyDrivingPatch
