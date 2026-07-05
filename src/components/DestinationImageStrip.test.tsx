@@ -115,7 +115,7 @@ describe('DestinationImageStrip', () => {
     expect(onOpenPreview).toHaveBeenCalledWith('media-2');
   });
 
-  it('renders web image search before the stop images when all web image props are supplied', () => {
+  it('renders web image search inside the stop images before the preview when all web image props are supplied', () => {
     render(
       <DestinationImageStrip
         {...createProps({
@@ -128,9 +128,11 @@ describe('DestinationImageStrip', () => {
 
     const searchInput = screen.getByLabelText('Search web images');
     const imageRegion = screen.getByRole('region', { name: 'Stop images' });
+    const previewButton = within(imageRegion).getByRole('button', { name: 'Open full image: Sunset over the harbour' });
 
     expect(searchInput).toBeInTheDocument();
-    expect(searchInput.compareDocumentPosition(imageRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(imageRegion).toContainElement(searchInput);
+    expect(searchInput.compareDocumentPosition(previewButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('omits web image search unless every web image prop is supplied', () => {

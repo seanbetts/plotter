@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Image as ImageIcon, LoaderCircle } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
 import type { MediaItem } from '../domain/types';
 import { preloadImageUrls } from '../media/imagePreloading';
@@ -21,6 +21,7 @@ export type MediaImageStripProps = {
   isLoading: boolean;
   isUploading: boolean;
   error: string | null;
+  controls?: ReactNode;
   onUploadFiles: (files: File[]) => Promise<void> | void;
   onReorder: (orderedMediaIds: string[]) => Promise<void> | void;
   onOpenPreview: (mediaId: string) => void;
@@ -123,6 +124,7 @@ export function MediaImageStrip({
   isLoading,
   isUploading,
   error,
+  controls,
   onUploadFiles,
   onReorder,
   onOpenPreview,
@@ -363,6 +365,8 @@ export function MediaImageStrip({
         multiple
         onChange={handleFileInputChange}
       />
+
+      {controls}
 
       {isImageDisplayLoading ? (
         <div className="destination-image-empty is-loading" role="status" aria-label="Loading images">

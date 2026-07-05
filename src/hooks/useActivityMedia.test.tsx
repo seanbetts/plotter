@@ -112,6 +112,8 @@ function createTripRepository(overrides: Partial<TripRepository> = {}) {
 
     uploadActivityMedia: vi.fn(async () => createMediaItem('uploaded-activity-media', 0)),
 
+    importActivityMediaFromSearch: vi.fn(async () => createMediaItem('imported-activity-media', 0)),
+
     updateActivityMedia: vi.fn(async (
       mediaId: string,
       patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>,

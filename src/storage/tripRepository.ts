@@ -55,6 +55,11 @@ export type TripRepository = {
     caption?: string;
     credit?: string;
   }): Promise<MediaItem>;
+  importActivityMediaFromSearch(input: {
+    destinationId: string;
+    activityId: string;
+    result: WebImageSearchResult;
+  }): Promise<MediaItem>;
   updateActivityMedia(
     mediaId: string,
     patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>,
@@ -491,6 +496,47 @@ export function createTripRepository(db: TripDb): TripRepository {
           ) + 1,
         contentType: input.file.type || undefined,
         sizeBytes: input.file.size,
+        uploadedAt: timestamp,
+      };
+
+      await db.activityMedia.put(mediaRecord);
+      return stripActivityMediaOwner(mediaRecord);
+    },
+
+    async importActivityMediaFromSearch(input: {
+      destinationId: string;
+      activityId: string;
+      result: WebImageSearchResult;
+    }): Promise<MediaItem> {
+      const [destination, activity] = await Promise.all([
+        db.destinations.get(input.destinationId),
+        db.activities.get(input.activityId),
+      ]);
+      if (!destination) {
+        throw new Error('Destination not found.');
+      }
+      if (!activity || activity.destinationId !== input.destinationId) {
+        throw new Error('Activity not found.');
+      }
+
+      const timestamp = new Date().toISOString();
+      const existingMedia = await this.listActivityMedia(input.activityId);
+      const mediaRecord: ActivityMediaRecord = {
+        id: crypto.randomUUID(),
+        activityId: input.activityId,
+        destinationId: input.destinationId,
+        url: input.result.imageUrl,
+        thumbnailUrl: input.result.thumbnailUrl,
+        previewUrl: input.result.imageUrl,
+        fullUrl: input.result.imageUrl,
+        caption: input.result.title,
+        credit: input.result.sourceName,
+        sortOrder:
+          existingMedia.reduce(
+            (maxSortOrder, item, index) => Math.max(maxSortOrder, item.sortOrder ?? index),
+            -1,
+          ) + 1,
+        contentType: 'image/jpeg',
         uploadedAt: timestamp,
       };
 

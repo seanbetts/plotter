@@ -358,6 +358,51 @@ describe('trip repository', () => {
     ]);
   });
 
+  it('imports activity media from a web image result', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+    const activity = await repository.createActivity({
+      destinationId: destination.id,
+      title: 'Louvre',
+    });
+
+    const mediaItem = await repository.importActivityMediaFromSearch({
+      destinationId: destination.id,
+      activityId: activity.id,
+      result: {
+        id: 'search-result-1',
+        title: 'Louvre Pyramid',
+        sourceName: 'Example Source',
+        sourceUrl: 'https://example.com/louvre-pyramid',
+        thumbnailUrl: 'https://images.example.com/louvre-pyramid-thumb.jpg',
+        imageUrl: 'https://images.example.com/louvre-pyramid.jpg',
+      },
+    });
+
+    expect(mediaItem).toEqual(expect.objectContaining({
+      caption: 'Louvre Pyramid',
+      credit: 'Example Source',
+      sortOrder: 0,
+      contentType: 'image/jpeg',
+      url: 'https://images.example.com/louvre-pyramid.jpg',
+      thumbnailUrl: 'https://images.example.com/louvre-pyramid-thumb.jpg',
+      previewUrl: 'https://images.example.com/louvre-pyramid.jpg',
+      fullUrl: 'https://images.example.com/louvre-pyramid.jpg',
+    }));
+    expect(await repository.listActivityMedia(activity.id)).toEqual([
+      expect.objectContaining({
+        id: mediaItem.id,
+        caption: 'Louvre Pyramid',
+        credit: 'Example Source',
+      }),
+    ]);
+  });
+
   it('keeps destination media separate from activity media and rolls activity media into stop media', async () => {
     const repository = createTestRepository();
     const destination = createDestination({

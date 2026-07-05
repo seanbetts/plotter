@@ -1881,13 +1881,15 @@ select {
   grid-template-columns: minmax(0, 1fr) 34px;
 }
 
-.destination-profile .activity-add-row input {
+.destination-profile .activity-add-row input,
+.activity-panel .activity-add-row input {
   min-width: 0;
   height: 34px;
   padding: 7px 9px;
 }
 
-.destination-profile .activity-search-group input {
+.destination-profile .activity-search-group input,
+.activity-panel .activity-search-group input {
   border: 0;
   background: transparent;
   outline: 0;
@@ -2834,32 +2836,12 @@ button.image-preview-activity-attribution:focus-visible {
   background: rgb(255 255 255 / 0.86);
 }
 
-.web-image-search {
-  position: relative;
-  padding: 10px 12px 0;
-}
-
-.web-image-search input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  padding: 9px 10px 9px 8px;
-  color: var(--color-text);
-  background: transparent;
-  outline: 0;
-  font-size: 0.88rem;
-}
-
-.web-image-search input::placeholder {
-  color: var(--text-faint);
-}
-
 .web-image-search-popover {
   position: absolute;
   z-index: 40;
   top: calc(100% + 6px);
-  right: 12px;
-  left: 12px;
+  right: 0;
+  left: 0;
   max-height: min(380px, 56vh);
   overflow: auto;
   padding: 10px;
@@ -2869,6 +2851,19 @@ button.image-preview-activity-attribution:focus-visible {
   box-shadow: var(--shadow-panel);
   -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
+}
+
+.activity-add-row > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.activity-add-row > button svg {
+  flex: 0 0 auto;
+}
+
+.activity-add-row > button:disabled svg[class*='lucide-loader-circle'] {
+  animation: route-spin 900ms linear infinite;
 }
 
 .web-image-result-grid {

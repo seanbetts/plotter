@@ -158,6 +158,7 @@ const repositoryMock = vi.hoisted(() => {
     listDestinationMediaRollup: vi.fn<TripRepository['listDestinationMediaRollup']>(async () => []),
     listActivityMedia: vi.fn(async (): Promise<MediaItem[]> => []),
     uploadActivityMedia: vi.fn(),
+    importActivityMediaFromSearch: vi.fn(),
     updateActivityMedia: vi.fn(),
     deleteActivityMedia: vi.fn(),
     reorderActivityMedia: vi.fn(),

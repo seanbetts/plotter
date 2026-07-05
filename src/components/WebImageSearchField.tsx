@@ -1,5 +1,5 @@
-import { LoaderCircle, Search, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { Image as ImageIcon, LoaderCircle, Plus, X } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import type {
   WebImageSearchClient,
   WebImageSearchResult,
@@ -20,6 +20,8 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
   const [isSearching, setIsSearching] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const inputId = useId();
+  const resultsId = useId();
   const latestSearchId = useRef(0);
   const searchTimerRef = useRef<number | null>(null);
   const trimmedQuery = query.trim();
@@ -34,6 +36,29 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
     setError('');
   }, []);
 
+  const searchImages = useCallback((searchQuery: string) => {
+    const searchId = latestSearchId.current + 1;
+    latestSearchId.current = searchId;
+    setIsSearching(true);
+    setError('');
+
+    void client.searchImages(searchQuery, context)
+      .then((nextResults) => {
+        if (searchId !== latestSearchId.current) return;
+        setResults(nextResults);
+      })
+      .catch((caught) => {
+        if (searchId !== latestSearchId.current) return;
+        setResults([]);
+        setError(caught instanceof Error ? caught.message : 'Unable to search web images.');
+      })
+      .finally(() => {
+        if (searchId === latestSearchId.current) {
+          setIsSearching(false);
+        }
+      });
+  }, [client, context]);
+
   useEffect(() => {
     if (searchTimerRef.current !== null) {
       window.clearTimeout(searchTimerRef.current);
@@ -47,28 +72,8 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
       return;
     }
 
-    const searchId = latestSearchId.current + 1;
-    latestSearchId.current = searchId;
-
     searchTimerRef.current = window.setTimeout(() => {
-      setIsSearching(true);
-      setError('');
-
-      void client.searchImages(trimmedQuery, context)
-        .then((nextResults) => {
-          if (searchId !== latestSearchId.current) return;
-          setResults(nextResults);
-        })
-        .catch((caught) => {
-          if (searchId !== latestSearchId.current) return;
-          setResults([]);
-          setError(caught instanceof Error ? caught.message : 'Unable to search web images.');
-        })
-        .finally(() => {
-          if (searchId === latestSearchId.current) {
-            setIsSearching(false);
-          }
-        });
+      searchImages(trimmedQuery);
     }, liveSearchDelayMs);
 
     return () => {
@@ -76,7 +81,7 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
         window.clearTimeout(searchTimerRef.current);
       }
     };
-  }, [client, context, trimmedQuery]);
+  }, [searchImages, trimmedQuery]);
 
   async function importResult(result: WebImageSearchResult) {
     if (importingId) return;
@@ -97,6 +102,7 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
     const nextQuery = event.target.value;
 
     if (nextQuery.trim() !== trimmedQuery) {
+      latestSearchId.current += 1;
       setResults([]);
       setError('');
     }
@@ -109,80 +115,104 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
       event.preventDefault();
       event.stopPropagation();
       clearSearch();
+      return;
+    }
+
+    if (event.key === 'Enter' && trimmedQuery) {
+      event.preventDefault();
+      if (searchTimerRef.current !== null) {
+        window.clearTimeout(searchTimerRef.current);
+      }
+      searchImages(trimmedQuery);
     }
   }
 
   return (
-    <div className="web-image-search">
-      <label className="sr-only" htmlFor="web-image-search-input">
+    <div className="activity-add-row">
+      <label className="sr-only" htmlFor={inputId}>
         Search web images
       </label>
-      <div className="search-input-shell web-image-search-input-shell">
-        <Search className="search-input-icon" size={18} aria-hidden="true" />
-        <input
-          id="web-image-search-input"
-          value={query}
-          onChange={handleQueryChange}
-          onKeyDown={handleKeyDown}
-          placeholder="Search web images"
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={showPopover}
-          aria-controls="web-image-search-results"
-        />
-        {query ? (
-          <button
-            type="button"
-            className="search-clear"
-            aria-label="Clear web image search"
-            onClick={clearSearch}
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        ) : null}
-      </div>
-      {showPopover ? (
-        <div className="web-image-search-popover">
-          {isSearching ? (
-            <div className="web-image-search-status" role="status">
-              <LoaderCircle size={16} aria-hidden="true" />
-              <span>Searching images...</span>
-            </div>
-          ) : null}
-          {error ? (
-            <p className="web-image-search-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          {results.length > 0 ? (
-            <div
-              id="web-image-search-results"
-              className="web-image-result-grid"
-              role="listbox"
-              aria-label="Web image results"
+      <div className="activity-search-group">
+        <div className="search-input-shell">
+          <ImageIcon className="search-input-icon" size={18} aria-hidden="true" />
+          <input
+            id={inputId}
+            value={query}
+            onChange={handleQueryChange}
+            onKeyDown={handleKeyDown}
+            placeholder="Search web images"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={showPopover}
+            aria-controls={resultsId}
+          />
+          {query ? (
+            <button
+              type="button"
+              className="search-clear"
+              aria-label="Clear web image search"
+              onClick={clearSearch}
             >
-              {results.map((result) => (
-                <button
-                  key={result.id}
-                  type="button"
-                  role="option"
-                  aria-selected="false"
-                  aria-label={`Import ${result.title} from ${result.sourceName}`}
-                  className="web-image-result-tile"
-                  disabled={Boolean(importingId)}
-                  onClick={() => void importResult(result)}
-                >
-                  <img src={result.thumbnailUrl} alt="" />
-                  <span className="web-image-result-meta">
-                    <span>{result.title}</span>
-                    <small>{importingId === result.id ? 'Importing...' : result.sourceName}</small>
-                  </span>
-                </button>
-              ))}
-            </div>
+              <X size={16} aria-hidden="true" />
+            </button>
           ) : null}
         </div>
-      ) : null}
+        {showPopover ? (
+          <div className="web-image-search-popover">
+            {isSearching ? (
+              <div className="web-image-search-status" role="status">
+                <LoaderCircle size={16} aria-hidden="true" />
+                <span>Searching images...</span>
+              </div>
+            ) : null}
+            {error ? (
+              <p className="web-image-search-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            {results.length > 0 ? (
+              <div
+                id={resultsId}
+                className="web-image-result-grid"
+                role="listbox"
+                aria-label="Web image results"
+              >
+                {results.map((result) => (
+                  <button
+                    key={result.id}
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    aria-label={`Import ${result.title} from ${result.sourceName}`}
+                    className="web-image-result-tile"
+                    disabled={Boolean(importingId)}
+                    onClick={() => void importResult(result)}
+                  >
+                    <img src={result.thumbnailUrl} alt="" />
+                    <span className="web-image-result-meta">
+                      <span>{result.title}</span>
+                      <small>{importingId === result.id ? 'Importing...' : result.sourceName}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        aria-label="Submit web image search"
+        disabled={!trimmedQuery || isSearching}
+        onClick={() => {
+          if (searchTimerRef.current !== null) {
+            window.clearTimeout(searchTimerRef.current);
+          }
+          searchImages(trimmedQuery);
+        }}
+      >
+        {isSearching ? <LoaderCircle size={15} aria-hidden="true" /> : <Plus size={15} aria-hidden="true" />}
+      </button>
     </div>
   );
 }

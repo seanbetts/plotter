@@ -32,6 +32,7 @@ function createMockRepository(snapshot: {
     listDestinationMediaRollup: vi.fn(async () => []),
     listActivityMedia: vi.fn(async () => []),
     uploadActivityMedia: vi.fn(),
+    importActivityMediaFromSearch: vi.fn(),
     updateActivityMedia: vi.fn(),
     deleteActivityMedia: vi.fn(),
     reorderActivityMedia: vi.fn(),

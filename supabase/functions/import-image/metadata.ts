@@ -215,6 +215,7 @@ async function readResponseBodyUpTo(response: Response, maxBytes: number) {
 export function createImportedImageObjectPath(input: {
   tripId: string;
   destinationId: string;
+  activityId?: string;
   title: string;
   contentType: string;
   uuid?: () => string;
@@ -222,8 +223,9 @@ export function createImportedImageObjectPath(input: {
   const uuid = input.uuid ?? crypto.randomUUID;
   const extension = extensionForContentType(input.contentType);
   const slug = slugify(input.title);
+  const ownerPath = input.activityId ? `${input.destinationId}/${input.activityId}` : input.destinationId;
 
-  return `${input.tripId}/${input.destinationId}/${uuid()}-${slug}.${extension}`;
+  return `${input.tripId}/${ownerPath}/${uuid()}-${slug}.${extension}`;
 }
 
 function stringField(value: unknown) {

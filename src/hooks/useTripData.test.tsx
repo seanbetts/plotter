@@ -880,6 +880,10 @@ function createMemoryRepository(
       throw new Error('Activity media uploads are not supported by this test repository.');
     },
 
+    async importActivityMediaFromSearch() {
+      throw new Error('Activity media imports are not supported by this test repository.');
+    },
+
     async updateActivityMedia() {
       throw new Error('Activity media updates are not supported by this test repository.');
     },

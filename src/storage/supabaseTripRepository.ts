@@ -131,7 +131,14 @@ type ImportImageSupabaseClient = {
   functions: {
     invoke(
       functionName: 'import-image',
-      options: { body: { tripId: string; destinationId: string; result: WebImageSearchResult } },
+      options: {
+        body: {
+          tripId: string;
+          destinationId: string;
+          activityId?: string;
+          result: WebImageSearchResult;
+        };
+      },
     ): Promise<ImportImageFunctionResponse>;
   };
 };
@@ -1139,6 +1146,28 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         await removeStorageObjectBestEffort(bucketId, uploadedObjectPath);
         throw error;
       }
+    },
+
+    async importActivityMediaFromSearch(input) {
+      const tripId = await getActiveTripId();
+      const response = await (supabase as ImportImageSupabaseClient).functions.invoke('import-image', {
+        body: {
+          tripId,
+          destinationId: input.destinationId,
+          activityId: input.activityId,
+          result: input.result,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(await extractFunctionErrorMessage(response.error, 'Unable to import image.'));
+      }
+
+      if (!response.data?.mediaAsset) {
+        throw new Error('Unable to import image.');
+      }
+
+      return createSignedMediaItem(response.data.mediaAsset);
     },
 
     async updateDestinationMedia(mediaId, patch) {

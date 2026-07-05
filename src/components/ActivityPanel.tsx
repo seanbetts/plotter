@@ -4,6 +4,11 @@ import type { ClipboardEvent, CSSProperties, KeyboardEvent, Ref } from 'react';
 import { formatLocationContext } from '../domain/locations';
 import type { Activity, ActivityLocation, Coordinates, MediaItem } from '../domain/types';
 import type { LinkPreviewClient } from '../services/linkPreviewClient';
+import type {
+  WebImageSearchClient,
+  WebImageSearchResult,
+  WebImageSearchStopContext,
+} from '../services/webImageSearchClient';
 import { ActivityImageStrip } from './ActivityImageStrip';
 import { LinkPreviewGrid } from './LinkPreviewGrid';
 import { TagEditor } from './TagEditor';
@@ -27,6 +32,9 @@ type ActivityPanelProps = {
   onUploadMedia: (files: File[]) => Promise<void> | void;
   onReorderMedia: (orderedMediaIds: string[]) => Promise<void> | void;
   onOpenMediaPreview: (mediaId: string) => void;
+  webImageSearchClient?: WebImageSearchClient;
+  webImageSearchContext?: WebImageSearchStopContext;
+  onImportWebImage?: (result: WebImageSearchResult) => Promise<void> | void;
 };
 
 type ActivityDraft = Pick<Activity, 'title' | 'description' | 'notes' | 'tags' | 'links'>;
@@ -133,6 +141,9 @@ export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(functio
   onUploadMedia,
   onReorderMedia,
   onOpenMediaPreview,
+  webImageSearchClient,
+  webImageSearchContext,
+  onImportWebImage,
 }: ActivityPanelProps, ref) {
   return (
     <ActivityPanelForm
@@ -151,6 +162,9 @@ export const ActivityPanel = forwardRef<HTMLElement, ActivityPanelProps>(functio
       onUploadMedia={onUploadMedia}
       onReorderMedia={onReorderMedia}
       onOpenMediaPreview={onOpenMediaPreview}
+      webImageSearchClient={webImageSearchClient}
+      webImageSearchContext={webImageSearchContext}
+      onImportWebImage={onImportWebImage}
     />
   );
 });
@@ -170,6 +184,9 @@ function ActivityPanelForm({
   onUploadMedia,
   onReorderMedia,
   onOpenMediaPreview,
+  webImageSearchClient,
+  webImageSearchContext,
+  onImportWebImage,
 }: ActivityPanelProps & { panelRef: Ref<HTMLElement> }) {
   const [draft, setDraft] = useState(() => createActivityDraft(activity));
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -575,6 +592,9 @@ function ActivityPanelForm({
         onUploadFiles={onUploadMedia}
         onReorder={onReorderMedia}
         onOpenPreview={onOpenMediaPreview}
+        webImageSearchClient={webImageSearchClient}
+        webImageSearchContext={webImageSearchContext}
+        onImportWebImage={onImportWebImage}
       />
 
       <LinkPreviewGrid

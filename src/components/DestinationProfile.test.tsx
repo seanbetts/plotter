@@ -245,8 +245,10 @@ describe('DestinationProfile', () => {
     const profile = screen.getByRole('complementary', { name: 'Samarkand profile' });
     const searchInput = within(profile).getByLabelText('Search web images');
     const imageRegion = within(profile).getByRole('region', { name: 'Stop images' });
+    const emptyImageButton = within(imageRegion).getByRole('button', { name: 'Choose stop images' });
 
-    expect(searchInput.compareDocumentPosition(imageRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(imageRegion).toContainElement(searchInput);
+    expect(searchInput.compareDocumentPosition(emptyImageButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows latitude and longitude as separate pills with a one-click copy button', async () => {

@@ -64,28 +64,26 @@ export function DestinationImageStrip(props: DestinationImageStripProps) {
   };
 
   return (
-    <>
-      {webImageSearch ? (
+    <MediaImageStrip
+      regionLabel="Stop images"
+      emptyLabel="No images yet"
+      emptyHint="Drop images here or click to add."
+      chooseFilesLabel="Choose stop images"
+      uploadingLabel="Uploading stop images"
+      items={getMediaStripItems(props)}
+      isLoading={props.isLoading}
+      isUploading={props.isUploading}
+      error={props.error}
+      controls={webImageSearch ? (
         <WebImageSearchField
           client={webImageSearch.client}
           context={webImageSearch.context}
           onImportImage={webImageSearch.onImportImage}
         />
       ) : null}
-      <MediaImageStrip
-        regionLabel="Stop images"
-        emptyLabel="No images yet"
-        emptyHint="Drop images here or click to add."
-        chooseFilesLabel="Choose stop images"
-        uploadingLabel="Uploading stop images"
-        items={getMediaStripItems(props)}
-        isLoading={props.isLoading}
-        isUploading={props.isUploading}
-        error={props.error}
-        onUploadFiles={props.onUploadFiles}
-        onReorder={handleReorder}
-        onOpenPreview={props.onOpenPreview}
-      />
-    </>
+      onUploadFiles={props.onUploadFiles}
+      onReorder={handleReorder}
+      onOpenPreview={props.onOpenPreview}
+    />
   );
 }

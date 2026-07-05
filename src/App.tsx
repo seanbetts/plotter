@@ -320,6 +320,7 @@ function TripWorkspace({
   const [destinationMediaRollupError, setDestinationMediaRollupError] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
   const selectedDestinationIdRef = useRef<string | null>(null);
+  const selectedActivityIdRef = useRef<string | null>(null);
   const activityPanelRef = useRef<HTMLElement | null>(null);
   const rollupLoadSequenceRef = useRef(0);
   const pendingMapStopRequestIdRef = useRef(0);
@@ -431,6 +432,10 @@ function TripWorkspace({
   useEffect(() => {
     selectedDestinationIdRef.current = selectedDestinationId;
   }, [selectedDestinationId]);
+
+  useEffect(() => {
+    selectedActivityIdRef.current = selectedActivityId;
+  }, [selectedActivityId]);
 
   useEffect(() => {
     try {
@@ -825,6 +830,27 @@ function TripWorkspace({
     await reloadDestinationMediaRollup();
   }, [activityMedia, reloadDestinationMediaRollup]);
 
+  const handleActivityWebImageImport = useCallback(async (result: WebImageSearchResult) => {
+    if (!selectedDestinationId || !selectedActivityId) return;
+    const importDestinationId = selectedDestinationId;
+    const importActivityId = selectedActivityId;
+
+    await repository.importActivityMediaFromSearch({
+      destinationId: importDestinationId,
+      activityId: importActivityId,
+      result,
+    });
+    if (
+      selectedDestinationIdRef.current !== importDestinationId ||
+      selectedActivityIdRef.current !== importActivityId
+    ) {
+      return;
+    }
+
+    await activityMedia.reload();
+    await reloadDestinationMediaRollup();
+  }, [activityMedia, reloadDestinationMediaRollup, repository, selectedActivityId, selectedDestinationId]);
+
   function navigatePreviewMedia(mediaId: string, direction: -1 | 1) {
     const currentIndex = previewMediaNavigationItems.findIndex((mediaItem) => mediaItem.id === mediaId);
     if (!previewMedia || currentIndex === -1 || previewMediaNavigationItems.length === 0) return;
@@ -956,6 +982,9 @@ function TripWorkspace({
                 onUploadMedia={handleActivityMediaUpload}
                 onReorderMedia={handleActivityMediaReorder}
                 onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'activity' })}
+                webImageSearchClient={webImageSearchClient}
+                webImageSearchContext={createWebImageSearchContext(selectedDestination)}
+                onImportWebImage={handleActivityWebImageImport}
               />
             ) : null}
             <DestinationProfile

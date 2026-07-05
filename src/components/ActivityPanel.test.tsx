@@ -76,6 +76,32 @@ async function addTag(tag: string) {
 }
 
 describe('ActivityPanel', () => {
+  it('renders web image search inside the activity images before the preview', () => {
+    render(
+      <ActivityPanel
+        {...createProps({
+          webImageSearchClient: { searchImages: vi.fn(async () => []) },
+          webImageSearchContext: {
+            stopName: 'Paris',
+            countryName: 'France',
+          },
+          onImportWebImage: vi.fn(),
+        })}
+      />,
+    );
+
+    const imageRegion = screen.getByRole('region', { name: 'Activity images' });
+    const searchInput = within(imageRegion).getByLabelText('Search web images');
+    const previewButton = within(imageRegion).getByRole('button', { name: 'Open full image: Gallery wing' });
+    const searchRow = searchInput.closest('.activity-add-row');
+
+    expect(searchInput).toBeInTheDocument();
+    expect(searchRow).toBeInTheDocument();
+    expect(searchRow?.querySelector('.activity-search-group')).toBeInTheDocument();
+    expect(imageRegion).toContainElement(searchInput);
+    expect(searchInput.compareDocumentPosition(previewButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('renders activity address and copyable coordinates when a location is present', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, {

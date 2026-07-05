@@ -53,17 +53,24 @@ Deno.serve(async (request) => {
     const destinationId = typeof body.destinationId === "string"
       ? body.destinationId.trim()
       : "";
-    if (!isUuid(tripId) || !isUuid(destinationId)) {
+    const activityId = typeof body.activityId === "string"
+      ? body.activityId.trim()
+      : "";
+    if (!isUuid(tripId) || !isUuid(destinationId) || (activityId && !isUuid(activityId))) {
       throw new Error("Select a stop before importing images.");
     }
 
     const result = normalizeImportResult(body.result);
 
     await assertDestinationAccess(supabase, tripId, destinationId);
-    const existingRows = await listExistingDestinationMediaSortOrders(
+    if (activityId) {
+      await assertActivityAccess(supabase, tripId, destinationId, activityId);
+    }
+    const existingRows = await listExistingMediaSortOrders(
       supabase,
       tripId,
       destinationId,
+      activityId || null,
     );
 
     const { bytes, contentType } = await fetchImportImage({
@@ -72,6 +79,7 @@ Deno.serve(async (request) => {
     const objectPath = createImportedImageObjectPath({
       tripId,
       destinationId,
+      ...(activityId ? { activityId } : {}),
       title: result.title,
       contentType,
     });
@@ -93,6 +101,7 @@ Deno.serve(async (request) => {
       mediaAsset = await insertMediaMetadataWithRetry(supabase, {
         tripId,
         destinationId,
+        activityId: activityId || null,
         objectPath,
         caption: result.title,
         credit: result.sourceName,
@@ -142,17 +151,42 @@ async function assertDestinationAccess(
   }
 }
 
-async function listExistingDestinationMediaSortOrders(
+async function assertActivityAccess(
   supabase: SupabaseTableClient,
   tripId: string,
   destinationId: string,
+  activityId: string,
 ) {
   const response = await supabase
+    .from("activities")
+    .select("id")
+    .eq("trip_id", tripId)
+    .eq("destination_id", destinationId)
+    .eq("id", activityId)
+    .maybeSingle();
+
+  if (response.error || !response.data) {
+    throw new Error("Select an activity before importing images.");
+  }
+}
+
+async function listExistingMediaSortOrders(
+  supabase: SupabaseTableClient,
+  tripId: string,
+  destinationId: string,
+  activityId: string | null,
+) {
+  let query = supabase
     .from("media_assets")
     .select("sort_order")
     .eq("trip_id", tripId)
-    .eq("destination_id", destinationId)
-    .is("activity_id", null);
+    .eq("destination_id", destinationId);
+
+  query = activityId
+    ? query.eq("activity_id", activityId)
+    : query.is("activity_id", null);
+
+  const response = await query;
 
   if (response.error) {
     throw new Error("Unable to save imported image.");
@@ -166,6 +200,7 @@ async function insertMediaMetadataWithRetry(
   input: {
     tripId: string;
     destinationId: string;
+    activityId: string | null;
     objectPath: string;
     caption: string;
     credit: string;
@@ -188,7 +223,7 @@ async function insertMediaMetadataWithRetry(
       .insert({
         trip_id: input.tripId,
         destination_id: input.destinationId,
-        activity_id: null,
+        activity_id: input.activityId,
         bucket_id: bucketId,
         object_path: input.objectPath,
         caption: input.caption,
@@ -209,10 +244,11 @@ async function insertMediaMetadataWithRetry(
       throw new Error("Unable to save imported image.");
     }
 
-    existingRows = await listExistingDestinationMediaSortOrders(
+    existingRows = await listExistingMediaSortOrders(
       supabase,
       input.tripId,
       input.destinationId,
+      input.activityId,
     );
   }
 
