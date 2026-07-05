@@ -10,7 +10,7 @@ import type {
 import { createLegacyLocation } from '../domain/locations';
 import { sortResearchLinks } from '../domain/researchLinks';
 import type { WebImageSearchResult } from '../services/webImageSearchClient';
-import type { TripDb } from './tripDb';
+import type { StoredActivity, StoredActivityMediaRecord, StoredDestination, StoredRouteLeg, TripDb } from './tripDb';
 
 export type TripRepository = {
   listDestinations(): Promise<Destination[]>;
@@ -80,6 +80,48 @@ type LegacyRouteLeg = Omit<RouteLeg, 'type' | 'status'> & {
   type?: RouteLeg['type'] | 'driving' | 'ferry-shipping' | 'uncertain';
   status?: RouteLeg['status'];
 };
+
+const defaultLocalTripId = 'local-default-trip';
+
+function stripDestinationTripId(destination: StoredDestination): Destination {
+  const { entityId, tripId: _tripId, ...domainDestination } = destination;
+  return { ...domainDestination, id: entityId ?? domainDestination.id };
+}
+
+function stripRouteLegTripId(routeLeg: StoredRouteLeg): RouteLeg {
+  const { entityId, tripId: _tripId, ...domainRouteLeg } = routeLeg;
+  return { ...domainRouteLeg, id: entityId ?? domainRouteLeg.id };
+}
+
+function stripActivityTripId(activity: StoredActivity): Activity {
+  const { entityId, tripId: _tripId, ...domainActivity } = activity;
+  return { ...domainActivity, id: entityId ?? domainActivity.id };
+}
+
+function stripActivityMediaTripId(record: StoredActivityMediaRecord): ActivityMediaRecord {
+  const { entityId, tripId: _tripId, ...domainRecord } = record;
+  return { ...domainRecord, id: entityId ?? domainRecord.id };
+}
+
+function localTripKey(tripId: string, recordId: string): string {
+  return `${tripId}:${recordId}`;
+}
+
+function storeDestination(destination: Destination, tripId: string): StoredDestination {
+  return { ...destination, id: localTripKey(tripId, destination.id), entityId: destination.id, tripId };
+}
+
+function storeRouteLeg(routeLeg: RouteLeg, tripId: string): StoredRouteLeg {
+  return { ...routeLeg, id: localTripKey(tripId, routeLeg.id), entityId: routeLeg.id, tripId };
+}
+
+function storeActivity(activity: Activity, tripId: string): StoredActivity {
+  return { ...activity, id: localTripKey(tripId, activity.id), entityId: activity.id, tripId };
+}
+
+function storeActivityMedia(record: ActivityMediaRecord, tripId: string): StoredActivityMediaRecord {
+  return { ...record, id: localTripKey(tripId, record.id), entityId: record.id, tripId };
+}
 
 function normalizeDestination(destination: Destination, index = 0): Destination {
   return {
@@ -165,39 +207,49 @@ async function createLocalMediaUrl(file: File) {
   return `data:${file.type || 'application/octet-stream'};base64,${btoa(binary)}`;
 }
 
-export function createTripRepository(db: TripDb): TripRepository {
+export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): TripRepository {
   return {
     async listDestinations(): Promise<Destination[]> {
-      const destinations = await db.destinations.toArray();
+      const destinations = await db.destinations.where('tripId').equals(tripId).toArray();
 
       return destinations
-        .map((destination, index) => normalizeDestination(destination, index))
+        .map((destination, index) => normalizeDestination(stripDestinationTripId(destination), index))
         .sort((left, right) => left.order - right.order || left.createdAt.localeCompare(right.createdAt));
     },
 
     async saveDestination(destination: Destination): Promise<void> {
-      await db.destinations.put(destination);
+      await db.destinations.put(storeDestination(destination, tripId));
     },
 
     async deleteDestination(destinationId: string): Promise<void> {
       await db.transaction('rw', db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
-        await db.destinations.delete(destinationId);
-        await db.activities.where('destinationId').equals(destinationId).delete();
-        await db.activityMedia.where('destinationId').equals(destinationId).delete();
-        const attachedLegs = await db.routeLegs
-          .where('originDestinationId')
-          .equals(destinationId)
-          .or('targetDestinationId')
-          .equals(destinationId)
-          .toArray();
+        const destination = await db.destinations.get(localTripKey(tripId, destinationId));
+        if (destination?.tripId !== tripId) return;
 
+        const attachedActivities = await db.activities
+          .where('[tripId+destinationId]')
+          .equals([tripId, destinationId])
+          .toArray();
+        const attachedActivityMedia = await db.activityMedia
+          .where('[tripId+destinationId]')
+          .equals([tripId, destinationId])
+          .toArray();
+        const attachedLegs = (await db.routeLegs.where('tripId').equals(tripId).toArray()).filter(
+          (leg) =>
+            leg.originDestinationId === destinationId ||
+            leg.targetDestinationId === destinationId,
+        );
+
+        await db.destinations.delete(localTripKey(tripId, destinationId));
+        await db.activities.bulkDelete(attachedActivities.map((activity) => activity.id));
+        await db.activityMedia.bulkDelete(attachedActivityMedia.map((mediaItem) => mediaItem.id));
         await db.routeLegs.bulkDelete(attachedLegs.map((leg) => leg.id));
       });
     },
 
     async listActivities(destinationId: string): Promise<Activity[]> {
-      return (await db.activities.where('destinationId').equals(destinationId).toArray())
-        .map(normalizeActivity)
+      return (await db.activities.where('[tripId+destinationId]').equals([tripId, destinationId]).toArray())
+        .map((activity) => normalizeActivity(stripActivityTripId(activity)))
         .sort((left, right) => left.order - right.order || left.createdAt.localeCompare(right.createdAt));
     },
 
@@ -207,8 +259,8 @@ export function createTripRepository(db: TripDb): TripRepository {
       order?: number;
       location?: Activity['location'];
     }): Promise<Activity> {
-      const destination = await db.destinations.get(input.destinationId);
-      if (!destination) {
+      const destination = await db.destinations.get(localTripKey(tripId, input.destinationId));
+      if (!destination || destination.tripId !== tripId) {
         throw new Error('Destination not found.');
       }
 
@@ -221,7 +273,7 @@ export function createTripRepository(db: TripDb): TripRepository {
         location: input.location,
       });
 
-      await db.activities.put(activity);
+      await db.activities.put(storeActivity(activity, tripId));
       return activity;
     },
 
@@ -229,20 +281,28 @@ export function createTripRepository(db: TripDb): TripRepository {
       activityId: string,
       patch: Partial<Omit<Activity, 'id' | 'destinationId' | 'createdAt' | 'updatedAt'>>,
     ): Promise<Activity> {
-      const existing = await db.activities.get(activityId);
-      if (!existing) {
+      const existing = await db.activities.get(localTripKey(tripId, activityId));
+      if (!existing || existing.tripId !== tripId) {
         throw new Error('Activity not found.');
       }
 
-      const updated = patchActivity(existing, patch);
-      await db.activities.put(updated);
+      const updated = patchActivity(stripActivityTripId(existing), patch);
+      await db.activities.put(storeActivity(updated, tripId));
       return updated;
     },
 
     async deleteActivity(activityId: string): Promise<void> {
       await db.transaction('rw', db.activities, db.activityMedia, async () => {
-        await db.activities.delete(activityId);
-        await db.activityMedia.where('activityId').equals(activityId).delete();
+        const activity = await db.activities.get(localTripKey(tripId, activityId));
+        if (activity?.tripId !== tripId) return;
+
+        const media = await db.activityMedia
+          .where('[tripId+activityId]')
+          .equals([tripId, activityId])
+          .toArray();
+
+        await db.activities.delete(localTripKey(tripId, activityId));
+        await db.activityMedia.bulkDelete(media.map((mediaItem) => mediaItem.id));
       });
     },
 
@@ -250,12 +310,14 @@ export function createTripRepository(db: TripDb): TripRepository {
       const currentActivities = await this.listActivities(destinationId);
       const orderedActivities = reorderActivityModels(currentActivities, orderedActivityIds);
 
-      await db.activities.bulkPut(orderedActivities);
+      await db.activities.bulkPut(orderedActivities.map((activity) => storeActivity(activity, tripId)));
       return orderedActivities;
     },
 
     async listDestinationMedia(destinationId: string): Promise<MediaItem[]> {
-      const destination = await db.destinations.get(destinationId);
+      const destination = await db.destinations.get(localTripKey(tripId, destinationId));
+      if (destination?.tripId !== tripId) return [];
+
       return [...(destination?.media ?? [])].sort(sortMediaItems);
     },
 
@@ -265,8 +327,8 @@ export function createTripRepository(db: TripDb): TripRepository {
       caption?: string;
       credit?: string;
     }): Promise<MediaItem> {
-      const destination = await db.destinations.get(input.destinationId);
-      if (!destination) {
+      const destination = await db.destinations.get(localTripKey(tripId, input.destinationId));
+      if (!destination || destination.tripId !== tripId) {
         throw new Error('Destination not found.');
       }
 
@@ -303,8 +365,8 @@ export function createTripRepository(db: TripDb): TripRepository {
       destinationId: string;
       result: WebImageSearchResult;
     }): Promise<MediaItem> {
-      const destination = await db.destinations.get(input.destinationId);
-      if (!destination) {
+      const destination = await db.destinations.get(localTripKey(tripId, input.destinationId));
+      if (!destination || destination.tripId !== tripId) {
         throw new Error('Destination not found.');
       }
 
@@ -340,7 +402,7 @@ export function createTripRepository(db: TripDb): TripRepository {
       patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>,
     ): Promise<MediaItem> {
       const timestamp = new Date().toISOString();
-      const destinations = await db.destinations.toArray();
+      const destinations = await db.destinations.where('tripId').equals(tripId).toArray();
       const destination = destinations.find((item) =>
         item.media.some((mediaItem) => mediaItem.id === mediaId),
       );
@@ -377,7 +439,7 @@ export function createTripRepository(db: TripDb): TripRepository {
 
     async deleteDestinationMedia(mediaId: string): Promise<void> {
       const timestamp = new Date().toISOString();
-      const destinations = await db.destinations.toArray();
+      const destinations = await db.destinations.where('tripId').equals(tripId).toArray();
       const destination = destinations.find((item) =>
         item.media.some((mediaItem) => mediaItem.id === mediaId),
       );
@@ -397,8 +459,8 @@ export function createTripRepository(db: TripDb): TripRepository {
       destinationId: string,
       orderedMediaIds: string[],
     ): Promise<MediaItem[]> {
-      const destination = await db.destinations.get(destinationId);
-      if (!destination) {
+      const destination = await db.destinations.get(localTripKey(tripId, destinationId));
+      if (!destination || destination.tripId !== tripId) {
         throw new Error('Destination not found.');
       }
 
@@ -453,8 +515,8 @@ export function createTripRepository(db: TripDb): TripRepository {
     },
 
     async listActivityMedia(activityId: string): Promise<MediaItem[]> {
-      return (await db.activityMedia.where('activityId').equals(activityId).toArray())
-        .map(stripActivityMediaOwner)
+      return (await db.activityMedia.where('[tripId+activityId]').equals([tripId, activityId]).toArray())
+        .map((record) => stripActivityMediaOwner(stripActivityMediaTripId(record)))
         .sort(sortMediaItems);
     },
 
@@ -466,13 +528,13 @@ export function createTripRepository(db: TripDb): TripRepository {
       credit?: string;
     }): Promise<MediaItem> {
       const [destination, activity] = await Promise.all([
-        db.destinations.get(input.destinationId),
-        db.activities.get(input.activityId),
+        db.destinations.get(localTripKey(tripId, input.destinationId)),
+        db.activities.get(localTripKey(tripId, input.activityId)),
       ]);
-      if (!destination) {
+      if (!destination || destination.tripId !== tripId) {
         throw new Error('Destination not found.');
       }
-      if (!activity || activity.destinationId !== input.destinationId) {
+      if (!activity || activity.tripId !== tripId || activity.destinationId !== input.destinationId) {
         throw new Error('Activity not found.');
       }
 
@@ -499,7 +561,7 @@ export function createTripRepository(db: TripDb): TripRepository {
         uploadedAt: timestamp,
       };
 
-      await db.activityMedia.put(mediaRecord);
+      await db.activityMedia.put(storeActivityMedia(mediaRecord, tripId));
       return stripActivityMediaOwner(mediaRecord);
     },
 
@@ -509,13 +571,13 @@ export function createTripRepository(db: TripDb): TripRepository {
       result: WebImageSearchResult;
     }): Promise<MediaItem> {
       const [destination, activity] = await Promise.all([
-        db.destinations.get(input.destinationId),
-        db.activities.get(input.activityId),
+        db.destinations.get(localTripKey(tripId, input.destinationId)),
+        db.activities.get(localTripKey(tripId, input.activityId)),
       ]);
-      if (!destination) {
+      if (!destination || destination.tripId !== tripId) {
         throw new Error('Destination not found.');
       }
-      if (!activity || activity.destinationId !== input.destinationId) {
+      if (!activity || activity.tripId !== tripId || activity.destinationId !== input.destinationId) {
         throw new Error('Activity not found.');
       }
 
@@ -540,7 +602,7 @@ export function createTripRepository(db: TripDb): TripRepository {
         uploadedAt: timestamp,
       };
 
-      await db.activityMedia.put(mediaRecord);
+      await db.activityMedia.put(storeActivityMedia(mediaRecord, tripId));
       return stripActivityMediaOwner(mediaRecord);
     },
 
@@ -548,37 +610,37 @@ export function createTripRepository(db: TripDb): TripRepository {
       mediaId: string,
       patch: Pick<Partial<MediaItem>, 'caption' | 'credit'>,
     ): Promise<MediaItem> {
-      const existing = await db.activityMedia.get(mediaId);
-      if (!existing) {
+      const existing = await db.activityMedia.get(localTripKey(tripId, mediaId));
+      if (!existing || existing.tripId !== tripId) {
         throw new Error('Media item not found.');
       }
 
       const updated: ActivityMediaRecord = {
-        ...existing,
+        ...stripActivityMediaTripId(existing),
         ...(patch.caption !== undefined ? { caption: patch.caption } : {}),
         ...(patch.credit !== undefined ? { credit: patch.credit } : {}),
       };
-      await db.activityMedia.put(updated);
+      await db.activityMedia.put(storeActivityMedia(updated, tripId));
       return stripActivityMediaOwner(updated);
     },
 
     async deleteActivityMedia(mediaId: string): Promise<void> {
-      const existing = await db.activityMedia.get(mediaId);
-      if (!existing) {
+      const existing = await db.activityMedia.get(localTripKey(tripId, mediaId));
+      if (!existing || existing.tripId !== tripId) {
         throw new Error('Media item not found.');
       }
 
-      await db.activityMedia.delete(mediaId);
+      await db.activityMedia.delete(localTripKey(tripId, mediaId));
     },
 
     async reorderActivityMedia(activityId: string, orderedMediaIds: string[]): Promise<MediaItem[]> {
-      const activity = await db.activities.get(activityId);
-      if (!activity) {
+      const activity = await db.activities.get(localTripKey(tripId, activityId));
+      if (!activity || activity.tripId !== tripId) {
         throw new Error('Activity not found.');
       }
 
-      const currentMedia = await db.activityMedia.where('activityId').equals(activityId).toArray();
-      const currentMediaIds = currentMedia.map((mediaItem) => mediaItem.id);
+      const currentMedia = await db.activityMedia.where('[tripId+activityId]').equals([tripId, activityId]).toArray();
+      const currentMediaIds = currentMedia.map((mediaItem) => stripActivityMediaTripId(mediaItem).id);
       const requestedIds = new Set(orderedMediaIds);
       const missingIds = currentMediaIds.filter((id) => !requestedIds.has(id));
       const extraIds = orderedMediaIds.filter((id) => !currentMediaIds.includes(id));
@@ -587,30 +649,33 @@ export function createTripRepository(db: TripDb): TripRepository {
         throw createMediaOrderMismatchError('activity', currentMediaIds, orderedMediaIds);
       }
 
-      const mediaById = new Map(currentMedia.map((mediaItem) => [mediaItem.id, mediaItem]));
+      const mediaById = new Map(currentMedia.map((mediaItem) => [stripActivityMediaTripId(mediaItem).id, mediaItem]));
       const media = orderedMediaIds.map((id, index) => ({
-        ...mediaById.get(id)!,
+        ...stripActivityMediaTripId(mediaById.get(id)!),
         sortOrder: index,
       }));
 
-      await db.activityMedia.bulkPut(media);
+      await db.activityMedia.bulkPut(media.map((mediaItem) => storeActivityMedia(mediaItem, tripId)));
       return media.map(stripActivityMediaOwner);
     },
 
     async listRouteLegs(): Promise<RouteLeg[]> {
-      const routeLegs = await db.routeLegs.toArray();
+      const routeLegs = await db.routeLegs.where('tripId').equals(tripId).toArray();
 
       return routeLegs
-        .map((routeLeg) => normalizeRouteLeg(routeLeg as LegacyRouteLeg))
+        .map((routeLeg) => normalizeRouteLeg(stripRouteLegTripId(routeLeg) as LegacyRouteLeg))
         .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
     },
 
     async saveRouteLeg(routeLeg: RouteLeg): Promise<void> {
-      await db.routeLegs.put(routeLeg);
+      await db.routeLegs.put(storeRouteLeg(routeLeg, tripId));
     },
 
     async deleteRouteLeg(routeLegId: string): Promise<void> {
-      await db.routeLegs.delete(routeLegId);
+      const routeLeg = await db.routeLegs.get(localTripKey(tripId, routeLegId));
+      if (routeLeg?.tripId === tripId) {
+        await db.routeLegs.delete(localTripKey(tripId, routeLegId));
+      }
     },
 
     async replaceTripData(snapshot: {
@@ -619,14 +684,21 @@ export function createTripRepository(db: TripDb): TripRepository {
       activities?: Activity[];
     }): Promise<void> {
       await db.transaction('rw', db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
-        await db.destinations.clear();
-        await db.routeLegs.clear();
-        await db.activities.clear();
-        await db.activityMedia.clear();
-        await db.destinations.bulkPut(snapshot.destinations.map((destination, index) => normalizeDestination(destination, index)));
-        await db.routeLegs.bulkPut(snapshot.routeLegs);
+        const existingDestinations = await db.destinations.where('tripId').equals(tripId).toArray();
+        const existingRouteLegs = await db.routeLegs.where('tripId').equals(tripId).toArray();
+        const existingActivities = await db.activities.where('tripId').equals(tripId).toArray();
+        const existingActivityMedia = await db.activityMedia.where('tripId').equals(tripId).toArray();
+
+        await db.destinations.bulkDelete(existingDestinations.map((destination) => destination.id));
+        await db.routeLegs.bulkDelete(existingRouteLegs.map((routeLeg) => routeLeg.id));
+        await db.activities.bulkDelete(existingActivities.map((activity) => activity.id));
+        await db.activityMedia.bulkDelete(existingActivityMedia.map((mediaItem) => mediaItem.id));
+        await db.destinations.bulkPut(snapshot.destinations.map((destination, index) =>
+          storeDestination(normalizeDestination(destination, index), tripId),
+        ));
+        await db.routeLegs.bulkPut(snapshot.routeLegs.map((routeLeg) => storeRouteLeg(routeLeg, tripId)));
         if (snapshot.activities) {
-          await db.activities.bulkPut(snapshot.activities);
+          await db.activities.bulkPut(snapshot.activities.map((activity) => storeActivity(activity, tripId)));
         }
       });
     },

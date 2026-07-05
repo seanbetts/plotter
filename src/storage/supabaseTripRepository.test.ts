@@ -14,6 +14,7 @@ import {
   routeLegToSupabaseRow,
   createSupabaseTripRepository,
 } from './supabaseTripRepository';
+import { createSupabaseTripDirectoryRepository } from './tripDirectoryRepository';
 
 function createTripsTableMock(rows: Array<{ id: string; owner_user_id: string; name: string }>) {
   return {
@@ -25,6 +26,193 @@ function createTripsTableMock(rows: Array<{ id: string; owner_user_id: string; n
     })),
   };
 }
+
+describe('supabase trip directory repository', () => {
+  it('lists trips ordered by update time', async () => {
+    const rows = [
+      {
+        id: crypto.randomUUID(),
+        owner_user_id: crypto.randomUUID(),
+        name: 'Japan',
+        description: 'Cherry blossom route',
+        created_at: '2026-07-01T12:00:00.000Z',
+        updated_at: '2026-07-02T12:00:00.000Z',
+      },
+    ];
+    const orderCreatedAt = vi.fn(async () => ({ data: rows, error: null }));
+    const orderUpdatedAt = vi.fn(() => ({ order: orderCreatedAt }));
+    const supabase = {
+      from: vi.fn((tableName: string) => {
+        expect(tableName).toBe('trips');
+        return {
+          select: vi.fn(() => ({
+            order: orderUpdatedAt,
+          })),
+        };
+      }),
+    };
+    const repository = createSupabaseTripDirectoryRepository(supabase as never);
+
+    await expect(repository.listTrips()).resolves.toEqual([
+      {
+        id: rows[0].id,
+        name: 'Japan',
+        description: 'Cherry blossom route',
+        createdAt: '2026-07-01T12:00:00.000Z',
+        updatedAt: '2026-07-02T12:00:00.000Z',
+      },
+    ]);
+    expect(orderUpdatedAt).toHaveBeenCalledWith('updated_at', { ascending: false });
+    expect(orderCreatedAt).toHaveBeenCalledWith('created_at', { ascending: false });
+  });
+
+  it('creates a trip for the current Supabase user', async () => {
+    const userId = crypto.randomUUID();
+    const row = {
+      id: crypto.randomUUID(),
+      owner_user_id: userId,
+      name: 'South America',
+      description: '',
+      created_at: '2026-07-03T12:00:00.000Z',
+      updated_at: '2026-07-03T12:00:00.000Z',
+    };
+    const insert = vi.fn(() => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => ({ data: row, error: null })),
+      })),
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({ data: { user: { id: userId } }, error: null })),
+      },
+      from: vi.fn(() => ({ insert })),
+    };
+    const repository = createSupabaseTripDirectoryRepository(supabase as never);
+
+    await expect(repository.createTrip({ name: 'South America' })).resolves.toMatchObject({
+      id: row.id,
+      name: 'South America',
+    });
+    expect(insert).toHaveBeenCalledWith({
+      owner_user_id: userId,
+      name: 'South America',
+      description: '',
+    });
+  });
+
+  it('renames a trip', async () => {
+    const tripId = crypto.randomUUID();
+    const row = {
+      id: tripId,
+      owner_user_id: crypto.randomUUID(),
+      name: 'Renamed trip',
+      description: 'Updated',
+      created_at: '2026-07-01T12:00:00.000Z',
+      updated_at: '2026-07-03T12:00:00.000Z',
+    };
+    const eq = vi.fn(() => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => ({ data: row, error: null })),
+      })),
+    }));
+    const update = vi.fn(() => ({ eq }));
+    const supabase = {
+      from: vi.fn(() => ({ update })),
+    };
+    const repository = createSupabaseTripDirectoryRepository(supabase as never);
+
+    await expect(repository.updateTrip(tripId, {
+      name: 'Renamed trip',
+      description: 'Updated',
+    })).resolves.toMatchObject({
+      id: tripId,
+      name: 'Renamed trip',
+      description: 'Updated',
+    });
+    expect(update).toHaveBeenCalledWith({ name: 'Renamed trip', description: 'Updated' });
+    expect(eq).toHaveBeenCalledWith('id', tripId);
+  });
+
+  it('removes storage objects before deleting a trip row', async () => {
+    const tripId = crypto.randomUUID();
+    const remove = vi.fn(async () => ({ data: [], error: null }));
+    const deleteEq = vi.fn(async () => ({ error: null }));
+    const supabase = {
+      storage: {
+        from: vi.fn(() => ({ remove })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(async () => ({
+                data: [
+                  { bucket_id: 'trip-media', object_path: `${tripId}/stop/a.webp` },
+                  { bucket_id: 'trip-media', object_path: `${tripId}/stop/b.webp` },
+                ],
+                error: null,
+              })),
+            })),
+          };
+        }
+
+        if (tableName === 'trips') {
+          return {
+            delete: vi.fn(() => ({
+              eq: deleteEq,
+            })),
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripDirectoryRepository(supabase as never);
+
+    await repository.deleteTrip(tripId);
+
+    expect(supabase.storage.from).toHaveBeenCalledWith('trip-media');
+    expect(remove).toHaveBeenCalledWith([`${tripId}/stop/a.webp`, `${tripId}/stop/b.webp`]);
+    expect(deleteEq).toHaveBeenCalledWith('id', tripId);
+  });
+
+  it('does not delete the trip row when storage cleanup fails', async () => {
+    const tripId = crypto.randomUUID();
+    const deleteTrip = vi.fn();
+    const supabase = {
+      storage: {
+        from: vi.fn(() => ({
+          remove: vi.fn(async () => ({
+            data: null,
+            error: { message: 'Storage remove failed' },
+          })),
+        })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(async () => ({
+                data: [{ bucket_id: 'trip-media', object_path: `${tripId}/stop/a.webp` }],
+                error: null,
+              })),
+            })),
+          };
+        }
+
+        if (tableName === 'trips') {
+          return { delete: deleteTrip };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripDirectoryRepository(supabase as never);
+
+    await expect(repository.deleteTrip(tripId)).rejects.toThrow('Storage remove failed');
+    expect(deleteTrip).not.toHaveBeenCalled();
+  });
+});
 
 describe('supabase trip repository mappers', () => {
   it('maps destinations to and from Supabase rows', () => {
@@ -261,7 +449,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await repository.saveDestination(destination);
     await repository.saveRouteLeg(routeLeg);
@@ -380,7 +568,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await repository.deleteDestination(destinationId);
 
@@ -444,7 +632,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.listActivities(destinationId)).resolves.toEqual(
       rows.map(activityFromSupabaseRow),
@@ -515,7 +703,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     const activity = await repository.createActivity({
       destinationId,
@@ -599,7 +787,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await repository.createActivity({
       destinationId,
@@ -664,7 +852,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.updateActivity(activityId, {
       title: 'Updated title',
@@ -742,7 +930,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.updateActivity(activityId, { links })).resolves.toEqual(
       expect.objectContaining({ id: activityId, links }),
@@ -857,7 +1045,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await repository.deleteActivity(activityId);
 
@@ -937,7 +1125,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.reorderActivities(destinationId, [second.id, first.id])).resolves.toEqual([
       expect.objectContaining({ id: second.id, order: 0 }),
@@ -1016,7 +1204,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await repository.replaceTripData({
       destinations: [destination],
@@ -1042,67 +1230,34 @@ describe('supabase trip repository mappers', () => {
     ]);
   });
 
-  it('uses the visible trip with planning data instead of a newer empty anonymous trip', async () => {
-    const emptyTripId = crypto.randomUUID();
-    const plannedTripId = crypto.randomUUID();
+  it('loads only destinations for the explicit trip id', async () => {
+    const tripId = crypto.randomUUID();
     const destination = createDestination({
       name: 'Kyoto',
       coordinates: { lat: 35.6764, lng: 139.65 },
     });
-    const destinationRow = destinationToSupabaseRow(destination, plannedTripId);
-    const destinationsByTrip = [{ trip_id: plannedTripId }, { trip_id: plannedTripId }];
-    const routeLegsByTrip = [{ trip_id: plannedTripId }];
-
+    const destinationRow = destinationToSupabaseRow(destination, tripId);
+    const eq = vi.fn(() => ({
+      order: vi.fn(() => ({
+        order: vi.fn(async () => ({ data: [destinationRow], error: null })),
+      })),
+    }));
     const supabase = {
-      auth: {
-        getUser: vi.fn(async () => ({
-          data: { user: { id: crypto.randomUUID() } },
-          error: null,
-        })),
-      },
       from: vi.fn((tableName: string) => {
-        if (tableName === 'trips') {
-          return createTripsTableMock([
-            { id: emptyTripId, owner_user_id: crypto.randomUUID(), name: 'Empty trip' },
-            { id: plannedTripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
-          ]);
+        if (tableName !== 'destinations') {
+          throw new Error(`Unexpected table ${tableName}`);
         }
 
-        if (tableName === 'destinations') {
-          return {
-            select: vi.fn((columns: string) => {
-              if (columns === 'trip_id') {
-                return {
-                  in: vi.fn(async () => ({ data: destinationsByTrip, error: null })),
-                };
-              }
-
-              return {
-                eq: vi.fn(() => ({
-                  order: vi.fn(() => ({
-                    order: vi.fn(async () => ({ data: [destinationRow], error: null })),
-                  })),
-                })),
-              };
-            }),
-          };
-        }
-
-        if (tableName === 'route_legs') {
-          return {
-            select: vi.fn(() => ({
-              in: vi.fn(async () => ({ data: routeLegsByTrip, error: null })),
-            })),
-          };
-        }
-
-        throw new Error(`Unexpected table ${tableName}`);
+        return {
+          select: vi.fn(() => ({ eq })),
+        };
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.listDestinations()).resolves.toEqual([destination]);
-    expect(supabase.from).toHaveBeenCalledWith('trips');
+    expect(eq).toHaveBeenCalledWith('trip_id', tripId);
+    expect(supabase.from).not.toHaveBeenCalledWith('trips');
   });
 
   it('uploads destination media to trip-scoped Supabase Storage and records metadata', async () => {
@@ -1174,7 +1329,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
     const file = new File(['image-data'], 'Paris sunset.JPG', { type: 'image/jpeg' });
 
     const mediaItem = await repository.uploadDestinationMedia({
@@ -1312,7 +1467,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
     const file = new File(['image-data'], 'Aurora.JPG', { type: 'image/jpeg' });
 
     const mediaItem = await repository.uploadDestinationMedia({
@@ -1389,7 +1544,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.uploadDestinationMedia({
       destinationId,
@@ -1463,7 +1618,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.uploadDestinationMedia({
       destinationId,
@@ -1534,7 +1689,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never, {
+    const repository = createSupabaseTripRepository(supabase as never, tripId, {
       importImageFunctionUrl: 'https://project.supabase.co/functions/v1/import-image',
       publishableKey: 'publishable-key',
       fetcher,
@@ -1626,7 +1781,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never, {
+    const repository = createSupabaseTripRepository(supabase as never, tripId, {
       importImageFunctionUrl: 'https://project.supabase.co/functions/v1/import-image',
       publishableKey: 'publishable-key',
       fetcher,
@@ -1697,7 +1852,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never, {
+    const repository = createSupabaseTripRepository(supabase as never, tripId, {
       importImageFunctionUrl: 'https://project.supabase.co/functions/v1/import-image',
       publishableKey: 'publishable-key',
       fetcher,
@@ -1755,7 +1910,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never, {
+    const repository = createSupabaseTripRepository(supabase as never, tripId, {
       importImageFunctionUrl: 'https://project.supabase.co/functions/v1/import-image',
       publishableKey: 'publishable-key',
       fetcher,
@@ -1840,7 +1995,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     expect(mediaAssetFromSupabaseRow(rows[0], 'https://signed.example/asset.webp')).toEqual(
       expect.objectContaining({
@@ -1978,7 +2133,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
     const file = new File(['image-data'], 'Louvre.JPG', { type: 'image/jpeg' });
 
     await expect(repository.uploadActivityMedia({
@@ -2049,7 +2204,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.uploadActivityMedia({
       destinationId,
@@ -2120,7 +2275,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.uploadActivityMedia({
       destinationId,
@@ -2234,7 +2389,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.uploadActivityMedia({
       destinationId,
@@ -2308,7 +2463,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.listActivityMedia(activityId)).resolves.toEqual([
       expect.objectContaining({
@@ -2472,7 +2627,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     const rollup = await repository.listDestinationMediaRollup(destinationId);
 
@@ -2540,7 +2695,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.updateDestinationMedia(mediaId, {
       caption: 'New caption',
@@ -2613,7 +2768,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.updateActivityMedia(mediaId, {
       caption: 'New caption',
@@ -2694,7 +2849,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await repository.deleteDestinationMedia(mediaId);
 
@@ -2770,7 +2925,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await repository.deleteActivityMedia(mediaId);
 
@@ -2880,7 +3035,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
     const { reorderDestinationMedia } = repository;
 
     await expect(reorderDestinationMedia(destinationId, [secondId, firstId])).resolves.toEqual([
@@ -2965,7 +3120,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.reorderDestinationMedia(destinationId, [firstId, foreignId]))
       .rejects.toThrow(`missing ${secondId}`);
@@ -3095,7 +3250,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.reorderActivityMedia(activityId, [secondId, firstId])).resolves.toEqual([
       expect.objectContaining({ id: secondId, sortOrder: 0 }),
@@ -3183,7 +3338,7 @@ describe('supabase trip repository mappers', () => {
         throw new Error(`Unexpected table ${tableName}`);
       }),
     };
-    const repository = createSupabaseTripRepository(supabase as never);
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
 
     await expect(repository.reorderActivityMedia(activityId, []))
       .rejects.toThrow('Activity not found.');

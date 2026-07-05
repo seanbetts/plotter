@@ -11,9 +11,9 @@ import {
 import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
+import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { WebImageSearchClient, WebImageSearchResult } from './services/webImageSearchClient';
-import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
 
 type Deferred<T> = {
@@ -179,8 +179,41 @@ const linkPreviewClientMock = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock('./storage/appRepository', () => ({
-  createAppTripRepository: vi.fn(async () => repositoryMock),
+const tripsMock = [
+  {
+    id: 'trip-one',
+    name: 'World tour',
+    description: '',
+    createdAt: '2026-07-01T10:00:00.000Z',
+    updatedAt: '2026-07-01T10:00:00.000Z',
+  },
+  {
+    id: 'trip-two',
+    name: 'Japan winter',
+    description: '',
+    createdAt: '2026-07-02T10:00:00.000Z',
+    updatedAt: '2026-07-02T10:00:00.000Z',
+  },
+];
+
+function mockTripWorkspace(overrides: Partial<ReturnType<typeof useTripWorkspace>> = {}) {
+  vi.mocked(useTripWorkspace).mockReturnValue({
+    trips: tripsMock,
+    activeTrip: tripsMock[0],
+    repository: repositoryMock,
+    isLoading: false,
+    error: null,
+    actionError: null,
+    selectTrip: vi.fn(),
+    createTrip: vi.fn(),
+    renameActiveTrip: vi.fn(),
+    deleteTrip: vi.fn(),
+    ...overrides,
+  });
+}
+
+vi.mock('./hooks/useTripWorkspace', () => ({
+  useTripWorkspace: vi.fn(),
 }));
 
 vi.mock('./services/linkPreviewClient', () => ({
@@ -295,7 +328,7 @@ describe('App', () => {
     repositoryMock.updateActivityMedia.mockClear();
     repositoryMock.deleteActivityMedia.mockClear();
     repositoryMock.reorderActivityMedia.mockClear();
-    vi.mocked(createAppTripRepository).mockResolvedValue(repositoryMock);
+    mockTripWorkspace();
     linkPreviewClientMock.fetchPreview.mockReset();
     linkPreviewClientMock.fetchPreview.mockResolvedValue({
       url: 'https://example.com',
@@ -351,7 +384,13 @@ describe('App', () => {
   });
 
   it('shows a storage bootstrap error when the app repository cannot be prepared', async () => {
-    vi.mocked(createAppTripRepository).mockRejectedValue(new Error('Unable to create an anonymous Supabase session.'));
+    mockTripWorkspace({
+      repository: null,
+      error: {
+        title: 'Trip storage unavailable',
+        message: 'Unable to create an anonymous Supabase session.',
+      },
+    });
 
     render(<App />);
 
@@ -363,9 +402,13 @@ describe('App', () => {
   });
 
   it('shows Supabase setup guidance when storage configuration is missing', async () => {
-    vi.mocked(createAppTripRepository).mockRejectedValue(
-      new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.'),
-    );
+    mockTripWorkspace({
+      repository: null,
+      error: {
+        title: 'Supabase is not configured',
+        message: 'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
+      },
+    });
 
     render(<App />);
 
@@ -373,6 +416,37 @@ describe('App', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
     );
+  });
+
+  it('renders the trip selector above the stop panel and clears selected stop when the active trip changes', async () => {
+    const firstDestination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    repositoryMock.initialDestinations = Promise.resolve([firstDestination]);
+    const { rerender } = render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await userEvent.click(await screen.findByRole('button', { name: 'Select Paris' }));
+    expect(screen.getByRole('complementary', { name: 'Paris profile' })).toBeInTheDocument();
+
+    mockTripWorkspace({
+      trips: tripsMock,
+      activeTrip: tripsMock[1],
+      repository: repositoryMock,
+      isLoading: false,
+      error: null,
+      actionError: null,
+      selectTrip: vi.fn(),
+      createTrip: vi.fn(),
+      renameActiveTrip: vi.fn(),
+      deleteTrip: vi.fn(),
+    });
+    rerender(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /current trip: Japan winter/i })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Paris profile' })).not.toBeInTheDocument();
   });
 
   it('adds a searched destination without opening its profile after trip data loads', async () => {
@@ -2072,8 +2146,9 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Add stop at map center' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
 
-    await waitFor(() => expect(maplibreMock.mapInstances).toHaveLength(1));
-    const doubleClickHandler = maplibreMock.mapInstances[0].on.mock.calls.find(
+    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+    const currentMap = maplibreMock.mapInstances.at(-1)!;
+    const doubleClickHandler = currentMap.on.mock.calls.find(
       ([eventName]) => eventName === 'dblclick',
     )?.[1];
     expect(doubleClickHandler).toBeUndefined();

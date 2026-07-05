@@ -1,11 +1,35 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type { Activity, ActivityMediaRecord, Destination, RouteLeg } from '../domain/types';
+import type { TripSummary } from './tripDirectoryRepository';
+
+const defaultLocalTripId = 'local-default-trip';
 
 export type TripDb = Dexie & {
-  destinations: EntityTable<Destination, 'id'>;
-  routeLegs: EntityTable<RouteLeg, 'id'>;
-  activities: EntityTable<Activity, 'id'>;
-  activityMedia: EntityTable<ActivityMediaRecord, 'id'>;
+  trips: EntityTable<TripSummary, 'id'>;
+  destinations: EntityTable<StoredDestination, 'id'>;
+  routeLegs: EntityTable<StoredRouteLeg, 'id'>;
+  activities: EntityTable<StoredActivity, 'id'>;
+  activityMedia: EntityTable<StoredActivityMediaRecord, 'id'>;
+};
+
+export type StoredDestination = Destination & {
+  tripId: string;
+  entityId?: string;
+};
+
+export type StoredRouteLeg = RouteLeg & {
+  tripId: string;
+  entityId?: string;
+};
+
+export type StoredActivity = Activity & {
+  tripId: string;
+  entityId?: string;
+};
+
+export type StoredActivityMediaRecord = ActivityMediaRecord & {
+  tripId: string;
+  entityId?: string;
 };
 
 export function createTripDb(name = 'world-tour-planner'): TripDb {
@@ -32,6 +56,38 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
     routeLegs: 'id, originDestinationId, targetDestinationId, type, status, routeKey, updatedAt',
     activities: 'id, destinationId, order, title, status, priority, updatedAt',
     activityMedia: 'id, activityId, destinationId, sortOrder, uploadedAt',
+  });
+
+  db.version(5).stores({
+    trips: 'id, name, updatedAt, createdAt',
+    destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
+    routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, type, status, routeKey, updatedAt',
+    activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
+    activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
+  }).upgrade(async (transaction) => {
+    const timestamp = new Date().toISOString();
+    const [destinationCount, routeLegCount, activityCount, activityMediaCount] = await Promise.all([
+      transaction.table('destinations').count(),
+      transaction.table('routeLegs').count(),
+      transaction.table('activities').count(),
+      transaction.table('activityMedia').count(),
+    ]);
+
+    if (destinationCount + routeLegCount + activityCount + activityMediaCount === 0) return;
+
+    await transaction.table('trips').put({
+      id: defaultLocalTripId,
+      name: 'World tour',
+      description: '',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await Promise.all([
+      transaction.table('destinations').toCollection().modify({ tripId: defaultLocalTripId }),
+      transaction.table('routeLegs').toCollection().modify({ tripId: defaultLocalTripId }),
+      transaction.table('activities').toCollection().modify({ tripId: defaultLocalTripId }),
+      transaction.table('activityMedia').toCollection().modify({ tripId: defaultLocalTripId }),
+    ]);
   });
 
   return db;

@@ -14,6 +14,7 @@ import { MapCanvas } from './components/MapCanvas';
 import type { MapAddStopRequest } from './components/MapCanvas';
 import { RouteAlternativesPanel } from './components/RouteAlternativesPanel';
 import { TopToolbar } from './components/TopToolbar';
+import { TripSelector } from './components/TripSelector';
 import { buildTagSuggestions } from './components/tagEditorModel';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
 import { routeLegPatchFromRouteOption, type RouteOption } from './domain/routeOptions';
@@ -28,6 +29,7 @@ import type {
 import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
+import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { preloadImageUrls } from './media/imagePreloading';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { LinkPreviewClient } from './services/linkPreviewClient';
@@ -37,7 +39,7 @@ import type {
   WebImageSearchResult,
   WebImageSearchStopContext,
 } from './services/webImageSearchClient';
-import { createAppTripRepository } from './storage/appRepository';
+import type { TripSummary } from './storage/tripDirectoryRepository';
 import type { TripRepository } from './storage/tripRepository';
 import './styles.css';
 
@@ -45,11 +47,6 @@ const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? 
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 const mobileWorkspacePanelsQuery = '(max-width: 760px)';
 const stopsPanelCollapsedStorageKey = 'world-tour:stops-panel-collapsed';
-
-type RepositoryError = {
-  title: string;
-  message: string;
-};
 
 type PendingMapStop = {
   id: number;
@@ -91,29 +88,6 @@ const mapStopConfirmationApproxSize = {
   width: 320,
   height: 260,
 };
-
-function formatRepositoryError(caught: unknown): RepositoryError {
-  const message = caught instanceof Error ? caught.message : 'Unable to prepare trip storage';
-
-  if (message.includes('Supabase is not configured')) {
-    return {
-      title: 'Supabase is not configured',
-      message: 'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
-    };
-  }
-
-  if (message.includes('row-level security') || message.includes('permission denied')) {
-    return {
-      title: 'Supabase permission denied',
-      message,
-    };
-  }
-
-  return {
-    title: 'Trip storage unavailable',
-    message,
-  };
-}
 
 function formatCoordinate(value: number) {
   return value.toFixed(4);
@@ -226,41 +200,34 @@ function getAvailableOverlayHeight(position: OverlayPosition) {
 }
 
 export default function App({ webImageSearchClient: injectedWebImageSearchClient }: AppProps = {}) {
-  const [repository, setRepository] = useState<TripRepository | null>(null);
   const [linkPreviewClient, setLinkPreviewClient] = useState<LinkPreviewClient | null>(null);
-  const [webImageSearchClient, setWebImageSearchClient] = useState<WebImageSearchClient | null>(null);
-  const [repositoryError, setRepositoryError] = useState<RepositoryError | null>(null);
+  const [webImageSearchClient, setWebImageSearchClient] = useState<WebImageSearchClient | null>(
+    injectedWebImageSearchClient ?? null,
+  );
+  const {
+    trips,
+    activeTrip,
+    repository,
+    isLoading,
+    error,
+    actionError,
+    selectTrip,
+    createTrip,
+    renameActiveTrip,
+    deleteTrip,
+  } = useTripWorkspace();
 
   useEffect(() => {
-    let isCancelled = false;
+    setLinkPreviewClient(createAppLinkPreviewClient());
+  }, []);
 
-    Promise.resolve()
-      .then(() => {
-        const nextLinkPreviewClient = createAppLinkPreviewClient();
-        const nextWebImageSearchClient = injectedWebImageSearchClient ?? createAppWebImageSearchClient();
+  useEffect(() => {
+    if (injectedWebImageSearchClient) {
+      setWebImageSearchClient(injectedWebImageSearchClient);
+      return;
+    }
 
-        return createAppTripRepository().then((nextRepository) => ({
-          nextRepository,
-          nextLinkPreviewClient,
-          nextWebImageSearchClient,
-        }));
-      })
-      .then(({ nextRepository, nextLinkPreviewClient, nextWebImageSearchClient }) => {
-        if (isCancelled) return;
-
-        setRepository(nextRepository);
-        setLinkPreviewClient(nextLinkPreviewClient);
-        setWebImageSearchClient(nextWebImageSearchClient);
-      })
-      .catch((caught) => {
-        if (isCancelled) return;
-
-        setRepositoryError(formatRepositoryError(caught));
-      });
-
-    return () => {
-      isCancelled = true;
-    };
+    setWebImageSearchClient(createAppWebImageSearchClient());
   }, [injectedWebImageSearchClient]);
 
   if (!repository || !linkPreviewClient || !webImageSearchClient) {
@@ -274,13 +241,13 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
             onSelectDestination={() => undefined}
           />
           <div
-            className={repositoryError ? 'app-status app-status-error' : 'app-status'}
-            role={repositoryError ? 'alert' : 'status'}
+            className={error ? 'app-status app-status-error' : 'app-status'}
+            role={error ? 'alert' : 'status'}
           >
-            {repositoryError ? (
+            {error ? (
               <>
-                <strong>{repositoryError.title}</strong>
-                <span>{repositoryError.message}</span>
+                <strong>{error.title}</strong>
+                <span>{error.message}</span>
               </>
             ) : (
               'Loading trip data'
@@ -293,9 +260,18 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
 
   return (
     <TripWorkspace
+      key={activeTrip?.id}
       repository={repository}
       linkPreviewClient={linkPreviewClient}
       webImageSearchClient={webImageSearchClient}
+      trips={trips}
+      activeTrip={activeTrip}
+      tripActionError={actionError}
+      onSelectTrip={selectTrip}
+      onCreateTrip={createTrip}
+      onRenameActiveTrip={renameActiveTrip}
+      onDeleteTrip={deleteTrip}
+      isTripWorkspaceLoading={isLoading}
     />
   );
 }
@@ -304,10 +280,26 @@ function TripWorkspace({
   repository,
   linkPreviewClient,
   webImageSearchClient,
+  trips,
+  activeTrip,
+  tripActionError,
+  onSelectTrip,
+  onCreateTrip,
+  onRenameActiveTrip,
+  onDeleteTrip,
+  isTripWorkspaceLoading,
 }: {
   repository: TripRepository;
   linkPreviewClient: LinkPreviewClient;
   webImageSearchClient: WebImageSearchClient;
+  trips: TripSummary[];
+  activeTrip: TripSummary | null;
+  tripActionError: string | null;
+  onSelectTrip: (tripId: string) => void;
+  onCreateTrip: (name: string) => Promise<boolean | void> | boolean | void;
+  onRenameActiveTrip: (name: string) => Promise<boolean | void> | boolean | void;
+  onDeleteTrip: (tripId: string) => Promise<boolean | void> | boolean | void;
+  isTripWorkspaceLoading: boolean;
 }) {
   const calculateRoute = useCallback(
     (input: Omit<Parameters<typeof calculateOpenRouteServiceRoute>[0], 'apiKey'>) =>
@@ -350,7 +342,7 @@ function TripWorkspace({
   const activePendingMapStopIdRef = useRef<number | null>(null);
   const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedMapStopElementRef = useRef<HTMLElement | null>(null);
-  const isInteractionLocked = isLoading;
+  const isInteractionLocked = isLoading || isTripWorkspaceLoading;
   const routeLegsById = useMemo(
     () => new Map(routeLegs.map((routeLeg) => [routeLeg.id, routeLeg])),
     [routeLegs],
@@ -1041,18 +1033,29 @@ function TripWorkspace({
               resolveSearchResult={resolveSearchResult}
               onAddDestination={handleAddDestination}
             />
-            <ItineraryPanel
-              destinations={destinations}
-              routeLegs={routeLegs}
-              selectedDestinationId={selectedDestinationId}
-              isCollapsed={isStopsPanelCollapsed}
-              onToggleCollapsed={() => setIsStopsPanelCollapsed((isCollapsed) => !isCollapsed)}
-              onSelectDestination={handleSelectDestination}
-              onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
-              onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
-              onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
-              onEditRouteLeg={(routeLegId) => void openRouteAlternatives(routeLegId)}
-            />
+            <div className="workspace-left-stack">
+              <TripSelector
+                trips={trips}
+                activeTrip={activeTrip}
+                actionError={tripActionError}
+                onSelectTrip={onSelectTrip}
+                onCreateTrip={onCreateTrip}
+                onRenameActiveTrip={onRenameActiveTrip}
+                onDeleteTrip={onDeleteTrip}
+              />
+              <ItineraryPanel
+                destinations={destinations}
+                routeLegs={routeLegs}
+                selectedDestinationId={selectedDestinationId}
+                isCollapsed={isStopsPanelCollapsed}
+                onToggleCollapsed={() => setIsStopsPanelCollapsed((isCollapsed) => !isCollapsed)}
+                onSelectDestination={handleSelectDestination}
+                onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
+                onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
+                onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
+                onEditRouteLeg={(routeLegId) => void openRouteAlternatives(routeLegId)}
+              />
+            </div>
           </>
         ) : null}
         {!isInteractionLocked && pendingMapStop && pendingMapStopPosition ? (

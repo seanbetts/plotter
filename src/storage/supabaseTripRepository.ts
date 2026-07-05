@@ -79,17 +79,6 @@ type SupabaseRouteLegRow = {
   updated_at: string;
 };
 
-type SupabaseTripRow = {
-  id: string;
-  owner_user_id: string;
-  name: string;
-  created_at?: string;
-};
-
-type SupabaseTripReferenceRow = {
-  trip_id: string;
-};
-
 type SupabaseMediaAssetRow = {
   id: string;
   trip_id: string;
@@ -435,80 +424,9 @@ export function mediaAssetFromSupabaseRow(
 
 export function createSupabaseTripRepository(
   supabase: SupabaseClient,
+  tripId: string,
   options: SupabaseTripRepositoryOptions = {},
 ): TripRepository {
-  let activeTripId: string | null = null;
-
-  async function chooseTripWithPlanningData(trips: SupabaseTripRow[]) {
-    if (trips.length <= 1) return trips[0];
-
-    const tripIds = trips.map((trip) => trip.id);
-    const [destinationRows, routeLegRows] = await Promise.all([
-      assertNoSupabaseError<SupabaseTripReferenceRow[]>(
-        await supabase.from('destinations').select('trip_id').in('trip_id', tripIds),
-        'Unable to load destination trip counts.',
-      ),
-      assertNoSupabaseError<SupabaseTripReferenceRow[]>(
-        await supabase.from('route_legs').select('trip_id').in('trip_id', tripIds),
-        'Unable to load route leg trip counts.',
-      ),
-    ]);
-    const planningCountsByTripId = new Map(tripIds.map((tripId) => [tripId, 0]));
-
-    for (const row of [...destinationRows, ...routeLegRows]) {
-      planningCountsByTripId.set(
-        row.trip_id,
-        (planningCountsByTripId.get(row.trip_id) ?? 0) + 1,
-      );
-    }
-
-    return trips.reduce((bestTrip, trip) => {
-      const bestCount = planningCountsByTripId.get(bestTrip.id) ?? 0;
-      const tripCount = planningCountsByTripId.get(trip.id) ?? 0;
-
-      return tripCount > bestCount ? trip : bestTrip;
-    });
-  }
-
-  async function getActiveTripId() {
-    if (activeTripId) return activeTripId;
-
-    const userResponse = await supabase.auth.getUser();
-    const user = userResponse.data.user;
-    if (userResponse.error || !user) {
-      throw new Error(userResponse.error?.message || 'Sign in before syncing trip data.');
-    }
-
-    const existingTrip = assertNoSupabaseError<SupabaseTripRow[]>(
-      await supabase
-        .from('trips')
-        .select('id, owner_user_id, name, created_at')
-        .order('created_at', { ascending: true }),
-      'Unable to load trips.',
-    );
-    const selectedTrip = await chooseTripWithPlanningData(existingTrip);
-
-    if (selectedTrip) {
-      activeTripId = selectedTrip.id;
-      return activeTripId;
-    }
-
-    const createdTrip = assertNoSupabaseError<SupabaseTripRow>(
-      await supabase
-        .from('trips')
-        .insert({
-          owner_user_id: user.id,
-          name: 'World tour',
-        })
-        .select('id, owner_user_id, name')
-        .single(),
-      'Unable to create a trip.',
-    );
-
-    activeTripId = createdTrip.id;
-    return activeTripId;
-  }
-
   async function listExistingDestinationMediaSortOrders(tripId: string, destinationId: string) {
     return assertNoSupabaseError<Pick<SupabaseMediaAssetRow, 'sort_order'>[]>(
       await supabase
@@ -877,7 +795,6 @@ export function createSupabaseTripRepository(
 
   return {
     async listDestinations() {
-      const tripId = await getActiveTripId();
       const rows = assertNoSupabaseError<SupabaseDestinationRow[]>(
         await supabase
           .from('destinations')
@@ -892,7 +809,6 @@ export function createSupabaseTripRepository(
     },
 
     async saveDestination(destination) {
-      const tripId = await getActiveTripId();
       const row = destinationToSupabaseRow(destination, tripId);
 
       assertSupabaseWriteSucceeded(
@@ -902,7 +818,6 @@ export function createSupabaseTripRepository(
     },
 
     async deleteDestination(destinationId) {
-      const tripId = await getActiveTripId();
       const mediaRows = await loadAllDestinationMediaRows(tripId, destinationId);
       const objectPathsByBucketId = new Map<string, string[]>();
 
@@ -928,12 +843,10 @@ export function createSupabaseTripRepository(
     },
 
     async listActivities(destinationId) {
-      const tripId = await getActiveTripId();
       return listTripActivities(tripId, destinationId);
     },
 
     async createActivity(input) {
-      const tripId = await getActiveTripId();
       const existingActivities = await listTripActivities(tripId, input.destinationId);
       const nextOrder =
         existingActivities.reduce((maxOrder, activity) => Math.max(maxOrder, activity.order), -1) + 1;
@@ -955,7 +868,6 @@ export function createSupabaseTripRepository(
     },
 
     async updateActivity(activityId, patch) {
-      const tripId = await getActiveTripId();
       const rowPatch: Partial<Pick<
         SupabaseActivityRow,
         'activity_order' | 'title' | 'description' | 'category' | 'status' | 'priority' | 'location' | 'links' | 'notes' | 'tags'
@@ -987,7 +899,6 @@ export function createSupabaseTripRepository(
     },
 
     async deleteActivity(activityId) {
-      const tripId = await getActiveTripId();
       const mediaRows = await loadActivityMediaRows(tripId, activityId);
       const objectPathsByBucketId = new Map<string, string[]>();
 
@@ -1013,7 +924,6 @@ export function createSupabaseTripRepository(
     },
 
     async reorderActivities(destinationId, orderedActivityIds) {
-      const tripId = await getActiveTripId();
       const currentActivities = await listTripActivities(tripId, destinationId);
       const orderedActivities = reorderActivityModels(currentActivities, orderedActivityIds);
 
@@ -1030,12 +940,10 @@ export function createSupabaseTripRepository(
     },
 
     async listDestinationMedia(destinationId) {
-      const tripId = await getActiveTripId();
       return listSignedDestinationMedia(tripId, destinationId);
     },
 
     async uploadDestinationMedia(input) {
-      const tripId = await getActiveTripId();
       const userResponse = await supabase.auth.getUser();
       const user = userResponse.data.user;
       if (userResponse.error || !user) {
@@ -1080,7 +988,6 @@ export function createSupabaseTripRepository(
     },
 
     async importDestinationMediaFromSearch(input) {
-      const tripId = await getActiveTripId();
       const importImageSupabase = supabase as ImportImageSupabaseClient;
       const mediaAsset = await invokeImportImageFunction({
         tripId,
@@ -1092,7 +999,6 @@ export function createSupabaseTripRepository(
     },
 
     async listDestinationMediaRollup(destinationId): Promise<MediaRollupItem[]> {
-      const tripId = await getActiveTripId();
       const destinationMedia = await listSignedDestinationMedia(tripId, destinationId);
       const activities = await listTripActivities(tripId, destinationId);
       const activityMediaRows = await loadDestinationActivityMediaRows(tripId, destinationId);
@@ -1131,12 +1037,10 @@ export function createSupabaseTripRepository(
     },
 
     async listActivityMedia(activityId) {
-      const tripId = await getActiveTripId();
       return listSignedActivityMedia(tripId, activityId);
     },
 
     async uploadActivityMedia(input) {
-      const tripId = await getActiveTripId();
       const userResponse = await supabase.auth.getUser();
       const user = userResponse.data.user;
       if (userResponse.error || !user) {
@@ -1188,7 +1092,6 @@ export function createSupabaseTripRepository(
     },
 
     async importActivityMediaFromSearch(input) {
-      const tripId = await getActiveTripId();
       const importImageSupabase = supabase as ImportImageSupabaseClient;
       const mediaAsset = await invokeImportImageFunction({
         tripId,
@@ -1201,7 +1104,6 @@ export function createSupabaseTripRepository(
     },
 
     async updateDestinationMedia(mediaId, patch) {
-      const tripId = await getActiveTripId();
       const rowPatch: Pick<Partial<SupabaseMediaAssetRow>, 'caption' | 'credit'> = {};
 
       if (patch.caption !== undefined) {
@@ -1228,7 +1130,6 @@ export function createSupabaseTripRepository(
     },
 
     async updateActivityMedia(mediaId, patch) {
-      const tripId = await getActiveTripId();
       const rowPatch: Pick<Partial<SupabaseMediaAssetRow>, 'caption' | 'credit'> = {};
 
       if (patch.caption !== undefined) {
@@ -1255,7 +1156,6 @@ export function createSupabaseTripRepository(
     },
 
     async deleteDestinationMedia(mediaId) {
-      const tripId = await getActiveTripId();
       const row = assertNoSupabaseError<SupabaseMediaAssetRow>(
         await supabase
           .from('media_assets')
@@ -1280,7 +1180,6 @@ export function createSupabaseTripRepository(
     },
 
     async deleteActivityMedia(mediaId) {
-      const tripId = await getActiveTripId();
       const row = assertNoSupabaseError<SupabaseMediaAssetRow>(
         await supabase
           .from('media_assets')
@@ -1305,7 +1204,6 @@ export function createSupabaseTripRepository(
     },
 
     async reorderDestinationMedia(destinationId, orderedMediaIds) {
-      const tripId = await getActiveTripId();
       const rows = await loadDestinationMediaRows(tripId, destinationId);
       const currentIds = rows.map((row) => row.id);
       const requestedIds = new Set(orderedMediaIds);
@@ -1342,7 +1240,6 @@ export function createSupabaseTripRepository(
     },
 
     async reorderActivityMedia(activityId, orderedMediaIds) {
-      const tripId = await getActiveTripId();
       await assertActivityExists(tripId, activityId);
 
       const rows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
@@ -1388,7 +1285,6 @@ export function createSupabaseTripRepository(
     },
 
     async listRouteLegs() {
-      const tripId = await getActiveTripId();
       const rows = assertNoSupabaseError<SupabaseRouteLegRow[]>(
         await supabase
           .from('route_legs')
@@ -1402,7 +1298,6 @@ export function createSupabaseTripRepository(
     },
 
     async saveRouteLeg(routeLeg) {
-      const tripId = await getActiveTripId();
       const row = routeLegToSupabaseRow(routeLeg, tripId);
 
       assertSupabaseWriteSucceeded(
@@ -1412,7 +1307,6 @@ export function createSupabaseTripRepository(
     },
 
     async deleteRouteLeg(routeLegId) {
-      const tripId = await getActiveTripId();
 
       assertSupabaseWriteSucceeded(
         await supabase
@@ -1425,7 +1319,6 @@ export function createSupabaseTripRepository(
     },
 
     async replaceTripData(snapshot) {
-      const tripId = await getActiveTripId();
 
       const destinationRows = snapshot.destinations.map((destination) =>
         destinationToSupabaseRow(destination, tripId),

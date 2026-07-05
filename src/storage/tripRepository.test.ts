@@ -4,6 +4,7 @@ import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg } from '../domain/routeLegs';
 import { createTripDb } from './tripDb';
+import { createLocalTripDirectoryRepository } from './tripDirectoryRepository';
 import { createTripRepository } from './tripRepository';
 
 describe('trip repository', () => {
@@ -18,13 +19,126 @@ describe('trip repository', () => {
     testDatabases.length = 0;
   });
 
-  function createTestRepository() {
+  function createTestRepository(tripId = 'local-default-trip') {
     const name = `world-tour-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
 
-    return createTripRepository(db);
+    return createTripRepository(db, tripId);
   }
+
+  it('keeps local destinations isolated by trip id', async () => {
+    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const db = createTripDb(name);
+    testDatabases.push({ db, name });
+    const firstTrip = createTripRepository(db, 'trip-one');
+    const secondTrip = createTripRepository(db, 'trip-two');
+    const firstDestination = createDestination({
+      name: 'Lisbon',
+      coordinates: { lat: 38.7223, lng: -9.1393 },
+    });
+    const secondDestination = createDestination({
+      name: 'Seoul',
+      coordinates: { lat: 37.5665, lng: 126.978 },
+    });
+
+    await firstTrip.saveDestination(firstDestination);
+    await secondTrip.saveDestination(secondDestination);
+
+    expect((await firstTrip.listDestinations()).map((destination) => destination.name)).toEqual(['Lisbon']);
+    expect((await secondTrip.listDestinations()).map((destination) => destination.name)).toEqual(['Seoul']);
+  });
+
+  it('keeps imported local rows isolated when different trips use the same entity ids', async () => {
+    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const db = createTripDb(name);
+    testDatabases.push({ db, name });
+    const firstTrip = createTripRepository(db, 'trip-one');
+    const secondTrip = createTripRepository(db, 'trip-two');
+    const sharedDestination = createDestination({
+      name: 'Shared import',
+      coordinates: { lat: 1, lng: 1 },
+    });
+
+    await firstTrip.replaceTripData({
+      destinations: [sharedDestination],
+      routeLegs: [],
+    });
+    await secondTrip.replaceTripData({
+      destinations: [{ ...sharedDestination, name: 'Shared import in second trip' }],
+      routeLegs: [],
+    });
+
+    expect((await firstTrip.listDestinations()).map((destination) => destination.name)).toEqual(['Shared import']);
+    expect((await secondTrip.listDestinations()).map((destination) => destination.name)).toEqual([
+      'Shared import in second trip',
+    ]);
+  });
+
+  it('creates, renames, lists, and deletes local trips', async () => {
+    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const db = createTripDb(name);
+    testDatabases.push({ db, name });
+    const directory = createLocalTripDirectoryRepository(db);
+
+    const trip = await directory.createTrip({ name: 'Alps' });
+    await expect(directory.listTrips()).resolves.toEqual([trip]);
+
+    const renamed = await directory.updateTrip(trip.id, { name: 'Alps winter' });
+    expect(renamed.name).toBe('Alps winter');
+
+    await directory.deleteTrip(trip.id);
+    await expect(directory.listTrips()).resolves.toEqual([]);
+  });
+
+  it('deletes local trip contents when deleting a trip', async () => {
+    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const db = createTripDb(name);
+    testDatabases.push({ db, name });
+    const directory = createLocalTripDirectoryRepository(db);
+    const trip = await directory.createTrip({ name: 'Atlas' });
+    const repository = createTripRepository(db, trip.id);
+    const destination = createDestination({
+      name: 'Marrakesh',
+      coordinates: { lat: 31.6295, lng: -7.9811 },
+    });
+
+    await repository.saveDestination(destination);
+    await directory.deleteTrip(trip.id);
+
+    await expect(repository.listDestinations()).resolves.toEqual([]);
+  });
+
+  it('backfills existing v4 local rows into the default trip during upgrade', async () => {
+    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const legacyDb = new Dexie(name);
+    const legacyDestination = createDestination({
+      name: 'Legacy Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    legacyDb.version(4).stores({
+      destinations: 'id, order, name, countryRegion, status, priority, updatedAt',
+      routeLegs: 'id, originDestinationId, targetDestinationId, type, status, routeKey, updatedAt',
+      activities: 'id, destinationId, order, title, status, priority, updatedAt',
+      activityMedia: 'id, activityId, destinationId, sortOrder, uploadedAt',
+    });
+    await legacyDb.table('destinations').put(legacyDestination);
+    legacyDb.close();
+
+    const upgradedDb = createTripDb(name);
+    testDatabases.push({ db: upgradedDb, name });
+    const directory = createLocalTripDirectoryRepository(upgradedDb);
+    const repository = createTripRepository(upgradedDb);
+
+    await expect(directory.listTrips()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'local-default-trip',
+        name: 'World tour',
+      }),
+    ]);
+    await expect(repository.listDestinations()).resolves.toEqual([legacyDestination]);
+  });
 
   it('creates, lists, updates, and deletes destinations', async () => {
     const repository = createTestRepository();

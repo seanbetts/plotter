@@ -23,6 +23,63 @@ const parisResult = [
   },
 ];
 
+test('creates and switches personal trips without Supabase', async ({ baseURL, context, page }) => {
+  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
+  const cdpSession = await context.newCDPSession(page);
+
+  await cdpSession.send('Storage.clearDataForOrigin', {
+    origin,
+    storageTypes: 'indexeddb',
+  });
+
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    const url = new URL(route.request().url());
+    const query = decodeURIComponent(url.pathname.replace('/geocoding/', '').replace('.json', ''));
+    const features = query === 'Kyoto'
+      ? [
+          {
+            id: 'place.kyoto',
+            text: 'Kyoto',
+            place_name: 'Kyoto, Japan',
+            center: [135.7681, 35.0116],
+            properties: { country_code: 'jp' },
+            context: [{ id: 'country.1', text: 'Japan', short_code: 'jp' }],
+          },
+        ]
+      : [];
+
+    await route.fulfill({
+      contentType: 'application/json',
+      json: { features },
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByLabel('Search for a destination')).toBeVisible();
+
+  await page.getByRole('button', { name: /current trip/i }).click();
+  await page.getByRole('menuitem', { name: 'New trip' }).click();
+  await page.getByLabel('Trip name').fill('Japan winter');
+  await page.getByRole('button', { name: 'Create trip' }).click();
+
+  await expect(page.getByRole('button', { name: /current trip: Japan winter/i })).toBeVisible();
+
+  await page.getByLabel('Search for a destination').fill('Kyoto');
+  await page.getByRole('option', { name: 'Kyoto, Japan' }).click();
+  await expect(page.getByRole('button', { name: 'Kyoto, Japan' })).toBeVisible();
+
+  await page.getByRole('button', { name: /current trip/i }).click();
+  await page.getByRole('menuitemradio', { name: 'World tour' }).click();
+
+  await expect(page.getByRole('button', { name: /current trip: World tour/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Kyoto, Japan' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: /current trip/i }).click();
+  await page.getByRole('menuitemradio', { name: 'Japan winter' }).click();
+
+  await expect(page.getByRole('button', { name: 'Kyoto, Japan' })).toBeVisible();
+});
+
 test('searches and saves an Istanbul destination profile', async ({ baseURL, context, page }) => {
   const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
   const cdpSession = await context.newCDPSession(page);
@@ -182,9 +239,9 @@ test('opens an activity panel with image region beside the selected stop', async
   });
 
   await activityPanel.getByLabel('Search web images').fill('mural');
-  await activityPanel.getByRole('option', { name: 'Import mural in Paris from Local image search' }).click();
+  await activityPanel.getByRole('option', { name: 'Import mural in Morning Louvre from Local image search' }).click();
 
-  await expect(activityPanel.getByRole('button', { name: 'Open full image: mural in Paris' })).toBeVisible();
+  await expect(activityPanel.getByRole('button', { name: 'Open full image: mural in Morning Louvre' })).toBeVisible();
   expect(openedFileChooser).toBe(false);
 
   const activityBox = await activityPanel.boundingBox();

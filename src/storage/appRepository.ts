@@ -3,7 +3,11 @@ import { createSupabaseTripRepository } from './supabaseTripRepository';
 import { tripDb } from './tripDb';
 import { createTripRepository } from './tripRepository';
 import type { TripRepository } from './tripRepository';
-import type { Activity } from '../domain/types';
+import {
+  createLocalTripDirectoryRepository,
+  createSupabaseTripDirectoryRepository,
+  type TripDirectoryRepository,
+} from './tripDirectoryRepository';
 
 type BrowserSupabaseClient = ReturnType<typeof createBrowserSupabaseClient>;
 
@@ -27,18 +31,23 @@ type SupabaseAuthClient = {
   };
 };
 
-type MigrationStorage = Pick<Storage, 'getItem' | 'setItem'>;
+export const selectedTripStorageKey = 'world-tour:selected-trip-id';
 
-type CreateAppTripRepositoryOptions = {
+type AppTripStorage = {
+  directory: TripDirectoryRepository;
+  createTripRepository: (tripId: string) => TripRepository;
+};
+
+type CreateAppTripStorageOptions = {
   isSupabaseConfigured?: boolean;
   tripStorageMode?: string;
   localRepository?: TripRepository;
+  localDirectory?: TripDirectoryRepository;
+  createLocalRepository?: (tripId: string) => TripRepository;
   createSupabaseClient?: () => SupabaseAuthClient;
-  createSupabaseRepository?: (supabase: SupabaseAuthClient) => TripRepository;
-  storage?: MigrationStorage;
+  createSupabaseDirectory?: (supabase: SupabaseAuthClient) => TripDirectoryRepository;
+  createSupabaseRepository?: (supabase: SupabaseAuthClient, tripId: string) => TripRepository;
 };
-
-const migrationKeyForUser = (userId: string) => `world-tour:supabase-migrated:${userId}`;
 
 export async function ensureAnonymousSession(supabase: SupabaseAuthClient) {
   const existingUser = await supabase.auth.getUser();
@@ -56,72 +65,46 @@ export async function ensureAnonymousSession(supabase: SupabaseAuthClient) {
   return anonymousUser.data.user;
 }
 
-async function migrateLocalTripDataOnce(input: {
-  userId: string;
-  localRepository: TripRepository;
-  cloudRepository: TripRepository;
-  storage: MigrationStorage;
-}) {
-  const migrationKey = migrationKeyForUser(input.userId);
-  if (input.storage.getItem(migrationKey) === 'true') return;
-
-  const [cloudDestinations, cloudRouteLegs] = await Promise.all([
-    input.cloudRepository.listDestinations(),
-    input.cloudRepository.listRouteLegs(),
-  ]);
-  if (cloudDestinations.length > 0 || cloudRouteLegs.length > 0) {
-    input.storage.setItem(migrationKey, 'true');
-    return;
-  }
-
-  const [localDestinations, localRouteLegs] = await Promise.all([
-    input.localRepository.listDestinations(),
-    input.localRepository.listRouteLegs(),
-  ]);
-  const localActivities: Activity[] = (
-    await Promise.all(
-      localDestinations.map((destination) => input.localRepository.listActivities(destination.id)),
-    )
-  ).flat();
-
-  if (localDestinations.length > 0 || localRouteLegs.length > 0 || localActivities.length > 0) {
-    await input.cloudRepository.replaceTripData({
-      destinations: localDestinations,
-      routeLegs: localRouteLegs,
-      activities: localActivities,
-    });
-  }
-
-  input.storage.setItem(migrationKey, 'true');
-}
-
-export async function createAppTripRepository(options: CreateAppTripRepositoryOptions = {}) {
+export async function createAppTripStorage(
+  options: CreateAppTripStorageOptions = {},
+): Promise<AppTripStorage> {
   const isSupabaseConfigured = options.isSupabaseConfigured ?? defaultIsSupabaseConfigured;
   const tripStorageMode = options.tripStorageMode ?? import.meta.env.VITE_TRIP_STORAGE;
-  const localRepository = options.localRepository ?? createTripRepository(tripDb);
+  const createLocalRepository =
+    options.createLocalRepository ??
+    ((tripId: string) => options.localRepository ?? createTripRepository(tripDb, tripId));
+  const localDirectory = options.localDirectory ?? createLocalTripDirectoryRepository(tripDb);
 
   if (tripStorageMode === 'e2e-local') {
-    return localRepository;
+    return {
+      directory: localDirectory,
+      createTripRepository: createLocalRepository,
+    };
   }
 
   if (!isSupabaseConfigured) {
     throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.');
   }
 
-  const storage = options.storage ?? window.localStorage;
   const createSupabaseClient = options.createSupabaseClient ?? createBrowserSupabaseClient;
   const supabase = createSupabaseClient();
-  const user = await ensureAnonymousSession(supabase);
-  const cloudRepository = options.createSupabaseRepository
-    ? options.createSupabaseRepository(supabase)
-    : createSupabaseTripRepository(supabase as BrowserSupabaseClient);
+  await ensureAnonymousSession(supabase);
 
-  await migrateLocalTripDataOnce({
-    userId: user.id,
-    localRepository,
-    cloudRepository,
-    storage,
-  });
+  return {
+    directory: options.createSupabaseDirectory
+      ? options.createSupabaseDirectory(supabase)
+      : createSupabaseTripDirectoryRepository(supabase as BrowserSupabaseClient),
+    createTripRepository: (tripId: string) =>
+      options.createSupabaseRepository
+        ? options.createSupabaseRepository(supabase, tripId)
+        : createSupabaseTripRepository(supabase as BrowserSupabaseClient, tripId),
+  };
+}
 
-  return cloudRepository;
+export async function createAppTripRepository(options: CreateAppTripStorageOptions = {}) {
+  const storage = await createAppTripStorage(options);
+  const trips = await storage.directory.listTrips();
+  const trip = trips[0] ?? await storage.directory.createTrip({ name: 'World tour' });
+
+  return storage.createTripRepository(trip.id);
 }
