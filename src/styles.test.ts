@@ -69,6 +69,9 @@ describe('panel tag editor styles', () => {
 
   it('keeps empty and populated tag rows compact', () => {
     expect(styles).toMatch(/\.tag-pill-list\s*{[^}]*min-height:\s*40px;/s);
+    expect(styles).toMatch(/\.tag-pill-list\s*{[^}]*padding:\s*0;/s);
+    expect(styles).not.toMatch(/\.tag-pill-list\s*{[^}]*border:/s);
+    expect(styles).not.toMatch(/\.tag-pill-list\s*{[^}]*background:/s);
     expect(styles).toMatch(/\.tag-empty-state\s*{[^}]*color:\s*var\(--text-muted\);/s);
     expect(styles).toMatch(/\.tag-add-button\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;/s);
   });

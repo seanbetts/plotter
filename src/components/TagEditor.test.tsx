@@ -93,18 +93,66 @@ describe('TagEditor', () => {
     expect(screen.getByRole('textbox', { name: 'Add tag' })).toBeInTheDocument();
   });
 
+  it('closes without committing typed text when clicking outside the add popover', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    render(
+      <>
+        <TagEditor label="Home Tags" tags={[]} suggestions={suggestions} onChange={onChange} />
+        <button type="button">Outside control</button>
+      </>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add tag' }));
+    await user.type(screen.getByRole('textbox', { name: 'Add tag' }), 'draft');
+    await user.click(screen.getByRole('button', { name: 'Outside control' }));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: 'Add tag' })).not.toBeInTheDocument();
+  });
+
   it('closes without committing typed text when Escape is pressed', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const windowKeyDown = vi.fn();
+
+    window.addEventListener('keydown', windowKeyDown);
+
+    try {
+      render(<TagEditor label="Home Tags" tags={[]} suggestions={suggestions} onChange={onChange} />);
+
+      await user.click(screen.getByRole('button', { name: 'Add tag' }));
+      await user.type(screen.getByRole('textbox', { name: 'Add tag' }), 'draft');
+      windowKeyDown.mockClear();
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Add tag' }), { key: 'Escape' });
+
+      expect(onChange).not.toHaveBeenCalled();
+      expect(windowKeyDown).not.toHaveBeenCalled();
+      expect(screen.queryByRole('textbox', { name: 'Add tag' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add tag' })).toHaveFocus();
+    } finally {
+      window.removeEventListener('keydown', windowKeyDown);
+    }
+  });
+
+  it('uses arrow keys to choose a suggested tag and Enter to add it', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
 
     render(<TagEditor label="Home Tags" tags={[]} suggestions={suggestions} onChange={onChange} />);
 
     await user.click(screen.getByRole('button', { name: 'Add tag' }));
-    await user.type(screen.getByRole('textbox', { name: 'Add tag' }), 'draft');
-    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Add tag' }), { key: 'Escape' });
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('button', { name: 'Add tag suggestion family' })).toHaveAttribute('aria-current', 'true');
 
-    expect(onChange).not.toHaveBeenCalled();
-    expect(screen.queryByRole('textbox', { name: 'Add tag' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add tag' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('button', { name: 'Add tag suggestion food' })).toHaveAttribute('aria-current', 'true');
+
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('button', { name: 'Add tag suggestion family' })).toHaveAttribute('aria-current', 'true');
+
+    await user.keyboard('{Enter}');
+    expect(onChange).toHaveBeenCalledWith(['family']);
   });
 });

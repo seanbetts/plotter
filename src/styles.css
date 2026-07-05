@@ -1295,14 +1295,7 @@ select {
   align-items: center;
   gap: 6px;
   min-height: 40px;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-control);
-  padding: 5px 6px;
-  background: var(--surface-control);
-}
-
-.tag-pill-list:focus-within {
-  border-color: var(--border-selected);
+  padding: 0;
 }
 
 .tag-pill {
@@ -1428,7 +1421,8 @@ select {
 }
 
 .tag-suggestion:hover,
-.tag-suggestion:focus-visible {
+.tag-suggestion:focus-visible,
+.tag-suggestion.is-active {
   background: var(--surface-action-subtle);
 }
 
