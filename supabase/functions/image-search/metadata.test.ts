@@ -29,6 +29,7 @@ Deno.test("builds a SerpApi URL with contextual query and large photo filters", 
   assertEquals(url.searchParams.get("hl"), "en");
   assertEquals(url.searchParams.get("gl"), "fr");
   assertEquals(url.searchParams.get("tbs"), "itp:photos,isz:l");
+  assertEquals(url.searchParams.get("location"), null);
 });
 
 Deno.test("maps SerpApi image results and keeps source metadata", () => {

@@ -108,14 +108,6 @@ export function buildSerpApiImageSearchUrl(input: {
   url.searchParams.set("device", "desktop");
   url.searchParams.set("tbs", largePhotoFilter);
 
-  const location = [
-    input.context.stopName,
-    input.context.countryName || input.context.regionName,
-  ].map(clean).filter(Boolean).join(", ");
-  if (location) {
-    url.searchParams.set("location", location);
-  }
-
   return url;
 }
 
