@@ -113,6 +113,39 @@ describe('route option helpers', () => {
     ]);
   });
 
+  it('deduplicates options with the same route key while preserving the first option', () => {
+    const recommended = routeOptionFromCalculation({
+      id: 'recommended',
+      label: 'Recommended',
+      source: 'recommended',
+      origin,
+      target,
+      distanceKm: 458.25,
+      travelTimeHours: 5,
+      geometry: directGeometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      variant: 'recommended',
+    });
+    const duplicateRouteKey = routeOptionFromCalculation({
+      id: 'recommended-recalculated',
+      label: 'Recommended recalculated',
+      source: 'provider-alternative',
+      origin,
+      target,
+      distanceKm: 459,
+      travelTimeHours: 5.1,
+      geometry: avoidHighwaysGeometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      variant: 'recommended',
+    });
+
+    expect(dedupeRouteOptions([recommended, duplicateRouteKey])).toEqual([recommended]);
+    expect(duplicateRouteKey.geometry).not.toEqual(recommended.geometry);
+    expect(duplicateRouteKey.routeKey).toBe(recommended.routeKey);
+  });
+
   it('creates a route-leg patch from the selected option', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: 'origin-id',
