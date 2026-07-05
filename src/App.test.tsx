@@ -4,6 +4,10 @@ import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { resolveMapTilerCoordinates, searchMapTilerPlaces } from './adapters/geocoding';
+import {
+  calculateOpenRouteServiceRoute,
+  calculateOpenRouteServiceRouteOptions,
+} from './adapters/openRouteService';
 import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
@@ -189,6 +193,59 @@ vi.mock('./adapters/geocoding', () => ({
   searchMapTilerPlaces: vi.fn(),
 }));
 
+vi.mock('./adapters/openRouteService', () => ({
+  calculateOpenRouteServiceRoute: vi.fn(async () => ({
+    distanceKm: 160,
+    travelTimeHours: 2.25,
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [28.9784, 41.0082],
+        [44.8271, 41.7151],
+      ],
+    },
+    provider: 'openrouteservice',
+    profile: 'driving-car',
+  })),
+  calculateOpenRouteServiceRouteOptions: vi.fn(async () => [
+    {
+      id: 'recommended',
+      label: 'Recommended',
+      source: 'recommended',
+      distanceKm: 160,
+      travelTimeHours: 2.25,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [28.9784, 41.0082],
+          [44.8271, 41.7151],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'recommended-route-key',
+    },
+    {
+      id: 'avoid-highways',
+      label: 'Avoid highways',
+      source: 'avoid-feature',
+      distanceKm: 220,
+      travelTimeHours: 3.4,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [28.9784, 41.0082],
+          [34.5, 40.9],
+          [44.8271, 41.7151],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'avoid-highways-route-key',
+    },
+  ]),
+}));
+
 vi.mock('maplibre-gl', () => ({
   default: {
     Map: maplibreMock.Map,
@@ -249,6 +306,8 @@ describe('App', () => {
     vi.mocked(createAppLinkPreviewClient).mockReturnValue(linkPreviewClientMock);
     vi.mocked(searchMapTilerPlaces).mockReset();
     vi.mocked(resolveMapTilerCoordinates).mockReset();
+    vi.mocked(calculateOpenRouteServiceRoute).mockClear();
+    vi.mocked(calculateOpenRouteServiceRouteOptions).mockClear();
     maplibreMock.Map.mockClear();
     maplibreMock.NavigationControl.mockClear();
     maplibreMock.mapInstances.length = 0;
@@ -348,6 +407,63 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: 'Kyoto, Japan' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Kyoto profile' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Select Kyoto' })).not.toHaveClass('is-selected');
+  });
+
+  it('opens route alternatives from the route row and saves the selected option', async () => {
+    const user = userEvent.setup();
+    vi.mocked(searchMapTilerPlaces)
+      .mockResolvedValueOnce([
+        createPlaceSearchResult({
+          id: 'place-istanbul',
+          label: 'Istanbul, Turkey',
+          placeName: 'Istanbul',
+          regionName: '',
+          countryName: 'Turkey',
+          coordinates: { lat: 41.0082, lng: 28.9784 },
+        }),
+      ])
+      .mockResolvedValueOnce([
+        createPlaceSearchResult({
+          id: 'place-tbilisi',
+          label: 'Tbilisi, Georgia',
+          placeName: 'Tbilisi',
+          regionName: '',
+          countryName: 'Georgia',
+          coordinates: { lat: 41.7151, lng: 44.8271 },
+        }),
+      ]);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+
+    await user.type(screen.getByLabelText('Search for a destination'), 'Istanbul');
+    await user.click(await screen.findByRole('option', { name: 'Istanbul, Turkey' }));
+    await user.clear(screen.getByLabelText('Search for a destination'));
+    await user.type(screen.getByLabelText('Search for a destination'), 'Tbilisi');
+    await user.click(await screen.findByRole('option', { name: 'Tbilisi, Georgia' }));
+
+    const editRouteButton = await screen.findByRole('button', {
+      name: 'Edit route from Istanbul to Tbilisi',
+    });
+    await user.click(editRouteButton);
+
+    expect(await screen.findByRole('dialog', { name: 'Edit route from Istanbul to Tbilisi' })).toBeInTheDocument();
+    expect(await screen.findByText('Avoid highways')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'Avoid highways 137 mi 3.4 hr' }));
+    await user.click(screen.getByRole('button', { name: 'Use selected route' }));
+
+    await waitFor(() =>
+      expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          routeKey: 'avoid-highways-route-key',
+          distanceKm: 220,
+          travelTimeHours: 3.4,
+          status: 'ready',
+        }),
+      ),
+    );
   });
 
   it('remembers when the stops panel is collapsed', async () => {

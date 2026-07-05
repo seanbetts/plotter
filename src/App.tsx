@@ -5,16 +5,18 @@ import {
   searchMapTilerPlaces,
 } from './adapters/geocoding';
 import type { PlaceSearchResult } from './adapters/geocoding';
-import { calculateOpenRouteServiceRoute } from './adapters/openRouteService';
+import { calculateOpenRouteServiceRoute, calculateOpenRouteServiceRouteOptions } from './adapters/openRouteService';
 import { ActivityPanel } from './components/ActivityPanel';
 import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
 import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapAddStopRequest } from './components/MapCanvas';
+import { RouteAlternativesPanel } from './components/RouteAlternativesPanel';
 import { TopToolbar } from './components/TopToolbar';
 import { buildTagSuggestions } from './components/tagEditorModel';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
+import { routeLegPatchFromRouteOption, type RouteOption } from './domain/routeOptions';
 import type {
   Activity,
   ActivityLocation,
@@ -71,6 +73,13 @@ type PreviewMediaSource = 'destination-rollup' | 'activity';
 type PreviewMediaSelection = {
   mediaId: string;
   source: PreviewMediaSource;
+};
+type RouteAlternativesState = {
+  routeLegId: string;
+  status: 'loading' | 'ready' | 'empty' | 'error' | 'saving';
+  options: RouteOption[];
+  selectedOptionId: string | null;
+  error: string | null;
 };
 type AppProps = {
   webImageSearchClient?: WebImageSearchClient;
@@ -332,6 +341,7 @@ function TripWorkspace({
   const [isDestinationMediaRollupLoading, setIsDestinationMediaRollupLoading] = useState(false);
   const [destinationMediaRollupError, setDestinationMediaRollupError] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
+  const [routeAlternativesState, setRouteAlternativesState] = useState<RouteAlternativesState | null>(null);
   const selectedDestinationIdRef = useRef<string | null>(null);
   const selectedActivityIdRef = useRef<string | null>(null);
   const activityPanelRef = useRef<HTMLElement | null>(null);
@@ -341,6 +351,23 @@ function TripWorkspace({
   const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedMapStopElementRef = useRef<HTMLElement | null>(null);
   const isInteractionLocked = isLoading;
+  const routeLegsById = useMemo(
+    () => new Map(routeLegs.map((routeLeg) => [routeLeg.id, routeLeg])),
+    [routeLegs],
+  );
+  const destinationsById = useMemo(
+    () => new Map(destinations.map((destination) => [destination.id, destination])),
+    [destinations],
+  );
+  const activeRouteAlternativesLeg = routeAlternativesState
+    ? routeLegsById.get(routeAlternativesState.routeLegId) ?? null
+    : null;
+  const activeRouteAlternativesOrigin = activeRouteAlternativesLeg
+    ? destinationsById.get(activeRouteAlternativesLeg.originDestinationId) ?? null
+    : null;
+  const activeRouteAlternativesTarget = activeRouteAlternativesLeg
+    ? destinationsById.get(activeRouteAlternativesLeg.targetDestinationId) ?? null
+    : null;
 
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
@@ -724,6 +751,98 @@ function TripWorkspace({
     [deleteDestination, isInteractionLocked],
   );
 
+  const openRouteAlternatives = useCallback(
+    async (routeLegId: string) => {
+      const routeLeg = routeLegsById.get(routeLegId);
+      if (!routeLeg || routeLeg.type !== 'driving-auto') return;
+
+      const origin = destinationsById.get(routeLeg.originDestinationId);
+      const target = destinationsById.get(routeLeg.targetDestinationId);
+      if (!origin || !target) return;
+
+      setRouteAlternativesState({
+        routeLegId,
+        status: 'loading',
+        options: [],
+        selectedOptionId: null,
+        error: null,
+      });
+
+      try {
+        const options = await calculateOpenRouteServiceRouteOptions({
+          apiKey: openRouteServiceApiKey,
+          origin: origin.coordinates,
+          target: target.coordinates,
+          profile: 'driving-car',
+        });
+
+        setRouteAlternativesState((current) =>
+          current?.routeLegId === routeLegId
+            ? {
+                routeLegId,
+                status: options.length > 0 ? 'ready' : 'empty',
+                options,
+                selectedOptionId: options[0]?.id ?? null,
+                error: null,
+              }
+            : current,
+        );
+      } catch (caught) {
+        setRouteAlternativesState((current) =>
+          current?.routeLegId === routeLegId
+            ? {
+                ...current,
+                status: 'error',
+                options: [],
+                selectedOptionId: null,
+                error: caught instanceof Error ? caught.message : 'Unable to calculate route options',
+              }
+            : current,
+        );
+      }
+    },
+    [destinationsById, routeLegsById],
+  );
+
+  const closeRouteAlternatives = useCallback(() => {
+    setRouteAlternativesState(null);
+  }, []);
+
+  const selectRouteAlternative = useCallback((optionId: string) => {
+    setRouteAlternativesState((current) =>
+      current ? { ...current, selectedOptionId: optionId } : current,
+    );
+  }, []);
+
+  const confirmRouteAlternative = useCallback(async () => {
+    if (!routeAlternativesState?.selectedOptionId) return;
+
+    const selectedOption = routeAlternativesState.options.find(
+      (option) => option.id === routeAlternativesState.selectedOptionId,
+    );
+    if (!selectedOption) return;
+
+    setRouteAlternativesState((current) => (current ? { ...current, status: 'saving' } : current));
+
+    try {
+      await updateRouteLeg(
+        routeAlternativesState.routeLegId,
+        routeLegPatchFromRouteOption(selectedOption),
+      );
+      setRouteAlternativesState(null);
+    } catch (caught) {
+      setRouteAlternativesState((current) =>
+        current
+          ? {
+              ...current,
+              status: 'error',
+              error: caught instanceof Error ? caught.message : 'Unable to save selected route',
+            }
+          : current,
+      );
+    }
+  }, [routeAlternativesState, updateRouteLeg]);
+
   const handleCloseDestinationProfile = useCallback(() => {
     setSelectedDestinationId(null);
     setSelectedActivityId(null);
@@ -932,6 +1051,7 @@ function TripWorkspace({
               onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
               onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
               onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
+              onEditRouteLeg={(routeLegId) => void openRouteAlternatives(routeLegId)}
             />
           </>
         ) : null}
@@ -976,6 +1096,19 @@ function TripWorkspace({
               </button>
             </div>
           </section>
+        ) : null}
+        {routeAlternativesState && activeRouteAlternativesOrigin && activeRouteAlternativesTarget ? (
+          <RouteAlternativesPanel
+            originName={activeRouteAlternativesOrigin.name}
+            targetName={activeRouteAlternativesTarget.name}
+            status={routeAlternativesState.status}
+            options={routeAlternativesState.options}
+            selectedOptionId={routeAlternativesState.selectedOptionId}
+            error={routeAlternativesState.error}
+            onSelectOption={selectRouteAlternative}
+            onConfirm={() => void confirmRouteAlternative()}
+            onClose={closeRouteAlternatives}
+          />
         ) : null}
         {!isInteractionLocked && selectedDestination ? (
           <div className="workspace-panels">
