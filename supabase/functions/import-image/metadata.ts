@@ -26,6 +26,8 @@ const allowedImageTypes = new Set([
   "image/gif",
 ]);
 const maxImageBytes = 50 * 1024 * 1024;
+const maxRedirects = 3;
+const redirectStatuses = new Set([301, 302, 303, 307, 308]);
 const userAgent = "WorldTourImageImport/1.0";
 
 export function normalizeImportResult(value: unknown): ImportImageResult {
@@ -104,12 +106,7 @@ export async function fetchImportImage({
   resolver = resolveHostname,
 }: FetchImportImageInput) {
   const safeUrl = await validatePublicImageUrl(imageUrl, resolver);
-  const response = await fetcher(safeUrl, {
-    headers: {
-      accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,*/*;q=0.8",
-      "User-Agent": userAgent,
-    },
-  });
+  const response = await fetchImportImageResponse(safeUrl, fetcher, resolver);
 
   if (!response.ok) {
     throw new Error("Unable to fetch image.");
@@ -131,6 +128,49 @@ export async function fetchImportImage({
   }
 
   return { bytes, contentType };
+}
+
+async function fetchImportImageResponse(
+  initialUrl: string,
+  fetcher: Fetcher,
+  resolver: Resolver,
+) {
+  let currentUrl = initialUrl;
+
+  for (
+    let redirectCount = 0;
+    redirectCount <= maxRedirects;
+    redirectCount += 1
+  ) {
+    const response = await fetcher(currentUrl, {
+      headers: {
+        accept:
+          "image/avif,image/webp,image/png,image/jpeg,image/gif,*/*;q=0.8",
+        "User-Agent": userAgent,
+      },
+      redirect: "manual",
+    });
+
+    if (!redirectStatuses.has(response.status)) {
+      return response;
+    }
+
+    if (redirectCount >= maxRedirects) {
+      throw new Error("Too many redirects while fetching image.");
+    }
+
+    const location = response.headers.get("location");
+    if (!location) {
+      throw new Error("Redirect response is missing a Location header.");
+    }
+
+    currentUrl = await validatePublicImageUrl(
+      new URL(location, currentUrl).toString(),
+      resolver,
+    );
+  }
+
+  throw new Error("Too many redirects while fetching image.");
 }
 
 export function createImportedImageObjectPath(input: {

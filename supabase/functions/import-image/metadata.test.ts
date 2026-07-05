@@ -111,3 +111,94 @@ Deno.test("fetchImportImage returns image bytes and content type", async () => {
   assertEquals(imported.contentType, "image/jpeg");
   assertEquals(imported.bytes.byteLength, 3);
 });
+
+Deno.test("fetchImportImage follows safe redirects", async () => {
+  const fetchedUrls: string[] = [];
+  const fetcher = (input: string | URL, init?: RequestInit) => {
+    fetchedUrls.push(input.toString());
+    assertEquals(init?.redirect, "manual");
+
+    if (input.toString() === "https://example.com/start.jpg") {
+      return Promise.resolve(
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://cdn.example.com/image.jpg" },
+        }),
+      );
+    }
+
+    return Promise.resolve(
+      new Response(new Uint8Array([4, 5, 6]), {
+        headers: { "content-type": "image/png" },
+      }),
+    );
+  };
+
+  const imported = await fetchImportImage({
+    imageUrl: "https://example.com/start.jpg",
+    fetcher,
+    resolver: publicResolver,
+  });
+
+  assertEquals(fetchedUrls, [
+    "https://example.com/start.jpg",
+    "https://cdn.example.com/image.jpg",
+  ]);
+  assertEquals(imported.contentType, "image/png");
+  assertEquals(imported.bytes.byteLength, 3);
+});
+
+Deno.test("fetchImportImage rejects public redirects to private targets before second fetch", async () => {
+  const fetchedUrls: string[] = [];
+  const fetcher = (input: string | URL) => {
+    fetchedUrls.push(input.toString());
+    return Promise.resolve(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://127.0.0.1/private.jpg" },
+      }),
+    );
+  };
+
+  await assertRejects(
+    () =>
+      fetchImportImage({
+        imageUrl: "https://example.com/start.jpg",
+        fetcher,
+        resolver: publicResolver,
+      }),
+    Error,
+    "public image URL",
+  );
+  assertEquals(fetchedUrls, ["https://example.com/start.jpg"]);
+});
+
+Deno.test("fetchImportImage rejects redirect loops after the redirect limit", async () => {
+  const fetchedUrls: string[] = [];
+  const fetcher = (input: string | URL) => {
+    fetchedUrls.push(input.toString());
+    return Promise.resolve(
+      new Response(null, {
+        status: 302,
+        headers: { location: "/loop.jpg" },
+      }),
+    );
+  };
+
+  await assertRejects(
+    () =>
+      fetchImportImage({
+        imageUrl: "https://example.com/loop.jpg",
+        fetcher,
+        resolver: publicResolver,
+      }),
+    Error,
+    "Too many redirects",
+  );
+  assertEquals(fetchedUrls, [
+    "https://example.com/loop.jpg",
+    "https://example.com/loop.jpg",
+    "https://example.com/loop.jpg",
+    "https://example.com/loop.jpg",
+  ]);
+});
