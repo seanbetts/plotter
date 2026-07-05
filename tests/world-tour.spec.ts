@@ -23,6 +23,127 @@ const parisResult = [
   },
 ];
 
+test('keeps the itinerary title row visible while scrolling the stop list', async ({ baseURL, context, page }) => {
+  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
+  const cdpSession = await context.newCDPSession(page);
+  const destinations = Array.from({ length: 12 }, (_, index) => {
+    const stopNumber = index + 1;
+
+    return {
+      id: `place.stop-${stopNumber}`,
+      text: `Stop ${stopNumber}`,
+      place_name: `Stop ${stopNumber}, Test Country`,
+      center: [-4 + index, 50 + index * 0.25],
+      properties: { country_code: 'tc' },
+      context: [{ id: 'country.1', text: 'Test Country', short_code: 'tc' }],
+    };
+  });
+
+  await cdpSession.send('Storage.clearDataForOrigin', {
+    origin,
+    storageTypes: 'indexeddb',
+  });
+
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    const url = new URL(route.request().url());
+    const query = decodeURIComponent(url.pathname.replace('/geocoding/', '').replace('.json', ''));
+    const destination = destinations.find((candidate) => candidate.text === query);
+
+    await route.fulfill({
+      contentType: 'application/json',
+      json: { features: destination ? [destination] : [] },
+    });
+  });
+  await page.route('https://api.openrouteservice.org/v2/directions/**', async (route) => {
+    const request = route.request();
+    const body = request.postDataJSON() as { coordinates?: [number, number][] } | null;
+    const coordinates = body?.coordinates ?? [
+      [0, 0],
+      [1, 1],
+    ];
+
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: {
+              summary: {
+                distance: 120_000,
+                duration: 7_200,
+              },
+            },
+            geometry: {
+              type: 'LineString',
+              coordinates,
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const searchInput = page.getByLabel('Search for a destination');
+  await expect(searchInput).toBeVisible();
+
+  for (const destination of destinations) {
+    await searchInput.fill(destination.text);
+    await page.getByRole('option', { name: destination.place_name }).click();
+    await expect(searchInput).toHaveValue('');
+  }
+
+  const itinerary = page.getByRole('complementary', { name: 'Itinerary' });
+  const stopList = itinerary.locator('.stop-list');
+  const header = itinerary.locator('.itinerary-panel-header');
+  await expect(header).toBeVisible();
+
+  await itinerary.evaluate((element) => {
+    const stopListElement = element.querySelector<HTMLElement>('.stop-list');
+    element.scrollTop = element.scrollHeight;
+    if (stopListElement) {
+      stopListElement.scrollTop = stopListElement.scrollHeight;
+    }
+  });
+
+  const metrics = await itinerary.evaluate((element) => {
+    const stopListElement = element.querySelector<HTMLElement>('.stop-list');
+    const headerElement = element.querySelector<HTMLElement>('.itinerary-panel-header');
+
+    if (!headerElement || !stopListElement) {
+      throw new Error('Expected itinerary header and stop list to exist.');
+    }
+
+    const panelRect = element.getBoundingClientRect();
+    const headerRect = headerElement.getBoundingClientRect();
+
+    return {
+      panelTop: panelRect.top,
+      panelBottom: panelRect.bottom,
+      headerTop: headerRect.top,
+      headerBottom: headerRect.bottom,
+      panelScrollTop: element.scrollTop,
+      stopListScrollTop: stopListElement.scrollTop,
+      panelScrollHeight: element.scrollHeight,
+      panelClientHeight: element.clientHeight,
+      stopListScrollHeight: stopListElement.scrollHeight,
+      stopListClientHeight: stopListElement.clientHeight,
+    };
+  });
+
+  expect(
+    metrics.panelScrollHeight > metrics.panelClientHeight ||
+      metrics.stopListScrollHeight > metrics.stopListClientHeight,
+  ).toBe(true);
+  expect(metrics.panelScrollTop + metrics.stopListScrollTop).toBeGreaterThan(0);
+  expect(metrics.headerTop).toBeGreaterThanOrEqual(metrics.panelTop);
+  expect(metrics.headerBottom).toBeLessThanOrEqual(metrics.panelBottom);
+  await expect(page.getByRole('heading', { name: 'Itinerary' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Collapse itinerary panel' })).toBeInViewport();
+});
+
 test('creates and switches personal trips without Supabase', async ({ baseURL, context, page }) => {
   const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
   const cdpSession = await context.newCDPSession(page);

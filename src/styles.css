@@ -2037,10 +2037,11 @@ select {
   bottom: 16px;
   z-index: 9;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   width: min(520px, calc(100vw - 32px));
   max-height: 58vh;
   gap: 14px;
-  overflow: auto;
+  overflow: hidden;
   padding: 16px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel);
@@ -2052,6 +2053,7 @@ select {
 }
 
 .itinerary-panel.is-collapsed {
+  grid-template-rows: auto;
   gap: 0;
   overflow: visible;
 }
@@ -2133,6 +2135,9 @@ select {
 .stop-list {
   display: grid;
   gap: var(--stop-list-gap, 8px);
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .stop-list.is-reordering {
@@ -2851,6 +2856,35 @@ select {
     left: 12px;
     width: auto;
     max-height: var(--mobile-itinerary-panel-clearance);
+  }
+
+  .itinerary-panel-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+
+  .itinerary-panel-title {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .itinerary-panel-actions {
+    display: contents;
+  }
+
+  .itinerary-panel-stats {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  .itinerary-panel-toggle {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
   }
 
   .map-canvas .maplibregl-ctrl-bottom-right {
