@@ -814,6 +814,94 @@ describe('App', () => {
     });
   });
 
+  it('does not reload stale stop media when selected stop changes during web image import', async () => {
+    const user = userEvent.setup();
+    const paris = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+      order: 0,
+    });
+    const rome = createDestination({
+      name: 'Rome',
+      countryRegion: 'Italy',
+      coordinates: { lat: 41.9028, lng: 12.4964 },
+      order: 1,
+    });
+    const selectedResult: WebImageSearchResult = {
+      id: 'web-image-paris-mural',
+      title: 'Paris mural',
+      sourceName: 'Example Source',
+      sourceUrl: 'https://example.com/paris-mural',
+      thumbnailUrl: 'https://example.com/paris-mural-thumb.jpg',
+      imageUrl: 'https://example.com/paris-mural.jpg',
+      width: 1600,
+      height: 1000,
+    };
+    const webImageSearchClient: WebImageSearchClient = {
+      searchImages: vi.fn(async () => [selectedResult]),
+    };
+    const importResult = createDeferred<MediaItem>();
+    repositoryMock.initialDestinations = Promise.resolve([paris, rome]);
+    repositoryMock.importDestinationMediaFromSearch.mockReturnValue(importResult.promise);
+    repositoryMock.listDestinationMedia.mockImplementation(async (destinationId: string) =>
+      destinationId === rome.id
+        ? [createMediaItem({ id: 'rome-stop-media', url: '/rome-stop.jpg', caption: 'Rome stop' })]
+        : [createMediaItem({ id: 'paris-stop-media', url: '/paris-stop.jpg', caption: 'Paris stop' })],
+    );
+    repositoryMock.listDestinationMediaRollup.mockImplementation(async (destinationId: string) =>
+      destinationId === rome.id
+        ? [
+            createDestinationRollupItem(
+              rome.id,
+              createMediaItem({ id: 'rome-media', url: '/rome.jpg', caption: 'Rome street' }),
+            ),
+          ]
+        : [
+            createDestinationRollupItem(
+              paris.id,
+              createMediaItem({ id: 'paris-media', url: '/paris.jpg', caption: 'Paris street' }),
+            ),
+          ],
+    );
+
+    render(<App webImageSearchClient={webImageSearchClient} />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.type(await screen.findByLabelText('Search web images'), 'mural');
+    await user.click(await screen.findByRole('option', { name: 'Import Paris mural from Example Source' }));
+    await waitFor(() => expect(repositoryMock.importDestinationMediaFromSearch).toHaveBeenCalledWith({
+      destinationId: paris.id,
+      result: selectedResult,
+    }));
+
+    await user.click(screen.getByRole('button', { name: 'Rome, Italy' }));
+    expect(await screen.findByRole('button', { name: 'Open full image: Rome street' })).toBeInTheDocument();
+    repositoryMock.listDestinationMedia.mockClear();
+    repositoryMock.listDestinationMediaRollup.mockClear();
+
+    await act(async () => {
+      importResult.resolve(createMediaItem({
+        id: 'imported-paris-mural',
+        url: selectedResult.imageUrl,
+        caption: selectedResult.title,
+      }));
+      await importResult.promise;
+      await Promise.resolve();
+    });
+
+    expect(repositoryMock.importDestinationMediaFromSearch).toHaveBeenCalledWith({
+      destinationId: paris.id,
+      result: selectedResult,
+    });
+    expect(repositoryMock.listDestinationMedia).not.toHaveBeenCalled();
+    expect(repositoryMock.listDestinationMediaRollup).not.toHaveBeenCalled();
+    expect(screen.getByRole('complementary', { name: 'Rome profile' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open full image: Rome street' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open full image: Paris street' })).not.toBeInTheDocument();
+  });
+
   it('opens the image preview over the map stage instead of inside the stop pane', async () => {
     const user = userEvent.setup();
     const destination = createDestination({

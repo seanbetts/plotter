@@ -803,11 +803,14 @@ function TripWorkspace({
 
   const handleDestinationWebImageImport = useCallback(async (result: WebImageSearchResult) => {
     if (!selectedDestinationId) return;
+    const importDestinationId = selectedDestinationId;
 
     await repository.importDestinationMediaFromSearch({
-      destinationId: selectedDestinationId,
+      destinationId: importDestinationId,
       result,
     });
+    if (selectedDestinationIdRef.current !== importDestinationId) return;
+
     await destinationMedia.reload();
     await reloadDestinationMediaRollup();
   }, [destinationMedia, reloadDestinationMediaRollup, repository, selectedDestinationId]);
