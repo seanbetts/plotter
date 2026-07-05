@@ -260,6 +260,23 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           } satisfies RouteLeg;
         }
 
+        if (
+          routeLeg.type === 'driving-auto' &&
+          routeLeg.status === 'ready' &&
+          routeLeg.geometry &&
+          routeLeg.distanceKm !== undefined &&
+          routeLeg.travelTimeHours !== undefined &&
+          routeLeg.provider &&
+          routeLeg.profile &&
+          routeLeg.routeKey
+        ) {
+          return {
+            ...routeLeg,
+            error: undefined,
+            updatedAt: createTimestamp(),
+          } satisfies RouteLeg;
+        }
+
         const [calculatedRouteLeg] = await calculateDrivingRouteLegs(nextDestinations, [
           {
             ...routeLeg,
