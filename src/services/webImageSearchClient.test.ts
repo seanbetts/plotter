@@ -65,6 +65,71 @@ describe('webImageSearchClient', () => {
     ]);
   });
 
+  it('keeps valid results with unknown dimensions', () => {
+    expect(normalizeWebImageSearchResults([
+      {
+        id: '1',
+        title: 'Street art in Paris',
+        sourceName: 'Example',
+        sourceUrl: 'https://example.com/page',
+        thumbnailUrl: 'https://example.com/thumb.jpg',
+        imageUrl: 'https://example.com/image.jpg',
+      },
+    ])).toEqual<WebImageSearchResult[]>([
+      {
+        id: '1',
+        title: 'Street art in Paris',
+        sourceName: 'Example',
+        sourceUrl: 'https://example.com/page',
+        thumbnailUrl: 'https://example.com/thumb.jpg',
+        imageUrl: 'https://example.com/image.jpg',
+      },
+    ]);
+  });
+
+  it('omits invalid dimensions without dropping otherwise valid results', () => {
+    expect(normalizeWebImageSearchResults([
+      {
+        id: '1',
+        title: 'Street art in Paris',
+        sourceName: 'Example',
+        sourceUrl: 'https://example.com/page',
+        thumbnailUrl: 'https://example.com/thumb.jpg',
+        imageUrl: 'https://example.com/image.jpg',
+        width: Infinity,
+        height: 1200,
+      },
+      {
+        id: '2',
+        title: 'Paris mural',
+        sourceName: 'Example',
+        sourceUrl: 'https://example.com/mural',
+        thumbnailUrl: 'https://example.com/mural-thumb.jpg',
+        imageUrl: 'https://example.com/mural.jpg',
+        width: '1600',
+        height: Number.NaN,
+      },
+    ])).toEqual<WebImageSearchResult[]>([
+      {
+        id: '1',
+        title: 'Street art in Paris',
+        sourceName: 'Example',
+        sourceUrl: 'https://example.com/page',
+        thumbnailUrl: 'https://example.com/thumb.jpg',
+        imageUrl: 'https://example.com/image.jpg',
+        height: 1200,
+      },
+      {
+        id: '2',
+        title: 'Paris mural',
+        sourceName: 'Example',
+        sourceUrl: 'https://example.com/mural',
+        thumbnailUrl: 'https://example.com/mural-thumb.jpg',
+        imageUrl: 'https://example.com/mural.jpg',
+      },
+    ]);
+  });
+
   it('invokes the Supabase image-search function with visible query and context', async () => {
     const invoke = vi.fn(async () => ({
       data: {
@@ -93,6 +158,34 @@ describe('webImageSearchClient', () => {
       },
     });
   });
+
+  it('rejects with the Supabase function error message', async () => {
+    const invoke = vi.fn(async () => ({
+      data: null,
+      error: { message: 'Provider failed' },
+    }));
+    const client = createSupabaseWebImageSearchClient({ functions: { invoke } });
+
+    await expect(client.searchImages('mural', parisContext)).rejects.toThrow('Provider failed');
+  });
+
+  it.each(['context', 'response'] as const)(
+    'rejects with an error message from a JSON %s response body',
+    async (errorResponseKey) => {
+      const invoke = vi.fn(async () => ({
+        data: null,
+        error: {
+          message: 'Function failed',
+          [errorResponseKey]: new Response(JSON.stringify({ error: 'Quota exceeded' }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        },
+      }));
+      const client = createSupabaseWebImageSearchClient({ functions: { invoke } });
+
+      await expect(client.searchImages('mural', parisContext)).rejects.toThrow('Quota exceeded');
+    },
+  );
 
   it('returns deterministic local results for e2e-local mode', async () => {
     const client = createLocalWebImageSearchClient();
