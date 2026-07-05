@@ -312,6 +312,7 @@ describe('ActivityPanel', () => {
     render(<ActivityPanel {...props} />);
 
     expect(screen.getByText('No tags yet')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Add tag' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Add tag' }));
 
