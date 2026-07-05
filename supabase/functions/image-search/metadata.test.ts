@@ -141,3 +141,39 @@ Deno.test("searchWebImages rejects invalid image result shapes with a stable err
     "Unable to search web images.",
   );
 });
+
+Deno.test("searchWebImages rejects malformed image result entries with a stable error", async () => {
+  await assertRejects(
+    () =>
+      searchWebImages({
+        apiKey: "secret",
+        query: "mural",
+        context: { stopName: "Paris", countryName: "France" },
+        fetcher: async () =>
+          Response.json({
+            images_results: [null],
+          }),
+      }),
+    Error,
+    "Unable to search web images.",
+  );
+});
+
+Deno.test("searchWebImages rejects provider errors without exposing raw detail", async () => {
+  const error = await assertRejects(
+    () =>
+      searchWebImages({
+        apiKey: "secret",
+        query: "mural",
+        context: { stopName: "Paris", countryName: "France" },
+        fetcher: async () =>
+          Response.json({
+            error: "Raw provider detail",
+          }),
+      }),
+    Error,
+    "Unable to search web images.",
+  );
+
+  assertEquals(error.message.includes("Raw provider detail"), false);
+});

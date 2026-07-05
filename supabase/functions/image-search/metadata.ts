@@ -141,6 +141,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function stringField(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function numberField(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "number" ? value : undefined;
+}
+
 async function parseSerpApiResponse(
   response: Response,
 ): Promise<SerpApiResponse> {
@@ -156,11 +166,17 @@ async function parseSerpApiResponse(
   }
 
   if (typeof body.error === "string") {
-    throw new Error(body.error);
+    throw new Error(providerSearchErrorMessage);
   }
 
   if (
     body.images_results !== undefined && !Array.isArray(body.images_results)
+  ) {
+    throw new Error(providerSearchErrorMessage);
+  }
+  if (
+    Array.isArray(body.images_results) &&
+    !body.images_results.every(isRecord)
   ) {
     throw new Error(providerSearchErrorMessage);
   }
@@ -172,14 +188,19 @@ export function mapSerpApiImageResults(
   response: SerpApiResponse,
 ): WebImageSearchResult[] {
   return (response.images_results ?? []).flatMap((result, index) => {
-    const title = clean(result.title) || "Web image";
-    const sourceName = clean(result.source) ||
-      (isHttpUrl(result.link)
-        ? new URL(result.link).hostname.replace(/^www\./, "")
+    if (!isRecord(result)) {
+      throw new Error(providerSearchErrorMessage);
+    }
+
+    const title = clean(stringField(result, "title")) || "Web image";
+    const link = stringField(result, "link");
+    const sourceName = clean(stringField(result, "source")) ||
+      (isHttpUrl(link)
+        ? new URL(link).hostname.replace(/^www\./, "")
         : "");
-    const sourceUrl = result.link;
-    const thumbnailUrl = result.thumbnail;
-    const imageUrl = result.original;
+    const sourceUrl = link;
+    const thumbnailUrl = stringField(result, "thumbnail");
+    const imageUrl = stringField(result, "original");
 
     if (
       !sourceName ||
@@ -190,11 +211,18 @@ export function mapSerpApiImageResults(
       return [];
     }
 
-    const width = dimension(result.original_width, result.width);
-    const height = dimension(result.original_height, result.height);
+    const width = dimension(
+      numberField(result, "original_width"),
+      numberField(result, "width"),
+    );
+    const height = dimension(
+      numberField(result, "original_height"),
+      numberField(result, "height"),
+    );
+    const position = numberField(result, "position");
 
     return [{
-      id: `serpapi-${result.position ?? index + 1}`,
+      id: `serpapi-${position ?? index + 1}`,
       title,
       sourceName,
       sourceUrl,
