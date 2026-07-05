@@ -105,8 +105,7 @@ export async function fetchImportImage({
   fetcher = fetch,
   resolver = resolveHostname,
 }: FetchImportImageInput) {
-  const safeUrl = await validatePublicImageUrl(imageUrl, resolver);
-  const response = await fetchImportImageResponse(safeUrl, fetcher, resolver);
+  const response = await fetchImportImageResponse(imageUrl, fetcher, resolver);
 
   if (!response.ok) {
     throw new Error("Unable to fetch image.");
@@ -119,12 +118,14 @@ export async function fetchImportImage({
     throw new Error("Selected result did not return a supported image.");
   }
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  const contentLength = Number(response.headers.get("content-length") ?? "");
+  if (Number.isFinite(contentLength) && contentLength > maxImageBytes) {
+    throw new Error("Selected image is too large.");
+  }
+
+  const bytes = await readResponseBodyUpTo(response, maxImageBytes);
   if (bytes.byteLength === 0) {
     throw new Error("Selected image was empty.");
-  }
-  if (bytes.byteLength > maxImageBytes) {
-    throw new Error("Selected image is too large.");
   }
 
   return { bytes, contentType };
@@ -142,7 +143,10 @@ async function fetchImportImageResponse(
     redirectCount <= maxRedirects;
     redirectCount += 1
   ) {
-    const response = await fetcher(currentUrl, {
+    // Deno fetch does not let us pin DNS results to the connection, so this
+    // narrows rebinding exposure by resolving at the last application boundary.
+    const safeUrl = await validatePublicImageUrl(currentUrl, resolver);
+    const response = await fetcher(safeUrl, {
       headers: {
         accept:
           "image/avif,image/webp,image/png,image/jpeg,image/gif,*/*;q=0.8",
@@ -164,13 +168,48 @@ async function fetchImportImageResponse(
       throw new Error("Redirect response is missing a Location header.");
     }
 
-    currentUrl = await validatePublicImageUrl(
-      new URL(location, currentUrl).toString(),
-      resolver,
-    );
+    currentUrl = new URL(location, safeUrl).toString();
   }
 
   throw new Error("Too many redirects while fetching image.");
+}
+
+async function readResponseBodyUpTo(response: Response, maxBytes: number) {
+  if (!response.body) {
+    return new Uint8Array();
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new Error("Selected image is too large.");
+      }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return bytes;
 }
 
 export function createImportedImageObjectPath(input: {
