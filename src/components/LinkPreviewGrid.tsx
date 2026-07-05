@@ -10,6 +10,7 @@ import {
 } from '../domain/researchLinks';
 import type { ResearchLink } from '../domain/types';
 import type { LinkPreviewClient } from '../services/linkPreviewClient';
+import { PanelActionRow, PanelInputGroup } from './PanelInputRow';
 
 export type LinkPreviewGridProps = {
   label: string;
@@ -236,27 +237,25 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
         <h2>{label}</h2>
       </div>
       <form className="link-preview-add-form" aria-label="Add link" onSubmit={handleSubmit}>
-        <label className="sr-only" htmlFor={inputId}>
-          Add link URL
-        </label>
-        <div className="link-preview-add-row">
-          <div className="link-preview-input-shell">
-            <div className="search-input-shell">
-              <Paperclip className="search-input-icon link-preview-input-icon" size={18} aria-hidden="true" />
-              <input
-                id={inputId}
-                value={linkInput}
-                onChange={(event) => setLinkInput(event.target.value)}
-                placeholder="Add link"
-                aria-describedby={error ? errorId : undefined}
-                disabled={isMutating}
-              />
-            </div>
-          </div>
-          <button type="submit" aria-label="Add link" disabled={isMutating}>
-            <Plus size={16} aria-hidden="true" />
-          </button>
-        </div>
+        <PanelActionRow
+          actionType="submit"
+          actionLabel="Add link"
+          actionDisabled={isMutating}
+          actionIcon={<Plus size={16} aria-hidden="true" />}
+        >
+          <PanelInputGroup
+            label="Add link URL"
+            inputId={inputId}
+            icon={Paperclip}
+            inputProps={{
+              value: linkInput,
+              onChange: (event) => setLinkInput(event.target.value),
+              placeholder: 'Add link',
+              'aria-describedby': error ? errorId : undefined,
+              disabled: isMutating,
+            }}
+          />
+        </PanelActionRow>
         {error ? (
           <p className="link-preview-error" id={errorId} role="alert">
             {error}

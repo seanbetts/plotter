@@ -148,15 +148,15 @@ describe('panel coordinate editor styles', () => {
 });
 
 describe('activity list styles', () => {
-  it('removes nested search shell chrome in the activity search', () => {
+  it('removes nested search shell chrome in shared panel search inputs', () => {
     expect(styles).toMatch(
-      /\.activity-search-group \.search-input-shell,\s*\.activity-search-group \.search-input-shell:focus-within\s*{[^}]*outline:\s*0;/s,
+      /\.panel-input-group \.search-input-shell,\s*\.panel-input-group \.search-input-shell:focus-within\s*{[^}]*outline:\s*0;/s,
     );
-    expect(styles).toMatch(/\.activity-search-group input\s*{[^}]*border:\s*0;/s);
-    expect(styles).toMatch(/\.activity-search-group input\s*{[^}]*background:\s*transparent;/s);
-    expect(styles).toMatch(/\.activity-search-group input\s*{[^}]*outline:\s*0;/s);
+    expect(styles).toMatch(/\.panel-action-row \.panel-input-group input\s*{[^}]*border:\s*0;/s);
+    expect(styles).toMatch(/\.panel-action-row \.panel-input-group input\s*{[^}]*background:\s*transparent;/s);
+    expect(styles).toMatch(/\.panel-action-row \.panel-input-group input\s*{[^}]*outline:\s*0;/s);
     expect(styles).toMatch(
-      /\.destination-profile \.activity-search-group input\s*{[^}]*border:\s*0;/s,
+      /\.destination-profile \.panel-input-group input,\s*\.activity-panel \.panel-input-group input\s*{[^}]*border:\s*0;/s,
     );
   });
 
@@ -184,10 +184,10 @@ describe('activity list styles', () => {
     expect(styles).toMatch(/\.activity-list-section\s*{[^}]*padding-top:\s*0;[^}]*border-top:\s*0;/s);
   });
 
-  it('keeps link preview input focus on the outer shell only', () => {
-    expect(styles).toMatch(/\.link-preview-add-row input\s*{[^}]*outline:\s*0;/s);
+  it('keeps shared panel input focus on the outer shell only', () => {
+    expect(styles).toMatch(/\.panel-action-row \.panel-input-group input\s*{[^}]*outline:\s*0;/s);
     expect(styles).not.toMatch(
-      /\.link-preview-add-row input:focus-visible,\s*\.link-preview-add-row button:focus-visible,[^{]*\{[^}]*outline:\s*var\(--focus-ring\)/s,
+      /\.panel-action-row input:focus-visible,\s*\.panel-action-row button:focus-visible,[^{]*\{[^}]*outline:\s*var\(--focus-ring\)/s,
     );
   });
 

@@ -5,6 +5,7 @@ import type {
   WebImageSearchResult,
   WebImageSearchStopContext,
 } from '../services/webImageSearchClient';
+import { PanelActionRow, PanelInputGroup } from './PanelInputRow';
 
 type WebImageSearchFieldProps = {
   context: WebImageSearchStopContext;
@@ -128,25 +129,33 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
   }
 
   return (
-    <div className="activity-add-row">
-      <label className="sr-only" htmlFor={inputId}>
-        Search web images
-      </label>
-      <div className="activity-search-group">
-        <div className="search-input-shell">
-          <ImageIcon className="search-input-icon" size={18} aria-hidden="true" />
-          <input
-            id={inputId}
-            value={query}
-            onChange={handleQueryChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Search web images"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded={showPopover}
-            aria-controls={resultsId}
-          />
-          {query ? (
+    <PanelActionRow
+      actionLabel="Submit web image search"
+      actionDisabled={!trimmedQuery || isSearching}
+      actionIcon={isSearching ? <LoaderCircle size={15} aria-hidden="true" /> : <Plus size={15} aria-hidden="true" />}
+      onActionClick={() => {
+        if (searchTimerRef.current !== null) {
+          window.clearTimeout(searchTimerRef.current);
+        }
+        searchImages(trimmedQuery);
+      }}
+    >
+      <PanelInputGroup
+        label="Search web images"
+        inputId={inputId}
+        icon={ImageIcon}
+        inputProps={{
+          value: query,
+          onChange: handleQueryChange,
+          onKeyDown: handleKeyDown,
+          placeholder: 'Search web images',
+          role: 'combobox',
+          'aria-autocomplete': 'list',
+          'aria-expanded': showPopover,
+          'aria-controls': resultsId,
+        }}
+        trailingControl={
+          query ? (
             <button
               type="button"
               className="search-clear"
@@ -155,8 +164,9 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
             >
               <X size={16} aria-hidden="true" />
             </button>
-          ) : null}
-        </div>
+          ) : null
+        }
+      >
         {showPopover ? (
           <div className="web-image-search-popover">
             {isSearching ? (
@@ -199,20 +209,7 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
             ) : null}
           </div>
         ) : null}
-      </div>
-      <button
-        type="button"
-        aria-label="Submit web image search"
-        disabled={!trimmedQuery || isSearching}
-        onClick={() => {
-          if (searchTimerRef.current !== null) {
-            window.clearTimeout(searchTimerRef.current);
-          }
-          searchImages(trimmedQuery);
-        }}
-      >
-        {isSearching ? <LoaderCircle size={15} aria-hidden="true" /> : <Plus size={15} aria-hidden="true" />}
-      </button>
-    </div>
+      </PanelInputGroup>
+    </PanelActionRow>
   );
 }

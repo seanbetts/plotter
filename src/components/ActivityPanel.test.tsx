@@ -93,11 +93,11 @@ describe('ActivityPanel', () => {
     const imageRegion = screen.getByRole('region', { name: 'Activity images' });
     const searchInput = within(imageRegion).getByLabelText('Search web images');
     const previewButton = within(imageRegion).getByRole('button', { name: 'Open full image: Gallery wing' });
-    const searchRow = searchInput.closest('.activity-add-row');
+    const searchRow = searchInput.closest('.panel-action-row');
 
     expect(searchInput).toBeInTheDocument();
     expect(searchRow).toBeInTheDocument();
-    expect(searchRow?.querySelector('.activity-search-group')).toBeInTheDocument();
+    expect(searchRow?.querySelector('.panel-input-group')).toBeInTheDocument();
     expect(imageRegion).toContainElement(searchInput);
     expect(searchInput.compareDocumentPosition(previewButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import type { Activity, ActivityLocation } from '../domain/types';
+import { PanelActionRow } from './PanelInputRow';
 import { SearchCombobox } from './SearchCombobox';
 
 type ActivityListProps = {
@@ -159,13 +160,17 @@ export function ActivityList({
         <h2>{title}</h2>
       </div>
 
-      <div className="activity-add-row">
+      <PanelActionRow
+        actionLabel="Add activity"
+        actionIcon={<Plus size={15} aria-hidden="true" />}
+        onActionClick={submitNewActivity}
+      >
         <SearchCombobox<PlaceSearchResult>
           label="Search for an activity"
           placeholder="Find a place, venue, or address"
           inputId="activity-search"
           resultsId="activity-search-results"
-          className="activity-search-group"
+          className="panel-input-group"
           value={newActivityTitle}
           onValueChange={setNewActivityTitle}
           search={searchActivities}
@@ -193,10 +198,7 @@ export function ActivityList({
             );
           }}
         />
-        <button type="button" aria-label="Add activity" onClick={submitNewActivity}>
-          <Plus size={15} aria-hidden="true" />
-        </button>
-      </div>
+      </PanelActionRow>
 
       {activities.length === 0 ? (
         <p className="activity-empty-state">No activities yet</p>

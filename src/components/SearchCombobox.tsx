@@ -1,5 +1,6 @@
 import { Search, X } from 'lucide-react';
 import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { PanelInputGroup } from './PanelInputRow';
 
 type SearchComboboxProps<Result> = {
   label: string;
@@ -214,36 +215,36 @@ export function SearchCombobox<Result>({
       : undefined;
 
   return (
-    <div className={className}>
-      <label className="sr-only" htmlFor={inputId}>
-        {label}
-      </label>
-      <div className="search-input-shell">
-        <Search className="search-input-icon" size={18} aria-hidden="true" />
-        <input
-          id={inputId}
-          value={query}
-          onChange={(event) => {
-            const nextQuery = event.target.value;
-            setQuery(nextQuery);
-            if (!nextQuery.trim()) {
-              resetSearchState();
-            }
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={visibleResults.length > 0}
-          aria-controls={resultsId}
-          aria-activedescendant={activeResultId}
-        />
-        {query ? (
+    <PanelInputGroup
+      className={className}
+      label={label}
+      inputId={inputId}
+      icon={Search}
+      inputProps={{
+        value: query,
+        onChange: (event) => {
+          const nextQuery = event.target.value;
+          setQuery(nextQuery);
+          if (!nextQuery.trim()) {
+            resetSearchState();
+          }
+        },
+        onKeyDown: handleKeyDown,
+        placeholder,
+        role: 'combobox',
+        'aria-autocomplete': 'list',
+        'aria-expanded': visibleResults.length > 0,
+        'aria-controls': resultsId,
+        'aria-activedescendant': activeResultId,
+      }}
+      trailingControl={
+        query ? (
           <button type="button" className="search-clear" aria-label={clearLabel} onClick={clearSearch}>
             <X size={16} aria-hidden="true" />
           </button>
-        ) : null}
-      </div>
+        ) : null
+      }
+    >
       {visibleIsSearching ? <div className="toolbar-status">Searching...</div> : null}
       {visibleError ? <div className="toolbar-error">{visibleError}</div> : null}
       {visibleResults.length > 0 ? (
@@ -270,6 +271,6 @@ export function SearchCombobox<Result>({
           })}
         </div>
       ) : null}
-    </div>
+    </PanelInputGroup>
   );
 }

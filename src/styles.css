@@ -511,7 +511,7 @@ select {
 }
 
 .search-group input,
-.activity-search-group input {
+.panel-input-group input {
   flex: 1 1 auto;
   width: 100%;
   min-width: 180px;
@@ -523,7 +523,7 @@ select {
 }
 
 .search-group input::placeholder,
-.activity-search-group input::placeholder {
+.panel-input-group input::placeholder {
   color: var(--text-faint);
 }
 
@@ -589,7 +589,7 @@ select {
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
 }
 
-.activity-search-group {
+.panel-input-group {
   display: grid;
   position: relative;
   min-width: 0;
@@ -604,27 +604,28 @@ select {
     box-shadow 140ms ease;
 }
 
-.activity-search-group:focus-within {
+.panel-input-group:focus-within {
   border-color: var(--border-selected);
   background: var(--surface-control-focus);
   box-shadow: 0 0 0 3px rgb(var(--color-accent-rgb) / 0.18);
 }
 
-.activity-search-group .search-input-shell,
-.activity-search-group .search-input-shell:focus-within {
+.panel-input-group .search-input-shell,
+.panel-input-group .search-input-shell:focus-within {
   border: 0;
   outline: 0;
   background: transparent;
   box-shadow: none;
 }
 
-.destination-profile .activity-search-group input {
+.destination-profile .panel-input-group input,
+.activity-panel .panel-input-group input {
   border: 0;
   background: transparent;
   outline: 0;
 }
 
-.activity-search-group .search-results {
+.panel-input-group .search-results {
   top: calc(100% + 6px);
   right: 0;
   left: 0;
@@ -645,7 +646,7 @@ select {
     color 140ms ease;
 }
 
-.activity-search-group .search-results button {
+.panel-input-group .search-results button {
   grid-template-columns: minmax(0, 1fr);
   padding: 10px 12px;
 }
@@ -707,7 +708,7 @@ select {
 }
 
 .activity-search-badge,
-.activity-search-group .search-result-badge {
+.panel-input-group .search-result-badge {
   flex: 0 0 auto;
   border: 1px solid var(--color-border-subtle, var(--border-subtle));
   border-radius: 999px;
@@ -718,7 +719,7 @@ select {
 }
 
 .activity-search-distance,
-.activity-search-group .search-result-distance {
+.panel-input-group .search-result-distance {
   flex: 0 0 auto;
   color: var(--color-text-muted, var(--text-muted));
   font-size: 0.76rem;
@@ -879,7 +880,7 @@ select {
 }
 
 .workspace-panels .activity-panel {
-  width: min(390px, calc(50vw - 28px));
+  width: min(520px, calc(100vw - 32px));
 }
 
 .profile-header {
@@ -1471,83 +1472,6 @@ select {
   gap: 6px;
 }
 
-.link-preview-add-row {
-  display: grid;
-  align-items: center;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  gap: 6px;
-}
-
-.link-preview-input-shell {
-  display: grid;
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  color: var(--color-text);
-  background: var(--surface-control);
-  transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.link-preview-input-shell:focus-within {
-  border-color: var(--border-selected);
-  background: var(--surface-control-focus);
-  box-shadow: 0 0 0 3px rgb(var(--color-accent-rgb) / 0.18);
-}
-
-.link-preview-input-shell .search-input-shell,
-.link-preview-input-shell .search-input-shell:focus-within {
-  border: 0;
-  outline: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.link-preview-add-row input {
-  min-width: 0;
-  height: 34px;
-  border: 0;
-  padding: 7px 9px;
-  color: var(--color-text);
-  background: transparent;
-  outline: 0;
-}
-
-.link-preview-add-row input::placeholder {
-  color: var(--text-faint);
-}
-
-.link-preview-add-row button {
-  display: grid;
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
-  padding: 0;
-  color: rgb(var(--color-text-rgb) / 0.78);
-  background: var(--surface-action-subtle);
-  cursor: pointer;
-}
-
-.link-preview-add-row button:hover:not(:disabled),
-.link-preview-add-row button:focus-visible:not(:disabled) {
-  color: var(--color-text);
-  background: var(--surface-control-hover);
-}
-
-.link-preview-add-row button:disabled {
-  color: var(--text-disabled);
-  cursor: progress;
-  opacity: 0.7;
-}
-
-.link-preview-add-row button:focus-visible,
 .link-preview-card__link:focus-visible,
 .link-preview-card__delete:focus-visible,
 .link-preview-card__move:focus-visible {
@@ -1866,7 +1790,7 @@ select {
 }
 
 .activity-row,
-.activity-add-row {
+.panel-action-row {
   display: grid;
   align-items: center;
   gap: 6px;
@@ -1877,19 +1801,17 @@ select {
   padding: 4px;
 }
 
-.activity-add-row {
+.panel-action-row {
   grid-template-columns: minmax(0, 1fr) 34px;
 }
 
-.destination-profile .activity-add-row input,
-.activity-panel .activity-add-row input {
+.panel-action-row input {
   min-width: 0;
   height: 34px;
   padding: 7px 9px;
 }
 
-.destination-profile .activity-search-group input,
-.activity-panel .activity-search-group input {
+.panel-action-row .panel-input-group input {
   border: 0;
   background: transparent;
   outline: 0;
@@ -1897,7 +1819,7 @@ select {
 
 .activity-select,
 .activity-row > button:not(.activity-select),
-.activity-add-row > button {
+.panel-action-row > button {
   display: grid;
   width: 32px;
   min-width: 32px;
@@ -1949,8 +1871,8 @@ select {
 
 .activity-row > button:not(.activity-select):hover:not(:disabled),
 .activity-row > button:not(.activity-select):focus-visible:not(:disabled),
-.activity-add-row > button:hover,
-.activity-add-row > button:focus-visible {
+.panel-action-row > button:hover:not(:disabled),
+.panel-action-row > button:focus-visible:not(:disabled) {
   border-color: var(--border-hover);
   color: var(--color-text);
   background: var(--surface-control-hover);
@@ -2853,16 +2775,16 @@ button.image-preview-activity-attribution:focus-visible {
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
 }
 
-.activity-add-row > button:disabled {
+.panel-action-row > button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.activity-add-row > button svg {
+.panel-action-row > button svg {
   flex: 0 0 auto;
 }
 
-.activity-add-row > button:disabled svg[class*='lucide-loader-circle'] {
+.panel-action-row > button:disabled svg[class*='lucide-loader-circle'] {
   animation: route-spin 900ms linear infinite;
 }
 

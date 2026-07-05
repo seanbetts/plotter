@@ -110,8 +110,9 @@ describe('LinkPreviewGrid', () => {
     const addButton = within(addLinkForm).getByRole('button', { name: 'Add link' });
 
     expect(within(addLinkForm).getByText('Add link URL')).toHaveClass('sr-only');
-    expect(linkInput.closest('.link-preview-input-shell')).not.toBeNull();
-    expect(linkInput.closest('.link-preview-input-shell')?.querySelector('.link-preview-input-icon')).not.toBeNull();
+    expect(linkInput.closest('.panel-action-row')).not.toBeNull();
+    expect(linkInput.closest('.panel-input-group')).not.toBeNull();
+    expect(linkInput.closest('.panel-input-group')?.querySelector('.search-input-icon')).not.toBeNull();
     expect(linkInput).toHaveAttribute('placeholder', 'Add link');
     expect(addButton).toHaveTextContent('');
   });
