@@ -25,6 +25,7 @@ function createMockRepository(snapshot: {
     replaceTripData: vi.fn(),
     listDestinationMedia: vi.fn(),
     uploadDestinationMedia: vi.fn(),
+    importDestinationMediaFromSearch: vi.fn(),
     updateDestinationMedia: vi.fn(),
     deleteDestinationMedia: vi.fn(),
     reorderDestinationMedia: vi.fn(),

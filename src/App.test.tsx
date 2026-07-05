@@ -150,6 +150,7 @@ const repositoryMock = vi.hoisted(() => {
     }),
     listDestinationMedia: vi.fn(async (): Promise<MediaItem[]> => []),
     uploadDestinationMedia: vi.fn(),
+    importDestinationMediaFromSearch: vi.fn(),
     updateDestinationMedia: vi.fn(),
     deleteDestinationMedia: vi.fn(),
     reorderDestinationMedia: vi.fn(),
@@ -225,6 +226,7 @@ describe('App', () => {
     repositoryMock.replaceTripData.mockClear();
     repositoryMock.listDestinationMedia.mockClear();
     repositoryMock.uploadDestinationMedia.mockClear();
+    repositoryMock.importDestinationMediaFromSearch.mockClear();
     repositoryMock.updateDestinationMedia.mockClear();
     repositoryMock.deleteDestinationMedia.mockClear();
     repositoryMock.reorderDestinationMedia.mockClear();

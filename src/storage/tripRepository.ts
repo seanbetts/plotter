@@ -9,6 +9,7 @@ import type {
 } from '../domain/types';
 import { createLegacyLocation } from '../domain/locations';
 import { sortResearchLinks } from '../domain/researchLinks';
+import type { WebImageSearchResult } from '../services/webImageSearchClient';
 import type { TripDb } from './tripDb';
 
 export type TripRepository = {
@@ -34,6 +35,10 @@ export type TripRepository = {
     file: File;
     caption?: string;
     credit?: string;
+  }): Promise<MediaItem>;
+  importDestinationMediaFromSearch(input: {
+    destinationId: string;
+    result: WebImageSearchResult;
   }): Promise<MediaItem>;
   updateDestinationMedia(
     mediaId: string,
@@ -277,6 +282,42 @@ export function createTripRepository(db: TripDb): TripRepository {
           ) + 1,
         contentType: input.file.type || undefined,
         sizeBytes: input.file.size,
+        uploadedAt: timestamp,
+      };
+
+      await db.destinations.put({
+        ...destination,
+        media: [...destination.media, mediaItem],
+        updatedAt: timestamp,
+      });
+
+      return mediaItem;
+    },
+
+    async importDestinationMediaFromSearch(input: {
+      destinationId: string;
+      result: WebImageSearchResult;
+    }): Promise<MediaItem> {
+      const destination = await db.destinations.get(input.destinationId);
+      if (!destination) {
+        throw new Error('Destination not found.');
+      }
+
+      const timestamp = new Date().toISOString();
+      const mediaItem: MediaItem = {
+        id: crypto.randomUUID(),
+        url: input.result.imageUrl,
+        thumbnailUrl: input.result.thumbnailUrl,
+        previewUrl: input.result.imageUrl,
+        fullUrl: input.result.imageUrl,
+        caption: input.result.title,
+        credit: input.result.sourceName,
+        sortOrder:
+          destination.media.reduce(
+            (maxSortOrder, item, index) => Math.max(maxSortOrder, item.sortOrder ?? index),
+            -1,
+          ) + 1,
+        contentType: 'image/jpeg',
         uploadedAt: timestamp,
       };
 

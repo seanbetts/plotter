@@ -1468,6 +1468,89 @@ describe('supabase trip repository mappers', () => {
     expect(remove).toHaveBeenCalledWith([uploadedPath]);
   });
 
+  it('imports destination media from a web image result and returns signed media URLs', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const mediaAssetId = crypto.randomUUID();
+    const result = {
+      id: 'image-result-1',
+      title: 'Paris mural',
+      sourceName: 'Example Source',
+      sourceUrl: 'https://example.com/paris-mural',
+      thumbnailUrl: 'https://images.example.com/paris-mural-thumb.jpg',
+      imageUrl: 'https://images.example.com/paris-mural.jpg',
+    };
+    const row = {
+      id: mediaAssetId,
+      trip_id: tripId,
+      destination_id: destinationId,
+      activity_id: null,
+      bucket_id: 'trip-media',
+      object_path: `${tripId}/${destinationId}/imported-paris-mural.jpg`,
+      caption: 'Paris mural',
+      credit: 'Example Source',
+      sort_order: 0,
+      content_type: 'image/jpeg',
+      size_bytes: 2048,
+      uploaded_by: userId,
+      created_at: '2026-06-29T12:00:00.000Z',
+      updated_at: '2026-06-29T12:00:00.000Z',
+    };
+    const invoke = vi.fn(async () => ({
+      data: { mediaAsset: row },
+      error: null,
+    }));
+    const createSignedUrl = vi.fn(async (_path: string, _expiresIn: number, options?: { transform?: { width: number } }) => ({
+      data: { signedUrl: `https://signed.example/imported-${options?.transform?.width ?? 'original'}.jpg` },
+      error: null,
+    }));
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: userId } },
+          error: null,
+        })),
+      },
+      functions: {
+        invoke,
+      },
+      storage: {
+        from: vi.fn(() => ({ createSignedUrl })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'trips') {
+          return createTripsTableMock([
+            { id: tripId, owner_user_id: userId, name: 'World tour' },
+          ]);
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never);
+
+    await expect(repository.importDestinationMediaFromSearch({
+      destinationId,
+      result,
+    })).resolves.toEqual(
+      expect.objectContaining({
+        id: mediaAssetId,
+        url: 'https://signed.example/imported-original.jpg',
+        thumbnailUrl: 'https://signed.example/imported-320.jpg',
+        previewUrl: 'https://signed.example/imported-900.jpg',
+        fullUrl: 'https://signed.example/imported-2200.jpg',
+        caption: 'Paris mural',
+        credit: 'Example Source',
+        sortOrder: 0,
+      }),
+    );
+    expect(invoke).toHaveBeenCalledWith('import-image', {
+      body: { tripId, destinationId, result },
+    });
+    expect(supabase.storage.from).toHaveBeenCalledWith('trip-media');
+  });
+
   it('lists destination media with signed URLs', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();

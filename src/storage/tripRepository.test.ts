@@ -318,6 +318,46 @@ describe('trip repository', () => {
     expect(mediaItem.url).toBe('data:image/webp;base64,aW1hZ2UtZGF0YQ==');
   });
 
+  it('imports destination media from a web image result', async () => {
+    const repository = createTestRepository();
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    await repository.saveDestination(destination);
+
+    const mediaItem = await repository.importDestinationMediaFromSearch({
+      destinationId: destination.id,
+      result: {
+        id: 'search-result-1',
+        title: 'Paris mural',
+        sourceName: 'Example Source',
+        sourceUrl: 'https://example.com/paris-mural',
+        thumbnailUrl: 'https://images.example.com/paris-mural-thumb.jpg',
+        imageUrl: 'https://images.example.com/paris-mural.jpg',
+      },
+    });
+
+    expect(mediaItem).toEqual(expect.objectContaining({
+      caption: 'Paris mural',
+      credit: 'Example Source',
+      sortOrder: 0,
+      contentType: 'image/jpeg',
+      url: 'https://images.example.com/paris-mural.jpg',
+      thumbnailUrl: 'https://images.example.com/paris-mural-thumb.jpg',
+      previewUrl: 'https://images.example.com/paris-mural.jpg',
+      fullUrl: 'https://images.example.com/paris-mural.jpg',
+    }));
+    expect(await repository.listDestinationMedia(destination.id)).toEqual([
+      expect.objectContaining({
+        id: mediaItem.id,
+        caption: 'Paris mural',
+        credit: 'Example Source',
+      }),
+    ]);
+  });
+
   it('keeps destination media separate from activity media and rolls activity media into stop media', async () => {
     const repository = createTestRepository();
     const destination = createDestination({

@@ -852,6 +852,10 @@ function createMemoryRepository(
       throw new Error('Media uploads are not supported by this test repository.');
     },
 
+    async importDestinationMediaFromSearch() {
+      throw new Error('Media imports are not supported by this test repository.');
+    },
+
     async updateDestinationMedia() {
       throw new Error('Media updates are not supported by this test repository.');
     },

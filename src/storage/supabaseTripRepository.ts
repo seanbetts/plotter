@@ -15,6 +15,7 @@ import type {
 } from '../domain/types';
 import { sortResearchLinks } from '../domain/researchLinks';
 import { mediaImageVariants } from '../media/imageOptimization';
+import type { WebImageSearchResult } from '../services/webImageSearchClient';
 import type { TripRepository } from './tripRepository';
 
 type SupabaseDestinationRow = {
@@ -119,6 +120,20 @@ type SupabaseResponse<T> = {
 
 type SupabaseWriteResponse = {
   error: { message: string } | null;
+};
+
+type ImportImageFunctionResponse = {
+  data: { mediaAsset?: SupabaseMediaAssetRow } | null;
+  error: { message?: string } | null;
+};
+
+type ImportImageSupabaseClient = {
+  functions: {
+    invoke(
+      functionName: 'import-image',
+      options: { body: { tripId: string; destinationId: string; result: WebImageSearchResult } },
+    ): Promise<ImportImageFunctionResponse>;
+  };
 };
 
 function assertNoSupabaseError<T>(response: SupabaseResponse<T>, fallbackMessage: string): T {
@@ -983,6 +998,27 @@ export function createSupabaseTripRepository(supabase: SupabaseClient): TripRepo
         await removeStorageObjectBestEffort(bucketId, uploadedObjectPath);
         throw error;
       }
+    },
+
+    async importDestinationMediaFromSearch(input) {
+      const tripId = await getActiveTripId();
+      const response = await (supabase as ImportImageSupabaseClient).functions.invoke('import-image', {
+        body: {
+          tripId,
+          destinationId: input.destinationId,
+          result: input.result,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Unable to import image.');
+      }
+
+      if (!response.data?.mediaAsset) {
+        throw new Error('Unable to import image.');
+      }
+
+      return createSignedMediaItem(response.data.mediaAsset);
     },
 
     async listDestinationMediaRollup(destinationId): Promise<MediaRollupItem[]> {
