@@ -9,6 +9,9 @@ import { ActivityList } from './ActivityList';
 import { DestinationImageStrip } from './DestinationImageStrip';
 import { LinkPreviewGrid } from './LinkPreviewGrid';
 import { formatStopHeaderLabel } from './stopLabels';
+import { TagEditor } from './TagEditor';
+import { listsMatch } from './tagEditorModel';
+import type { TagSuggestion } from './tagEditorModel';
 
 type DestinationPatch = Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>;
 
@@ -18,7 +21,6 @@ type DestinationFormState = {
   expectedStayDays: string;
   tags: string[];
   links: ResearchLink[];
-  tagInput: string;
 };
 
 type CreateActivityInput = { title: string; location?: ActivityLocation };
@@ -30,6 +32,7 @@ type DestinationProfileProps = {
   destination: Destination;
   activities: Activity[];
   selectedActivityId: string | null;
+  tagSuggestions?: TagSuggestion[];
   stopNumber?: number;
   mediaItems: MediaItem[];
   mediaRollupItems?: MediaRollupItem[];
@@ -66,29 +69,6 @@ const savedStatusVisibleMs = 2400;
 const copiedStatusVisibleMs = 1600;
 const emptyActivitySearch = async (): Promise<PlaceSearchResult[]> => [];
 
-const splitTagInput = (value: string) =>
-  value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-const tagKey = (tag: string) => tag.toLocaleLowerCase();
-
-const addUniqueTags = (currentTags: string[], newTags: string[]) => {
-  const existingTags = new Set(currentTags.map(tagKey));
-  const additions = newTags.filter((tag) => {
-    const key = tagKey(tag);
-    if (existingTags.has(key)) {
-      return false;
-    }
-
-    existingTags.add(key);
-    return true;
-  });
-
-  return [...currentTags, ...additions];
-};
-
 const normalizeExpectedStayDays = (value: string) => {
   const parsed = Number(value);
 
@@ -111,8 +91,6 @@ const normalizeCoordinateValue = (coordinate: number) => {
   return Object.is(rounded, -0) ? 0 : rounded;
 };
 const formatCoordinateValue = (coordinate: number) => String(normalizeCoordinateValue(coordinate));
-const listsMatch = (left: string[], right: string[]) =>
-  left.length === right.length && left.every((item, index) => item === right[index]);
 const researchLinksMatch = (left: ResearchLink[], right: ResearchLink[]) =>
   left.length === right.length &&
   left.every((leftLink, index) => {
@@ -156,7 +134,6 @@ const createFormState = (destination: Destination): DestinationFormState => ({
   expectedStayDays: String(destination.timing.expectedStayDays),
   tags: destination.tags,
   links: destination.research.links,
-  tagInput: '',
 });
 
 function statusTextForSaveStatus(saveStatus: SaveStatus) {
@@ -219,6 +196,7 @@ function DestinationProfileForm({
   destination,
   activities,
   selectedActivityId,
+  tagSuggestions = [],
   stopNumber,
   mediaItems,
   mediaRollupItems,
@@ -384,22 +362,8 @@ function DestinationProfileForm({
     setDraft((current) => ({ ...current, ...patch }));
   }
 
-  function updateTagInput(tagInput: string) {
-    setDraft((current) => ({ ...current, tagInput }));
-  }
-
-  function commitTagInput() {
-    const nextTags = addUniqueTags(form.tags, splitTagInput(form.tagInput));
-    if (listsMatch(nextTags, form.tags)) {
-      updateTagInput('');
-      return;
-    }
-
-    updateForm({ tags: nextTags, tagInput: '' });
-  }
-
-  function removeTag(tagToRemove: string) {
-    updateForm({ tags: form.tags.filter((tag) => tag !== tagToRemove) });
+  function updateTags(tags: string[]) {
+    updateForm({ tags });
   }
 
   function changeExpectedStayDays(delta: -1 | 1) {
@@ -743,43 +707,12 @@ function DestinationProfileForm({
         }
       />
 
-      <fieldset className="tag-editor" aria-label={tagsLabel}>
-        <legend>{tagsLabel}</legend>
-        <div className="tag-pill-list">
-          {form.tags.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              className="tag-pill"
-              aria-label={`Remove tag ${tag}`}
-              onClick={() => removeTag(tag)}
-            >
-              <span>{tag}</span>
-              <X size={13} aria-hidden="true" />
-            </button>
-          ))}
-          <input
-            className="tag-pill-input"
-            aria-label="Add tag"
-            placeholder="Add tag"
-            value={form.tagInput}
-            onChange={(event) => updateTagInput(event.target.value)}
-            onBlur={commitTagInput}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ',') {
-                event.preventDefault();
-                commitTagInput();
-                return;
-              }
-
-              if (event.key === 'Backspace' && form.tagInput === '' && form.tags.length > 0) {
-                event.preventDefault();
-                updateForm({ tags: form.tags.slice(0, -1) });
-              }
-            }}
-          />
-        </div>
-      </fieldset>
+      <TagEditor
+        label={tagsLabel}
+        tags={form.tags}
+        suggestions={tagSuggestions}
+        onChange={updateTags}
+      />
     </aside>
   );
 }

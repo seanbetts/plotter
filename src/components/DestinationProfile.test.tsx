@@ -40,6 +40,7 @@ const defaultMediaProps = {
   onUploadMedia: vi.fn(),
   onReorderMedia: vi.fn(),
   onOpenMediaPreview: vi.fn(),
+  tagSuggestions: [],
 };
 
 function createMediaItem(input: Partial<MediaItem> & Pick<MediaItem, 'id' | 'url'>): MediaItem {
@@ -68,8 +69,9 @@ function setupAutosaveTimers() {
   vi.useFakeTimers();
 }
 
-function addTag(tag: string) {
-  const input = screen.getByLabelText('Add tag');
+async function addTag(tag: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Add tag' }));
+  const input = screen.getByRole('textbox', { name: 'Add tag' });
 
   fireEvent.change(input, { target: { value: tag } });
   fireEvent.keyDown(input, { key: 'Enter' });
@@ -798,7 +800,7 @@ describe('DestinationProfile', () => {
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Increase expected stay days' }));
-    addTag('port-city');
+    await addTag('port-city');
 
     expect(onUpdate).not.toHaveBeenCalled();
     await advanceAutosave();
@@ -911,12 +913,8 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    const tagsInput = screen.getByLabelText('Add tag');
-    fireEvent.change(tagsInput, { target: { value: 'silk' } });
-    fireEvent.change(tagsInput, { target: { value: 'silk-road' } });
-    fireEvent.keyDown(tagsInput, { key: 'Enter' });
-    fireEvent.change(tagsInput, { target: { value: 'tiles' } });
-    fireEvent.keyDown(tagsInput, { key: 'Enter' });
+    await addTag('silk-road');
+    await addTag('tiles');
 
     expect(onUpdate).not.toHaveBeenCalled();
 
@@ -929,6 +927,37 @@ describe('DestinationProfile', () => {
         tags: ['silk-road', 'tiles'],
       }),
     );
+  });
+
+  it('shows an empty tag state and opens shared suggestions from the add button', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Valparaiso',
+      countryRegion: 'Chile',
+      coordinates: { lat: -33.0472, lng: -71.6127 },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        tagSuggestions={[
+          { tag: 'food', count: 3 },
+          { tag: 'street-art', count: 2 },
+        ]}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('No tags yet')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Add tag' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Add tag' }));
+
+    expect(screen.getByRole('textbox', { name: 'Add tag' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Add tag suggestion food' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add tag suggestion street-art' })).toBeInTheDocument();
   });
 
   it('renders tags as removable pills and deduplicates new tags', async () => {
@@ -947,8 +976,8 @@ describe('DestinationProfile', () => {
 
     expect(screen.getByRole('button', { name: 'Remove tag street-art' })).toBeInTheDocument();
 
-    addTag('Street-Art');
-    addTag('port-city');
+    await addTag('Street-Art');
+    await addTag('port-city');
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag street-art' }));
 
     await advanceAutosave();
@@ -963,7 +992,7 @@ describe('DestinationProfile', () => {
     );
   });
 
-  it('removes the last tag with backspace when the tag input is empty', async () => {
+  it('removes tags through removable pills', async () => {
     setupAutosaveTimers();
     const destination = {
       ...createDestination({
@@ -977,7 +1006,7 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    fireEvent.keyDown(screen.getByLabelText('Add tag'), { key: 'Backspace' });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag food' }));
     await advanceAutosave();
 
     expect(screen.getByRole('button', { name: 'Remove tag temples' })).toBeInTheDocument();
@@ -1006,7 +1035,7 @@ describe('DestinationProfile', () => {
     const { rerender } = render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Remove tag silk-road' }));
-    await user.type(screen.getByLabelText('Add tag'), 'local-draft{Enter}');
+    await addTag('local-draft');
 
     rerender(
       <DestinationProfile {...defaultMediaProps}
@@ -1093,7 +1122,7 @@ describe('DestinationProfile', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Remove tag temples' }));
-    await user.type(screen.getByLabelText('Add tag'), 'unsaved-draft{Enter}');
+    await addTag('unsaved-draft');
 
     rerender(<DestinationProfile {...defaultMediaProps} destination={secondDestination} onUpdate={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Remove tag silk-road' })).toBeInTheDocument();
@@ -1156,7 +1185,7 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    addTag('silk-road');
+    await addTag('silk-road');
     await advanceAutosave();
 
     expect(screen.getByRole('status', { name: 'Saving...' })).toHaveClass(
@@ -1187,7 +1216,7 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    addTag('silk-road');
+    await addTag('silk-road');
     await advanceAutosave();
 
     await flushAutosave();
@@ -1212,12 +1241,12 @@ describe('DestinationProfile', () => {
 
     render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
 
-    addTag('first');
+    await addTag('first');
     await advanceAutosave();
     expect(screen.getByRole('status', { name: 'Saving...' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag first' }));
-    addTag('second');
+    await addTag('second');
     firstSave.resolve();
 
     await act(async () => {
@@ -1270,7 +1299,7 @@ describe('DestinationProfile', () => {
 
     render(<ProfileHarness />);
 
-    addTag('silk-road');
+    await addTag('silk-road');
     await advanceAutosave();
 
     await flushAutosave();
