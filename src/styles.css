@@ -2405,13 +2405,17 @@ select {
 }
 
 .route-alternatives-panel {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
+  --route-alternatives-left: calc(16px + min(520px, calc(100vw - 32px)) + 12px);
+
+  position: absolute;
+  bottom: 16px;
+  left: var(--route-alternatives-left);
   z-index: 20;
   display: grid;
-  width: min(420px, calc(100vw - 32px));
+  width: min(420px, calc(100vw - var(--route-alternatives-left) - 16px));
+  max-height: min(58vh, calc(100vh - 32px));
   gap: 16px;
+  overflow: auto;
   padding: 18px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel);
@@ -2724,6 +2728,14 @@ select {
     width: auto;
     max-height: none;
     overflow: visible;
+  }
+
+  .route-alternatives-panel {
+    right: 12px;
+    bottom: calc(var(--mobile-itinerary-panel-clearance) + 24px);
+    left: 12px;
+    width: auto;
+    max-height: calc(100dvh - var(--mobile-itinerary-panel-clearance) - 128px);
   }
 
   .destination-profile,
