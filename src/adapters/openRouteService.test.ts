@@ -290,6 +290,115 @@ describe('OpenRouteService adapter', () => {
     expect(options.map((option) => option.label)).toEqual(['Recommended', 'Avoid highways']);
   });
 
+  it('rejects auth failures from route options requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({}),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      calculateOpenRouteServiceRouteOptions({
+        apiKey: 'ors-key',
+        origin: { lat: 51.5072, lng: -0.1276 },
+        target: { lat: 48.8566, lng: 2.3522 },
+      }),
+    ).rejects.toThrow('OpenRouteService route calculation failed');
+  });
+
+  it('supplements route options when provider alternatives dedupe below the maximum', async () => {
+    const recommendedGeometry: LineString = {
+      type: 'LineString',
+      coordinates: [
+        [-0.1276, 51.5072],
+        [2.3522, 48.8566],
+      ],
+    };
+    const alternativeGeometry: LineString = {
+      type: 'LineString',
+      coordinates: [
+        [-0.1276, 51.5072],
+        [0.1, 50.9],
+        [2.3522, 48.8566],
+      ],
+    };
+    const avoidHighwaysGeometry: LineString = {
+      type: 'LineString',
+      coordinates: [
+        [-0.1276, 51.5072],
+        [0.6, 50.6],
+        [2.3522, 48.8566],
+      ],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: recommendedGeometry,
+              properties: { summary: { distance: 458_250, duration: 18_000 } },
+            },
+            {
+              type: 'Feature',
+              geometry: alternativeGeometry,
+              properties: { summary: { distance: 492_000, duration: 20_700 } },
+            },
+            {
+              type: 'Feature',
+              geometry: alternativeGeometry,
+              properties: { summary: { distance: 492_000, duration: 20_700 } },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: avoidHighwaysGeometry,
+              properties: { summary: { distance: 520_000, duration: 23_040 } },
+            },
+          ],
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin: { lat: 51.5072, lng: -0.1276 },
+      target: { lat: 48.8566, lng: 2.3522 },
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://api.openrouteservice.org/v2/directions/driving-car/geojson',
+      expect.objectContaining({
+        body: JSON.stringify({
+          coordinates: [
+            [-0.1276, 51.5072],
+            [2.3522, 48.8566],
+          ],
+          options: {
+            avoid_features: ['highways'],
+          },
+        }),
+      }),
+    );
+    expect(options.map((option) => option.label)).toEqual([
+      'Recommended',
+      'Alternative 1',
+      'Avoid highways',
+    ]);
+  });
+
   it('requires an API key before route options requests', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

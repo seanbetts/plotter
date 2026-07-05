@@ -33,6 +33,12 @@ type OpenRouteServiceFeatureProperties = {
 
 type OpenRouteServiceFeatureCollection = FeatureCollection<LineString, OpenRouteServiceFeatureProperties>;
 
+class OpenRouteServiceRouteCalculationError extends Error {
+  constructor(public readonly status?: number) {
+    super('OpenRouteService route calculation failed');
+  }
+}
+
 const provider = 'openrouteservice';
 const defaultProfile: OpenRouteServiceProfile = 'driving-car';
 const endpointBaseUrl = 'https://api.openrouteservice.org/v2/directions';
@@ -93,6 +99,10 @@ function parseRouteResponse(data: OpenRouteServiceFeatureCollection): Omit<Calcu
   return parseRouteFeature(feature);
 }
 
+function isAuthFailure(error: unknown) {
+  return error instanceof OpenRouteServiceRouteCalculationError && (error.status === 401 || error.status === 403);
+}
+
 async function postDirections({
   apiKey,
   profile,
@@ -112,7 +122,7 @@ async function postDirections({
   });
 
   if (!response.ok) {
-    throw new Error('OpenRouteService route calculation failed');
+    throw new OpenRouteServiceRouteCalculationError(response.status);
   }
 
   return (await response.json()) as OpenRouteServiceFeatureCollection;
@@ -234,12 +244,16 @@ export async function calculateOpenRouteServiceRouteOptions({
         profile,
       })),
     );
-  } catch {
+  } catch (error) {
+    if (isAuthFailure(error)) {
+      throw error;
+    }
+
     // The alternatives endpoint can fail for long routes; supported supplementals still get a chance below.
   }
 
   for (const supplemental of supplementalAvoidFeatures) {
-    if (options.length >= maxRouteOptions) break;
+    if (dedupeRouteOptions(options).length >= maxRouteOptions) break;
 
     try {
       options.push(
@@ -251,7 +265,11 @@ export async function calculateOpenRouteServiceRouteOptions({
           ...supplemental,
         }),
       );
-    } catch {
+    } catch (error) {
+      if (isAuthFailure(error)) {
+        throw error;
+      }
+
       // Failed supplemental options are hidden from the picker.
     }
   }
