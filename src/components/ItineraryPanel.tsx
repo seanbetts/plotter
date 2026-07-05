@@ -1,4 +1,4 @@
-import { Car, ChevronDown, ChevronUp, GripVertical, RefreshCw, Ship, Signpost, Trash2 } from 'lucide-react';
+import { Car, ChevronDown, ChevronUp, GripVertical, Pencil, RefreshCw, Ship, Signpost, Trash2 } from 'lucide-react';
 import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { formatDestinationLocation, formatLocationContext, formatLocationParts } from '../domain/locations';
@@ -18,6 +18,7 @@ type ItineraryPanelProps = {
     routeLegId: string,
     patch: Partial<Omit<RouteLeg, 'id' | 'createdAt' | 'updatedAt'>>,
   ) => void;
+  onEditRouteLeg?: (routeLegId: string) => void;
 };
 
 type DropPosition = 'before' | 'after';
@@ -170,6 +171,7 @@ export function ItineraryPanel({
   onDeleteDestination,
   onReorderDestinations,
   onUpdateRouteLeg,
+  onEditRouteLeg = () => undefined,
 }: ItineraryPanelProps) {
   const [draggedDestinationId, setDraggedDestinationId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
@@ -553,49 +555,62 @@ export function ItineraryPanel({
                     >
                       {routeLeg.type === 'shipping-manual' ? <Ship size={15} /> : <Car size={15} />}
                     </button>
-                    <span
-                      className={`inline-route-metrics ${isCalculatingRoute ? 'is-calculating-route' : ''} ${
-                        isFailedRoute ? 'is-failed-route' : ''
-                      }`}
-                    >
-                      {isCalculatingRoute ? (
-                        <span
-                          className="inline-route-spinner"
-                          role="status"
-                          aria-label={`Calculating ${destination.name} to ${nextDestination.name} route`}
-                        />
-                      ) : null}
-                      {formatLegDistance(routeLeg) ? (
-                        <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
-                      ) : null}
-                      {isFailedRoute ? (
+                    <span className="inline-route-summary">
+                      {routeLeg.type === 'driving-auto' ? (
                         <button
                           type="button"
-                          className="inline-route-retry"
-                          aria-label={`Retry ${destination.name} to ${nextDestination.name} route calculation`}
-                          title="Retry route calculation"
-                          onClick={() =>
-                            onUpdateRouteLeg(routeLeg.id, {
-                              type: 'driving-auto',
-                            })
-                          }
+                          className="inline-route-edit"
+                          aria-label={`Edit route from ${destination.name} to ${nextDestination.name}`}
+                          title="Edit route"
+                          onClick={() => onEditRouteLeg(routeLeg.id)}
                         >
-                          <RefreshCw size={15} aria-hidden="true" />
+                          <Pencil size={15} aria-hidden="true" />
                         </button>
                       ) : null}
-                      {formatLegTime(routeLeg) ? (
-                        <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
-                      ) : null}
-                      {borderCrossingLabel ? (
-                        <span
-                          className="inline-route-border-crossing"
-                          role="img"
-                          aria-label={borderCrossingLabel}
-                          title={borderCrossingLabel}
-                        >
-                          <Signpost size={15} aria-hidden="true" />
-                        </span>
-                      ) : null}
+                      <span
+                        className={`inline-route-metrics ${isCalculatingRoute ? 'is-calculating-route' : ''} ${
+                          isFailedRoute ? 'is-failed-route' : ''
+                        }`}
+                      >
+                        {isCalculatingRoute ? (
+                          <span
+                            className="inline-route-spinner"
+                            role="status"
+                            aria-label={`Calculating ${destination.name} to ${nextDestination.name} route`}
+                          />
+                        ) : null}
+                        {formatLegDistance(routeLeg) ? (
+                          <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
+                        ) : null}
+                        {isFailedRoute ? (
+                          <button
+                            type="button"
+                            className="inline-route-retry"
+                            aria-label={`Retry ${destination.name} to ${nextDestination.name} route calculation`}
+                            title="Retry route calculation"
+                            onClick={() =>
+                              onUpdateRouteLeg(routeLeg.id, {
+                                type: 'driving-auto',
+                              })
+                            }
+                          >
+                            <RefreshCw size={15} aria-hidden="true" />
+                          </button>
+                        ) : null}
+                        {formatLegTime(routeLeg) ? (
+                          <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
+                        ) : null}
+                        {borderCrossingLabel ? (
+                          <span
+                            className="inline-route-border-crossing"
+                            role="img"
+                            aria-label={borderCrossingLabel}
+                            title={borderCrossingLabel}
+                          >
+                            <Signpost size={15} aria-hidden="true" />
+                          </span>
+                        ) : null}
+                      </span>
                     </span>
                   </div>
                 ) : null}

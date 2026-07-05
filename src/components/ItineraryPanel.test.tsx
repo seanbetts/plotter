@@ -173,6 +173,90 @@ describe('ItineraryPanel', () => {
     expect(screen.getByText('2.0 hrs')).toBeInTheDocument();
   });
 
+  it('shows an icon-only edit route button for driving route rows', async () => {
+    const user = userEvent.setup();
+    const origin = createDestination({
+      name: 'Bilbao',
+      countryRegion: 'Spain',
+      coordinates: { lat: 43.263, lng: -2.935 },
+    });
+    const target = createDestination({
+      name: 'Porto',
+      countryRegion: 'Portugal',
+      coordinates: { lat: 41.1579, lng: -8.6291 },
+    });
+    const routeLeg = {
+      ...createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        type: 'driving-auto',
+        status: 'ready',
+        distanceKm: 715,
+        travelTimeHours: 7.6,
+      }),
+      id: 'route-bilbao-porto',
+    };
+    const onEditRouteLeg = vi.fn();
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+        onEditRouteLeg={onEditRouteLeg}
+      />,
+    );
+
+    const editButton = screen.getByRole('button', { name: 'Edit route from Bilbao to Porto' });
+
+    expect(editButton).toHaveAttribute('title', 'Edit route');
+    expect(editButton).not.toHaveTextContent('Edit');
+
+    await user.click(editButton);
+
+    expect(onEditRouteLeg).toHaveBeenCalledWith('route-bilbao-porto');
+  });
+
+  it('does not show the edit route button for shipping/manual route rows', () => {
+    const origin = createDestination({
+      name: 'Panama City',
+      countryRegion: 'Panama',
+      coordinates: { lat: 8.9824, lng: -79.5199 },
+    });
+    const target = createDestination({
+      name: 'Cartagena',
+      countryRegion: 'Colombia',
+      coordinates: { lat: 10.391, lng: -75.4794 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'shipping-manual',
+      status: 'manual',
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+        onEditRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Edit route from Panama City to Cartagena' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows a retry button for a failed driving route leg', async () => {
     const user = userEvent.setup();
     const origin = createDestination({

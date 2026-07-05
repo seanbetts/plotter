@@ -2287,10 +2287,43 @@ select {
   display: block;
 }
 
-.inline-route-metrics {
+.inline-route-summary {
   display: flex;
   grid-column: 3;
   grid-row: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inline-route-edit {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--text-soft);
+  background: var(--surface-control);
+  cursor: pointer;
+}
+
+.inline-route-edit:hover,
+.inline-route-edit:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  color: var(--color-text);
+  background: var(--surface-control-hover);
+}
+
+.inline-route-edit svg {
+  display: block;
+}
+
+.inline-route-metrics {
+  display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
