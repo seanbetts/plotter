@@ -186,3 +186,44 @@ test('opens an activity panel with image region beside the selected stop', async
 
   expect(activityBox.x + activityBox.width).toBeLessThanOrEqual(stopBox.x);
 });
+
+test('imports a web image result into a stop carousel', async ({ baseURL, context, page }) => {
+  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
+  const cdpSession = await context.newCDPSession(page);
+
+  await cdpSession.send('Storage.clearDataForOrigin', {
+    origin,
+    storageTypes: 'indexeddb',
+  });
+
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    const url = new URL(route.request().url());
+
+    expect(url.pathname).toBe('/geocoding/Paris.json');
+
+    await route.fulfill({
+      contentType: 'application/json',
+      json: { features: parisResult },
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Search for a destination')).toBeVisible();
+  await page.getByLabel('Search for a destination').fill('Paris');
+  await page.getByRole('option', { name: 'Paris, France' }).click();
+
+  const stopPanel = page.getByRole('complementary', { name: 'Paris profile' });
+
+  if (!(await stopPanel.isVisible())) {
+    await page.getByRole('button', { name: 'Paris, France' }).last().click();
+  }
+
+  await expect(stopPanel).toBeVisible();
+
+  await stopPanel.getByLabel('Search web images').fill('mural');
+  await stopPanel.getByRole('option', { name: 'Import mural in Paris from Local image search' }).click();
+
+  await expect(stopPanel.getByRole('button', { name: 'Open full image: mural in Paris' })).toBeVisible();
+});
