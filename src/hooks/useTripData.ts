@@ -29,7 +29,24 @@ type UseTripDataOptions = {
   calculateRoute?: (input: CalculateRouteInput) => Promise<CalculatedRoute>;
 };
 
+type RouteLegPatch = Partial<Omit<RouteLeg, 'id' | 'createdAt' | 'updatedAt'>>;
+
 const createTimestamp = () => new Date().toISOString();
+
+function hasPreservableDrivingRouteData(routeLeg: RouteLeg | RouteLegPatch): boolean {
+  return Boolean(
+    routeLeg.type === 'driving-auto' &&
+    routeLeg.status === 'ready' &&
+    routeLeg.geometry &&
+    routeLeg.distanceKm !== undefined &&
+    routeLeg.travelTimeHours !== undefined &&
+    routeLeg.provider &&
+    routeLeg.profile === 'driving-car' &&
+    routeLeg.routeKey &&
+    routeLeg.calculatedAt &&
+    !routeLeg.error,
+  );
+}
 
 export function useTripData(repository: TripRepository, options: UseTripDataOptions = {}) {
   const [destinations, setDestinations] = useState<Destination[]>([]);
@@ -200,7 +217,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
           if (
             leg.type !== 'driving-auto' ||
-            leg.status === 'ready' ||
+            (leg.status === 'ready' && hasPreservableDrivingRouteData(leg)) ||
             !origin ||
             !target
           ) {
@@ -260,17 +277,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           } satisfies RouteLeg;
         }
 
-        if (
-          routeLeg.type === 'driving-auto' &&
-          routeLeg.status === 'ready' &&
-          routeLeg.geometry &&
-          routeLeg.distanceKm !== undefined &&
-          routeLeg.travelTimeHours !== undefined &&
-          routeLeg.provider &&
-          routeLeg.profile &&
-          routeLeg.routeKey &&
-          routeLeg.calculatedAt
-        ) {
+        if (hasPreservableDrivingRouteData(routeLeg)) {
           return {
             ...routeLeg,
             error: undefined,
@@ -448,17 +455,35 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
         async updateRouteLeg(
           routeLegId: string,
-          patch: Partial<Omit<RouteLeg, 'id' | 'createdAt' | 'updatedAt'>>,
+          patch: RouteLegPatch,
         ) {
           const existing = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
           if (!existing) return;
 
+          const updatedAt = createTimestamp();
+          const mergedRouteLeg = {
+            ...existing,
+            ...patch,
+            updatedAt,
+          };
+          const isIncompleteReadyDrivingPatch =
+            patch.type === 'driving-auto' &&
+            patch.status === 'ready' &&
+            !hasPreservableDrivingRouteData(patch);
           const updated = await finalizeRouteLeg(
-            {
-              ...existing,
-              ...patch,
-              updatedAt: createTimestamp(),
-            },
+            isIncompleteReadyDrivingPatch
+              ? {
+                ...mergedRouteLeg,
+                distanceKm: patch.distanceKm,
+                travelTimeHours: patch.travelTimeHours,
+                geometry: patch.geometry,
+                provider: patch.provider,
+                profile: patch.profile,
+                routeKey: patch.routeKey,
+                calculatedAt: patch.calculatedAt,
+                error: patch.error,
+              }
+              : mergedRouteLeg,
             destinationsRef.current,
           );
           if (!isActiveAction()) return;
