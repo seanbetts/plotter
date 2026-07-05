@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MediaItem, MediaRollupItem } from '../domain/types';
+import type { WebImageSearchClient, WebImageSearchStopContext } from '../services/webImageSearchClient';
 import { DestinationImageStrip } from './DestinationImageStrip';
 
 function createMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
@@ -45,6 +46,16 @@ function createMediaRollupItem(overrides: Partial<MediaRollupItem> = {}): MediaR
     ...overrides,
   };
 }
+
+const webImageSearchClient: WebImageSearchClient = {
+  searchImages: vi.fn(async () => []),
+};
+const webImageSearchContext: WebImageSearchStopContext = {
+  stopName: 'Bergen',
+  regionName: 'Vestland',
+  countryName: 'Norway',
+  countryCode: 'NO',
+};
 
 describe('DestinationImageStrip', () => {
   it('renders the stop image labels through the shared media strip', () => {
@@ -102,6 +113,37 @@ describe('DestinationImageStrip', () => {
     fireEvent.click(preview);
 
     expect(onOpenPreview).toHaveBeenCalledWith('media-2');
+  });
+
+  it('renders web image search before the stop images when all web image props are supplied', () => {
+    render(
+      <DestinationImageStrip
+        {...createProps({
+          webImageSearchClient,
+          webImageSearchContext,
+          onImportWebImage: vi.fn(),
+        })}
+      />,
+    );
+
+    const searchInput = screen.getByLabelText('Search web images');
+    const imageRegion = screen.getByRole('region', { name: 'Stop images' });
+
+    expect(searchInput).toBeInTheDocument();
+    expect(searchInput.compareDocumentPosition(imageRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('omits web image search unless every web image prop is supplied', () => {
+    render(
+      <DestinationImageStrip
+        {...createProps({
+          webImageSearchClient,
+          webImageSearchContext,
+        })}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Search web images')).not.toBeInTheDocument();
   });
 
   it('shows activity attribution on the selected rollup preview but not rollup thumbnails', () => {

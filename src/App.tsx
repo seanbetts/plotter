@@ -29,6 +29,12 @@ import { useTripData } from './hooks/useTripData';
 import { preloadImageUrls } from './media/imagePreloading';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { LinkPreviewClient } from './services/linkPreviewClient';
+import { createAppWebImageSearchClient } from './services/webImageSearchClient';
+import type {
+  WebImageSearchClient,
+  WebImageSearchResult,
+  WebImageSearchStopContext,
+} from './services/webImageSearchClient';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
 import './styles.css';
@@ -65,6 +71,9 @@ type PreviewMediaSource = 'destination-rollup' | 'activity';
 type PreviewMediaSelection = {
   mediaId: string;
   source: PreviewMediaSource;
+};
+type AppProps = {
+  webImageSearchClient?: WebImageSearchClient;
 };
 
 const overlayViewportPaddingPx = 16;
@@ -107,6 +116,15 @@ function formatCoordinatePair(coordinates: Coordinates) {
 
 function getFullMediaImageUrl(mediaItem: { fullUrl?: string; previewUrl?: string; url: string }) {
   return mediaItem.fullUrl ?? mediaItem.previewUrl ?? mediaItem.url;
+}
+
+function createWebImageSearchContext(destination: Destination): WebImageSearchStopContext {
+  return {
+    stopName: destination.name,
+    regionName: destination.location.regionName || destination.countryRegion,
+    countryName: destination.location.countryName || destination.countryRegion,
+    countryCode: destination.location.countryCode,
+  };
 }
 
 function readStopsPanelCollapsedPreference() {
@@ -185,9 +203,10 @@ function getAvailableOverlayHeight(position: OverlayPosition) {
   )}px`;
 }
 
-export default function App() {
+export default function App({ webImageSearchClient: injectedWebImageSearchClient }: AppProps = {}) {
   const [repository, setRepository] = useState<TripRepository | null>(null);
   const [linkPreviewClient, setLinkPreviewClient] = useState<LinkPreviewClient | null>(null);
+  const [webImageSearchClient, setWebImageSearchClient] = useState<WebImageSearchClient | null>(null);
   const [repositoryError, setRepositoryError] = useState<RepositoryError | null>(null);
 
   useEffect(() => {
@@ -196,17 +215,20 @@ export default function App() {
     Promise.resolve()
       .then(() => {
         const nextLinkPreviewClient = createAppLinkPreviewClient();
+        const nextWebImageSearchClient = injectedWebImageSearchClient ?? createAppWebImageSearchClient();
 
         return createAppTripRepository().then((nextRepository) => ({
           nextRepository,
           nextLinkPreviewClient,
+          nextWebImageSearchClient,
         }));
       })
-      .then(({ nextRepository, nextLinkPreviewClient }) => {
+      .then(({ nextRepository, nextLinkPreviewClient, nextWebImageSearchClient }) => {
         if (isCancelled) return;
 
         setRepository(nextRepository);
         setLinkPreviewClient(nextLinkPreviewClient);
+        setWebImageSearchClient(nextWebImageSearchClient);
       })
       .catch((caught) => {
         if (isCancelled) return;
@@ -217,9 +239,9 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [injectedWebImageSearchClient]);
 
-  if (!repository || !linkPreviewClient) {
+  if (!repository || !linkPreviewClient || !webImageSearchClient) {
     return (
       <main className="app-shell">
         <section className="map-stage" aria-label="World tour map workspace">
@@ -247,15 +269,23 @@ export default function App() {
     );
   }
 
-  return <TripWorkspace repository={repository} linkPreviewClient={linkPreviewClient} />;
+  return (
+    <TripWorkspace
+      repository={repository}
+      linkPreviewClient={linkPreviewClient}
+      webImageSearchClient={webImageSearchClient}
+    />
+  );
 }
 
 function TripWorkspace({
   repository,
   linkPreviewClient,
+  webImageSearchClient,
 }: {
   repository: TripRepository;
   linkPreviewClient: LinkPreviewClient;
+  webImageSearchClient: WebImageSearchClient;
 }) {
   const calculateRoute = useCallback(
     (input: Omit<Parameters<typeof calculateOpenRouteServiceRoute>[0], 'apiKey'>) =>
@@ -771,6 +801,17 @@ function TripWorkspace({
     await reloadDestinationMediaRollup();
   }, [destinationMedia, reloadDestinationMediaRollup]);
 
+  const handleDestinationWebImageImport = useCallback(async (result: WebImageSearchResult) => {
+    if (!selectedDestinationId) return;
+
+    await repository.importDestinationMediaFromSearch({
+      destinationId: selectedDestinationId,
+      result,
+    });
+    await destinationMedia.reload();
+    await reloadDestinationMediaRollup();
+  }, [destinationMedia, reloadDestinationMediaRollup, repository, selectedDestinationId]);
+
   const handleActivityMediaUpload = useCallback(async (files: File[]) => {
     await activityMedia.uploadFiles(files);
     await reloadDestinationMediaRollup();
@@ -935,6 +976,9 @@ function TripWorkspace({
               onUploadMedia={handleDestinationMediaUpload}
               onReorderMedia={handleDestinationMediaReorder}
               onOpenMediaPreview={(mediaId) => setPreviewMedia({ mediaId, source: 'destination-rollup' })}
+              webImageSearchClient={webImageSearchClient}
+              webImageSearchContext={createWebImageSearchContext(selectedDestination)}
+              onImportWebImage={handleDestinationWebImageImport}
               onClose={handleCloseDestinationProfile}
             />
           </div>

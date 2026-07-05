@@ -5,6 +5,11 @@ import type { PlaceSearchResult } from '../adapters/geocoding';
 import { formatLocationContext, formatLocationParts } from '../domain/locations';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, ResearchLink } from '../domain/types';
 import type { LinkPreviewClient } from '../services/linkPreviewClient';
+import type {
+  WebImageSearchClient,
+  WebImageSearchResult,
+  WebImageSearchStopContext,
+} from '../services/webImageSearchClient';
 import { ActivityList } from './ActivityList';
 import { DestinationImageStrip } from './DestinationImageStrip';
 import { LinkPreviewGrid } from './LinkPreviewGrid';
@@ -52,6 +57,9 @@ type DestinationProfileProps = {
   onUploadMedia: (files: File[]) => Promise<void> | void;
   onReorderMedia: (orderedMediaIds: string[]) => Promise<void> | void;
   onOpenMediaPreview: (mediaId: string) => void;
+  webImageSearchClient?: WebImageSearchClient;
+  webImageSearchContext?: WebImageSearchStopContext;
+  onImportWebImage?: (result: WebImageSearchResult) => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -213,6 +221,9 @@ function DestinationProfileForm({
   onUploadMedia,
   onReorderMedia,
   onOpenMediaPreview,
+  webImageSearchClient,
+  webImageSearchContext,
+  onImportWebImage,
   onClose,
 }: DestinationProfileProps) {
   const [draft, setDraft] = useState(() => createFormState(destination));
@@ -685,6 +696,9 @@ function DestinationProfileForm({
         onUploadFiles={onUploadMedia}
         onReorder={onReorderMedia}
         onOpenPreview={onOpenMediaPreview}
+        webImageSearchClient={webImageSearchClient}
+        webImageSearchContext={webImageSearchContext}
+        onImportWebImage={onImportWebImage}
       />
 
       <LinkPreviewGrid

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActivity } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import type { Destination, MediaItem, MediaRollupItem } from '../domain/types';
+import type { WebImageSearchClient, WebImageSearchStopContext } from '../services/webImageSearchClient';
 import { DestinationProfile } from './DestinationProfile';
 
 function deferred<T>() {
@@ -213,6 +214,39 @@ describe('DestinationProfile', () => {
     expect(imageRegion.compareDocumentPosition(linksSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(linksSection.compareDocumentPosition(activitiesHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(linksSection.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('passes web image search props into the image strip above stop images', () => {
+    const destination = createDestination({
+      name: 'Samarkand',
+      countryRegion: 'Uzbekistan',
+      coordinates: { lat: 39.6542, lng: 66.9597 },
+    });
+    const webImageSearchClient: WebImageSearchClient = {
+      searchImages: vi.fn(async () => []),
+    };
+    const webImageSearchContext: WebImageSearchStopContext = {
+      stopName: 'Samarkand',
+      countryName: 'Uzbekistan',
+    };
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        webImageSearchClient={webImageSearchClient}
+        webImageSearchContext={webImageSearchContext}
+        onImportWebImage={vi.fn()}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const profile = screen.getByRole('complementary', { name: 'Samarkand profile' });
+    const searchInput = within(profile).getByLabelText('Search web images');
+    const imageRegion = within(profile).getByRole('region', { name: 'Stop images' });
+
+    expect(searchInput.compareDocumentPosition(imageRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows latitude and longitude as separate pills with a one-click copy button', async () => {

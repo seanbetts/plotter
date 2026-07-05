@@ -8,6 +8,7 @@ import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
+import type { WebImageSearchClient, WebImageSearchResult } from './services/webImageSearchClient';
 import { createAppTripRepository } from './storage/appRepository';
 import type { TripRepository } from './storage/tripRepository';
 
@@ -756,6 +757,61 @@ describe('App', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Open full image: Balcombe lane' })).toBeInTheDocument();
+  });
+
+  it('searches web images with stop context and imports a selected result', async () => {
+    const user = userEvent.setup();
+    const destination = createDestination({
+      name: 'Paris',
+      location: {
+        placeName: 'Paris',
+        regionName: 'Ile-de-France',
+        countryName: 'France',
+        countryCode: 'FR',
+        sourceLabel: 'Paris, France',
+        sourceProvider: 'maptiler',
+      },
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const selectedResult: WebImageSearchResult = {
+      id: 'web-image-paris-mural',
+      title: 'Paris mural',
+      sourceName: 'Example Source',
+      sourceUrl: 'https://example.com/paris-mural',
+      thumbnailUrl: 'https://example.com/paris-mural-thumb.jpg',
+      imageUrl: 'https://example.com/paris-mural.jpg',
+      width: 1600,
+      height: 1000,
+    };
+    const webImageSearchClient: WebImageSearchClient = {
+      searchImages: vi.fn(async () => [selectedResult]),
+    };
+    repositoryMock.initialDestinations = Promise.resolve([destination]);
+    repositoryMock.importDestinationMediaFromSearch.mockResolvedValue(
+      createMediaItem({
+        id: 'imported-paris-mural',
+        url: selectedResult.imageUrl,
+        caption: selectedResult.title,
+      }),
+    );
+
+    render(<App webImageSearchClient={webImageSearchClient} />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Paris, Ile-de-France, France' }));
+    await user.type(await screen.findByLabelText('Search web images'), 'mural');
+    await user.click(await screen.findByRole('option', { name: 'Import Paris mural from Example Source' }));
+
+    expect(webImageSearchClient.searchImages).toHaveBeenCalledWith('mural', {
+      stopName: 'Paris',
+      regionName: 'Ile-de-France',
+      countryName: 'France',
+      countryCode: 'FR',
+    });
+    expect(repositoryMock.importDestinationMediaFromSearch).toHaveBeenCalledWith({
+      destinationId: destination.id,
+      result: selectedResult,
+    });
   });
 
   it('opens the image preview over the map stage instead of inside the stop pane', async () => {
