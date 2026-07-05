@@ -132,18 +132,19 @@ export function TagEditor({
             onKeyDown={handleInputKeyDown}
           />
           {visibleSuggestions.length > 0 ? (
-            <div className="tag-suggestion-list" role="listbox" aria-label="Tag suggestions">
+            <div className="tag-suggestion-list" role="list" aria-label="Tag suggestions">
               {visibleSuggestions.map((suggestion) => (
-                <button
-                  key={suggestion.tag}
-                  type="button"
-                  className="tag-suggestion"
-                  aria-label={`Add tag suggestion ${suggestion.tag}`}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => addSuggestion(suggestion.tag)}
-                >
-                  {suggestion.tag}
-                </button>
+                <div key={suggestion.tag} role="listitem">
+                  <button
+                    type="button"
+                    className="tag-suggestion"
+                    aria-label={`Add tag suggestion ${suggestion.tag}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => addSuggestion(suggestion.tag)}
+                  >
+                    {suggestion.tag}
+                  </button>
+                </div>
               ))}
             </div>
           ) : null}

@@ -36,7 +36,7 @@ describe('TagEditor', () => {
     await user.click(screen.getByRole('button', { name: 'Add tag' }));
 
     expect(screen.getByRole('textbox', { name: 'Add tag' })).toHaveFocus();
-    const list = screen.getByRole('listbox', { name: 'Tag suggestions' });
+    const list = screen.getByRole('list', { name: 'Tag suggestions' });
     expect(within(list).getByRole('button', { name: 'Add tag suggestion family' })).toBeInTheDocument();
     expect(within(list).getByRole('button', { name: 'Add tag suggestion food' })).toBeInTheDocument();
   });
@@ -61,10 +61,23 @@ describe('TagEditor', () => {
     await user.click(screen.getByRole('button', { name: 'Add tag' }));
     await user.type(screen.getByRole('textbox', { name: 'Add tag' }), 'ar');
 
-    const list = screen.getByRole('listbox', { name: 'Tag suggestions' });
+    const list = screen.getByRole('list', { name: 'Tag suggestions' });
     expect(within(list).getByRole('button', { name: 'Add tag suggestion architecture' })).toBeInTheDocument();
     expect(within(list).getByRole('button', { name: 'Add tag suggestion garden' })).toBeInTheDocument();
     expect(within(list).queryByRole('button', { name: 'Add tag suggestion food' })).not.toBeInTheDocument();
+  });
+
+  it('commits typed text when the add input blurs', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    render(<TagEditor label="Home Tags" tags={[]} suggestions={suggestions} onChange={onChange} />);
+
+    await user.click(screen.getByRole('button', { name: 'Add tag' }));
+    await user.type(screen.getByRole('textbox', { name: 'Add tag' }), 'garden');
+    await user.tab();
+
+    expect(onChange).toHaveBeenCalledWith(['garden']);
   });
 
   it('adds a clicked suggestion and keeps the popover open', async () => {

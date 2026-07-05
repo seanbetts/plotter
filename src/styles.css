@@ -1333,6 +1333,16 @@ select {
   background: rgb(var(--color-accent-rgb) / 0.17);
 }
 
+.tag-editor .tag-pill-input {
+  flex: 1 1 110px;
+  width: auto;
+  min-width: 92px;
+  border: 0;
+  padding: 3px 2px;
+  background: transparent;
+  outline: 0;
+}
+
 .tag-empty-state {
   flex: 1 1 auto;
   min-width: 0;
@@ -1403,6 +1413,7 @@ select {
 
 .tag-suggestion {
   display: flex;
+  width: 100%;
   min-height: 30px;
   align-items: center;
   border: 0;

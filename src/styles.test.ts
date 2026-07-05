@@ -72,6 +72,12 @@ describe('panel tag editor styles', () => {
     expect(styles).toMatch(/\.tag-empty-state\s*{[^}]*color:\s*var\(--text-muted\);/s);
     expect(styles).toMatch(/\.tag-add-button\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;/s);
   });
+
+  it('preserves legacy tag input styling until panels migrate to the shared editor', () => {
+    expect(styles).toMatch(
+      /\.tag-editor \.tag-pill-input\s*{[^}]*flex:\s*1 1 110px;[^}]*min-width:\s*92px;[^}]*outline:\s*0;/s,
+    );
+  });
 });
 
 describe('profile header styles', () => {
