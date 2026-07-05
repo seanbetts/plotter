@@ -1911,7 +1911,7 @@ function mockTripWorkspace(overrides: Partial<ReturnType<typeof useTripWorkspace
 }
 ```
 
-Keep the current expanded `repositoryMock` methods for activities, destination media rollups, and activity media. Do not replace it with the smaller pre-activity-media mock from older tests.
+Keep the current expanded `repositoryMock` methods for activities, route alternatives, destination media rollups, activity media, link previews, tag suggestions, web image search, and stop-panel collapse behavior. Do not replace it with the smaller pre-activity-media mock from older tests.
 
 In `beforeEach`, call:
 
@@ -1989,7 +1989,7 @@ Expected: FAIL because `App` still calls the old repository bootstrap and does n
 
 - [ ] **Step 3: Use trip workspace in App**
 
-In `src/App.tsx`, remove `createAppTripRepository` and repository boot state. Import the hook and selector:
+In `src/App.tsx`, remove `createAppTripRepository` and repository boot state. Keep the existing `AppProps`, link preview client state/effects, injected web image search client handling, `createAppWebImageSearchClient` fallback, and service loading behavior. Import the hook and selector:
 
 ```ts
 import { TripSelector } from './components/TripSelector';
@@ -1999,7 +1999,11 @@ import { useTripWorkspace } from './hooks/useTripWorkspace';
 Replace `App` with:
 
 ```tsx
-export default function App() {
+export default function App({ webImageSearchClient: injectedWebImageSearchClient }: AppProps = {}) {
+  const [linkPreviewClient, setLinkPreviewClient] = useState<LinkPreviewClient | null>(null);
+  const [webImageSearchClient, setWebImageSearchClient] = useState<WebImageSearchClient | null>(
+    injectedWebImageSearchClient ?? null,
+  );
   const {
     trips,
     activeTrip,
@@ -2013,7 +2017,20 @@ export default function App() {
     deleteTrip,
   } = useTripWorkspace();
 
-  if (!repository) {
+  useEffect(() => {
+    setLinkPreviewClient(createAppLinkPreviewClient());
+  }, []);
+
+  useEffect(() => {
+    if (injectedWebImageSearchClient) {
+      setWebImageSearchClient(injectedWebImageSearchClient);
+      return;
+    }
+
+    setWebImageSearchClient(createAppWebImageSearchClient());
+  }, [injectedWebImageSearchClient]);
+
+  if (!repository || !linkPreviewClient || !webImageSearchClient) {
     return (
       <main className="app-shell">
         <section className="map-stage" aria-label="World tour map workspace">
@@ -2045,6 +2062,8 @@ export default function App() {
     <TripWorkspace
       key={activeTrip?.id}
       repository={repository}
+      linkPreviewClient={linkPreviewClient}
+      webImageSearchClient={webImageSearchClient}
       trips={trips}
       activeTrip={activeTrip}
       tripActionError={actionError}
@@ -2063,6 +2082,8 @@ Update `TripWorkspace` props:
 ```ts
 function TripWorkspace({
   repository,
+  linkPreviewClient,
+  webImageSearchClient,
   trips,
   activeTrip,
   tripActionError,
@@ -2073,6 +2094,8 @@ function TripWorkspace({
   isTripWorkspaceLoading,
 }: {
   repository: TripRepository;
+  linkPreviewClient: LinkPreviewClient;
+  webImageSearchClient: WebImageSearchClient;
   trips: TripSummary[];
   activeTrip: TripSummary | null;
   tripActionError: string | null;
@@ -2090,7 +2113,7 @@ Import `TripSummary`:
 import type { TripSummary } from './storage/tripDirectoryRepository';
 ```
 
-Render the selector above `ItineraryPanel` while leaving `TopToolbar`, `ActivityPanel`, `DestinationProfile`, and `DestinationImagePreviewModal` wired as they are in the current file:
+Render the selector above `ItineraryPanel` while leaving `TopToolbar`, `RouteAlternativesPanel`, `ActivityPanel`, `DestinationProfile`, `DestinationImagePreviewModal`, tag suggestions, link previews, and web image search wired as they are in the current file:
 
 ```tsx
 <div className="workspace-left-stack">
@@ -2107,17 +2130,20 @@ Render the selector above `ItineraryPanel` while leaving `TopToolbar`, `Activity
     destinations={destinations}
     routeLegs={routeLegs}
     selectedDestinationId={selectedDestinationId}
+    isCollapsed={isStopsPanelCollapsed}
+    onToggleCollapsed={() => setIsStopsPanelCollapsed((isCollapsed) => !isCollapsed)}
     onSelectDestination={handleSelectDestination}
     onDeleteDestination={(destinationId) => void handleDeleteDestination(destinationId)}
     onReorderDestinations={(destinationIds) => void reorderDestinations(destinationIds)}
     onUpdateRouteLeg={(routeLegId, patch) => void updateRouteLeg(routeLegId, patch)}
+    onEditRouteLeg={(routeLegId) => void openRouteAlternatives(routeLegId)}
   />
 </div>
 ```
 
 Remove the standalone `ItineraryPanel` render that the stack replaces.
 
-Do not remove the existing `workspace-panels` block. It owns the selected `ActivityPanel`, `DestinationProfile`, destination media rollup, activity media, and `DestinationImagePreviewModal` behavior added by the activity media work.
+Do not remove the existing `RouteAlternativesPanel` block or `workspace-panels` block. They own route alternatives, selected `ActivityPanel`, `DestinationProfile`, destination media rollup, activity media, tag suggestions, link previews, web image search, and `DestinationImagePreviewModal` behavior.
 
 Set interaction locking to include workspace loading:
 
@@ -2125,7 +2151,7 @@ Set interaction locking to include workspace loading:
 const isInteractionLocked = isLoading || isTripWorkspaceLoading;
 ```
 
-The `key={activeTrip?.id}` on `TripWorkspace` resets selected destination and pending map-stop state when the active trip changes.
+The `key={activeTrip?.id}` on `TripWorkspace` resets selected destination, selected activity, pending map-stop state, media preview state, and route alternatives state when the active trip changes.
 
 - [ ] **Step 4: Add CSS for the left stack and selector**
 

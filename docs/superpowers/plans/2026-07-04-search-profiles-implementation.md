@@ -1,6 +1,6 @@
 # Search Profiles Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build shared MapTiler search profiles for macro stop search and micro activity search, then wire them into the top toolbar and stop-panel activity flow.
 
@@ -40,7 +40,7 @@
 - Modify: `src/adapters/geocoding.ts`
 - Modify: `src/adapters/geocoding.test.ts`
 
-- [ ] **Step 1: Write failing tests for stop and activity profile request types**
+- [x] **Step 1: Write failing tests for stop and activity profile request types**
 
 Add these tests inside `describe('geocoding adapter', () => { ... })` in `src/adapters/geocoding.test.ts`:
 
@@ -95,7 +95,7 @@ Add these tests inside `describe('geocoding adapter', () => { ... })` in `src/ad
   });
 ```
 
-- [ ] **Step 2: Run adapter tests and verify failure**
+- [x] **Step 2: Run adapter tests and verify failure**
 
 Run:
 
@@ -105,7 +105,7 @@ npm test -- src/adapters/geocoding.test.ts
 
 Expected: FAIL because `SearchOptions` does not accept `profile` or `proximity`, and the adapter still uses the old `usefulTypes` array.
 
-- [ ] **Step 3: Add profile types and request type mapping**
+- [x] **Step 3: Add profile types and request type mapping**
 
 In `src/adapters/geocoding.ts`, replace the current `SearchOptions` and `usefulTypes` declarations with:
 
@@ -168,7 +168,7 @@ Update `resolveMapTilerCoordinates` to use the selected profile types:
   url.searchParams.set('types', placeTypesByProfile[profile].join(','));
 ```
 
-- [ ] **Step 4: Run adapter tests and verify the new profile request tests pass**
+- [x] **Step 4: Run adapter tests and verify the new profile request tests pass**
 
 Run:
 
@@ -178,7 +178,7 @@ npm test -- src/adapters/geocoding.test.ts
 
 Expected: PASS for the new request type tests, with possible failures only from later rich-result expectations that have not been added yet.
 
-- [ ] **Step 5: Write failing tests for richer MapTiler fields and activity distance**
+- [x] **Step 5: Write failing tests for richer MapTiler fields and activity distance**
 
 Add this test to `src/adapters/geocoding.test.ts`:
 
@@ -296,7 +296,7 @@ Add this test for the Sagres regression:
   });
 ```
 
-- [ ] **Step 6: Run adapter tests and verify failure**
+- [x] **Step 6: Run adapter tests and verify failure**
 
 Run:
 
@@ -306,7 +306,7 @@ npm test -- src/adapters/geocoding.test.ts
 
 Expected: FAIL because `PlaceSearchResult` does not expose rich MapTiler fields, context normalization, or distance.
 
-- [ ] **Step 7: Extend adapter types and feature mapping**
+- [x] **Step 7: Extend adapter types and feature mapping**
 
 In `src/adapters/geocoding.ts`, add these exported types above `PlaceSearchResult`:
 
@@ -468,7 +468,7 @@ For coordinate results, include distance when proximity is supplied:
     ];
 ```
 
-- [ ] **Step 8: Run adapter tests and commit**
+- [x] **Step 8: Run adapter tests and commit**
 
 Run:
 
@@ -493,7 +493,7 @@ git commit -m "feat: add search profiles"
 - Modify: `src/components/TopToolbar.tsx`
 - Modify: `src/components/TopToolbar.test.tsx`
 
-- [ ] **Step 1: Write tests for shared combobox behavior**
+- [x] **Step 1: Write tests for shared combobox behavior**
 
 Create `src/components/SearchCombobox.test.tsx`:
 
@@ -645,7 +645,7 @@ describe('SearchCombobox', () => {
 });
 ```
 
-- [ ] **Step 2: Run combobox tests and verify failure**
+- [x] **Step 2: Run combobox tests and verify failure**
 
 Run:
 
@@ -655,7 +655,7 @@ npm test -- src/components/SearchCombobox.test.tsx
 
 Expected: FAIL because `SearchCombobox.tsx` does not exist.
 
-- [ ] **Step 3: Create `SearchCombobox`**
+- [x] **Step 3: Create `SearchCombobox`**
 
 Create `src/components/SearchCombobox.tsx`:
 
@@ -861,7 +861,7 @@ export function SearchCombobox<Result>({
 }
 ```
 
-- [ ] **Step 4: Run combobox tests and verify pass**
+- [x] **Step 4: Run combobox tests and verify pass**
 
 Run:
 
@@ -871,7 +871,7 @@ npm test -- src/components/SearchCombobox.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 5: Refactor `TopToolbar` to use `SearchCombobox`**
+- [x] **Step 5: Refactor `TopToolbar` to use `SearchCombobox`**
 
 In `src/components/TopToolbar.tsx`, remove local `query`, `results`, `highlightedIndex`, `isSearching`, `error`, `latestSearchId`, `searchTimerRef`, `handleSearch`, `handleQueryChange`, `handleClearSearch`, and `handleSearchKeyDown` state/helpers.
 
@@ -913,7 +913,7 @@ import { SearchCombobox } from './SearchCombobox';
 
 Remove now-unused imports from `lucide-react` and React hooks.
 
-- [ ] **Step 6: Update top toolbar tests for new placeholder and no badges**
+- [x] **Step 6: Update top toolbar tests for new placeholder and no badges**
 
 In `src/components/TopToolbar.test.tsx`, update the placeholder assertion:
 
@@ -949,7 +949,7 @@ Add this test:
   });
 ```
 
-- [ ] **Step 7: Run component tests and commit**
+- [x] **Step 7: Run component tests and commit**
 
 Run:
 
@@ -978,7 +978,7 @@ git commit -m "refactor: share search combobox"
 - Modify: `src/hooks/useTripData.ts`
 - Modify: `src/hooks/useTripData.test.tsx`
 
-- [ ] **Step 1: Add failing domain test for activity location creation**
+- [x] **Step 1: Add failing domain test for activity location creation**
 
 In `src/domain/activities.test.ts`, add:
 
@@ -1006,7 +1006,7 @@ In `src/domain/activities.test.ts`, add:
   });
 ```
 
-- [ ] **Step 2: Run domain activity tests and verify failure**
+- [x] **Step 2: Run domain activity tests and verify failure**
 
 Run:
 
@@ -1016,7 +1016,7 @@ npm test -- src/domain/activities.test.ts
 
 Expected: FAIL because `CreateActivityInput` does not accept `location` and `createActivity` does not set it.
 
-- [ ] **Step 3: Update activity creation model**
+- [x] **Step 3: Update activity creation model**
 
 In `src/domain/activities.ts`, import `ActivityLocation`:
 
@@ -1041,7 +1041,7 @@ Add `location` to the created activity after `priority`:
     location: input.location,
 ```
 
-- [ ] **Step 4: Run domain activity tests and verify pass**
+- [x] **Step 4: Run domain activity tests and verify pass**
 
 Run:
 
@@ -1051,7 +1051,7 @@ npm test -- src/domain/activities.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Add repository and hook tests for location forwarding**
+- [x] **Step 5: Add repository and hook tests for location forwarding**
 
 In `src/storage/tripRepository.test.ts`, add or update a create-activity test:
 
@@ -1195,7 +1195,7 @@ Then add this create-path test near `creates activities through Supabase using a
   });
 ```
 
-- [ ] **Step 6: Run repository and hook tests and verify failure**
+- [x] **Step 6: Run repository and hook tests and verify failure**
 
 Run:
 
@@ -1205,7 +1205,7 @@ npm test -- src/storage/tripRepository.test.ts src/storage/supabaseTripRepositor
 
 Expected: FAIL because create-activity input types and persistence code do not yet accept location.
 
-- [ ] **Step 7: Update local repository create input and persistence**
+- [x] **Step 7: Update local repository create input and persistence**
 
 In `src/storage/tripRepository.ts`, update `TripRepository.createActivity` input:
 
@@ -1229,7 +1229,7 @@ Update the local repository implementation call to `createActivity`:
       });
 ```
 
-- [ ] **Step 8: Update Supabase repository create input and row mapping**
+- [x] **Step 8: Update Supabase repository create input and row mapping**
 
 In `src/storage/supabaseTripRepository.ts`, update the public `createActivity(input)` implementation so the created model receives location:
 
@@ -1258,7 +1258,7 @@ const { data, error } = await supabase
   .single();
 ```
 
-- [ ] **Step 9: Update `useTripData` create action type**
+- [x] **Step 9: Update `useTripData` create action type**
 
 In `src/hooks/useTripData.ts`, update the create action signature:
 
@@ -1273,7 +1273,7 @@ In `src/hooks/useTripData.ts`, update the create action signature:
 
 No further implementation changes should be needed if the action already forwards `input` to `repository.createActivity(input)`.
 
-- [ ] **Step 10: Run all activity data tests and commit**
+- [x] **Step 10: Run all activity data tests and commit**
 
 Run:
 
@@ -1298,7 +1298,7 @@ git commit -m "feat: create activities with locations"
 - Modify: `src/components/DestinationProfile.tsx`
 - Modify: `src/components/DestinationProfile.test.tsx`
 
-- [ ] **Step 1: Add failing ActivityList tests for search result rendering and manual fallback**
+- [x] **Step 1: Add failing ActivityList tests for search result rendering and manual fallback**
 
 In `src/components/ActivityList.test.tsx`, add imports:
 
@@ -1418,7 +1418,7 @@ Add tests:
   });
 ```
 
-- [ ] **Step 2: Run ActivityList tests and verify failure**
+- [x] **Step 2: Run ActivityList tests and verify failure**
 
 Run:
 
@@ -1428,7 +1428,7 @@ npm test -- src/components/ActivityList.test.tsx
 
 Expected: FAIL because `ActivityList` does not accept `searchActivities` and still uses `New activity title`.
 
-- [ ] **Step 3: Update ActivityList props and creation input**
+- [x] **Step 3: Update ActivityList props and creation input**
 
 In `src/components/ActivityList.tsx`, import search types and combobox:
 
@@ -1518,7 +1518,7 @@ Add handler:
   }
 ```
 
-- [ ] **Step 4: Replace the add row input with activity search combobox**
+- [x] **Step 4: Replace the add row input with activity search combobox**
 
 In `ActivityList` JSX, replace the `<input aria-label="New activity title" ... />` inside `.activity-add-row` with:
 
@@ -1614,7 +1614,7 @@ Add `useState` to the React import in `SearchCombobox.test.tsx`:
 import { useState } from 'react';
 ```
 
-- [ ] **Step 5: Update DestinationProfile props**
+- [x] **Step 5: Update DestinationProfile props**
 
 In `src/components/DestinationProfile.tsx`, import `ActivityLocation` and `PlaceSearchResult`:
 
@@ -1640,7 +1640,7 @@ Update `ActivityList` usage:
         searchActivities={searchActivities}
 ```
 
-- [ ] **Step 6: Run ActivityList and DestinationProfile tests and commit**
+- [x] **Step 6: Run ActivityList and DestinationProfile tests and commit**
 
 Run:
 
@@ -1664,7 +1664,7 @@ git commit -m "feat: add activity search field"
 - Modify: `src/App.test.tsx`
 - Modify: `src/components/TopToolbar.test.tsx`
 
-- [ ] **Step 1: Add failing App test for activity search creation**
+- [x] **Step 1: Add failing App test for activity search creation**
 
 In `src/App.test.tsx`, add this test near the existing activity tests:
 
@@ -1744,7 +1744,7 @@ expect(searchMapTilerPlaces).toHaveBeenCalledWith('Kyoto', {
 });
 ```
 
-- [ ] **Step 2: Run App test and verify failure**
+- [x] **Step 2: Run App test and verify failure**
 
 Run:
 
@@ -1754,7 +1754,7 @@ npm test -- src/App.test.tsx
 
 Expected: FAIL because `App` still calls `searchMapTilerPlaces(query, { apiKey })` and `handleCreateActivity` still accepts a title string.
 
-- [ ] **Step 3: Update App search callbacks**
+- [x] **Step 3: Update App search callbacks**
 
 In `src/App.tsx`, replace the current `searchPlaces` callback with:
 
@@ -1801,7 +1801,7 @@ Use `searchStopPlaces` when rendering `TopToolbar`:
               searchPlaces={searchStopPlaces}
 ```
 
-- [ ] **Step 4: Update App activity creation handler**
+- [x] **Step 4: Update App activity creation handler**
 
 In `src/App.tsx`, import `ActivityLocation` if not already available from the existing type import:
 
@@ -1831,7 +1831,7 @@ Pass activity search to `DestinationProfile`:
               searchActivities={searchActivityPlaces}
 ```
 
-- [ ] **Step 5: Update App tests for existing manual activity flow**
+- [x] **Step 5: Update App tests for existing manual activity flow**
 
 In `src/App.test.tsx`, change existing manual creation expectations from:
 
@@ -1862,7 +1862,7 @@ Keep the explicit `location: undefined` expectation. `handleCreateActivity` shou
       });
 ```
 
-- [ ] **Step 6: Run App and toolbar tests and commit**
+- [x] **Step 6: Run App and toolbar tests and commit**
 
 Run:
 
@@ -1884,7 +1884,7 @@ git commit -m "feat: wire stop and activity search profiles"
 **Files:**
 - Modify: `src/styles.css`
 
-- [ ] **Step 1: Add activity search CSS**
+- [x] **Step 1: Add activity search CSS**
 
 In `src/styles.css`, add styles near the existing `.search-*` rules:
 
@@ -1928,7 +1928,7 @@ In `src/styles.css`, add styles near the existing `.search-*` rules:
 
 Use the exact variables shown above. They already match the existing stylesheet token names used around the current search/profile styles.
 
-- [ ] **Step 2: Run focused tests**
+- [x] **Step 2: Run focused tests**
 
 Run:
 
@@ -1938,7 +1938,7 @@ npm test -- src/adapters/geocoding.test.ts src/components/SearchCombobox.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 3: Run e2e smoke coverage**
+- [x] **Step 3: Run e2e smoke coverage**
 
 Run:
 
@@ -1948,7 +1948,11 @@ npm run test:e2e
 
 Expected: PASS. Remember Playwright owns a disposable Vite server on `127.0.0.1:5174` and stops it when done.
 
-- [ ] **Step 4: Commit final styling and verification changes**
+- [x] **Step 4: Commit final styling and verification changes**
+
+## Implementation Status
+
+Completed in the current codebase: `SearchCombobox` exists, MapTiler search profile handling is wired through stop and activity search, activities persist location details, and App tests cover location-aware activity creation and coordinate reverse-geocoding.
 
 Commit:
 

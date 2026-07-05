@@ -1,6 +1,6 @@
 # Route Alternatives Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add an icon-triggered route alternatives picker for each driving route row, calculating a small set of provider-backed options on demand and saving the selected option onto the existing route leg.
 
@@ -36,7 +36,7 @@
 - Create: `src/domain/routeOptions.test.ts`
 - Modify: none
 
-- [ ] **Step 1: Write the failing route option tests**
+- [x] **Step 1: Write the failing route option tests**
 
 Create `src/domain/routeOptions.test.ts`:
 
@@ -200,7 +200,7 @@ describe('route option helpers', () => {
 });
 ```
 
-- [ ] **Step 2: Run the route option tests to verify they fail**
+- [x] **Step 2: Run the route option tests to verify they fail**
 
 Run:
 
@@ -210,7 +210,7 @@ npm run test -- src/domain/routeOptions.test.ts
 
 Expected: FAIL because `src/domain/routeOptions.ts` does not exist.
 
-- [ ] **Step 3: Implement the route option helpers**
+- [x] **Step 3: Implement the route option helpers**
 
 Create `src/domain/routeOptions.ts`:
 
@@ -324,7 +324,7 @@ export function routeLegPatchFromRouteOption(
 }
 ```
 
-- [ ] **Step 4: Run the route option tests to verify they pass**
+- [x] **Step 4: Run the route option tests to verify they pass**
 
 Run:
 
@@ -334,7 +334,7 @@ npm run test -- src/domain/routeOptions.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/domain/routeOptions.ts src/domain/routeOptions.test.ts
@@ -350,7 +350,7 @@ git commit -m "feat: add route option helpers"
 - Modify: `src/adapters/openRouteService.test.ts`
 - Test: `src/adapters/openRouteService.test.ts`
 
-- [ ] **Step 1: Add failing adapter tests for alternatives and supplemental avoid-feature routes**
+- [x] **Step 1: Add failing adapter tests for alternatives and supplemental avoid-feature routes**
 
 Append these tests inside the existing `describe('OpenRouteService adapter', () => { ... })` block in `src/adapters/openRouteService.test.ts`:
 
@@ -546,7 +546,7 @@ import {
 } from './openRouteService';
 ```
 
-- [ ] **Step 2: Run adapter tests to verify they fail**
+- [x] **Step 2: Run adapter tests to verify they fail**
 
 Run:
 
@@ -556,7 +556,7 @@ npm run test -- src/adapters/openRouteService.test.ts
 
 Expected: FAIL because `calculateOpenRouteServiceRouteOptions` is not exported.
 
-- [ ] **Step 3: Implement route options in the OpenRouteService adapter**
+- [x] **Step 3: Implement route options in the OpenRouteService adapter**
 
 Modify `src/adapters/openRouteService.ts` to this shape, preserving the existing single-route export:
 
@@ -823,7 +823,7 @@ export async function calculateOpenRouteServiceRouteOptions({
 }
 ```
 
-- [ ] **Step 4: Run adapter and route option tests**
+- [x] **Step 4: Run adapter and route option tests**
 
 Run:
 
@@ -833,7 +833,7 @@ npm run test -- src/domain/routeOptions.test.ts src/adapters/openRouteService.te
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/adapters/openRouteService.ts src/adapters/openRouteService.test.ts src/domain/routeOptions.ts src/domain/routeOptions.test.ts
@@ -849,7 +849,7 @@ git commit -m "feat: calculate route alternatives"
 - Modify: `src/hooks/useTripData.test.tsx`
 - Test: `src/hooks/useTripData.test.tsx`
 
-- [ ] **Step 1: Add a failing hook test for applying a selected alternative**
+- [x] **Step 1: Add a failing hook test for applying a selected alternative**
 
 Add this test near the existing route calculation tests in `src/hooks/useTripData.test.tsx`:
 
@@ -926,7 +926,7 @@ Add this test near the existing route calculation tests in `src/hooks/useTripDat
   });
 ```
 
-- [ ] **Step 2: Run the hook test to verify it fails**
+- [x] **Step 2: Run the hook test to verify it fails**
 
 Run:
 
@@ -936,7 +936,7 @@ npm run test -- src/hooks/useTripData.test.tsx -t "saves selected ready route ge
 
 Expected: FAIL because `finalizeRouteLeg` recalculates ready driving patches.
 
-- [ ] **Step 3: Preserve selected ready geometry in `finalizeRouteLeg`**
+- [x] **Step 3: Preserve selected ready geometry in `finalizeRouteLeg`**
 
 In `src/hooks/useTripData.ts`, add this branch immediately before `const [calculatedRouteLeg] = await calculateDrivingRouteLegs(...)` inside `finalizeRouteLeg`:
 
@@ -1006,7 +1006,7 @@ The surrounding code should read:
         ]);
 ```
 
-- [ ] **Step 4: Run hook tests**
+- [x] **Step 4: Run hook tests**
 
 Run:
 
@@ -1016,7 +1016,7 @@ npm run test -- src/hooks/useTripData.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/hooks/useTripData.ts src/hooks/useTripData.test.tsx
@@ -1033,7 +1033,7 @@ git commit -m "feat: preserve selected route alternatives"
 - Modify: `src/styles.css`
 - Test: `src/components/ItineraryPanel.test.tsx`
 
-- [ ] **Step 1: Write the failing ItineraryPanel test**
+- [x] **Step 1: Write the failing ItineraryPanel test**
 
 Add this test to `src/components/ItineraryPanel.test.tsx`:
 
@@ -1108,7 +1108,7 @@ The test will require `onEditRouteLeg` in existing `ItineraryPanel` renders. For
         onEditRouteLeg={vi.fn()}
 ```
 
-- [ ] **Step 2: Run the component test to verify it fails**
+- [x] **Step 2: Run the component test to verify it fails**
 
 Run:
 
@@ -1118,7 +1118,7 @@ npm run test -- src/components/ItineraryPanel.test.tsx -t "icon-only edit route"
 
 Expected: FAIL because `onEditRouteLeg` is not a supported prop and the pencil button is missing.
 
-- [ ] **Step 3: Add the prop and pencil button**
+- [x] **Step 3: Add the prop and pencil button**
 
 In `src/components/ItineraryPanel.tsx`, update imports:
 
@@ -1154,7 +1154,7 @@ Inside the inline route leg markup, after the route type button and before `inli
                     ) : null}
 ```
 
-- [ ] **Step 4: Add stable icon button styles**
+- [x] **Step 4: Add stable icon button styles**
 
 Add this CSS near the existing `.inline-route-*` rules in `src/styles.css`:
 
@@ -1181,7 +1181,7 @@ Add this CSS near the existing `.inline-route-*` rules in `src/styles.css`:
 }
 ```
 
-- [ ] **Step 5: Run ItineraryPanel tests**
+- [x] **Step 5: Run ItineraryPanel tests**
 
 Run:
 
@@ -1191,7 +1191,7 @@ npm run test -- src/components/ItineraryPanel.test.tsx src/components/RouteLegEd
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/ItineraryPanel.tsx src/components/ItineraryPanel.test.tsx src/components/RouteLegEditor.test.tsx src/styles.css
@@ -1208,7 +1208,7 @@ git commit -m "feat: add route edit button"
 - Modify: `src/styles.css`
 - Test: `src/components/RouteAlternativesPanel.test.tsx`
 
-- [ ] **Step 1: Write failing panel component tests**
+- [x] **Step 1: Write failing panel component tests**
 
 Create `src/components/RouteAlternativesPanel.test.tsx`:
 
@@ -1328,7 +1328,7 @@ describe('RouteAlternativesPanel', () => {
 });
 ```
 
-- [ ] **Step 2: Run panel tests to verify they fail**
+- [x] **Step 2: Run panel tests to verify they fail**
 
 Run:
 
@@ -1338,7 +1338,7 @@ npm run test -- src/components/RouteAlternativesPanel.test.tsx
 
 Expected: FAIL because `RouteAlternativesPanel.tsx` does not exist.
 
-- [ ] **Step 3: Implement the panel**
+- [x] **Step 3: Implement the panel**
 
 Create `src/components/RouteAlternativesPanel.tsx`:
 
@@ -1439,7 +1439,7 @@ export function RouteAlternativesPanel({
 }
 ```
 
-- [ ] **Step 4: Add panel styles**
+- [x] **Step 4: Add panel styles**
 
 Add to `src/styles.css` near other panel/modal styles:
 
@@ -1535,7 +1535,7 @@ Add to `src/styles.css` near other panel/modal styles:
 }
 ```
 
-- [ ] **Step 5: Run panel tests**
+- [x] **Step 5: Run panel tests**
 
 Run:
 
@@ -1545,7 +1545,7 @@ npm run test -- src/components/RouteAlternativesPanel.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/RouteAlternativesPanel.tsx src/components/RouteAlternativesPanel.test.tsx src/styles.css
@@ -1561,7 +1561,7 @@ git commit -m "feat: add route alternatives panel"
 - Modify: `src/App.test.tsx`
 - Test: `src/App.test.tsx`
 
-- [ ] **Step 1: Add a failing integrated App test**
+- [x] **Step 1: Add a failing integrated App test**
 
 In `src/App.test.tsx`, add this import near the geocoding adapter import:
 
@@ -1697,7 +1697,7 @@ Add this test near the route behavior tests:
   });
 ```
 
-- [ ] **Step 2: Run the integrated App test to verify it fails**
+- [x] **Step 2: Run the integrated App test to verify it fails**
 
 Run:
 
@@ -1707,7 +1707,7 @@ npm run test -- src/App.test.tsx -t "opens route alternatives"
 
 Expected: FAIL because App does not pass `onEditRouteLeg`, does not calculate route options, and does not render `RouteAlternativesPanel`.
 
-- [ ] **Step 3: Add App state and route option wiring**
+- [x] **Step 3: Add App state and route option wiring**
 
 In `src/App.tsx`, update imports:
 
@@ -1867,7 +1867,7 @@ Render the panel near the end of `TripWorkspace` JSX, before preview modals:
       ) : null}
 ```
 
-- [ ] **Step 4: Run App test**
+- [x] **Step 4: Run App test**
 
 Run:
 
@@ -1877,7 +1877,7 @@ npm run test -- src/App.test.tsx -t "opens route alternatives"
 
 Expected: PASS.
 
-- [ ] **Step 5: Run route-related component tests**
+- [x] **Step 5: Run route-related component tests**
 
 Run:
 
@@ -1887,7 +1887,7 @@ npm run test -- src/App.test.tsx src/components/ItineraryPanel.test.tsx src/comp
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/App.tsx src/App.test.tsx src/components/ItineraryPanel.tsx src/components/RouteAlternativesPanel.tsx src/domain/routeOptions.ts
@@ -1902,7 +1902,7 @@ git commit -m "feat: wire route alternatives picker"
 - Modify: none
 - Test: focused Vitest suites, full Vitest suite, lint, build
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 Run:
 
@@ -1912,7 +1912,7 @@ npm run test -- src/domain/routeOptions.test.ts src/adapters/openRouteService.te
 
 Expected: PASS.
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -1924,7 +1924,7 @@ npm run build
 
 Expected: all commands PASS.
 
-- [ ] **Step 3: Confirm the working tree state**
+- [x] **Step 3: Confirm the working tree state**
 
 Run:
 
@@ -1942,3 +1942,7 @@ Expected: no uncommitted changes. If verification exposed a failure, return to t
 - Type consistency: `RouteOption`, `RouteAvoidFeature`, `routeLegPatchFromRouteOption`, and `calculateOpenRouteServiceRouteOptions` are introduced before any later task uses them.
 - Scope: Discarded alternatives are not persisted. Map preview is not required for v1; the panel selection flow is enough to choose and save one active geometry.
 - External API references used for this plan: OpenRouteService documents `alternative_routes` as `target_count`, `share_factor`, and `weight_factor`; OpenRouteService routing options document `options.avoid_features` with `highways`, `ferries`, and `tollways` support for driving profiles.
+
+## Implementation Status
+
+Completed in `5866e2e feat: wire route alternatives picker`.

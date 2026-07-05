@@ -1,6 +1,6 @@
 # Tag Editor Suggestions Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace the always-visible stop/activity tag input with a compact pill row, upward add popover, empty state, and shared stop/activity tag suggestions.
 
@@ -35,7 +35,7 @@ Before implementation, run `git status --short`. This workspace may contain unre
 - Create: `src/components/tagEditorModel.ts`
 - Create: `src/components/tagEditorModel.test.ts`
 
-- [ ] **Step 1: Write failing model tests**
+- [x] **Step 1: Write failing model tests**
 
 Create `src/components/tagEditorModel.test.ts`:
 
@@ -110,7 +110,7 @@ describe('tag editor model', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -120,7 +120,7 @@ npm test -- src/components/tagEditorModel.test.ts
 
 Expected: FAIL because `src/components/tagEditorModel.ts` does not exist.
 
-- [ ] **Step 3: Implement minimal model helpers**
+- [x] **Step 3: Implement minimal model helpers**
 
 Create `src/components/tagEditorModel.ts`:
 
@@ -217,7 +217,7 @@ function compareByFrequencyThenName(left: TagSuggestion, right: TagSuggestion) {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run:
 
@@ -227,7 +227,7 @@ npm test -- src/components/tagEditorModel.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit model helpers**
+- [x] **Step 5: Commit model helpers**
 
 Run:
 
@@ -246,7 +246,7 @@ git commit -m "Add tag editor model helpers"
 - Modify: `src/styles.css`
 - Modify: `src/styles.test.ts`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Create `src/components/TagEditor.test.tsx`:
 
@@ -350,7 +350,7 @@ describe('TagEditor', () => {
 });
 ```
 
-- [ ] **Step 2: Add failing style tests**
+- [x] **Step 2: Add failing style tests**
 
 In `src/styles.test.ts`, add these tests inside `describe('panel tag editor styles', () => { ... })`:
 
@@ -369,7 +369,7 @@ In `src/styles.test.ts`, add these tests inside `describe('panel tag editor styl
   });
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -379,7 +379,7 @@ npm test -- src/components/TagEditor.test.tsx src/styles.test.ts -t "TagEditor|t
 
 Expected: FAIL because `TagEditor.tsx` and the new styles do not exist.
 
-- [ ] **Step 4: Implement the TagEditor component**
+- [x] **Step 4: Implement the TagEditor component**
 
 Create `src/components/TagEditor.tsx`:
 
@@ -540,7 +540,7 @@ export function TagEditor({
 }
 ```
 
-- [ ] **Step 5: Implement tag editor styles**
+- [x] **Step 5: Implement tag editor styles**
 
 Update the existing tag editor block in `src/styles.css`:
 
@@ -658,7 +658,7 @@ Update the existing tag editor block in `src/styles.css`:
 
 Remove the old `.tag-editor .tag-pill-input` block because the resting input no longer exists.
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run:
 
@@ -668,7 +668,7 @@ npm test -- src/components/TagEditor.test.tsx src/components/tagEditorModel.test
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit shared component**
+- [x] **Step 7: Commit shared component**
 
 Run:
 
@@ -685,7 +685,7 @@ git commit -m "Add shared tag editor popover"
 - Modify: `src/components/DestinationProfile.tsx`
 - Modify: `src/components/DestinationProfile.test.tsx`
 
-- [ ] **Step 1: Write failing destination profile tests**
+- [x] **Step 1: Write failing destination profile tests**
 
 In `src/components/DestinationProfile.test.tsx`, update `defaultMediaProps`:
 
@@ -793,7 +793,7 @@ Update `removes the last tag with backspace when the tag input is empty` because
   });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -803,7 +803,7 @@ npm test -- src/components/DestinationProfile.test.tsx -t "tag|tags"
 
 Expected: FAIL because `DestinationProfile` does not accept `tagSuggestions` or render `TagEditor`.
 
-- [ ] **Step 3: Wire DestinationProfile to TagEditor**
+- [x] **Step 3: Wire DestinationProfile to TagEditor**
 
 In `src/components/DestinationProfile.tsx`, update imports:
 
@@ -890,7 +890,7 @@ Replace the tag fieldset JSX with:
       />
 ```
 
-- [ ] **Step 4: Run destination profile tag tests**
+- [x] **Step 4: Run destination profile tag tests**
 
 Run:
 
@@ -900,7 +900,7 @@ npm test -- src/components/DestinationProfile.test.tsx -t "tag|tags"
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit destination profile wiring**
+- [x] **Step 5: Commit destination profile wiring**
 
 Run:
 
@@ -917,7 +917,7 @@ git commit -m "Use shared tag editor in stop panel"
 - Modify: `src/components/ActivityPanel.tsx`
 - Modify: `src/components/ActivityPanel.test.tsx`
 
-- [ ] **Step 1: Write failing activity panel tests**
+- [x] **Step 1: Write failing activity panel tests**
 
 In `src/components/ActivityPanel.test.tsx`, update `createProps` return value:
 
@@ -1006,7 +1006,7 @@ Replace the backspace removal test with:
   });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1016,7 +1016,7 @@ npm test -- src/components/ActivityPanel.test.tsx -t "tag|tags"
 
 Expected: FAIL because `ActivityPanel` does not accept `tagSuggestions` or render `TagEditor`.
 
-- [ ] **Step 3: Wire ActivityPanel to TagEditor**
+- [x] **Step 3: Wire ActivityPanel to TagEditor**
 
 In `src/components/ActivityPanel.tsx`, update imports:
 
@@ -1076,7 +1076,7 @@ Replace the tag fieldset JSX with:
       />
 ```
 
-- [ ] **Step 4: Run activity panel tag tests**
+- [x] **Step 4: Run activity panel tag tests**
 
 Run:
 
@@ -1086,7 +1086,7 @@ npm test -- src/components/ActivityPanel.test.tsx -t "tag|tags"
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit activity panel wiring**
+- [x] **Step 5: Commit activity panel wiring**
 
 Run:
 
@@ -1103,7 +1103,7 @@ git commit -m "Use shared tag editor in activity panel"
 - Modify: `src/App.tsx`
 - Modify: `src/App.test.tsx`
 
-- [ ] **Step 1: Write failing app-level suggestion test**
+- [x] **Step 1: Write failing app-level suggestion test**
 
 In `src/App.test.tsx`, add this test near the existing profile-opening tests:
 
@@ -1150,7 +1150,7 @@ In `src/App.test.tsx`, add this test near the existing profile-opening tests:
   });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -1160,7 +1160,7 @@ npm test -- src/App.test.tsx -t "tag suggestion"
 
 Expected: FAIL because `App.tsx` does not compute or pass shared tag suggestions yet.
 
-- [ ] **Step 3: Compute and pass shared suggestions**
+- [x] **Step 3: Compute and pass shared suggestions**
 
 In `src/App.tsx`, add import:
 
@@ -1195,7 +1195,7 @@ Pass it into `DestinationProfile`:
               tagSuggestions={tagSuggestions}
 ```
 
-- [ ] **Step 4: Run app suggestion test**
+- [x] **Step 4: Run app suggestion test**
 
 Run:
 
@@ -1205,7 +1205,7 @@ npm test -- src/App.test.tsx -t "tag suggestion"
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit app wiring**
+- [x] **Step 5: Commit app wiring**
 
 Run:
 
@@ -1221,7 +1221,7 @@ git commit -m "Surface shared tag suggestions"
 **Files:**
 - Modify only if tests reveal issues in files from Tasks 1-5.
 
-- [ ] **Step 1: Run focused component and style tests**
+- [x] **Step 1: Run focused component and style tests**
 
 Run:
 
@@ -1231,7 +1231,7 @@ npm test -- src/components/tagEditorModel.test.ts src/components/TagEditor.test.
 
 Expected: PASS.
 
-- [ ] **Step 2: Run app tests touched by suggestion wiring**
+- [x] **Step 2: Run app tests touched by suggestion wiring**
 
 Run:
 
@@ -1241,7 +1241,7 @@ npm test -- src/App.test.tsx
 
 Expected: PASS. If unrelated pre-existing App tests fail, capture the failing test names and inspect `git diff` before changing code.
 
-- [ ] **Step 3: Run whitespace checks**
+- [x] **Step 3: Run whitespace checks**
 
 Run:
 
@@ -1251,7 +1251,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 4: Verify rendered UI in browser**
+- [x] **Step 4: Verify rendered UI in browser**
 
 Start a persistent dev server:
 
@@ -1270,11 +1270,11 @@ Open the reported localhost URL. In the stop panel:
 
 Repeat the same add flow in the activity panel.
 
-- [ ] **Step 5: Stop the dev server**
+- [x] **Step 5: Stop the dev server**
 
 Stop the dev server with `Ctrl-C`.
 
-- [ ] **Step 6: Final status check**
+- [x] **Step 6: Final status check**
 
 Run:
 
@@ -1284,7 +1284,11 @@ git status --short
 
 Expected: only intended files are modified. If unrelated files existed before this work, leave them unstaged and call them out.
 
-- [ ] **Step 7: Commit verification fixes after failures**
+- [x] **Step 7: Commit verification fixes after failures**
+
+## Implementation Status
+
+Completed across `6a37ab4 Add tag editor model helpers`, `c27c2fd Add shared tag editor popover`, `3c422cb Use shared tag editor in stop panel`, `1b08f7b Use shared tag editor in activity panel`, `913307b Surface shared tag suggestions`, and `08023e9 Polish tag editor popover interactions`.
 
 If Step 1-4 required fixes, commit only those fixes:
 

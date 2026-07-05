@@ -1,6 +1,6 @@
 # Stop And Activity Link Previews Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build visual URL preview cards for stop and activity links, with server-side preview fetching, fallback visuals, click-to-open, delete, and drag-to-reorder.
 
@@ -42,7 +42,7 @@
 - Modify: `src/domain/activities.test.ts`
 - Modify: `src/domain/destinations.test.ts`
 
-- [ ] **Step 1: Write failing tests for URL normalization, fallback creation, sorting, and reorder**
+- [x] **Step 1: Write failing tests for URL normalization, fallback creation, sorting, and reorder**
 
 Create `src/domain/researchLinks.test.ts`:
 
@@ -151,7 +151,7 @@ expect(destination.research.links).toEqual([]);
 
 Keep those expectations unchanged after extending the type.
 
-- [ ] **Step 2: Run the failing domain tests**
+- [x] **Step 2: Run the failing domain tests**
 
 Run:
 
@@ -161,7 +161,7 @@ npm test -- src/domain/researchLinks.test.ts src/domain/activities.test.ts src/d
 
 Expected: `src/domain/researchLinks.test.ts` fails because `src/domain/researchLinks.ts` does not exist.
 
-- [ ] **Step 3: Extend the shared type and implement helpers**
+- [x] **Step 3: Extend the shared type and implement helpers**
 
 Modify `src/domain/types.ts`:
 
@@ -270,7 +270,7 @@ export function reorderResearchLinks(links: ResearchLink[], orderedLinkIds: stri
 }
 ```
 
-- [ ] **Step 4: Run the domain tests**
+- [x] **Step 4: Run the domain tests**
 
 Run:
 
@@ -280,7 +280,7 @@ npm test -- src/domain/researchLinks.test.ts src/domain/activities.test.ts src/d
 
 Expected: all listed test files pass.
 
-- [ ] **Step 5: Commit domain helpers**
+- [x] **Step 5: Commit domain helpers**
 
 Run:
 
@@ -298,7 +298,7 @@ git commit -m "Add research link domain helpers"
 - Create: `supabase/functions/link-preview/metadata.ts`
 - Test: `supabase/functions/link-preview/metadata.test.ts`
 
-- [ ] **Step 1: Write failing Deno tests for metadata helpers**
+- [x] **Step 1: Write failing Deno tests for metadata helpers**
 
 Create `supabase/functions/link-preview/metadata.test.ts`:
 
@@ -379,7 +379,7 @@ Deno.test('falls back to Twitter metadata and then document title', async () => 
 });
 ```
 
-- [ ] **Step 2: Run the failing Deno tests**
+- [x] **Step 2: Run the failing Deno tests**
 
 Run:
 
@@ -389,7 +389,7 @@ deno test --allow-net=deno.land supabase/functions/link-preview/metadata.test.ts
 
 Expected: fail because `metadata.ts` does not exist.
 
-- [ ] **Step 3: Implement metadata parsing and URL safety**
+- [x] **Step 3: Implement metadata parsing and URL safety**
 
 Create `supabase/functions/link-preview/metadata.ts`:
 
@@ -556,7 +556,7 @@ export async function fetchLinkPreview(rawUrl: string, fetcher: typeof fetch = f
 }
 ```
 
-- [ ] **Step 4: Implement the Edge Function entrypoint**
+- [x] **Step 4: Implement the Edge Function entrypoint**
 
 Create `supabase/functions/link-preview/index.ts`:
 
@@ -596,7 +596,7 @@ Deno.serve(async (request) => {
 });
 ```
 
-- [ ] **Step 5: Run Edge Function tests**
+- [x] **Step 5: Run Edge Function tests**
 
 Run:
 
@@ -606,7 +606,7 @@ deno test --allow-net=deno.land supabase/functions/link-preview/metadata.test.ts
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit Edge Function**
+- [x] **Step 6: Commit Edge Function**
 
 Run:
 
@@ -624,7 +624,7 @@ git commit -m "Add link preview edge function"
 - Test: `src/services/linkPreviewClient.test.ts`
 - Modify: `src/storage/supabaseClient.ts`
 
-- [ ] **Step 1: Write failing tests for preview client behavior**
+- [x] **Step 1: Write failing tests for preview client behavior**
 
 Create `src/services/linkPreviewClient.test.ts`:
 
@@ -682,7 +682,7 @@ describe('linkPreviewClient', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing client tests**
+- [x] **Step 2: Run the failing client tests**
 
 Run:
 
@@ -692,7 +692,7 @@ npm test -- src/services/linkPreviewClient.test.ts
 
 Expected: fail because `src/services/linkPreviewClient.ts` does not exist.
 
-- [ ] **Step 3: Export Supabase env helpers and implement the client**
+- [x] **Step 3: Export Supabase env helpers and implement the client**
 
 Modify `src/storage/supabaseClient.ts`:
 
@@ -787,7 +787,7 @@ export function createAppLinkPreviewClient(): LinkPreviewClient {
 }
 ```
 
-- [ ] **Step 4: Run client tests**
+- [x] **Step 4: Run client tests**
 
 Run:
 
@@ -797,7 +797,7 @@ npm test -- src/services/linkPreviewClient.test.ts
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit preview client**
+- [x] **Step 5: Commit preview client**
 
 Run:
 
@@ -815,7 +815,7 @@ git commit -m "Add link preview client"
 - Test: `src/components/LinkPreviewGrid.test.tsx`
 - Modify: `src/styles.css`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Create `src/components/LinkPreviewGrid.test.tsx`:
 
@@ -988,7 +988,7 @@ describe('LinkPreviewGrid', () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing component tests**
+- [x] **Step 2: Run the failing component tests**
 
 Run:
 
@@ -998,7 +998,7 @@ npm test -- src/components/LinkPreviewGrid.test.tsx
 
 Expected: fail because `src/components/LinkPreviewGrid.tsx` does not exist.
 
-- [ ] **Step 3: Implement `LinkPreviewGrid`**
+- [x] **Step 3: Implement `LinkPreviewGrid`**
 
 Create `src/components/LinkPreviewGrid.tsx`:
 
@@ -1170,7 +1170,7 @@ export function LinkPreviewGrid({ label, links, previewClient, onChange }: LinkP
 }
 ```
 
-- [ ] **Step 4: Add link preview CSS**
+- [x] **Step 4: Add link preview CSS**
 
 Append to `src/styles.css`:
 
@@ -1314,7 +1314,7 @@ Append to `src/styles.css`:
 }
 ```
 
-- [ ] **Step 5: Run component tests**
+- [x] **Step 5: Run component tests**
 
 Run:
 
@@ -1324,7 +1324,7 @@ npm test -- src/components/LinkPreviewGrid.test.tsx
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit the shared component**
+- [x] **Step 6: Commit the shared component**
 
 Run:
 
@@ -1343,7 +1343,7 @@ git commit -m "Add shared link preview grid"
 - Modify: `src/App.tsx`
 - Modify: `src/App.test.tsx`
 
-- [ ] **Step 1: Write failing stop panel tests**
+- [x] **Step 1: Write failing stop panel tests**
 
 Add tests to `src/components/DestinationProfile.test.tsx`:
 
@@ -1415,7 +1415,7 @@ it('renders stop research links and saves added links without overwriting resear
 });
 ```
 
-- [ ] **Step 2: Run the failing stop panel test**
+- [x] **Step 2: Run the failing stop panel test**
 
 Run:
 
@@ -1425,7 +1425,7 @@ npm test -- src/components/DestinationProfile.test.tsx
 
 Expected: fail because `DestinationProfile` does not accept `linkPreviewClient`.
 
-- [ ] **Step 3: Add stop links to `DestinationProfile` props and state**
+- [x] **Step 3: Add stop links to `DestinationProfile` props and state**
 
 Modify imports in `src/components/DestinationProfile.tsx`:
 
@@ -1502,7 +1502,7 @@ return {
 
 Pass `linkPreviewClient` through `DestinationProfile` to `DestinationProfileForm`.
 
-- [ ] **Step 4: Render stop links**
+- [x] **Step 4: Render stop links**
 
 In `DestinationProfileForm`, insert the grid after the tag editor and before `ActivityList`:
 
@@ -1515,7 +1515,7 @@ In `DestinationProfileForm`, insert the grid after the tag editor and before `Ac
 />
 ```
 
-- [ ] **Step 5: Wire the app preview client**
+- [x] **Step 5: Wire the app preview client**
 
 Modify `src/App.tsx` imports:
 
@@ -1566,7 +1566,7 @@ function TripWorkspace({
 
 Pass `linkPreviewClient` into `DestinationProfile`.
 
-- [ ] **Step 6: Update App tests with a mock preview client**
+- [x] **Step 6: Update App tests with a mock preview client**
 
 In `src/App.test.tsx`, mock `createAppLinkPreviewClient`:
 
@@ -1583,7 +1583,7 @@ vi.mock('./services/linkPreviewClient', () => ({
 }));
 ```
 
-- [ ] **Step 7: Run stop integration tests**
+- [x] **Step 7: Run stop integration tests**
 
 Run:
 
@@ -1593,7 +1593,7 @@ npm test -- src/components/DestinationProfile.test.tsx src/App.test.tsx
 
 Expected: all listed test files pass.
 
-- [ ] **Step 8: Commit stop link integration**
+- [x] **Step 8: Commit stop link integration**
 
 Run:
 
@@ -1611,7 +1611,7 @@ git commit -m "Add stop link previews"
 - Modify: `src/components/ActivityPanel.test.tsx`
 - Modify: `src/App.tsx`
 
-- [ ] **Step 1: Write failing activity panel tests**
+- [x] **Step 1: Write failing activity panel tests**
 
 Add tests to `src/components/ActivityPanel.test.tsx`:
 
@@ -1668,7 +1668,7 @@ it('renders activity links and saves added links on the activity', async () => {
 });
 ```
 
-- [ ] **Step 2: Run the failing activity panel tests**
+- [x] **Step 2: Run the failing activity panel tests**
 
 Run:
 
@@ -1678,7 +1678,7 @@ npm test -- src/components/ActivityPanel.test.tsx
 
 Expected: fail because `ActivityPanel` does not accept `linkPreviewClient` and cannot update `links`.
 
-- [ ] **Step 3: Add links to `ActivityPanel` draft handling**
+- [x] **Step 3: Add links to `ActivityPanel` draft handling**
 
 Modify imports in `src/components/ActivityPanel.tsx`:
 
@@ -1746,7 +1746,7 @@ const nextDraft = {
 
 Add `activityLinks` to the dependency list.
 
-- [ ] **Step 4: Render activity links**
+- [x] **Step 4: Render activity links**
 
 Insert after the activity tag editor:
 
@@ -1762,7 +1762,7 @@ Insert after the activity tag editor:
 />
 ```
 
-- [ ] **Step 5: Pass the preview client from App**
+- [x] **Step 5: Pass the preview client from App**
 
 In `src/App.tsx`, pass `linkPreviewClient` into `ActivityPanel`:
 
@@ -1773,7 +1773,7 @@ In `src/App.tsx`, pass `linkPreviewClient` into `ActivityPanel`:
 />
 ```
 
-- [ ] **Step 6: Run activity integration tests**
+- [x] **Step 6: Run activity integration tests**
 
 Run:
 
@@ -1783,7 +1783,7 @@ npm test -- src/components/ActivityPanel.test.tsx src/App.test.tsx
 
 Expected: all listed test files pass.
 
-- [ ] **Step 7: Commit activity link integration**
+- [x] **Step 7: Commit activity link integration**
 
 Run:
 
@@ -1803,7 +1803,7 @@ git commit -m "Add activity link previews"
 - Modify: `src/storage/supabaseTripRepository.test.ts`
 - Modify: `src/hooks/useTripData.test.tsx`
 
-- [ ] **Step 1: Add repository tests for rich link JSON**
+- [x] **Step 1: Add repository tests for rich link JSON**
 
 Add to `src/storage/tripRepository.test.ts`:
 
@@ -1866,7 +1866,7 @@ it('updates activity links with preview metadata', async () => {
 });
 ```
 
-- [ ] **Step 2: Run persistence tests**
+- [x] **Step 2: Run persistence tests**
 
 Run:
 
@@ -1876,7 +1876,7 @@ npm test -- src/storage/tripRepository.test.ts src/storage/supabaseTripRepositor
 
 Expected: failures identify any mocks or type fixtures that still create `ResearchLink` without `domain` and `sortOrder`.
 
-- [ ] **Step 3: Update fixtures and normalize repository reads**
+- [x] **Step 3: Update fixtures and normalize repository reads**
 
 In `src/storage/tripRepository.ts`, import helper:
 
@@ -1925,7 +1925,7 @@ domain: 'example.com',
 sortOrder: 0,
 ```
 
-- [ ] **Step 4: Run persistence tests again**
+- [x] **Step 4: Run persistence tests again**
 
 Run:
 
@@ -1935,7 +1935,7 @@ npm test -- src/storage/tripRepository.test.ts src/storage/supabaseTripRepositor
 
 Expected: all listed test files pass.
 
-- [ ] **Step 5: Commit persistence guards**
+- [x] **Step 5: Commit persistence guards**
 
 Run:
 
@@ -1951,7 +1951,7 @@ git commit -m "Normalize persisted research links"
 **Files:**
 - Create: `tests/e2e/link-previews.spec.ts`
 
-- [ ] **Step 1: Write focused e2e coverage**
+- [x] **Step 1: Write focused e2e coverage**
 
 Create `tests/e2e/link-previews.spec.ts`:
 
@@ -1974,7 +1974,7 @@ test('adds and reorders stop link preview cards', async ({ page }) => {
 
 Use the existing e2e-local preview client. It produces fallback cards without Supabase network access.
 
-- [ ] **Step 2: Run the focused e2e test**
+- [x] **Step 2: Run the focused e2e test**
 
 Run:
 
@@ -1984,7 +1984,7 @@ npm run test:e2e -- tests/e2e/link-previews.spec.ts
 
 Expected: the e2e test passes.
 
-- [ ] **Step 3: Run unit and build verification**
+- [x] **Step 3: Run unit and build verification**
 
 Run:
 
@@ -1995,7 +1995,7 @@ npm run build
 
 Expected: both commands pass.
 
-- [ ] **Step 4: Verify rendered app in the browser**
+- [x] **Step 4: Verify rendered app in the browser**
 
 Start the app:
 
@@ -2011,7 +2011,11 @@ Open the local app, select a stop, add a link, and confirm:
 - clicking the card opens the link in a new tab
 - dragging the card itself changes order when at least two cards exist
 
-- [ ] **Step 5: Commit final verification coverage**
+- [x] **Step 5: Commit final verification coverage**
+
+## Implementation Status
+
+Completed across the link-preview client/function/component work now present in `src/services/linkPreviewClient.ts`, `supabase/functions/link-preview/`, `src/components/LinkPreviewGrid.tsx`, and `tests/link-previews.spec.ts`, with final visible coverage committed in `a0322af Add link preview e2e coverage`.
 
 Run:
 

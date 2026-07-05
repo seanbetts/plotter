@@ -1,6 +1,6 @@
 # Web Image Search Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add stop-panel web image search with a contextual search bar, image-grid popover, large-result filtering, and immediate import into existing stop media.
 
@@ -43,7 +43,7 @@
 - Create: `src/services/webImageSearchClient.test.ts`
 - Modify: `.env.example`
 
-- [ ] **Step 1: Write failing tests for query expansion and client behavior**
+- [x] **Step 1: Write failing tests for query expansion and client behavior**
 
 Create `src/services/webImageSearchClient.test.ts`:
 
@@ -158,7 +158,7 @@ describe('webImageSearchClient', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -168,7 +168,7 @@ npm test -- src/services/webImageSearchClient.test.ts
 
 Expected: FAIL because `src/services/webImageSearchClient.ts` does not exist.
 
-- [ ] **Step 3: Implement the client module**
+- [x] **Step 3: Implement the client module**
 
 Create `src/services/webImageSearchClient.ts`:
 
@@ -378,7 +378,7 @@ export function createAppWebImageSearchClient(): WebImageSearchClient {
 }
 ```
 
-- [ ] **Step 4: Add environment documentation**
+- [x] **Step 4: Add environment documentation**
 
 Modify `.env.example`:
 
@@ -391,7 +391,7 @@ VITE_TRIP_STORAGE=supabase
 SERPAPI_API_KEY=
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run:
 
@@ -401,7 +401,7 @@ npm test -- src/services/webImageSearchClient.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .env.example src/services/webImageSearchClient.ts src/services/webImageSearchClient.test.ts
@@ -417,7 +417,7 @@ git commit -m "Add web image search client"
 - Create: `supabase/functions/image-search/index.ts`
 - Create: `supabase/functions/image-search/metadata.test.ts`
 
-- [ ] **Step 1: Write failing Deno tests for provider query and result filtering**
+- [x] **Step 1: Write failing Deno tests for provider query and result filtering**
 
 Create `supabase/functions/image-search/metadata.test.ts`:
 
@@ -536,7 +536,7 @@ Deno.test("searchWebImages rejects missing SerpApi keys", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -546,7 +546,7 @@ deno test --allow-env --allow-net=serpapi.com supabase/functions/image-search/me
 
 Expected: FAIL because `metadata.ts` does not exist.
 
-- [ ] **Step 3: Implement SerpApi metadata helpers**
+- [x] **Step 3: Implement SerpApi metadata helpers**
 
 Create `supabase/functions/image-search/metadata.ts`:
 
@@ -726,7 +726,7 @@ export async function searchWebImages({
 }
 ```
 
-- [ ] **Step 4: Implement the Edge Function entrypoint**
+- [x] **Step 4: Implement the Edge Function entrypoint**
 
 Create `supabase/functions/image-search/index.ts`:
 
@@ -775,7 +775,7 @@ Deno.serve(async (request) => {
 });
 ```
 
-- [ ] **Step 5: Run Deno tests**
+- [x] **Step 5: Run Deno tests**
 
 Run:
 
@@ -785,7 +785,7 @@ deno test --allow-env --allow-net=serpapi.com supabase/functions/image-search/me
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add supabase/functions/image-search
@@ -801,7 +801,7 @@ git commit -m "Add image search edge function"
 - Create: `supabase/functions/import-image/index.ts`
 - Create: `supabase/functions/import-image/metadata.test.ts`
 
-- [ ] **Step 1: Write failing Deno tests for URL safety, image validation, and object paths**
+- [x] **Step 1: Write failing Deno tests for URL safety, image validation, and object paths**
 
 Create `supabase/functions/import-image/metadata.test.ts`:
 
@@ -900,7 +900,7 @@ Deno.test("fetchImportImage returns image bytes and content type", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -910,7 +910,7 @@ deno test --allow-env --allow-net supabase/functions/import-image/metadata.test.
 
 Expected: FAIL because `metadata.ts` does not exist.
 
-- [ ] **Step 3: Implement import helpers**
+- [x] **Step 3: Implement import helpers**
 
 Create `supabase/functions/import-image/metadata.ts`:
 
@@ -1132,7 +1132,7 @@ function isPrivateIpv6(hostname: string) {
 }
 ```
 
-- [ ] **Step 4: Implement import Edge Function entrypoint**
+- [x] **Step 4: Implement import Edge Function entrypoint**
 
 Create `supabase/functions/import-image/index.ts`:
 
@@ -1244,7 +1244,7 @@ Deno.serve(async (request) => {
 });
 ```
 
-- [ ] **Step 5: Run Deno tests**
+- [x] **Step 5: Run Deno tests**
 
 Run:
 
@@ -1254,7 +1254,7 @@ deno test --allow-env --allow-net supabase/functions/import-image/metadata.test.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add supabase/functions/import-image
@@ -1271,7 +1271,7 @@ git commit -m "Add web image import function"
 - Modify: `src/storage/tripRepository.test.ts`
 - Modify: `src/storage/supabaseTripRepository.test.ts`
 
-- [ ] **Step 1: Write failing local repository test**
+- [x] **Step 1: Write failing local repository test**
 
 Add this test to `src/storage/tripRepository.test.ts` near existing media tests:
 
@@ -1314,7 +1314,7 @@ it('imports destination media from a web image result in local storage', async (
 });
 ```
 
-- [ ] **Step 2: Write failing Supabase repository test**
+- [x] **Step 2: Write failing Supabase repository test**
 
 Add this test to `src/storage/supabaseTripRepository.test.ts` near destination media tests:
 
@@ -1389,7 +1389,7 @@ it('imports destination media from web search through the import-image function'
 });
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -1399,7 +1399,7 @@ npm test -- src/storage/tripRepository.test.ts src/storage/supabaseTripRepositor
 
 Expected: FAIL because `importDestinationMediaFromSearch` is not defined.
 
-- [ ] **Step 4: Extend repository types**
+- [x] **Step 4: Extend repository types**
 
 Modify `src/storage/tripRepository.ts` imports:
 
@@ -1416,7 +1416,7 @@ Add to `TripRepository` after `uploadDestinationMedia`:
   }): Promise<MediaItem>;
 ```
 
-- [ ] **Step 5: Implement local repository import**
+- [x] **Step 5: Implement local repository import**
 
 Add this method after `uploadDestinationMedia` in `createTripRepository`:
 
@@ -1458,7 +1458,7 @@ Add this method after `uploadDestinationMedia` in `createTripRepository`:
     },
 ```
 
-- [ ] **Step 6: Implement Supabase repository import**
+- [x] **Step 6: Implement Supabase repository import**
 
 Modify the Supabase client type in `src/storage/supabaseTripRepository.ts` to include `functions.invoke`. Add:
 
@@ -1494,11 +1494,11 @@ Inside `createSupabaseTripRepository`, add this method after `uploadDestinationM
     },
 ```
 
-- [ ] **Step 7: Update repository mocks**
+- [x] **Step 7: Update repository mocks**
 
 Add `importDestinationMediaFromSearch: vi.fn()` to every `TripRepository` test mock, including `src/App.test.tsx`, `src/hooks/useTripData.test.tsx`, `src/storage/appRepository.test.ts`, `src/hooks/useDestinationMedia.test.tsx`, and `src/hooks/useActivityMedia.test.tsx`.
 
-- [ ] **Step 8: Run tests**
+- [x] **Step 8: Run tests**
 
 Run:
 
@@ -1508,7 +1508,7 @@ npm test -- src/storage/tripRepository.test.ts src/storage/supabaseTripRepositor
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/storage/tripRepository.ts src/storage/supabaseTripRepository.ts src/storage/tripRepository.test.ts src/storage/supabaseTripRepository.test.ts src/App.test.tsx src/hooks/useTripData.test.tsx src/storage/appRepository.test.ts src/hooks/useDestinationMedia.test.tsx src/hooks/useActivityMedia.test.tsx
@@ -1525,7 +1525,7 @@ git commit -m "Add repository import for web images"
 - Modify: `src/styles.css`
 - Modify: `src/styles.test.ts`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Create `src/components/WebImageSearchField.test.tsx`:
 
@@ -1618,7 +1618,7 @@ describe('WebImageSearchField', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -1628,7 +1628,7 @@ npm test -- src/components/WebImageSearchField.test.tsx
 
 Expected: FAIL because `WebImageSearchField.tsx` does not exist.
 
-- [ ] **Step 3: Implement the UI component**
+- [x] **Step 3: Implement the UI component**
 
 Create `src/components/WebImageSearchField.tsx`:
 
@@ -1797,7 +1797,7 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
 }
 ```
 
-- [ ] **Step 4: Add CSS**
+- [x] **Step 4: Add CSS**
 
 Append to `src/styles.css` near image strip styles:
 
@@ -1877,7 +1877,7 @@ Append to `src/styles.css` near image strip styles:
 }
 ```
 
-- [ ] **Step 5: Add style tests**
+- [x] **Step 5: Add style tests**
 
 Add to `src/styles.test.ts`:
 
@@ -1891,7 +1891,7 @@ describe('web image search styles', () => {
 });
 ```
 
-- [ ] **Step 6: Run component and style tests**
+- [x] **Step 6: Run component and style tests**
 
 Run:
 
@@ -1901,7 +1901,7 @@ npm test -- src/components/WebImageSearchField.test.tsx src/styles.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/components/WebImageSearchField.tsx src/components/WebImageSearchField.test.tsx src/styles.css src/styles.test.ts
@@ -1920,7 +1920,7 @@ git commit -m "Add web image search field"
 - Modify: `src/components/DestinationImageStrip.test.tsx`
 - Modify: `src/components/DestinationProfile.test.tsx`
 
-- [ ] **Step 1: Write failing App integration test**
+- [x] **Step 1: Write failing App integration test**
 
 Add to `src/App.test.tsx`:
 
@@ -1985,7 +1985,7 @@ it('searches web images with stop context and imports a selected result', async 
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -1995,7 +1995,7 @@ npm test -- src/App.test.tsx -t "searches web images"
 
 Expected: FAIL because `App` does not accept `webImageSearchClient` and the image strip has no search field.
 
-- [ ] **Step 3: Update component props**
+- [x] **Step 3: Update component props**
 
 In `src/components/DestinationImageStrip.tsx`, import:
 
@@ -2026,7 +2026,7 @@ Render before `MediaImageStrip`:
 
 In `src/components/DestinationProfile.tsx`, add matching props and pass them to `DestinationImageStrip`.
 
-- [ ] **Step 4: Wire App search client and import handler**
+- [x] **Step 4: Wire App search client and import handler**
 
 In `src/App.tsx`, import:
 
@@ -2077,13 +2077,13 @@ Pass into `DestinationProfile`:
               onImportWebImage={handleDestinationWebImageImport}
 ```
 
-- [ ] **Step 5: Update unit tests for required props**
+- [x] **Step 5: Update unit tests for required props**
 
 In `DestinationImageStrip.test.tsx`, add tests that it renders `Search web images` when all web image props are supplied and omits it otherwise.
 
 In `DestinationProfile.test.tsx`, pass a fake `webImageSearchClient` only in the new test so existing tests do not need a search field.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run:
 
@@ -2093,7 +2093,7 @@ npm test -- src/App.test.tsx src/components/DestinationImageStrip.test.tsx src/c
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/App.tsx src/App.test.tsx src/components/DestinationImageStrip.tsx src/components/DestinationImageStrip.test.tsx src/components/DestinationProfile.tsx src/components/DestinationProfile.test.tsx
@@ -2107,7 +2107,7 @@ git commit -m "Wire web image search into stop panel"
 **Files:**
 - Modify: `tests/world-tour.spec.ts`
 
-- [ ] **Step 1: Add e2e smoke test**
+- [x] **Step 1: Add e2e smoke test**
 
 Add to `tests/world-tour.spec.ts`:
 
@@ -2142,7 +2142,7 @@ test('imports a web image result into a stop carousel', async ({ baseURL, contex
 });
 ```
 
-- [ ] **Step 2: Run e2e test**
+- [x] **Step 2: Run e2e test**
 
 Run:
 
@@ -2152,7 +2152,7 @@ npm run test:e2e -- tests/world-tour.spec.ts -g "imports a web image result"
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/world-tour.spec.ts
@@ -2166,7 +2166,7 @@ git commit -m "Add web image import e2e smoke test"
 **Files:**
 - Verify only.
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 Run:
 
@@ -2178,7 +2178,7 @@ npm run test:e2e -- tests/world-tour.spec.ts -g "imports a web image result"
 
 Expected: all commands PASS.
 
-- [ ] **Step 2: Run full app checks**
+- [x] **Step 2: Run full app checks**
 
 Run:
 
@@ -2190,7 +2190,7 @@ npm run test:e2e
 
 Expected: all commands PASS.
 
-- [ ] **Step 3: Manual browser verification**
+- [x] **Step 3: Manual browser verification**
 
 Run:
 
@@ -2206,7 +2206,11 @@ Open the local Vite URL. In a stop panel, confirm:
 - Delete still works in the preview modal.
 - Existing drag/drop upload and thumbnail reorder still work.
 
-- [ ] **Step 4: Commit verification notes only if files changed**
+- [x] **Step 4: Commit verification notes only if files changed**
+
+## Implementation Status
+
+Completed across `4454c57 Add web image search client`, `7292242 Add image search edge function`, `05680d1 Add web image import function`, `d89a285 Add repository import for web images`, `2403bf1 Wire web image search into stop panel`, `e478841 Add web image import e2e smoke test`, and follow-up hardening commits through `26d91c1 Use activity location in image search`.
 
 If manual verification required no file changes, do not commit. If a small fix was needed, commit it with:
 

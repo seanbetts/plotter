@@ -1,6 +1,6 @@
 # Stop Focus Map Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add stop focus map behavior so selecting a stop zooms into its local area, shows clickable activity pins, and restores the route viewport when the stop panel closes.
 
@@ -38,7 +38,7 @@ Before starting implementation, run `git status --short`. This repo currently ha
 - Modify: `src/components/MapCanvas.tsx`
 - Modify: `src/components/MapCanvas.test.tsx`
 
-- [ ] **Step 1: Write failing MapCanvas tests for focused activity source and features**
+- [x] **Step 1: Write failing MapCanvas tests for focused activity source and features**
 
 In `src/components/MapCanvas.test.tsx`, update the imports:
 
@@ -196,7 +196,7 @@ Add this test near the existing source/layer tests:
   });
 ```
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [x] **Step 2: Run the focused test and verify it fails**
 
 Run:
 
@@ -206,7 +206,7 @@ npm test -- src/components/MapCanvas.test.tsx
 
 Expected: FAIL with TypeScript errors because `focusedActivities`, `selectedActivityId`, and `onSelectActivity` are not `MapCanvas` props, and with missing `world-tour-focused-activities` source/layers.
 
-- [ ] **Step 3: Add activity feature types, source ids, and feature builder**
+- [x] **Step 3: Add activity feature types, source ids, and feature builder**
 
 In `src/components/MapCanvas.tsx`, update imports:
 
@@ -288,7 +288,7 @@ function buildFocusedActivityFeatures(
 }
 ```
 
-- [ ] **Step 4: Wire activity refs and source updates**
+- [x] **Step 4: Wire activity refs and source updates**
 
 In the `MapCanvas` function signature, include defaults:
 
@@ -342,7 +342,7 @@ Inside the main props sync `useEffect`, add these assignments:
 
 Add `focusedActivities`, `selectedActivityId`, and `onSelectActivity` to that effect dependency array.
 
-- [ ] **Step 5: Add MapLibre activity source and layers**
+- [x] **Step 5: Add MapLibre activity source and layers**
 
 Inside `addMapLayers`, after the destinations source block and before the routes source block, add:
 
@@ -414,7 +414,7 @@ After the destination points layer, add:
     }
 ```
 
-- [ ] **Step 6: Run focused tests and commit**
+- [x] **Step 6: Run focused tests and commit**
 
 Run:
 
@@ -437,7 +437,7 @@ git commit -m "Add focused activity map layers"
 - Modify: `src/components/MapCanvas.tsx`
 - Modify: `src/components/MapCanvas.test.tsx`
 
-- [ ] **Step 1: Extend the map mock and write failing viewport tests**
+- [x] **Step 1: Extend the map mock and write failing viewport tests**
 
 In `src/components/MapCanvas.test.tsx`, update `MockMap`:
 
@@ -583,7 +583,7 @@ Add these tests near the existing fit-bounds test:
   });
 ```
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [x] **Step 2: Run the focused test and verify it fails**
 
 Run:
 
@@ -593,7 +593,7 @@ npm test -- src/components/MapCanvas.test.tsx
 
 Expected: FAIL because stop focus does not call `fitBounds` and restore does not call `easeTo`.
 
-- [ ] **Step 3: Add viewport helpers and saved viewport ref**
+- [x] **Step 3: Add viewport helpers and saved viewport ref**
 
 In `src/components/MapCanvas.tsx`, add these types near `OverlayPosition`:
 
@@ -645,7 +645,7 @@ Inside `MapCanvas`, add this ref after `previousDestinationCountRef`:
   const routeViewportBeforeFocusRef = useRef<MapViewport | null>(null);
 ```
 
-- [ ] **Step 4: Implement stop focus fit and route viewport restore**
+- [x] **Step 4: Implement stop focus fit and route viewport restore**
 
 Add this callback after `fitMapToDestinations`:
 
@@ -721,7 +721,7 @@ Then use `previousSelectedDestinationIdRef.current` in the focus effect and set 
     previousSelectedDestinationIdRef.current = selectedDestinationId;
 ```
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run:
 
@@ -746,7 +746,7 @@ git commit -m "Add stop focus viewport transitions"
 - Modify: `src/App.tsx`
 - Modify: `src/App.test.tsx`
 
-- [ ] **Step 1: Write failing MapCanvas test for activity pin clicks**
+- [x] **Step 1: Write failing MapCanvas test for activity pin clicks**
 
 In `src/components/MapCanvas.test.tsx`, add:
 
@@ -781,7 +781,7 @@ In `src/components/MapCanvas.test.tsx`, add:
   });
 ```
 
-- [ ] **Step 2: Implement activity pin click handlers**
+- [x] **Step 2: Implement activity pin click handlers**
 
 In the map initialization effect in `src/components/MapCanvas.tsx`, add:
 
@@ -817,7 +817,7 @@ Clean them up in the return block:
       map.off('mouseleave', activityPointsLayerId, handleActivityMouseLeave);
 ```
 
-- [ ] **Step 3: Wire App props into MapCanvas**
+- [x] **Step 3: Wire App props into MapCanvas**
 
 In `src/App.tsx`, update the `MapCanvas` call:
 
@@ -834,7 +834,7 @@ In `src/App.tsx`, update the `MapCanvas` call:
         />
 ```
 
-- [ ] **Step 4: Write app-level test for map pin opening the activity panel**
+- [x] **Step 4: Write app-level test for map pin opening the activity panel**
 
 In `src/App.test.tsx`, update `MockMap`:
 
@@ -906,7 +906,7 @@ Add this test near the existing activity panel tests:
   });
 ```
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run:
 
@@ -929,7 +929,7 @@ git commit -m "Wire clickable activity map pins"
 - Modify: `src/styles.css` only if rendered verification proves the default MapLibre layer styling needs app-level CSS support.
 - Modify: `tests/world-tour.spec.ts` only if a stable e2e assertion can be added without making MapLibre internals brittle.
 
-- [ ] **Step 1: Run focused unit tests**
+- [x] **Step 1: Run focused unit tests**
 
 Run:
 
@@ -939,7 +939,7 @@ npm test -- src/components/MapCanvas.test.tsx src/App.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 2: Run broader tests likely affected by panel and activity selection**
+- [x] **Step 2: Run broader tests likely affected by panel and activity selection**
 
 Run:
 
@@ -949,7 +949,7 @@ npm test -- src/components/DestinationProfile.test.tsx src/components/ActivityPa
 
 Expected: PASS.
 
-- [ ] **Step 3: Run lint and build**
+- [x] **Step 3: Run lint and build**
 
 Run:
 
@@ -960,7 +960,7 @@ npm run build
 
 Expected: PASS. The build may print the existing Vite large chunk warning; that warning is acceptable.
 
-- [ ] **Step 4: Browser verification**
+- [x] **Step 4: Browser verification**
 
 Start the normal dev server:
 
@@ -979,7 +979,7 @@ Open the app in a browser and verify:
 
 If the browser check shows activity labels overlap the panels, update `stopFocusPadding` in `src/components/MapCanvas.tsx` first. Only edit `src/styles.css` if the problem is caused by DOM overlay styling rather than MapLibre layer placement.
 
-- [ ] **Step 5: Run e2e**
+- [x] **Step 5: Run e2e**
 
 Run:
 
@@ -995,7 +995,7 @@ lsof -nP -iTCP:5174 -sTCP:LISTEN
 
 If the listener is a Vite process from `.`, stop that process and rerun `npm run test:e2e`.
 
-- [ ] **Step 6: Final status check**
+- [x] **Step 6: Final status check**
 
 Run:
 
@@ -1005,7 +1005,7 @@ git status --short
 
 Expected: only intentional stop-focus map files are modified. If `src/styles.css` and `src/styles.test.ts` still show the unrelated image-strip edits from before this plan, leave them unstaged.
 
-- [ ] **Step 7: Final commit if verification required changes**
+- [x] **Step 7: Final commit if verification required changes**
 
 If Task 4 required code or test changes, commit them:
 
@@ -1021,3 +1021,7 @@ If Task 4 made no changes, do not create an empty commit.
 - Spec coverage: Task 1 covers focused activity source/layers, feature filtering, selected activity properties, and empty route-view data. Task 2 covers zooming into selected stops, mappable activities, no-activity local zoom, direct stop transitions, and route viewport restore. Task 3 covers clickable pins and app state flow. Task 4 covers rendered behavior and final verification.
 - Red-flag scan: no vague steps or unspecified test commands remain.
 - Type consistency: `focusedActivities`, `selectedActivityId`, and `onSelectActivity` are introduced in `MapCanvasProps`, used in `App`, and covered by test fixtures using the existing `Activity` type.
+
+## Implementation Status
+
+Completed in the current codebase: `MapCanvas` accepts focused activities, renders focused activity sources and selected-activity layers, fits the selected stop/activity viewport, and App tests cover opening the activity panel from a focused activity map pin.
