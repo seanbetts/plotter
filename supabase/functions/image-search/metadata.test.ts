@@ -110,3 +110,34 @@ Deno.test("searchWebImages rejects missing SerpApi keys", async () => {
     "SERPAPI_API_KEY",
   );
 });
+
+Deno.test("searchWebImages rejects non-JSON 200 provider responses with a stable error", async () => {
+  await assertRejects(
+    () =>
+      searchWebImages({
+        apiKey: "secret",
+        query: "mural",
+        context: { stopName: "Paris", countryName: "France" },
+        fetcher: async () => new Response("not json"),
+      }),
+    Error,
+    "Unable to search web images.",
+  );
+});
+
+Deno.test("searchWebImages rejects invalid image result shapes with a stable error", async () => {
+  await assertRejects(
+    () =>
+      searchWebImages({
+        apiKey: "secret",
+        query: "mural",
+        context: { stopName: "Paris", countryName: "France" },
+        fetcher: async () =>
+          Response.json({
+            images_results: {},
+          }),
+      }),
+    Error,
+    "Unable to search web images.",
+  );
+});

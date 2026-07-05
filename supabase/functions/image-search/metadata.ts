@@ -44,6 +44,7 @@ type SearchWebImagesInput = {
 const largePhotoFilter = "itp:photos,isz:l";
 const minLongEdge = 1200;
 const minShortEdge = 700;
+const providerSearchErrorMessage = "Unable to search web images.";
 
 function clean(value: string | undefined) {
   return value?.trim().replace(/\s+/g, " ") ?? "";
@@ -136,6 +137,37 @@ function dimension(primary: number | undefined, fallback: number | undefined) {
     : undefined;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function parseSerpApiResponse(
+  response: Response,
+): Promise<SerpApiResponse> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error(providerSearchErrorMessage);
+  }
+
+  if (!isRecord(body)) {
+    throw new Error(providerSearchErrorMessage);
+  }
+
+  if (typeof body.error === "string") {
+    throw new Error(body.error);
+  }
+
+  if (
+    body.images_results !== undefined && !Array.isArray(body.images_results)
+  ) {
+    throw new Error(providerSearchErrorMessage);
+  }
+
+  return body as SerpApiResponse;
+}
+
 export function mapSerpApiImageResults(
   response: SerpApiResponse,
 ): WebImageSearchResult[] {
@@ -201,13 +233,10 @@ export async function searchWebImages({
     buildSerpApiImageSearchUrl({ apiKey, query, context }),
   );
   if (!response.ok) {
-    throw new Error("Unable to search web images.");
+    throw new Error(providerSearchErrorMessage);
   }
 
-  const body = await response.json() as SerpApiResponse;
-  if (body.error) {
-    throw new Error(body.error);
-  }
+  const body = await parseSerpApiResponse(response);
 
   return filterQualityImageResults(mapSerpApiImageResults(body));
 }
