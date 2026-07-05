@@ -47,9 +47,10 @@ export function WebImageSearchField({ context, client, onImportImage }: WebImage
       return;
     }
 
+    const searchId = latestSearchId.current + 1;
+    latestSearchId.current = searchId;
+
     searchTimerRef.current = window.setTimeout(() => {
-      const searchId = latestSearchId.current + 1;
-      latestSearchId.current = searchId;
       setIsSearching(true);
       setError('');
 

@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   WebImageSearchClient,
   WebImageSearchResult,
@@ -31,7 +31,22 @@ function createClient(results: WebImageSearchResult[] = [result]): WebImageSearc
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 describe('WebImageSearchField', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('searches and renders image results in a popover grid', async () => {
     const user = userEvent.setup();
     const client = createClient();
@@ -88,5 +103,65 @@ describe('WebImageSearchField', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Imported image is too small.');
     expect(screen.getByRole('option', { name: 'Import Paris mural from Example Source' })).toBeInTheDocument();
+  });
+
+  it('ignores in-flight search results after the query changes', async () => {
+    vi.useFakeTimers();
+    const firstSearch = createDeferred<WebImageSearchResult[]>();
+    const secondSearch = createDeferred<WebImageSearchResult[]>();
+    const bridgeResult: WebImageSearchResult = {
+      ...result,
+      id: 'image-2',
+      title: 'Paris bridge',
+      sourceName: 'Bridge Source',
+    };
+    const client: WebImageSearchClient = {
+      searchImages: vi.fn((query: string) => {
+        if (query === 'mural') return firstSearch.promise;
+        return secondSearch.promise;
+      }),
+    };
+    render(
+      <WebImageSearchField
+        context={context}
+        client={client}
+        onImportImage={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText('Search web images');
+    fireEvent.change(input, { target: { value: 'mural' } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(client.searchImages).toHaveBeenCalledWith('mural', context);
+
+    fireEvent.change(input, { target: { value: 'bridge' } });
+    expect(client.searchImages).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstSearch.resolve([result]);
+    });
+
+    expect(
+      screen.queryByRole('option', { name: 'Import Paris mural from Example Source' }),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(client.searchImages).toHaveBeenCalledWith('bridge', context);
+
+    await act(async () => {
+      secondSearch.resolve([bridgeResult]);
+    });
+
+    const grid = screen.getByRole('listbox', { name: 'Web image results' });
+    expect(
+      within(grid).getByRole('option', { name: 'Import Paris bridge from Bridge Source' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Import Paris mural from Example Source' }),
+    ).not.toBeInTheDocument();
   });
 });
