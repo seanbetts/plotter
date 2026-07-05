@@ -676,6 +676,47 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Balcombe, United Kingdom' })).not.toHaveAttribute('aria-current');
   });
 
+  it('shows tag suggestion values used by other stops and activities', async () => {
+    const user = userEvent.setup();
+    const home = {
+      ...createDestination({
+        name: 'Home',
+        countryRegion: 'United Kingdom',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      }),
+      tags: [],
+    };
+    const brest = {
+      ...createDestination({
+        name: 'Brest',
+        countryRegion: 'France',
+        coordinates: { lat: 48.3904, lng: -4.4861 },
+      }),
+      tags: ['family'],
+    };
+    const activity = {
+      ...createActivity({
+        destinationId: home.id,
+        title: 'Louvre',
+        order: 0,
+      }),
+      tags: ['museum'],
+    };
+    repositoryMock.initialDestinations = Promise.resolve([home, brest]);
+    repositoryMock.listActivities.mockImplementation(async (destinationId: string) =>
+      destinationId === home.id ? [activity] : [],
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Home, United Kingdom' }));
+    await user.click(screen.getByRole('button', { name: 'Add tag' }));
+
+    expect(screen.getByRole('button', { name: 'Add tag suggestion family' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add tag suggestion museum' })).toBeInTheDocument();
+  });
+
   it('loads destination media after opening a profile without blocking the pane', async () => {
     const user = userEvent.setup();
     const destination = createDestination({

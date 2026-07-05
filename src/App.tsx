@@ -13,6 +13,7 @@ import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapAddStopRequest } from './components/MapCanvas';
 import { TopToolbar } from './components/TopToolbar';
+import { buildTagSuggestions } from './components/tagEditorModel';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
 import type {
   Activity,
@@ -312,6 +313,16 @@ function TripWorkspace({
   const selectedDestinationActivities = useMemo(
     () => (selectedDestination ? activitiesByDestinationId[selectedDestination.id] ?? [] : []),
     [activitiesByDestinationId, selectedDestination],
+  );
+  const tagSuggestions = useMemo(
+    () =>
+      buildTagSuggestions([
+        ...destinations.map((destination) => destination.tags),
+        ...Object.values(activitiesByDestinationId).flatMap((activities) =>
+          activities.map((activity) => activity.tags),
+        ),
+      ]),
+    [activitiesByDestinationId, destinations],
   );
   const selectedActivity = useMemo(
     () =>
@@ -895,6 +906,7 @@ function TripWorkspace({
                 isMediaLoading={activityMedia.isLoading}
                 isMediaUploading={activityMedia.isUploading}
                 linkPreviewClient={linkPreviewClient}
+                tagSuggestions={tagSuggestions}
                 onClose={() => setSelectedActivityId(null)}
                 onUpdateActivity={handleUpdateActivityPanel}
                 onUploadMedia={handleActivityMediaUpload}
@@ -913,6 +925,7 @@ function TripWorkspace({
               isMediaUploading={destinationMedia.isUploading}
               mediaError={destinationMedia.error ?? destinationMediaRollupError}
               linkPreviewClient={linkPreviewClient}
+              tagSuggestions={tagSuggestions}
               onSelectActivity={setSelectedActivityId}
               onCreateActivity={handleCreateActivity}
               searchActivities={searchActivityPlaces}
