@@ -1264,6 +1264,7 @@ select {
 }
 
 .tag-editor {
+  position: relative;
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -1332,14 +1333,92 @@ select {
   background: rgb(var(--color-accent-rgb) / 0.17);
 }
 
-.tag-editor .tag-pill-input {
-  flex: 1 1 110px;
-  width: auto;
-  min-width: 92px;
-  border: 0;
-  padding: 3px 2px;
-  background: transparent;
+.tag-empty-state {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-add-button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--surface-action-subtle);
+  cursor: pointer;
+}
+
+.tag-add-button:hover,
+.tag-add-button:focus-visible {
+  border-color: var(--border-hover);
+  background: var(--surface-control-hover);
+}
+
+.tag-add-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 4;
+  display: grid;
+  width: min(260px, 100%);
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay-profile);
+  box-shadow: 0 12px 32px rgb(var(--color-text-rgb) / 0.14);
+  -webkit-backdrop-filter: blur(16px) saturate(1.16);
+  backdrop-filter: blur(16px) saturate(1.16);
+}
+
+.tag-popover-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  padding: 8px 9px;
+  color: var(--color-text);
+  background: var(--surface-control);
   outline: 0;
+}
+
+.tag-popover-input:focus-visible {
+  border-color: var(--border-selected);
+  box-shadow: 0 0 0 3px rgb(var(--color-accent-rgb) / 0.18);
+}
+
+.tag-suggestion-list {
+  display: grid;
+  gap: 4px;
+}
+
+.tag-suggestion {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 6px 8px;
+  color: var(--color-text);
+  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tag-suggestion:hover,
+.tag-suggestion:focus-visible {
+  background: var(--surface-action-subtle);
 }
 
 .link-preview-section {

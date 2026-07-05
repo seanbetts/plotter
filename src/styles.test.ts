@@ -59,6 +59,19 @@ describe('panel tag editor styles', () => {
   it('leaves breathing room between tag titles and their divider line', () => {
     expect(styles).toMatch(/\.tag-editor legend\s*{[^}]*padding-right:\s*12px;/s);
   });
+
+  it('uses an overlay popover for tag entry instead of expanding layout', () => {
+    expect(styles).toMatch(/\.tag-editor\s*{[^}]*position:\s*relative;/s);
+    expect(styles).toMatch(
+      /\.tag-add-popover\s*{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(100% \+ 8px\);/s,
+    );
+  });
+
+  it('keeps empty and populated tag rows compact', () => {
+    expect(styles).toMatch(/\.tag-pill-list\s*{[^}]*min-height:\s*40px;/s);
+    expect(styles).toMatch(/\.tag-empty-state\s*{[^}]*color:\s*var\(--text-muted\);/s);
+    expect(styles).toMatch(/\.tag-add-button\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;/s);
+  });
 });
 
 describe('profile header styles', () => {
