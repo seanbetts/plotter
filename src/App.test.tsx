@@ -149,7 +149,7 @@ const repositoryMock = vi.hoisted(() => {
       repository.destinations = [...snapshot.destinations];
       repository.routeLegs = [...snapshot.routeLegs];
     }),
-    listDestinationMedia: vi.fn(async (): Promise<MediaItem[]> => []),
+    listDestinationMedia: vi.fn<TripRepository['listDestinationMedia']>(async () => []),
     uploadDestinationMedia: vi.fn(),
     importDestinationMediaFromSearch: vi.fn(),
     updateDestinationMedia: vi.fn(),

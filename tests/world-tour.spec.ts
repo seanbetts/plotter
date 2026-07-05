@@ -58,8 +58,6 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   await expect(profile).toBeVisible();
 
-  const tagInput = profile.getByLabel('Add tag');
-
   for (const tag of savedTags) {
     const existingTag = profile.getByRole('button', { name: `Remove tag ${tag}` });
     if (await existingTag.isVisible()) {
@@ -68,6 +66,8 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
   }
 
   for (const tag of savedTags) {
+    await profile.getByRole('button', { name: 'Add tag' }).click();
+    const tagInput = profile.getByRole('textbox', { name: 'Add tag' });
     await tagInput.fill(tag);
     await tagInput.press('Enter');
   }
