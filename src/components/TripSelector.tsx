@@ -28,22 +28,26 @@ export function TripSelector({
   const [tripName, setTripName] = useState('');
   const [targetTrip, setTargetTrip] = useState<TripSummary | null>(null);
   const selectorRef = useRef<HTMLDivElement | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!isOpen && !dialogMode) return undefined;
 
-    const handleWindowPointerDown = (event: PointerEvent) => {
-      if (selectorRef.current?.contains(event.target as Node)) return;
-
+    const closeOverlays = () => {
       setIsOpen(false);
       setDialogMode(null);
       setTargetTrip(null);
     };
+    const handleWindowPointerDown = (event: PointerEvent) => {
+      if (selectorRef.current?.contains(event.target as Node)) return;
+
+      closeOverlays();
+    };
     const handleWindowKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsOpen(false);
-        setDialogMode(null);
-        setTargetTrip(null);
+        event.preventDefault();
+        event.stopPropagation();
+        closeOverlays();
       }
     };
 
@@ -54,6 +58,12 @@ export function TripSelector({
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
   }, [dialogMode, isOpen]);
+
+  useEffect(() => {
+    if (dialogMode !== 'create' && dialogMode !== 'rename') return;
+
+    nameInputRef.current?.focus();
+  }, [dialogMode]);
 
   const closeDialog = () => {
     setDialogMode(null);
@@ -178,6 +188,7 @@ export function TripSelector({
             <div className="trip-selector__dialog-entry">
               <input
                 id="trip-selector-name"
+                ref={nameInputRef}
                 value={tripName}
                 onChange={(event) => setTripName(event.target.value)}
               />

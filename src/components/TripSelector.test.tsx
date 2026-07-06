@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
@@ -70,12 +70,31 @@ describe('TripSelector', () => {
     expect(createButton).toHaveTextContent('');
   });
 
+  it('focuses the name field when creating a new trip', async () => {
+    renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: 'New trip' }));
+
+    expect(screen.getByLabelText('Trip name')).toHaveFocus();
+  });
+
   it('dismisses the new trip dialog with Escape', async () => {
     renderSelector();
 
     await userEvent.click(screen.getByRole('button', { name: 'New trip' }));
     await userEvent.keyboard('{Escape}');
 
+    expect(screen.queryByRole('dialog', { name: 'New trip' })).not.toBeInTheDocument();
+  });
+
+  it('prevents browser Escape handling while dismissing the new trip dialog', async () => {
+    renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: 'New trip' }));
+
+    const wasNotCanceled = fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(wasNotCanceled).toBe(false);
     expect(screen.queryByRole('dialog', { name: 'New trip' })).not.toBeInTheDocument();
   });
 
