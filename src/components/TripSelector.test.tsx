@@ -56,6 +56,61 @@ describe('TripSelector', () => {
     expect(props.onCreateTrip).toHaveBeenCalledWith('South America');
   });
 
+  it('uses inline icon buttons in the new trip dialog', async () => {
+    renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: 'New trip' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'New trip' });
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    const createButton = screen.getByRole('button', { name: 'Create trip' });
+
+    expect(dialog.querySelector('.trip-selector__dialog-entry')).toContainElement(screen.getByLabelText('Trip name'));
+    expect(cancelButton).toHaveTextContent('');
+    expect(createButton).toHaveTextContent('');
+  });
+
+  it('dismisses the new trip dialog with Escape', async () => {
+    renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: 'New trip' }));
+    await userEvent.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: 'New trip' })).not.toBeInTheDocument();
+  });
+
+  it('dismisses the new trip dialog after clicking outside', async () => {
+    const props = {
+      trips,
+      activeTrip: trips[0],
+      actionError: null,
+      onSelectTrip: vi.fn(),
+      onCreateTrip: vi.fn(),
+      onRenameTrip: vi.fn(),
+      onDeleteTrip: vi.fn(),
+    };
+    render(
+      <>
+        <button type="button">Outside</button>
+        <TripSelector {...props} />
+      </>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'New trip' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Outside' }));
+
+    expect(screen.queryByRole('dialog', { name: 'New trip' })).not.toBeInTheDocument();
+  });
+
+  it('creates a named trip with Enter from the name field', async () => {
+    const props = renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: 'New trip' }));
+    await userEvent.type(screen.getByLabelText('Trip name'), 'North Coast 500{Enter}');
+
+    expect(props.onCreateTrip).toHaveBeenCalledWith('North Coast 500');
+  });
+
   it('renames a trip from its list row', async () => {
     const props = renderSelector();
 

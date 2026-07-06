@@ -2048,11 +2048,38 @@ select {
   gap: 10px;
 }
 
+.trip-selector__dialog-form {
+  display: grid;
+  gap: 10px;
+}
+
+.trip-selector__dialog-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px 38px;
+  gap: 6px;
+  align-items: stretch;
+}
+
 .trip-selector__dialog input {
   min-height: 38px;
   padding: 0 10px;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
+}
+
+.trip-selector__dialog-icon-button {
+  display: grid;
+  min-height: 38px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: transparent;
+}
+
+.trip-selector__dialog-icon-button:hover,
+.trip-selector__dialog-icon-button:focus-visible {
+  background: var(--surface-action-subtle);
 }
 
 .trip-selector__error {

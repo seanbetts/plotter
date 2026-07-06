@@ -1,4 +1,4 @@
-import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 
@@ -30,17 +30,20 @@ export function TripSelector({
   const selectorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (!isOpen && !dialogMode) return undefined;
 
     const handleWindowPointerDown = (event: PointerEvent) => {
       if (selectorRef.current?.contains(event.target as Node)) return;
 
       setIsOpen(false);
+      setDialogMode(null);
+      setTargetTrip(null);
     };
     const handleWindowKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsOpen(false);
         setDialogMode(null);
+        setTargetTrip(null);
       }
     };
 
@@ -50,7 +53,12 @@ export function TripSelector({
       window.removeEventListener('pointerdown', handleWindowPointerDown);
       window.removeEventListener('keydown', handleWindowKeyDown);
     };
-  }, [isOpen]);
+  }, [dialogMode, isOpen]);
+
+  const closeDialog = () => {
+    setDialogMode(null);
+    setTargetTrip(null);
+  };
 
   const openDialog = (mode: DialogMode, trip: TripSummary | null = null) => {
     setDialogMode(mode);
@@ -159,23 +167,37 @@ export function TripSelector({
           aria-modal="true"
           aria-label={dialogMode === 'create' ? 'New trip' : 'Rename trip'}
         >
-          <label htmlFor="trip-selector-name">Trip name</label>
-          <input
-            id="trip-selector-name"
-            value={tripName}
-            onChange={(event) => setTripName(event.target.value)}
-          />
-          <div className="trip-selector__dialog-actions">
-            <button type="button" onClick={() => {
-              setDialogMode(null);
-              setTargetTrip(null);
-            }}>
-              Cancel
-            </button>
-            <button type="button" onClick={() => void submitName()}>
-              {dialogMode === 'create' ? 'Create trip' : 'Save name'}
-            </button>
-          </div>
+          <form
+            className="trip-selector__dialog-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitName();
+            }}
+          >
+            <label htmlFor="trip-selector-name">Trip name</label>
+            <div className="trip-selector__dialog-entry">
+              <input
+                id="trip-selector-name"
+                value={tripName}
+                onChange={(event) => setTripName(event.target.value)}
+              />
+              <button
+                type="button"
+                className="trip-selector__dialog-icon-button"
+                aria-label="Cancel"
+                onClick={closeDialog}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+              <button
+                type="submit"
+                className="trip-selector__dialog-icon-button"
+                aria-label={dialogMode === 'create' ? 'Create trip' : 'Save name'}
+              >
+                <Check size={16} aria-hidden="true" />
+              </button>
+            </div>
+          </form>
         </section>
       ) : null}
 
@@ -183,10 +205,7 @@ export function TripSelector({
         <section className="trip-selector__dialog" role="dialog" aria-modal="true" aria-label="Delete trip">
           <p>Delete {targetTrip.name}?</p>
           <div className="trip-selector__dialog-actions">
-            <button type="button" onClick={() => {
-              setDialogMode(null);
-              setTargetTrip(null);
-            }}>
+            <button type="button" onClick={closeDialog}>
               Cancel
             </button>
             <button type="button" onClick={() => void confirmDelete()}>
