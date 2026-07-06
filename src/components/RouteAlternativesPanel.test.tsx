@@ -61,7 +61,9 @@ describe('RouteAlternativesPanel', () => {
     );
 
     expect(screen.getByRole('dialog', { name: 'Edit route from Bilbao to Porto' })).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Calculating route options' })).toBeInTheDocument();
+    const loadingStatus = screen.getByRole('status', { name: 'Calculating route options' });
+    expect(loadingStatus).toBeInTheDocument();
+    expect(loadingStatus.querySelector('.route-alternatives-spinner')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use selected route' })).toBeDisabled();
   });
 

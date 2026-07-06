@@ -58,7 +58,8 @@ export function RouteAlternativesPanel({
 
       {status === 'loading' ? (
         <p className="route-alternatives-status" role="status" aria-label="Calculating route options">
-          Calculating route options
+          <span className="route-alternatives-spinner" aria-hidden="true" />
+          <span>Calculating route options</span>
         </p>
       ) : null}
       {status === 'error' && error ? (

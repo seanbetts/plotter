@@ -2706,6 +2706,22 @@ select {
   line-height: 1.4;
 }
 
+.route-alternatives-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.route-alternatives-spinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgb(var(--color-text-rgb) / 0.18);
+  border-top-color: var(--color-accent);
+  border-radius: var(--radius-pill);
+  animation: route-spin 900ms linear infinite;
+}
+
 .route-alternatives-error {
   color: var(--color-danger);
 }
