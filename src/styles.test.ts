@@ -46,6 +46,13 @@ describe('web image search styles', () => {
   });
 });
 
+describe('link preview card styles', () => {
+  it('anchors delete buttons to the bottom-right corner of the image area', () => {
+    expect(styles).toMatch(/\.link-preview-card\s*{[^}]*container-type:\s*inline-size;/s);
+    expect(styles).toMatch(/\.link-preview-card__delete\s*{[^}]*right:\s*7px;[^}]*top:\s*calc\(56\.25cqw - 39px\);/s);
+  });
+});
+
 describe('panel tag editor styles', () => {
   it('matches label-to-control spacing for tag legends', () => {
     expect(styles).toMatch(/\.tag-editor legend\s*{[^}]*margin-bottom:\s*6px;/s);

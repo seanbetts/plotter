@@ -1500,6 +1500,7 @@ select {
 
 .link-preview-card {
   position: relative;
+  container-type: inline-size;
   min-width: 0;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
@@ -1626,7 +1627,7 @@ select {
 .link-preview-card__delete {
   position: absolute;
   right: 7px;
-  top: 7px;
+  top: calc(56.25cqw - 39px);
   display: grid;
   width: 32px;
   height: 32px;
