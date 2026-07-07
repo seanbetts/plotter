@@ -1082,6 +1082,42 @@ describe('useTripData', () => {
     ]);
   });
 
+  it('deletes route legs that no longer match adjacent destinations after reorder', async () => {
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({
+        name: 'First',
+        coordinates: { lat: 1, lng: 1 },
+      });
+      await result.current.addDestination({
+        name: 'Second',
+        coordinates: { lat: 2, lng: 2 },
+      });
+      await result.current.addDestination({
+        name: 'Third',
+        coordinates: { lat: 3, lng: 3 },
+      });
+    });
+
+    const [first, second, third] = result.current.destinations;
+
+    await act(async () => {
+      await result.current.reorderDestinations([third.id, first.id, second.id]);
+    });
+
+    const persistedRoutePairs = (await repository.listRouteLegs())
+      .map((leg) => `${leg.originDestinationId}:${leg.targetDestinationId}`)
+      .sort();
+    expect(persistedRoutePairs).toEqual([
+      `${first.id}:${second.id}`,
+      `${third.id}:${first.id}`,
+    ].sort());
+  });
+
   it('inserts new destinations at the best route position after the first stop', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));
