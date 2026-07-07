@@ -2066,6 +2066,74 @@ describe('supabase trip repository mappers', () => {
     });
   });
 
+  it('skips stale destination media rows when the storage object is missing', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const missingRow = {
+      id: crypto.randomUUID(),
+      trip_id: tripId,
+      destination_id: destinationId,
+      activity_id: null,
+      bucket_id: 'trip-media',
+      object_path: `${tripId}/${destinationId}/missing.webp`,
+      caption: 'Missing image',
+      credit: '',
+      sort_order: 0,
+      content_type: 'image/webp',
+      size_bytes: 1200,
+      uploaded_by: crypto.randomUUID(),
+      created_at: '2026-06-29T12:00:00.000Z',
+      updated_at: '2026-06-29T12:00:00.000Z',
+    };
+    const availableRow = {
+      ...missingRow,
+      id: crypto.randomUUID(),
+      object_path: `${tripId}/${destinationId}/available.webp`,
+      caption: 'Available image',
+      sort_order: 1,
+    };
+    const createSignedUrl = vi.fn(async (path: string, _expiresIn: number, options?: { transform?: { width: number } }) => {
+      if (path === missingRow.object_path) {
+        return { data: null, error: { message: 'Object not found' } };
+      }
+
+      return {
+        data: { signedUrl: `https://signed.example/${options?.transform?.width ?? 'original'}.webp` },
+        error: null,
+      };
+    });
+    const mediaOrderBy = vi.fn(async () => ({ data: [missingRow, availableRow], error: null }));
+    const mediaSortOrderBy = vi.fn(() => ({ order: mediaOrderBy }));
+    const activityOwnerFilter = vi.fn(() => ({ order: mediaSortOrderBy }));
+    const destinationFilter = vi.fn(() => ({ is: activityOwnerFilter }));
+    const tripFilter = vi.fn(() => ({ eq: destinationFilter }));
+    const supabase = {
+      storage: {
+        from: vi.fn(() => ({ createSignedUrl })),
+      },
+      from: vi.fn((tableName: string) => {
+        if (tableName === 'media_assets') {
+          return {
+            select: vi.fn(() => ({ eq: tripFilter })),
+          };
+        }
+
+        throw new Error(`Unexpected table ${tableName}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
+
+    await expect(repository.listDestinationMedia(destinationId)).resolves.toEqual([
+      expect.objectContaining({
+        id: availableRow.id,
+        url: 'https://signed.example/original.webp',
+        thumbnailUrl: 'https://signed.example/320.webp',
+        previewUrl: 'https://signed.example/900.webp',
+        fullUrl: 'https://signed.example/2200.webp',
+      }),
+    ]);
+  });
+
   it('uploads activity media under the activity owner and records metadata', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();

@@ -156,6 +156,10 @@ function assertSupabaseWriteSucceeded(response: SupabaseWriteResponse, fallbackM
   }
 }
 
+function isMissingStorageObjectError(caught: unknown) {
+  return caught instanceof Error && caught.message === 'Object not found';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -565,6 +569,24 @@ export function createSupabaseTripRepository(
     return mediaAssetFromSupabaseRow(row, signedUrls);
   }
 
+  async function createAvailableSignedMediaItems(rows: SupabaseMediaAssetRow[]) {
+    const settledMediaItems = await Promise.allSettled(rows.map((row) => createSignedMediaItem(row)));
+    const mediaItems: MediaItem[] = [];
+
+    for (const settledMediaItem of settledMediaItems) {
+      if (settledMediaItem.status === 'fulfilled') {
+        mediaItems.push(settledMediaItem.value);
+        continue;
+      }
+
+      if (!isMissingStorageObjectError(settledMediaItem.reason)) {
+        throw settledMediaItem.reason;
+      }
+    }
+
+    return mediaItems;
+  }
+
   async function loadDestinationMediaRows(tripId: string, destinationId: string) {
     return assertNoSupabaseError<SupabaseMediaAssetRow[]>(
       await supabase
@@ -601,7 +623,7 @@ export function createSupabaseTripRepository(
       'Unable to load destination media.',
     );
 
-    return Promise.all(rows.map((row) => createSignedMediaItem(row)));
+    return createAvailableSignedMediaItems(rows);
   }
 
   async function listSignedActivityMedia(tripId: string, activityId: string) {
@@ -616,7 +638,7 @@ export function createSupabaseTripRepository(
       'Unable to load activity media.',
     );
 
-    return Promise.all(rows.map((row) => createSignedMediaItem(row)));
+    return createAvailableSignedMediaItems(rows);
   }
 
   async function loadActivityMediaRows(tripId: string, activityId: string) {
@@ -1021,7 +1043,7 @@ export function createSupabaseTripRepository(
 
       for (const activity of activities) {
         const rows = activityMediaRowsByActivityId.get(activity.id) ?? [];
-        const activityMedia = await Promise.all(rows.map((row) => createSignedMediaItem(row)));
+        const activityMedia = await createAvailableSignedMediaItems(rows);
 
         rollup.push(...activityMedia.map((mediaItem) => ({
           mediaItem,
