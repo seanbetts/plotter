@@ -13,6 +13,7 @@ The command layer lets agents create, delete, rename, inspect, and amend trips. 
 - Stops are the primary writable route data.
 - Route legs are derived from ordered adjacent stops.
 - Links and activities are authored through explicit commands, not bundled into stop creation.
+- In itinerary-style source material, overnight locations are route stops; non-overnight places to visit are activities under the relevant stop.
 - Image automation is separate from core trip/stop authoring and must require explicit user confirmation.
 - Command inputs and outputs are structured JSON with stable schemas.
 - Every write command supports dry-run validation.
@@ -196,6 +197,7 @@ Input:
       "coordinates": { "lat": 38.7223, "lng": -9.1393 }
     },
     "expectedStayDays": 4,
+    "notes": "Booked campsite. Ref: WTB10B2CC9",
     "tags": ["food", "culture"]
   }
 }
@@ -224,6 +226,7 @@ Input:
       "coordinates": { "lat": 38.7223, "lng": -9.1393 }
     },
     "expectedStayDays": 5,
+    "notes": "Updated stop notes",
     "tags": ["food", "culture", "tiles"]
   }
 }
@@ -487,6 +490,7 @@ Fields:
     "coordinates": { "lat": 38.7223, "lng": -9.1393 }
   },
   "expectedStayDays": 4,
+  "notes": "Booked campsite. Ref: WTB10B2CC9",
   "tags": ["food", "culture"]
 }
 ```
@@ -504,9 +508,12 @@ Location input:
 Writable optional fields:
 
 - `expectedStayDays`
+- `notes`
 - `tags`
 
-The service fills all omitted `Destination` fields with app defaults. In v1, the draft intentionally excludes fields that are not currently surfaced in the app, including stop status, priority, route notes, timing dates, rationale text, media, and internal location details.
+`notes` maps to `Destination.research.notes`. This field is already persisted but is not currently surfaced in the stop UI, so agents should use it for useful stop-level context that does not need immediate visibility. Details that should be visible in the current UI should become activity notes instead.
+
+The service fills all omitted `Destination` fields with app defaults. In v1, the draft intentionally excludes fields that are not currently surfaced in the app, including stop status, priority, route-specific notes, timing dates, rationale text, media, and internal location details.
 
 The agent-facing draft does not accept internal location details such as country, region, country code, source provider, or source feature id. The service derives those fields from MapTiler when an API key and resolvable place input is available. If coordinates are present and enrichment is unavailable, it creates a legacy location from the stop name and coordinates. If only `place.query` is present and the service cannot resolve coordinates, validation fails. `countryRegion` is derived from the resolved location or left blank.
 
@@ -583,6 +590,18 @@ Writable optional fields:
 - `place`
 
 The service fills or updates activity location from `place`; it does not expose category, status, or priority in v1 because those are not currently user-facing controls.
+
+## Itinerary Interpretation
+
+When an agent turns prose, notes, or other planning material into trip commands, it should use these general rules:
+
+- Overnight locations are route stops.
+- Places visited between overnight locations are activities under the nearest relevant stop.
+- Accommodation/provider URLs and map URLs for an overnight location are stop links.
+- Activity/provider URLs and map URLs for a non-overnight place are activity links.
+- Existing source dates, times, booking references, costs, and status text go into visible activity notes when attached to an activity. Stop-level booking/reference details can go into stop `notes`, but those notes are not yet surfaced in the app UI.
+- Source-provided coordinates should be passed as `place.coordinates`; a human-readable name or address can be passed as `place.query` for enrichment.
+- Date and time fields are not structured in v1.
 
 ## Validation
 
