@@ -4,7 +4,7 @@
 
 Allow an AI coding agent to read and write world-tour trip data through a stable, documented command interface. The first wrapper is a local CLI, and the same command layer should later support an in-app chat UI.
 
-The command layer lets agents create, delete, rename, inspect, and amend trips. In v1, ordered stops are the main writable trip content. Routes remain derived app data: the service reconciles adjacent route legs after stop changes and calculates route geometry when an OpenRouteService key is available.
+The command layer lets agents create, delete, rename, inspect, and amend trips. In v1, ordered stops are the main writable route content, with separate commands for stop links, activities, and activity details. Routes remain derived app data: the service reconciles adjacent route legs after stop changes and calculates route geometry when an OpenRouteService key is available.
 
 ## Design Principles
 
@@ -12,6 +12,8 @@ The command layer lets agents create, delete, rename, inspect, and amend trips. 
 - Agents manipulate trip commands, not database tables.
 - Stops are the primary writable route data.
 - Route legs are derived from ordered adjacent stops.
+- Links and activities are authored through explicit commands, not bundled into stop creation.
+- Image automation is separate from core trip/stop authoring and must require explicit user confirmation.
 - Command inputs and outputs are structured JSON with stable schemas.
 - Every write command supports dry-run validation.
 - The open app updates automatically after CLI writes.
@@ -58,14 +60,15 @@ Returns:
 
 ### `getTrip`
 
-Reads one trip, its ordered stops, route legs, and optionally activities.
+Reads one trip, its ordered stops, route legs, links, and optionally activities.
 
 Input:
 
 ```json
 {
   "tripId": "trip-id",
-  "includeActivities": true
+  "includeActivities": true,
+  "includeLinks": true
 }
 ```
 
@@ -188,8 +191,10 @@ Input:
   "beforeStopId": null,
   "stop": {
     "name": "Lisbon",
-    "searchQuery": "Lisbon, Portugal",
-    "coordinates": { "lat": 38.7223, "lng": -9.1393 },
+    "place": {
+      "query": "Lisbon, Portugal",
+      "coordinates": { "lat": 38.7223, "lng": -9.1393 }
+    },
     "expectedStayDays": 4,
     "tags": ["food", "culture"]
   }
@@ -215,7 +220,9 @@ Input:
   "stopId": "lisbon-id",
   "patch": {
     "name": "Lisbon",
-    "coordinates": { "lat": 38.7223, "lng": -9.1393 },
+    "place": {
+      "coordinates": { "lat": 38.7223, "lng": -9.1393 }
+    },
     "expectedStayDays": 5,
     "tags": ["food", "culture", "tiles"]
   }
@@ -269,6 +276,190 @@ Manipulates:
 
 Does not manipulate activities or media.
 
+### `addStopLink`
+
+Adds one research link to a stop.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "stopId": "lisbon-id",
+  "url": "https://example.com/lisbon-guide"
+}
+```
+
+Manipulates:
+
+- `destinations.research.links`: appends one normalized link and dense sort order.
+
+The agent supplies only a URL. The service normalizes the URL, fetches link preview metadata when possible, and derives title, domain, preview image, sort order, and fallback values.
+
+### `deleteStopLink`
+
+Deletes one research link from a stop.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "stopId": "lisbon-id",
+  "linkId": "link-id"
+}
+```
+
+Manipulates:
+
+- `destinations.research.links`: removes the selected link and densifies sort order.
+
+### `listActivities`
+
+Reads activities for one stop.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "stopId": "lisbon-id"
+}
+```
+
+Manipulates no data.
+
+### `createActivity`
+
+Adds one activity under a stop.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "stopId": "lisbon-id",
+  "activity": {
+    "title": "Museu Nacional do Azulejo",
+    "place": {
+      "query": "Museu Nacional do Azulejo, Lisbon"
+    }
+  }
+}
+```
+
+Manipulates:
+
+- `activities`: inserts one activity under the selected stop with the next activity order.
+
+The agent supplies a title and optional place input. The service resolves activity location through MapTiler when possible and fills default category, status, priority, description, notes, links, and tags.
+
+### `updateActivity`
+
+Updates fields surfaced in the current activity panel.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "activityId": "activity-id",
+  "patch": {
+    "title": "Museu Nacional do Azulejo",
+    "description": "Tile museum in a former convent.",
+    "notes": "Check opening days before going.",
+    "tags": ["culture", "tiles"],
+    "place": {
+      "coordinates": { "lat": 38.7241, "lng": -9.1041 }
+    }
+  }
+}
+```
+
+Manipulates:
+
+- `activities.title`
+- `activities.description`
+- `activities.notes`
+- `activities.tags`
+- `activities.location`, when `place` is supplied
+
+Does not manipulate activity category, status, priority, media, or route stops.
+
+### `deleteActivity`
+
+Deletes one activity.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "activityId": "activity-id"
+}
+```
+
+Manipulates:
+
+- `activities`: deletes the activity.
+- `media_assets`: deletes owned activity media through existing repository/database behavior.
+
+### `reorderActivities`
+
+Sets the ordered activity sequence for one stop.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "stopId": "lisbon-id",
+  "activityIds": ["activity-a", "activity-b"]
+}
+```
+
+Manipulates:
+
+- `activities.activity_order`: renumbers activities under the selected stop.
+
+### `addActivityLink`
+
+Adds one research link to an activity.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "activityId": "activity-id",
+  "url": "https://example.com/azulejo"
+}
+```
+
+Manipulates:
+
+- `activities.links`: appends one normalized link and dense sort order.
+
+The service uses the same URL normalization and preview enrichment as stop links.
+
+### `deleteActivityLink`
+
+Deletes one research link from an activity.
+
+Input:
+
+```json
+{
+  "tripId": "trip-id",
+  "activityId": "activity-id",
+  "linkId": "link-id"
+}
+```
+
+Manipulates:
+
+- `activities.links`: removes the selected link and densifies sort order.
+
 ## Agent-Facing Data Structures
 
 ### `TripDraft`
@@ -291,8 +482,10 @@ Fields:
 {
   "id": "optional-existing-stop-id",
   "name": "Lisbon",
-  "searchQuery": "Lisbon, Portugal",
-  "coordinates": { "lat": 38.7223, "lng": -9.1393 },
+  "place": {
+    "query": "Lisbon, Portugal",
+    "coordinates": { "lat": 38.7223, "lng": -9.1393 }
+  },
   "expectedStayDays": 4,
   "tags": ["food", "culture"]
 }
@@ -304,9 +497,9 @@ Required:
 
 Location input:
 
-- `coordinates` is preferred when the agent already knows a precise stop anchor.
-- `searchQuery` is context used to resolve or enrich the stop through MapTiler.
-- At least one of `coordinates` or `searchQuery` is required.
+- `place.coordinates` is preferred when the agent already knows a precise stop anchor.
+- `place.query` is context used to resolve or enrich the stop through MapTiler.
+- At least one of `place.coordinates` or `place.query` is required.
 
 Writable optional fields:
 
@@ -315,13 +508,81 @@ Writable optional fields:
 
 The service fills all omitted `Destination` fields with app defaults. In v1, the draft intentionally excludes fields that are not currently surfaced in the app, including stop status, priority, route notes, timing dates, rationale text, media, and internal location details.
 
-The agent-facing draft does not accept internal location details such as country, region, country code, source provider, or source feature id. The service derives those fields from MapTiler when an API key and resolvable query/coordinates are available. If coordinates are present and enrichment is unavailable, it creates a legacy location from the stop name and coordinates. If only `searchQuery` is present and the service cannot resolve coordinates, validation fails. `countryRegion` is derived from the resolved location or left blank.
+The agent-facing draft does not accept internal location details such as country, region, country code, source provider, or source feature id. The service derives those fields from MapTiler when an API key and resolvable place input is available. If coordinates are present and enrichment is unavailable, it creates a legacy location from the stop name and coordinates. If only `place.query` is present and the service cannot resolve coordinates, validation fails. `countryRegion` is derived from the resolved location or left blank.
 
 ### `StopPatch`
 
 Same writable shape as `StopDraft`, but all fields are optional and at least one field must be present. `id` is not allowed inside `patch`; the command identifies the target with `stopId`.
 
-When a patch changes `coordinates` or `searchQuery`, the service re-runs stop enrichment and recalculates adjacent route legs.
+When a patch changes `place`, the service re-runs stop enrichment and recalculates adjacent route legs if coordinates changed.
+
+### `PlaceInput`
+
+```json
+{
+  "query": "Lisbon, Portugal",
+  "coordinates": { "lat": 38.7223, "lng": -9.1393 }
+}
+```
+
+Fields:
+
+- `query`: optional place lookup text for MapTiler resolution/enrichment.
+- `coordinates`: optional explicit coordinates.
+
+At least one field is required. When both are present, coordinates are the route anchor and query is enrichment context.
+
+### `LinkDraft`
+
+```json
+{
+  "url": "https://example.com/lisbon-guide"
+}
+```
+
+The service derives link id, title, domain, image URL, preview timestamp, and sort order.
+
+### `ActivityDraft`
+
+```json
+{
+  "title": "Museu Nacional do Azulejo",
+  "place": {
+    "query": "Museu Nacional do Azulejo, Lisbon"
+  }
+}
+```
+
+Fields:
+
+- `title`: required.
+- `place`: optional `PlaceInput`.
+
+The service fills default activity description, notes, category, status, priority, links, and tags.
+
+### `ActivityPatch`
+
+```json
+{
+  "title": "Museu Nacional do Azulejo",
+  "description": "Tile museum in a former convent.",
+  "notes": "Check opening days before going.",
+  "tags": ["culture", "tiles"],
+  "place": {
+    "coordinates": { "lat": 38.7241, "lng": -9.1041 }
+  }
+}
+```
+
+Writable optional fields:
+
+- `title`
+- `description`
+- `notes`
+- `tags`
+- `place`
+
+The service fills or updates activity location from `place`; it does not expose category, status, or priority in v1 because those are not currently user-facing controls.
 
 ## Validation
 
@@ -329,11 +590,14 @@ Validation should happen before any write:
 
 - trip names must be non-empty
 - stop names must be non-empty
-- each new stop must include coordinates or a search query
-- coordinates, when present, must be finite numbers in valid latitude/longitude ranges
+- each new stop must include `place.coordinates` or `place.query`
+- each new activity may include `place.coordinates`, `place.query`, or neither
+- place coordinates, when present, must be finite numbers in valid latitude/longitude ranges
 - stop ids must belong to the target trip
+- activity ids must belong to the target trip and expected stop when stop-scoped
 - insert positions must be unambiguous
 - `replaceStops` must reject duplicate stop ids
+- URLs must normalize to `http` or `https`
 - enum values must match the app domain
 - destructive commands must produce dry-run summaries before apply unless `--yes` or an explicit apply flag is passed
 
@@ -344,7 +608,7 @@ Validation failures return structured errors:
   "ok": false,
   "error": {
     "code": "STOP_LOCATION_REQUIRED",
-    "message": "Stop 'Lisbon' needs coordinates or a search query before it can be added.",
+    "message": "Stop 'Lisbon' needs place coordinates or a place query before it can be added.",
     "path": "stops[2]"
   }
 }
@@ -355,7 +619,7 @@ Validation failures return structured errors:
 The service should extract non-React route orchestration from `useTripData`:
 
 - normalize stop drafts into full `Destination` records
-- resolve or enrich stop location data through MapTiler when possible
+- resolve or enrich stop and activity place data through MapTiler when possible
 - fill app-owned default fields instead of requiring agents to write internal destination structure
 - create/update ordered destinations
 - reconcile adjacent route legs
@@ -380,7 +644,7 @@ Active trip subscription:
 
 - subscribes to `destinations`, `route_legs`, `activities`, and `media_assets` filtered by active `trip_id`
 - debounces bursts of changes from one CLI command
-- calls `useTripData.reload()` for route/stop/activity changes
+- calls `useTripData.reload()` for route/stop/activity/link changes
 - refreshes selected media rollups when relevant media changes affect the selected stop
 
 V1 should rely on Supabase realtime for the shared CLI/browser source of truth. Local IndexedDB cross-process realtime is out of scope.
@@ -400,6 +664,14 @@ npm run trip -- insert-stop --trip-id <id> --after-stop-id <id> --input ./stop.j
 npm run trip -- update-stop --trip-id <id> --stop-id <id> --input ./patch.json
 npm run trip -- delete-stop --trip-id <id> --stop-id <id> --dry-run
 npm run trip -- reorder-stops --trip-id <id> --input ./stop-order.json
+npm run trip -- add-stop-link --trip-id <id> --stop-id <id> --url <url>
+npm run trip -- delete-stop-link --trip-id <id> --stop-id <id> --link-id <id>
+npm run trip -- create-activity --trip-id <id> --stop-id <id> --input ./activity.json
+npm run trip -- update-activity --trip-id <id> --activity-id <id> --input ./activity-patch.json
+npm run trip -- delete-activity --trip-id <id> --activity-id <id> --dry-run
+npm run trip -- reorder-activities --trip-id <id> --stop-id <id> --input ./activity-order.json
+npm run trip -- add-activity-link --trip-id <id> --activity-id <id> --url <url>
+npm run trip -- delete-activity-link --trip-id <id> --activity-id <id> --link-id <id>
 ```
 
 The CLI should:
@@ -422,8 +694,11 @@ A Codex skill can wrap the CLI by documenting:
 - safe workflow: read, dry-run, apply, verify
 - destructive workflow: require explicit user approval before delete or replace
 - routing rule: manipulate stops, let the service derive routes
+- media rule: do not import images automatically without explicit user confirmation
 
-The skill should prefer narrow commands like `insertStop`, `updateStop`, and `reorderStops` over `replaceStops` unless the user clearly asks to regenerate the whole stop list.
+The skill should prefer narrow commands like `insertStop`, `updateStop`, `reorderStops`, `createActivity`, `updateActivity`, and link add/delete commands over broad replacement unless the user clearly asks to regenerate a whole list.
+
+Image writes are not part of the v1 CLI command surface. The skill may suggest image candidates in its response, but importing/uploading remains a user-confirmed app action. A later media command set can wrap the existing image search/import/upload repository paths once attribution, source quality, and confirmation behavior are designed.
 
 ## Future Chat UI
 
@@ -439,6 +714,8 @@ The command API should return summaries and changed-object lists suitable for ch
     "stopsAdded": ["Lisbon"],
     "stopsUpdated": [],
     "stopsDeleted": [],
+    "activitiesAdded": ["Museu Nacional do Azulejo"],
+    "linksAdded": ["https://example.com/azulejo"],
     "routesRecalculated": 2
   }
 }
@@ -452,6 +729,9 @@ Unit tests:
 
 - command validation
 - stop draft normalization
+- place input normalization
+- link URL normalization and preview fallback
+- activity draft and patch normalization
 - route reconciliation service behavior
 - dry-run summaries
 - destructive command safeguards
@@ -462,6 +742,8 @@ Repository/service tests:
 - create trip with stops
 - replace stops preserving matched stop ids
 - insert/delete/reorder recalculating route legs
+- add/delete stop and activity links
+- create/update/delete/reorder activities
 - delete trip cascade expectations
 
 App tests:
@@ -477,7 +759,7 @@ E2e tests:
 
 ## Out Of Scope For V1
 
-- AI-generated activities and media writes.
+- automatic image import or upload by agents.
 - Direct route geometry authoring by agents.
 - MCP server wrapper.
 - Local IndexedDB cross-process realtime.
