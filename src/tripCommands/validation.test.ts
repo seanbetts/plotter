@@ -32,10 +32,18 @@ describe('trip command validation', () => {
   });
 
   it('requires stop drafts to include a place query or coordinates', () => {
-    expect(() => validateStopDraft({ name: 'Lisbon' })).toThrow(TripCommandValidationError);
-    expect(() => validateStopDraft({ name: 'Lisbon' })).toThrow(
-      "Stop 'Lisbon' needs place coordinates or a place query before it can be added.",
-    );
+    for (const input of [{ name: 'Lisbon' }, { name: 'Lisbon', place: {} }]) {
+      expect(() => validateStopDraft(input)).toThrow(TripCommandValidationError);
+      expect(() => validateStopDraft(input)).toThrow(
+        "Stop 'Lisbon' needs place coordinates or a place query before it can be added.",
+      );
+    }
+  });
+
+  it('wraps URL normalization failures in TripCommandValidationError', () => {
+    expect(validateUrlInput('example.com/nc500')).toBe('https://example.com/nc500');
+    expect(() => validateUrlInput('ftp://example.com/file')).toThrow(TripCommandValidationError);
+    expect(() => validateUrlInput('ftp://example.com/file')).toThrow('Links must use http or https.');
   });
 
   it('rejects invalid coordinates', () => {
@@ -70,8 +78,4 @@ describe('trip command validation', () => {
     expect(() => validateStopPatch({})).toThrow('Stop patch must include at least one field.');
   });
 
-  it('normalizes URL input to http or https', () => {
-    expect(validateUrlInput('example.com/nc500')).toBe('https://example.com/nc500');
-    expect(() => validateUrlInput('ftp://example.com/file')).toThrow('Links must use http or https.');
-  });
 });

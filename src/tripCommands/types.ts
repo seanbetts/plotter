@@ -1,5 +1,5 @@
 import type { LineString } from 'geojson';
-import type { ResearchLink, Coordinates, DestinationStatus, Priority, ActivityLocation } from '../domain/types';
+import type { ResearchLink, Coordinates, ActivityLocation } from '../domain/types';
 import type { TripRepository } from '../storage/tripRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
 
@@ -12,8 +12,6 @@ export type StopDraft = {
   id?: string;
   name: string;
   place: PlaceInput;
-  status?: DestinationStatus;
-  priority?: Priority;
   expectedStayDays?: number;
   notes?: string;
   tags?: string[];

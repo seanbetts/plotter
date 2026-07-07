@@ -1,5 +1,5 @@
 import { normalizeResearchLinkUrl } from '../domain/researchLinks';
-import type { Coordinates, DestinationStatus, Priority } from '../domain/types';
+import type { Coordinates } from '../domain/types';
 import type { ActivityDraft, ActivityPatch, PlaceInput, StopDraft, StopPatch } from './types';
 
 export class TripCommandValidationError extends Error {
@@ -60,18 +60,6 @@ function optionalPositiveInteger(value: unknown, path: string): number | undefin
   return Math.floor(parsed);
 }
 
-const destinationStatuses: DestinationStatus[] = ['idea', 'planned', 'confirmed', 'visited'];
-const priorities: Priority[] = ['low', 'medium', 'high', 'must-do'];
-
-function optionalEnum<T extends string>(value: unknown, allowed: readonly T[], path: string): T | undefined {
-  const normalized = optionalString(value, path);
-  if (normalized === undefined) return undefined;
-  if (!allowed.includes(normalized as T)) {
-    throw new TripCommandValidationError('INVALID_ENUM', `${path} must be one of: ${allowed.join(', ')}.`, path);
-  }
-  return normalized as T;
-}
-
 function validateCoordinates(value: unknown, path: string): Coordinates | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) {
@@ -130,28 +118,38 @@ export function validateStopDraft(input: unknown, path = 'stop'): StopDraft {
   }
 
   const name = requiredString(input.name, 'Stop name', `${path}.name`);
-  const place = input.place === undefined ? undefined : validatePlaceInput(input.place, `${path}.place`, { required: false });
-  if (!place) {
-    throw new TripCommandValidationError(
-      'STOP_LOCATION_REQUIRED',
-      `Stop '${name}' needs place coordinates or a place query before it can be added.`,
-      path,
-    );
-  }
+  const place = (() => {
+    try {
+      const validatedPlace = validatePlaceInput(input.place, `${path}.place`, { required: true });
+      if (!validatedPlace) {
+        throw new TripCommandValidationError(
+          'STOP_LOCATION_REQUIRED',
+          `Stop '${name}' needs place coordinates or a place query before it can be added.`,
+          path,
+        );
+      }
+      return validatedPlace;
+    } catch (error) {
+      if (error instanceof TripCommandValidationError && (error.code === 'STOP_LOCATION_REQUIRED' || error.code === 'PLACE_REQUIRED')) {
+        throw new TripCommandValidationError(
+          'STOP_LOCATION_REQUIRED',
+          `Stop '${name}' needs place coordinates or a place query before it can be added.`,
+          path,
+        );
+      }
+      throw error;
+    }
+  })();
 
   const expectedStayDays = optionalPositiveInteger(input.expectedStayDays, `${path}.expectedStayDays`);
   const notes = optionalString(input.notes, `${path}.notes`);
   const tags = optionalStringArray(input.tags, `${path}.tags`);
   const id = optionalString(input.id, `${path}.id`);
-  const status = optionalEnum(input.status, destinationStatuses, `${path}.status`);
-  const priority = optionalEnum(input.priority, priorities, `${path}.priority`);
 
   return {
     ...(id ? { id } : {}),
     name,
     place,
-    ...(status ? { status } : {}),
-    ...(priority ? { priority } : {}),
     ...(expectedStayDays !== undefined ? { expectedStayDays } : {}),
     ...(notes ? { notes } : {}),
     ...(tags ? { tags } : {}),
@@ -166,16 +164,12 @@ export function validateStopPatch(input: unknown, path = 'patch'): StopPatch {
   const patch: StopPatch = {};
   const name = optionalString(input.name, `${path}.name`);
   const place = validatePlaceInput(input.place, `${path}.place`, { required: false });
-  const status = optionalEnum(input.status, destinationStatuses, `${path}.status`);
-  const priority = optionalEnum(input.priority, priorities, `${path}.priority`);
   const expectedStayDays = optionalPositiveInteger(input.expectedStayDays, `${path}.expectedStayDays`);
   const notes = optionalString(input.notes, `${path}.notes`);
   const tags = optionalStringArray(input.tags, `${path}.tags`);
 
   if (name !== undefined) patch.name = name;
   if (place !== undefined) patch.place = place;
-  if (status !== undefined) patch.status = status;
-  if (priority !== undefined) patch.priority = priority;
   if (expectedStayDays !== undefined) patch.expectedStayDays = expectedStayDays;
   if (notes !== undefined) patch.notes = notes;
   if (tags !== undefined) patch.tags = tags;
@@ -234,5 +228,12 @@ export function validateUrlInput(input: unknown, path = 'url') {
     throw new TripCommandValidationError('INVALID_URL', `${path} must be a string.`, path);
   }
 
-  return normalizeResearchLinkUrl(input);
+  try {
+    return normalizeResearchLinkUrl(input);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new TripCommandValidationError('INVALID_URL', error.message, path);
+    }
+    throw new TripCommandValidationError('INVALID_URL', `${path} must be a valid URL.`, path);
+  }
 }
