@@ -29,7 +29,7 @@ CLI / future chat UI / skill wrapper
   -> useTripWorkspace refresh + useTripData.reload()
 ```
 
-`TripDataService` owns the trip command behavior. It uses the existing repository abstractions for persistence and reuses the existing route reconciliation rules. In v1, extract the non-React stop ordering and route reconciliation/calculation code needed by the CLI. The existing React hook can keep its browser-facing action API, but it must call the shared route orchestration utilities rather than maintaining a separate copy of those rules.
+`TripDataService` owns the trip command behavior. It uses the existing repository abstractions for persistence and reuses the existing route reconciliation rules. In v1, extract the non-React stop ordering, stop enrichment, and route reconciliation/calculation code needed by the CLI. The existing React hook can keep its browser-facing action API, but it must call the shared route orchestration utilities rather than maintaining a separate copy of those rules.
 
 ## Command Surface
 
@@ -48,7 +48,6 @@ Returns:
     {
       "id": "trip-id",
       "name": "World tour",
-      "description": "",
       "createdAt": "2026-07-07T10:00:00.000Z",
       "updatedAt": "2026-07-07T10:00:00.000Z",
       "stopCount": 12
@@ -80,7 +79,6 @@ Returns:
   "trip": {
     "id": "trip-id",
     "name": "World tour",
-    "description": "",
     "stops": [],
     "routeLegs": [],
     "activitiesByStopId": {}
@@ -97,14 +95,13 @@ Input:
 ```json
 {
   "name": "Iberia loop",
-  "description": "Portugal and northern Spain",
   "stops": []
 }
 ```
 
 Manipulates:
 
-- `trips`: inserts one trip with name and description.
+- `trips`: inserts one trip with name.
 - `destinations`: inserts provided stops with dense `order` values.
 - `route_legs`: creates adjacent route legs for the inserted stop order.
 
@@ -145,15 +142,13 @@ Input:
 ```json
 {
   "tripId": "trip-id",
-  "name": "Updated name",
-  "description": "Optional updated description"
+  "name": "Updated name"
 }
 ```
 
 Manipulates:
 
 - `trips.name`
-- `trips.description`
 - `trips.updated_at`
 
 Does not manipulate stops, routes, activities, or media.
@@ -193,10 +188,9 @@ Input:
   "beforeStopId": null,
   "stop": {
     "name": "Lisbon",
+    "searchQuery": "Lisbon, Portugal",
     "coordinates": { "lat": 38.7223, "lng": -9.1393 },
-    "countryRegion": "Portugal",
     "expectedStayDays": 4,
-    "notes": "Food, tiles, viewpoints",
     "tags": ["food", "culture"]
   }
 }
@@ -223,7 +217,6 @@ Input:
     "name": "Lisbon",
     "coordinates": { "lat": 38.7223, "lng": -9.1393 },
     "expectedStayDays": 5,
-    "notes": "Add Sintra as nearby research",
     "tags": ["food", "culture", "tiles"]
   }
 }
@@ -283,7 +276,6 @@ Does not manipulate activities or media.
 ```json
 {
   "name": "Iberia loop",
-  "description": "Portugal and northern Spain",
   "stops": []
 }
 ```
@@ -291,7 +283,6 @@ Does not manipulate activities or media.
 Fields:
 
 - `name`: required for `createTrip`.
-- `description`: optional.
 - `stops`: optional ordered array of `StopDraft`.
 
 ### `StopDraft`
@@ -300,28 +291,9 @@ Fields:
 {
   "id": "optional-existing-stop-id",
   "name": "Lisbon",
+  "searchQuery": "Lisbon, Portugal",
   "coordinates": { "lat": 38.7223, "lng": -9.1393 },
-  "countryRegion": "Portugal",
-  "location": {
-    "placeName": "Lisbon",
-    "regionName": "Lisbon",
-    "countryName": "Portugal",
-    "countryCode": "PT",
-    "sourceLabel": "Lisbon, Portugal",
-    "sourceProvider": "manual"
-  },
-  "status": "idea",
-  "priority": "medium",
   "expectedStayDays": 4,
-  "idealMonths": ["April", "May"],
-  "provisionalStartDate": "",
-  "provisionalEndDate": "",
-  "summary": "City stop for food, tiles, and viewpoints.",
-  "highlights": "Alfama, azulejos, viewpoints.",
-  "personalRationale": "",
-  "notes": "Keep flexible.",
-  "drivingNotes": "",
-  "borderShippingNotes": "",
   "tags": ["food", "culture"]
 }
 ```
@@ -329,16 +301,27 @@ Fields:
 Required:
 
 - `name`
-- `coordinates.lat`
-- `coordinates.lng`
 
-Optional fields map to existing `Destination` fields. The service fills defaults for omitted fields.
+Location input:
 
-`location.sourceProvider` accepts `maptiler`, `legacy`, or `manual` at the command boundary. V1 normalizes command-authored `manual` locations to the existing domain's `legacy` provider before persistence, so the CLI does not require a domain enum migration.
+- `coordinates` is preferred when the agent already knows a precise stop anchor.
+- `searchQuery` is context used to resolve or enrich the stop through MapTiler.
+- At least one of `coordinates` or `searchQuery` is required.
+
+Writable optional fields:
+
+- `expectedStayDays`
+- `tags`
+
+The service fills all omitted `Destination` fields with app defaults. In v1, the draft intentionally excludes fields that are not currently surfaced in the app, including stop status, priority, route notes, timing dates, rationale text, media, and internal location details.
+
+The agent-facing draft does not accept internal location details such as country, region, country code, source provider, or source feature id. The service derives those fields from MapTiler when an API key and resolvable query/coordinates are available. If coordinates are present and enrichment is unavailable, it creates a legacy location from the stop name and coordinates. If only `searchQuery` is present and the service cannot resolve coordinates, validation fails. `countryRegion` is derived from the resolved location or left blank.
 
 ### `StopPatch`
 
-Same shape as `StopDraft`, but all fields are optional. `id` is not allowed inside `patch`; the command identifies the target with `stopId`.
+Same writable shape as `StopDraft`, but all fields are optional and at least one field must be present. `id` is not allowed inside `patch`; the command identifies the target with `stopId`.
+
+When a patch changes `coordinates` or `searchQuery`, the service re-runs stop enrichment and recalculates adjacent route legs.
 
 ## Validation
 
@@ -346,7 +329,8 @@ Validation should happen before any write:
 
 - trip names must be non-empty
 - stop names must be non-empty
-- coordinates must be finite numbers in valid latitude/longitude ranges
+- each new stop must include coordinates or a search query
+- coordinates, when present, must be finite numbers in valid latitude/longitude ranges
 - stop ids must belong to the target trip
 - insert positions must be unambiguous
 - `replaceStops` must reject duplicate stop ids
@@ -359,9 +343,9 @@ Validation failures return structured errors:
 {
   "ok": false,
   "error": {
-    "code": "STOP_COORDINATES_REQUIRED",
-    "message": "Stop 'Lisbon' needs coordinates before it can be added.",
-    "path": "stops[2].coordinates"
+    "code": "STOP_LOCATION_REQUIRED",
+    "message": "Stop 'Lisbon' needs coordinates or a search query before it can be added.",
+    "path": "stops[2]"
   }
 }
 ```
@@ -370,6 +354,9 @@ Validation failures return structured errors:
 
 The service should extract non-React route orchestration from `useTripData`:
 
+- normalize stop drafts into full `Destination` records
+- resolve or enrich stop location data through MapTiler when possible
+- fill app-owned default fields instead of requiring agents to write internal destination structure
 - create/update ordered destinations
 - reconcile adjacent route legs
 - preserve still-valid route legs
