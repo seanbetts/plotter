@@ -126,6 +126,10 @@ function ensureStopIdList(stopIds: string[]) {
 }
 
 function ensureActivityIdList(activityIds: string[]) {
+  if (!Array.isArray(activityIds) || activityIds.length === 0) {
+    throw new TripCommandValidationError('ACTIVITY_IDS_REQUIRED', 'Provide at least one activity id.', 'activityIds');
+  }
+
   const normalized: string[] = [];
   for (const [index, activityId] of activityIds.entries()) {
     const trimmed = trimRequiredString(activityId, `activityIds[${index}]`, `activityIds[${index}]`);

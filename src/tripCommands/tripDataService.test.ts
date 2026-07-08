@@ -755,6 +755,42 @@ describe('TripDataService links and activities', () => {
     ]);
   });
 
+  it('rejects malformed activity ids input with a validation error', async () => {
+    const { service, repositories } = createHarness();
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Durness', place: { coordinates: { lat: 58.5689, lng: -4.7454 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    const activity = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Smoo Cave' },
+    });
+    if (!activity.ok) throw new Error('Expected activity creation to pass.');
+
+    const repoState = repositories.get(created.trip.id);
+    if (!repoState) throw new Error('Expected repository to exist.');
+    repoState.reorderActivities.mockClear();
+
+    const result = await service.reorderActivities({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activityIds: 'abc' as never,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'ACTIVITY_IDS_REQUIRED',
+        message: 'Provide at least one activity id.',
+        path: 'activityIds',
+      },
+    });
+    expect(repoState.reorderActivities).not.toHaveBeenCalled();
+  });
+
   it('adds and deletes activity links with stable ordering', async () => {
     const { service } = createHarness();
     const created = await service.createTrip({
