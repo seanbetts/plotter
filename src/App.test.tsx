@@ -10,6 +10,7 @@ import {
 } from './adapters/openRouteService';
 import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
+import { createRouteLeg } from './domain/routeLegs';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
@@ -299,6 +300,7 @@ describe('App', () => {
     repositoryMock.initialDestinations = Promise.resolve([]);
     repositoryMock.initialRouteLegs = Promise.resolve([]);
     repositoryMock.listDestinations.mockClear();
+    repositoryMock.listDestinations.mockImplementation(async () => repositoryMock.initialDestinations);
     repositoryMock.saveDestination.mockClear();
     repositoryMock.saveDestination.mockImplementation(async (destination: Destination) => {
       repositoryMock.destinations.push(destination);
@@ -319,17 +321,21 @@ describe('App', () => {
     repositoryMock.reorderActivities.mockClear();
     repositoryMock.reorderActivities.mockImplementation(async () => []);
     repositoryMock.listRouteLegs.mockClear();
+    repositoryMock.listRouteLegs.mockImplementation(async () => repositoryMock.initialRouteLegs);
     repositoryMock.saveRouteLeg.mockClear();
     repositoryMock.deleteRouteLeg.mockClear();
     repositoryMock.replaceTripData.mockClear();
     repositoryMock.listDestinationMedia.mockClear();
+    repositoryMock.listDestinationMedia.mockImplementation(async () => []);
     repositoryMock.uploadDestinationMedia.mockClear();
     repositoryMock.importDestinationMediaFromSearch.mockClear();
     repositoryMock.updateDestinationMedia.mockClear();
     repositoryMock.deleteDestinationMedia.mockClear();
     repositoryMock.reorderDestinationMedia.mockClear();
     repositoryMock.listDestinationMediaRollup.mockClear();
+    repositoryMock.listDestinationMediaRollup.mockImplementation(async () => []);
     repositoryMock.listActivityMedia.mockClear();
+    repositoryMock.listActivityMedia.mockImplementation(async () => []);
     repositoryMock.uploadActivityMedia.mockClear();
     repositoryMock.updateActivityMedia.mockClear();
     repositoryMock.deleteActivityMedia.mockClear();
@@ -406,6 +412,7 @@ describe('App', () => {
     expect(alert).toHaveTextContent('Unable to create an anonymous Supabase session.');
     expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+    expectNoStatusPlaceholderPin();
   });
 
   it('shows Supabase setup guidance when storage configuration is missing', async () => {
@@ -479,6 +486,7 @@ describe('App', () => {
     expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument();
     expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+    expectNoStatusPlaceholderPin();
 
     await act(async () => {
       initialDestinations.resolve([]);
@@ -499,6 +507,7 @@ describe('App', () => {
     expect(status).toHaveTextContent('Search for a destination or add a stop from the map.');
     expect(screen.getByLabelText('Search for a destination')).toBeInTheDocument();
     expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
+    expectNoStatusPlaceholderPin();
   });
 
   it('shows active trip data load errors in the centered status panel and retries with reload', async () => {
@@ -512,11 +521,170 @@ describe('App', () => {
     expect(alert).toHaveTextContent('Unable to load trip data');
     expect(alert).toHaveTextContent('Trip rows unavailable.');
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+    expectNoStatusPlaceholderPin();
 
     repositoryMock.initialDestinations = Promise.resolve([]);
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
     expect(await screen.findByText('No stops in this trip yet')).toBeInTheDocument();
+  });
+
+  it('clears open route, panel, and preview surfaces when trip data reload fails', async () => {
+    const user = userEvent.setup();
+    const tripDataChanges: Array<() => void> = [];
+    const realtime = {
+      subscribeToTrips: vi.fn(() => vi.fn()),
+      subscribeToTripData: vi.fn((tripId: string, onChange: () => void) => {
+        expect(tripId).toBe(tripsMock[0].id);
+        tripDataChanges.push(onChange);
+        return vi.fn();
+      }),
+    };
+    const paris = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const rome = createDestination({
+      name: 'Rome',
+      countryRegion: 'Italy',
+      coordinates: { lat: 41.9028, lng: 12.4964 },
+      order: 1,
+    });
+    const louvre = createActivity({
+      destinationId: paris.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: paris.id,
+      targetDestinationId: rome.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 1420,
+      travelTimeHours: 14.5,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [paris.coordinates.lng, paris.coordinates.lat],
+          [rome.coordinates.lng, rome.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      routeKey: 'paris-rome',
+    });
+    repositoryMock.initialDestinations = Promise.resolve([paris, rome]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+    repositoryMock.listActivities.mockImplementation(async (destinationId: string) =>
+      destinationId === paris.id ? [louvre] : [],
+    );
+    repositoryMock.listDestinationMedia.mockResolvedValue([createMediaItem({ id: 'paris-stop-media', url: '/paris.jpg' })]);
+    repositoryMock.listDestinationMediaRollup.mockResolvedValue([
+      createDestinationRollupItem(
+        paris.id,
+        createMediaItem({
+          id: 'paris-stop-media',
+          url: '/paris.jpg',
+          caption: 'Paris street',
+        }),
+      ),
+    ]);
+    mockTripWorkspace({ realtime } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+
+    await waitForTripReady();
+    await user.click(screen.getByRole('button', { name: 'Paris, France' }));
+    await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
+    await user.click(await screen.findByRole('button', { name: 'Open full image: Paris street' }));
+    await user.click(screen.getByRole('button', { name: 'Edit route from Paris to Rome' }));
+
+    expect(screen.getByRole('complementary', { name: 'Paris profile' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Louvre activity' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Image preview' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Edit route from Paris to Rome' })).toBeInTheDocument();
+
+    repositoryMock.listDestinations.mockRejectedValueOnce(new Error('Trip rows unavailable.'));
+    act(() => {
+      tripDataChanges[0]?.();
+    });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load trip data');
+    expect(alert).toHaveTextContent('Trip rows unavailable.');
+    expect(screen.queryByRole('complementary', { name: 'Paris profile' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Louvre activity' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Edit route from Paris to Rome' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+
+    repositoryMock.listDestinations.mockResolvedValue([paris, rome]);
+    repositoryMock.listRouteLegs.mockResolvedValue([routeLeg]);
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('Search for a destination')).toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Paris profile' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Louvre activity' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Image preview' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Edit route from Paris to Rome' })).not.toBeInTheDocument();
+  });
+
+  it('closes pending map-stop confirmation when trip data reload fails', async () => {
+    const tripDataChanges: Array<() => void> = [];
+    const realtime = {
+      subscribeToTrips: vi.fn(() => vi.fn()),
+      subscribeToTripData: vi.fn((tripId: string, onChange: () => void) => {
+        expect(tripId).toBe(tripsMock[0].id);
+        tripDataChanges.push(onChange);
+        return vi.fn();
+      }),
+    };
+    const paris = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
+      createPlaceSearchResult({
+        id: 'place-balcombe',
+        label: 'Balcombe, United Kingdom',
+        placeName: 'Balcombe',
+        regionName: 'West Sussex',
+        countryName: 'United Kingdom',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      }),
+    );
+    repositoryMock.initialDestinations = Promise.resolve([paris]);
+    repositoryMock.initialRouteLegs = Promise.resolve([]);
+    repositoryMock.listActivities.mockResolvedValue([]);
+    mockTripWorkspace({ realtime } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+
+    await waitForTripReady();
+    await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+
+    const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
+    act(() => {
+      contextMenuHandler({
+        preventDefault: vi.fn(),
+        lngLat: { lat: 51.0576, lng: -0.1342 },
+        point: { x: 300, y: 220 },
+      });
+    });
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toBeInTheDocument();
+
+    repositoryMock.listDestinations.mockRejectedValueOnce(new Error('Trip rows unavailable.'));
+    act(() => {
+      tripDataChanges[0]?.();
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Trip rows unavailable.');
+    expect(screen.queryByRole('dialog', { name: 'Add stop from map' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
   });
 
   it('renders the trip selector above the stop panel and clears selected stop when the active trip changes', async () => {
@@ -2343,6 +2511,10 @@ function triggerMapLayerEvent(map: MockMap, eventName: string, layerId: string, 
   act(() => {
     handler(event);
   });
+}
+
+function expectNoStatusPlaceholderPin() {
+  expect(screen.queryByRole('button', { name: 'Select App status placeholder' })).not.toBeInTheDocument();
 }
 
 async function openContextMenuMapStop(coordinates: Destination['coordinates']) {

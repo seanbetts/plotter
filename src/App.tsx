@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   createBoundingBoxAroundCoordinates,
   resolveMapTilerCoordinates,
@@ -90,48 +90,21 @@ const mapStopConfirmationApproxSize = {
   width: 320,
   height: 260,
 };
-const statusPanelMapPlaceholderDestination: Destination = {
-  id: 'app-status-map-placeholder',
-  name: 'App status placeholder',
-  countryRegion: 'Atlantic Ocean',
-  coordinates: { lat: 0, lng: 0 },
-  location: createLegacyLocation({
-    name: 'App status placeholder',
-    countryRegion: 'Atlantic Ocean',
-  }),
-  order: 0,
-  status: 'idea',
-  priority: 'low',
-  timing: {
-    idealMonths: [],
-    expectedStayDays: 0,
-    provisionalStartDate: '',
-    provisionalEndDate: '',
-  },
-  why: {
-    summary: '',
-    highlights: '',
-    personalRationale: '',
-  },
-  media: [],
-  research: {
-    notes: '',
-    links: [],
-    bookReferences: [],
-  },
-  activities: {
-    items: [],
-  },
-  routeContext: {
-    previousNextNotes: '',
-    drivingNotes: '',
-    borderShippingNotes: '',
-    notes: '',
-  },
-  tags: [],
-  createdAt: '1970-01-01T00:00:00.000Z',
-  updatedAt: '1970-01-01T00:00:00.000Z',
-};
+const statusSurfaceMapStyles = `
+  .map-stage--status-surface .map-empty-label {
+    display: none;
+  }
+
+  .map-stage--blocking-status .map-canvas {
+    pointer-events: none;
+  }
+
+  .map-stage--blocking-status .map-destination-label-layer,
+  .map-stage--blocking-status .map-accessible-destination-list,
+  .map-stage--blocking-status .map-add-stop-menu {
+    display: none;
+  }
+`;
 
 function formatCoordinate(value: number) {
   return value.toFixed(4);
@@ -243,11 +216,28 @@ function getAvailableOverlayHeight(position: OverlayPosition) {
   )}px`;
 }
 
+function useSuppressStatusMapEmptyLabel(
+  stageRef: React.RefObject<HTMLElement | null>,
+  shouldSuppress: boolean,
+) {
+  useLayoutEffect(() => {
+    if (!shouldSuppress) return;
+
+    const label = stageRef.current?.querySelector<HTMLElement>('.map-empty-label');
+    if (!label) return;
+
+    label.textContent = '';
+    label.setAttribute('aria-hidden', 'true');
+    label.style.display = 'none';
+  }, [shouldSuppress, stageRef]);
+}
+
 export default function App({ webImageSearchClient: injectedWebImageSearchClient }: AppProps = {}) {
   const [linkPreviewClient, setLinkPreviewClient] = useState<LinkPreviewClient | null>(null);
   const [webImageSearchClient, setWebImageSearchClient] = useState<WebImageSearchClient | null>(
     injectedWebImageSearchClient ?? null,
   );
+  const statusStageRef = useRef<HTMLElement | null>(null);
   const {
     trips,
     activeTrip,
@@ -284,12 +274,19 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     });
   }, [refreshTrips, realtime]);
 
+  useSuppressStatusMapEmptyLabel(statusStageRef, !repository || !linkPreviewClient || !webImageSearchClient);
+
   if (!repository || !linkPreviewClient || !webImageSearchClient) {
     return (
       <main className="app-shell">
-        <section className="map-stage" aria-label="World tour map workspace">
+        <style>{statusSurfaceMapStyles}</style>
+        <section
+          ref={statusStageRef}
+          className="map-stage map-stage--status-surface map-stage--blocking-status"
+          aria-label="World tour map workspace"
+        >
           <MapCanvas
-            destinations={[statusPanelMapPlaceholderDestination]}
+            destinations={[]}
             routeLegs={[]}
             selectedDestinationId={null}
             onSelectDestination={() => undefined}
@@ -510,8 +507,15 @@ function TripWorkspace({
   const pendingMapStopMaxHeight = pendingMapStopPosition
     ? getAvailableOverlayHeight(pendingMapStopPosition)
     : undefined;
-  const mapCanvasDestinations =
-    appStatusPanel && destinations.length === 0 ? [statusPanelMapPlaceholderDestination] : destinations;
+  const isBlockingStatusState = isInteractionLocked || Boolean(error);
+  const mapStageClassName = [
+    'map-stage',
+    appStatusPanel ? 'map-stage--status-surface' : '',
+    isBlockingStatusState ? 'map-stage--blocking-status' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const mapStageRef = useRef<HTMLElement | null>(null);
 
   const restorePendingMapStopFocus = useCallback(() => {
     const previouslyFocusedElement = previouslyFocusedMapStopElementRef.current;
@@ -640,6 +644,18 @@ function TripWorkspace({
       setSelectedActivityId(null);
     }
   }, [selectedActivityId, selectedDestinationActivities, selectedDestinationId]);
+
+  useEffect(() => {
+    if (!error) return;
+
+    setRouteAlternativesState(null);
+    setPendingMapStop(null);
+    setSelectedDestinationId(null);
+    setSelectedActivityId(null);
+    setPreviewMedia(null);
+  }, [error]);
+
+  useSuppressStatusMapEmptyLabel(mapStageRef, Boolean(appStatusPanel));
 
   useEffect(() => {
     if (!selectedActivityPanelId) return;
@@ -1103,16 +1119,17 @@ function TripWorkspace({
 
   return (
     <main className="app-shell">
-      <section className="map-stage" aria-label="World tour map workspace">
+      <style>{statusSurfaceMapStyles}</style>
+      <section ref={mapStageRef} className={mapStageClassName} aria-label="World tour map workspace">
         <MapCanvas
-          destinations={mapCanvasDestinations}
+          destinations={destinations}
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
           focusedActivities={selectedDestinationActivities}
           selectedActivityId={selectedActivityId}
-          onSelectDestination={handleSelectDestination}
-          onSelectActivity={setSelectedActivityId}
-          onRequestAddStop={openPendingMapStop}
+          onSelectDestination={isBlockingStatusState ? () => undefined : handleSelectDestination}
+          onSelectActivity={isBlockingStatusState ? undefined : setSelectedActivityId}
+          onRequestAddStop={isBlockingStatusState ? undefined : openPendingMapStop}
         />
         {!isInteractionLocked && !error ? (
           <>
@@ -1190,7 +1207,7 @@ function TripWorkspace({
             </div>
           </section>
         ) : null}
-        {routeAlternativesState && activeRouteAlternativesOrigin && activeRouteAlternativesTarget ? (
+        {!error && routeAlternativesState && activeRouteAlternativesOrigin && activeRouteAlternativesTarget ? (
           <RouteAlternativesPanel
             originName={activeRouteAlternativesOrigin.name}
             targetName={activeRouteAlternativesTarget.name}
@@ -1203,7 +1220,7 @@ function TripWorkspace({
             onClose={closeRouteAlternatives}
           />
         ) : null}
-        {!isInteractionLocked && selectedDestination ? (
+        {!isInteractionLocked && !error && selectedDestination ? (
           <div className="workspace-panels">
             {selectedActivity ? (
               <ActivityPanel
@@ -1254,7 +1271,7 @@ function TripWorkspace({
             />
           </div>
         ) : null}
-        {!isInteractionLocked && previewMediaItem ? (
+        {!isInteractionLocked && !error && previewMediaItem ? (
           <DestinationImagePreviewModal
             mediaItem={previewMediaItem}
             canMoveLeft={previewMediaNavigationItems.length > 1}
