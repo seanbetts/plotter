@@ -107,6 +107,10 @@ Example: Pan-American Highway from Alaska to Patagonia.
 
 Decompose into phases before stop selection. Add logistics gates for route discontinuities, borders, vehicle shipping, import limits, permits, ferry constraints, and seasonal road constraints.
 
+#### Blocked Mega-Corridors
+
+If a phase is blocked by current travel advice, active conflict, border closure, vehicle shipping or import constraints, or seasonal closure, do not produce a single continuous stop list. Mark the phase as `blocked` or `deferred`, add a `route-discontinuity` logistics gate, and propose restart options such as overflying, vehicle shipping, restarting with a rental or local vehicle, or deferring the route. Produce candidate stops only for phases that are researchable or explicitly approved.
+
 ### Region Loop
 
 Example: Morocco or Iceland.
@@ -134,14 +138,15 @@ After user approval, switch to the trip data workflow:
 
 1. Convert only approved route content to app data.
 2. For mega-corridors, implement approved phases or phase subsets rather than flattening the whole speculative route.
-3. Convert approved overnight or base candidates to trip stops.
-4. Convert approved non-overnight candidates to activities.
-5. Preserve approved candidate tags as stop or activity tags.
-6. Store source URLs as stop or activity links.
-7. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
-8. Use source coordinates when available.
-9. Let the app calculate routes and derived data.
-10. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
+3. For blocked or deferred mega-corridor phases, do not create stops or activities until the user approves a resolved restart, skip, or deferral plan.
+4. Convert approved overnight or base candidates to trip stops.
+5. Convert approved non-overnight candidates to activities.
+6. Preserve approved candidate tags as stop or activity tags.
+7. Store source URLs as stop or activity links.
+8. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
+9. Use source coordinates when available.
+10. Let the app calculate routes and derived data.
+11. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
 
 ## References
 

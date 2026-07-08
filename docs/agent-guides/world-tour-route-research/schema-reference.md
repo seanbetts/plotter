@@ -67,6 +67,21 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `immersive`
 - `exhaustive`
 
+`phaseStatus`:
+
+- `researchable`
+- `blocked`
+- `deferred`
+
+`logisticsGate.type`:
+
+- `route-discontinuity`
+- `border-crossing`
+- `vehicle-shipping`
+- `seasonal-access`
+- `permit-or-booking`
+- `road-status-check`
+
 ## CorridorOption
 
 ```json
@@ -103,13 +118,18 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "start": "Guatemala",
   "end": "Panama City, Panama",
   "routeShape": "regional-corridor",
+  "status": "researchable",
   "density": "immersive",
   "corridorOptions": [],
   "logisticsGateIds": ["darien-gap-vehicle-shipping"],
   "candidateStops": [],
-  "openQuestions": []
+  "openQuestions": [],
+  "blockedReason": null,
+  "restartOptions": []
 }
 ```
+
+For blocked or deferred phases, keep `candidateStops` empty unless the user explicitly approves researching a reachable subsection. Use `blockedReason` to explain the hard constraint and `restartOptions` for choices such as overflying, vehicle shipping, restarting with a rental or local vehicle, or deferring the phase.
 
 ## LogisticsGate
 
@@ -246,3 +266,4 @@ If one of these details matters to the recommendation, describe the caveat in `n
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
 - Coordinates are passed only when sourced.
 - Route geometry is never authored.
+- Blocked or deferred phases are not implemented as stops or activities until the user approves a resolved restart, skip, or deferral plan.
