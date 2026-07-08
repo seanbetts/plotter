@@ -128,31 +128,6 @@ select {
   inset: 0;
 }
 
-.map-empty-label {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 168px;
-  transform: translate(-50%, -50%);
-  border: 1px solid rgb(var(--color-text-rgb) / 0.18);
-  border-radius: var(--radius-panel);
-  padding: 10px 14px;
-  color: var(--color-text);
-  background: var(--surface-overlay-menu);
-  box-shadow: var(--shadow-panel);
-  font-size: 0.86rem;
-  font-weight: 800;
-  letter-spacing: 0;
-  line-height: 1.2;
-  pointer-events: none;
-  -webkit-backdrop-filter: blur(12px) saturate(1.18);
-  backdrop-filter: blur(12px) saturate(1.18);
-}
-
 .map-destination-label-layer {
   position: absolute;
   inset: 0;

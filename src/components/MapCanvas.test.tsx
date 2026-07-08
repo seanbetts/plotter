@@ -523,7 +523,7 @@ describe('MapCanvas', () => {
     expect(screen.getByRole('button', { name: 'Select Cappadocia' })).toHaveClass('is-selected');
   });
 
-  it('renders the empty planning map label with no destinations', () => {
+  it('leaves empty-trip messaging to the app shell', () => {
     render(
       <MapCanvas
         destinations={[]}
@@ -533,7 +533,7 @@ describe('MapCanvas', () => {
       />,
     );
 
-    expect(screen.getByText('Blank planning map')).toHaveClass('map-empty-label', 'is-prominent');
+    expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
   });
 
   it('does not render the route leg count badge', () => {

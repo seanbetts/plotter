@@ -1713,7 +1713,6 @@ export function MapCanvas({
         onPointerCancel={handleMapPointerEnd}
         onContextMenuCapture={handleMapContextMenu}
       />
-      {destinations.length === 0 ? <div className="map-empty-label is-prominent">Blank planning map</div> : null}
       {addStopMenu && addStopMenuPosition ? (
         <div
           className="map-add-stop-menu"
