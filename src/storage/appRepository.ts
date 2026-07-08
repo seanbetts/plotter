@@ -3,6 +3,7 @@ import { createSupabaseTripRepository } from './supabaseTripRepository';
 import { tripDb } from './tripDb';
 import { createTripRepository } from './tripRepository';
 import type { TripRepository } from './tripRepository';
+import { createSupabaseTripRealtime, type TripRealtimeSubscriptions } from './tripRealtime';
 import {
   createLocalTripDirectoryRepository,
   createSupabaseTripDirectoryRepository,
@@ -36,6 +37,7 @@ export const selectedTripStorageKey = 'world-tour:selected-trip-id';
 type AppTripStorage = {
   directory: TripDirectoryRepository;
   createTripRepository: (tripId: string) => TripRepository;
+  realtime?: TripRealtimeSubscriptions;
 };
 
 type CreateAppTripStorageOptions = {
@@ -98,6 +100,7 @@ export async function createAppTripStorage(
       options.createSupabaseRepository
         ? options.createSupabaseRepository(supabase, tripId)
         : createSupabaseTripRepository(supabase as BrowserSupabaseClient, tripId),
+    realtime: createSupabaseTripRealtime(supabase as BrowserSupabaseClient),
   };
 }
 

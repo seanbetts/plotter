@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createAppTripStorage,
   selectedTripStorageKey,
 } from '../storage/appRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
+import type { TripRealtimeSubscriptions } from '../storage/tripRealtime';
 import type { TripRepository } from '../storage/tripRepository';
 
 type AppTripStorage = {
   directory: TripDirectoryRepository;
   createTripRepository: (tripId: string) => TripRepository;
+  realtime?: TripRealtimeSubscriptions;
 };
 
 type LocalStorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -64,12 +66,18 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<RepositoryError | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const activeTripRef = useRef<TripSummary | null>(null);
 
   const activateTrip = useCallback((nextStorage: AppTripStorage, nextTrip: TripSummary) => {
     localStorage?.setItem(selectedTripStorageKey, nextTrip.id);
+    activeTripRef.current = nextTrip;
     setActiveTrip(nextTrip);
     setRepository(nextStorage.createTripRepository(nextTrip.id));
   }, [localStorage]);
+
+  useEffect(() => {
+    activeTripRef.current = activeTrip;
+  }, [activeTrip]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -150,7 +158,11 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
       setTrips((current) =>
         current.map((trip) => (trip.id === updatedTrip.id ? updatedTrip : trip)),
       );
-      setActiveTrip((current) => (current?.id === updatedTrip.id ? updatedTrip : current));
+      setActiveTrip((current) => {
+        const nextActive = current?.id === updatedTrip.id ? updatedTrip : current;
+        activeTripRef.current = nextActive;
+        return nextActive;
+      });
       return true;
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : 'Unable to rename trip');
@@ -180,10 +192,31 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     }
   }, [activateTrip, storage, trips]);
 
+  const refreshTrips = useCallback(async () => {
+    if (!storage) return;
+
+    const nextTrips = await storage.directory.listTrips();
+    const currentActive = activeTripRef.current;
+    const nextActive = currentActive
+      ? nextTrips.find((trip) => trip.id === currentActive.id) ?? nextTrips[0] ?? null
+      : nextTrips[0] ?? null;
+
+    setTrips(nextTrips);
+    setActiveTrip(nextActive);
+    activeTripRef.current = nextActive;
+    setRepository(nextActive ? storage.createTripRepository(nextActive.id) : null);
+    if (nextActive) {
+      localStorage?.setItem(selectedTripStorageKey, nextActive.id);
+    } else {
+      localStorage?.removeItem(selectedTripStorageKey);
+    }
+  }, [localStorage, storage]);
+
   return useMemo(() => ({
     trips,
     activeTrip,
     repository,
+    realtime: storage?.realtime ?? null,
     isLoading,
     error,
     actionError,
@@ -191,6 +224,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     createTrip,
     renameTrip,
     deleteTrip,
+    refreshTrips,
   }), [
     actionError,
     activeTrip,
@@ -200,7 +234,9 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     isLoading,
     repository,
     renameTrip,
+    refreshTrips,
     selectTrip,
+    storage?.realtime,
     trips,
   ]);
 }

@@ -75,6 +75,9 @@ function createStorage(initialTrips: TripSummary[]) {
     },
     directory,
     createTripRepository,
+    setTrips(nextTrips: TripSummary[]) {
+      trips = [...nextTrips];
+    },
   };
 }
 
@@ -163,5 +166,41 @@ describe('useTripWorkspace', () => {
       await result.current.deleteTrip(result.current.activeTrip!.id);
     });
     expect(result.current.activeTrip).not.toBeNull();
+  });
+
+  it('refreshes trips against the current active trip when it was removed externally', async () => {
+    const first = createTrip('First', 'first-trip');
+    const second = createTrip('Second', 'second-trip');
+    const third = createTrip('Third', 'third-trip');
+    const localStorage = createLocalStorage(null);
+    const { storage, createTripRepository, setTrips } = createStorage([first, second]);
+
+    const { result } = renderHook(() =>
+      useTripWorkspace({
+        createStorage: async () => storage,
+        localStorage,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeTrip?.id).toBe(first.id));
+
+    await act(async () => {
+      await result.current.selectTrip(second.id);
+    });
+    expect(result.current.activeTrip?.id).toBe(second.id);
+
+    setTrips([third]);
+
+    await act(async () => {
+      await (
+        result.current as ReturnType<typeof useTripWorkspace> & {
+          refreshTrips: () => Promise<void>;
+        }
+      ).refreshTrips();
+    });
+
+    expect(result.current.trips).toEqual([third]);
+    expect(result.current.activeTrip?.id).toBe(third.id);
+    expect(createTripRepository).toHaveBeenLastCalledWith(third.id);
   });
 });

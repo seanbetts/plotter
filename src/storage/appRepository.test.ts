@@ -190,6 +190,37 @@ describe('app repository bootstrap', () => {
     expect(storage.directory).toBe(localDirectory);
     expect(storage.createTripRepository('trip-1')).toBe(localRepository);
     expect(createSupabaseClient).not.toHaveBeenCalled();
+    expect('realtime' in storage).toBe(false);
+  });
+
+  it('returns Supabase realtime subscriptions for Supabase storage', async () => {
+    const user = { id: crypto.randomUUID() };
+    const supabase = {
+      auth: {
+        getUser: vi.fn(async () => ({ data: { user }, error: null })),
+        signInAnonymously: vi.fn(),
+      },
+      channel: vi.fn(),
+      removeChannel: vi.fn(),
+    };
+    const createSupabaseDirectory = vi.fn(() => ({
+      listTrips: vi.fn(),
+      createTrip: vi.fn(),
+      updateTrip: vi.fn(),
+      deleteTrip: vi.fn(),
+    }));
+
+    const storage = await createAppTripStorage({
+      isSupabaseConfigured: true,
+      createSupabaseClient: () => supabase,
+      createSupabaseDirectory,
+      createSupabaseRepository: vi.fn(() => createMockRepository()),
+    });
+
+    expect((storage as { realtime?: unknown }).realtime).toEqual({
+      subscribeToTrips: expect.any(Function),
+      subscribeToTripData: expect.any(Function),
+    });
   });
 
   it('exports the selected trip storage key used by the app shell', () => {

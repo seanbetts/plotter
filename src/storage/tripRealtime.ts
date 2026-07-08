@@ -1,0 +1,49 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+export type TripRealtimeSubscriptions = {
+  subscribeToTrips(onChange: () => void): () => void;
+  subscribeToTripData(tripId: string, onChange: () => void): () => void;
+};
+
+function debounce(callback: () => void, delayMs: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  return () => {
+    if (timer) clearTimeout(timer);
+
+    timer = setTimeout(() => {
+      timer = null;
+      callback();
+    }, delayMs);
+  };
+}
+
+export function createSupabaseTripRealtime(supabase: SupabaseClient): TripRealtimeSubscriptions {
+  return {
+    subscribeToTrips(onChange) {
+      const channel = supabase
+        .channel('world-tour-trips')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, onChange)
+        .subscribe();
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
+    },
+
+    subscribeToTripData(tripId, onChange) {
+      const debounced = debounce(onChange, 150);
+      const channel = supabase
+        .channel(`world-tour-trip-${tripId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'destinations', filter: `trip_id=eq.${tripId}` }, debounced)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'route_legs', filter: `trip_id=eq.${tripId}` }, debounced)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'activities', filter: `trip_id=eq.${tripId}` }, debounced)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'media_assets', filter: `trip_id=eq.${tripId}` }, debounced)
+        .subscribe();
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
+    },
+  };
+}

@@ -40,6 +40,7 @@ import type {
   WebImageSearchStopContext,
 } from './services/webImageSearchClient';
 import type { TripSummary } from './storage/tripDirectoryRepository';
+import type { TripRealtimeSubscriptions } from './storage/tripRealtime';
 import type { TripRepository } from './storage/tripRepository';
 import './styles.css';
 
@@ -215,6 +216,8 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     createTrip,
     renameTrip,
     deleteTrip,
+    refreshTrips,
+    realtime,
   } = useTripWorkspace();
 
   useEffect(() => {
@@ -229,6 +232,14 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
 
     setWebImageSearchClient(createAppWebImageSearchClient());
   }, [injectedWebImageSearchClient]);
+
+  useEffect(() => {
+    if (!realtime) return undefined;
+
+    return realtime.subscribeToTrips(() => {
+      void refreshTrips();
+    });
+  }, [refreshTrips, realtime]);
 
   if (!repository || !linkPreviewClient || !webImageSearchClient) {
     return (
@@ -272,6 +283,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
       onRenameTrip={renameTrip}
       onDeleteTrip={deleteTrip}
       isTripWorkspaceLoading={isLoading}
+      realtime={realtime}
     />
   );
 }
@@ -288,6 +300,7 @@ function TripWorkspace({
   onRenameTrip,
   onDeleteTrip,
   isTripWorkspaceLoading,
+  realtime,
 }: {
   repository: TripRepository;
   linkPreviewClient: LinkPreviewClient;
@@ -300,6 +313,7 @@ function TripWorkspace({
   onRenameTrip: (tripId: string, name: string) => Promise<boolean | void> | boolean | void;
   onDeleteTrip: (tripId: string) => Promise<boolean | void> | boolean | void;
   isTripWorkspaceLoading: boolean;
+  realtime: TripRealtimeSubscriptions | null;
 }) {
   const calculateRoute = useCallback(
     (input: Omit<Parameters<typeof calculateOpenRouteServiceRoute>[0], 'apiKey'>) =>
@@ -324,6 +338,7 @@ function TripWorkspace({
     updateActivity,
     deleteActivity,
     reorderActivities,
+    reload,
   } = useTripData(repository, { calculateRoute });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
@@ -360,6 +375,14 @@ function TripWorkspace({
   const activeRouteAlternativesTarget = activeRouteAlternativesLeg
     ? destinationsById.get(activeRouteAlternativesLeg.targetDestinationId) ?? null
     : null;
+
+  useEffect(() => {
+    if (!realtime || !activeTrip) return undefined;
+
+    return realtime.subscribeToTripData(activeTrip.id, () => {
+      void reload();
+    });
+  }, [activeTrip, realtime, reload]);
 
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
