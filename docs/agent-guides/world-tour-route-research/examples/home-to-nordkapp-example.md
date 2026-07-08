@@ -2,11 +2,19 @@
 
 This example is compact. It demonstrates structure, not complete research.
 
+## User-Facing Summary
+
+Recommended route: use the hybrid Sweden northbound / northern Norway finish. It keeps the long southern transit efficient, then spends the scenic budget where the route starts to feel Arctic.
+
+Main alternatives: a Sweden/Finland efficiency route is simpler but less scenic; a Norway-heavy coastal route is more memorable but adds ferry and time risk.
+
+Decision needed before implementation: choose whether the Norway-heavy ferry/coast variant is worth the extra complexity. The North Cape access check is a travel-time validation item, not a reason to block planning now.
+
 ## Assumptions
 
 - Home means Balcombe, West Sussex, UK.
 - Default style is hybrid: efficient transit through southern Scandinavia, then scenic northern Norway.
-- Output density is immersive.
+- Research depth is `candidate-plan`.
 - No app data is written by this plan.
 
 ## Route Shape
@@ -57,11 +65,11 @@ Retrieved: 2026-07-08.
 
 ## Logistics Gates
 
-| ID | Gate | Applies To | Required Decision | Vehicle | Evidence |
-| --- | --- | --- | --- | --- | --- |
-| nordkapp-e69-seasonal-access | E69/North Cape Plateau seasonal access | Honningsvag to North Cape Plateau | Check current Statens vegvesen traffic status and Visit Nordkapp convoy guidance close to travel; add buffer if winter or severe weather is possible. | check | high |
-| denmark-norway-ferry-choice | Denmark-Norway ferry choice | Norway-heavy coast corridor | Choose whether to cross directly to Norway by ferry or continue through Sweden before implementation. | good | medium |
-| helgeland-ferry-chain | Helgelandskysten ferry chain | Norway-heavy coast corridor | If this corridor is chosen, validate current ferry timetables and decide whether the scenic delay is worth it. | check | high |
+| ID | Gate | Severity | Applies To | Required Decision | Vehicle | Evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| nordkapp-e69-seasonal-access | E69/North Cape Plateau seasonal access | travel-time-validation | Honningsvag to North Cape Plateau | Check current Statens vegvesen traffic status and Visit Nordkapp convoy guidance close to travel; add buffer if winter or severe weather is possible. | check | high |
+| denmark-norway-ferry-choice | Denmark-Norway ferry choice | blocking-decision | Norway-heavy coast corridor | Choose whether to cross directly to Norway by ferry or continue through Sweden before implementation. | good | medium |
+| helgeland-ferry-chain | Helgelandskysten ferry chain | pre-implementation-check | Norway-heavy coast corridor | If this corridor is chosen, validate current ferry timetables and decide whether the scenic delay is worth it. | check | high |
 
 ## Open Questions
 

@@ -17,20 +17,31 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Recommend stop and activity tags only from the controlled tag vocabulary, preserving approved route variants, constraints, themes, and practical roles for handoff.
 - Use source coordinates when available.
 - Keep source links with each candidate.
+- Keep the rich schema as the agent handoff artifact. The default user-facing output should be decision-oriented, not a schema dump.
+- Use the smallest research depth that answers the request.
+- Ask the user only for high-consequence decisions. Make conservative agent-owned decisions explicit in assumptions.
 - Require user approval before handing the plan to the trip data CLI.
 
 ## Workflow
 
-1. Clarify the request:
+1. Clarify the request only as much as needed:
 
 - start and end locations
 - intended season or timing, if known
 - desired trip style: efficient, scenic, expedition, family, recovery-heavy, city-light, nature-heavy, or mixed
 - approximate duration or desired stop count
 - vehicle constraints, especially large expedition truck suitability
-- output density: compressed, immersive, or exhaustive
+- desired research depth, if the user has a preference
 
-2. Decide the route shape before selecting stops:
+2. Choose the smallest useful research depth:
+
+- `sketch`: route shape, recommended direction or corridor, key alternatives, hard blockers, and a small candidate spine.
+- `candidate-plan`: enough stops, activities, tags, sources, and logistics notes for the user to review the proposed trip.
+- `implementation-ready`: the approved handoff artifact with stable fields, source links, `placeQuery` or sourced coordinates, and notes ready for the trip data CLI.
+
+Default to `sketch` for broad or uncertain requests, `candidate-plan` when the user asks to plan a trip, and `implementation-ready` only after the route direction is approved or the user explicitly asks for implementation-ready detail.
+
+3. Decide the route shape before selecting stops:
 
 - Ambiguous point-to-point routes: compare broad corridors first.
 - Official scenic routes: decide scope, direction, and density first.
@@ -39,13 +50,13 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Open-ended route families: compare route concepts and corridor viability before ranking stops.
 - Remote expedition tracks: prove logistics viability before candidate stop selection.
 
-3. Build the candidate pool with three source layers:
+4. Build the candidate pool with three source layers:
 
 - Route-defining sources: official tourism, road authorities, route guides, guidebooks, ferry or border authorities, national park authorities.
 - Stop-discovery sources: iOverlander, park4night, Google Maps reviews and photos, AllTrails, Komoot, Wikiloc, UNESCO, official maps, high-quality blogs and trip reports.
 - Validation sources: recent official pages, recent traveller reviews, recent iOverlander or park4night comments, recent YouTube or blog reports, satellite or Street View evidence, current access and restriction pages.
 
-4. Score each candidate:
+5. Score each candidate:
 
 - 5: essential anchor
 - 4: strong stop worth building around
@@ -53,7 +64,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - 2: practical or resupply stop
 - 1: interesting but probably not worth pinning
 
-5. Classify each candidate:
+6. Classify each candidate:
 
 - anchor
 - experience
@@ -61,7 +72,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - practical
 - buffer
 
-6. Recommend tags for each candidate from the controlled vocabulary:
+7. Recommend tags for each candidate from the controlled vocabulary:
 
 - Route variants: `official-route`, `practical-route`, `adventure-variant`, `optional-detour`.
 - Access and logistics: `road-status-check`, `seasonal-access`, `permit-or-booking`, `border-crossing`, `high-clearance-4wd`.
@@ -70,17 +81,51 @@ This guide is research-only. It produces a reviewable route research plan. It do
 
 Do not invent new tags during research. If a useful detail does not fit the controlled vocabulary, put it in `notes`, `logisticsGates`, or `openQuestions`.
 
-7. Balance and prune:
+8. Balance and prune:
 
 - Avoid repeated versions of the same experience.
 - Prefer a deliberate mix of iconic anchors, landscape, culture, wildlife, rest, resupply, scenic transit, and practical detours.
 - For official scenic routes, choose base stops first and attach discovery points as activities.
 - For mega-corridors, research each phase independently and do not produce one global ranked stop list.
 - For remote expedition tracks, complete the logistics viability pass before scoring stops. Treat camps, wells, fuel points, exit tracks, and recovery towns as practical anchors rather than attractions.
+- When adding logistics gates, set severity: `blocking-decision` for user choices that stop planning, `pre-implementation-check` for issues that must be resolved before writing data, and `travel-time-validation` for routine checks close to travel.
 
-8. Produce a route research plan using `schema-reference.md`.
+9. Present the user-facing plan first, then include schema-shaped details only when needed for review or handoff.
 
-9. Stop for user review. Do not implement until the user explicitly approves implementation.
+10. Stop for user review. Do not implement until the user explicitly approves implementation.
+
+## User-Facing Output
+
+Default output should be easy to scan:
+
+1. Recommended route or direction, with a short rationale.
+2. Material alternatives or variants, only if they change the trip.
+3. Hard blockers, unresolved decisions, or time-sensitive validation items.
+4. A compact stop and activity preview at the chosen research depth.
+5. The approval question or next decision.
+
+Keep route-shape labels, internal field names, evidence details, and full JSON-like structures out of the main response unless they help the user make a decision or the user asks for implementation-ready output. Use the schema reference as the stable handoff contract between agents.
+
+## Decision Ownership
+
+The agent should decide:
+
+- route shape and whether phases, corridors, or expedition viability are needed
+- source weighting, evidence level, candidate scoring, and pruning
+- stop versus activity classification
+- default tags from the controlled vocabulary
+- routine validation notes that do not change the route choice
+- a recommended default route when the trade-offs are clear
+
+The user should decide:
+
+- high-consequence corridor, direction, or route variant choices
+- season, vehicle, safety, comfort, or border-risk choices that materially affect feasibility
+- whether to skip, defer, ship, overfly, or restart around a blocked phase
+- whether to expand from `sketch` to `candidate-plan` or from `candidate-plan` to `implementation-ready`
+- final approval before any trip data is written
+
+Phrase user decisions in plain travel terms, not schema terms.
 
 ## Route Shapes
 

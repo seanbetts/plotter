@@ -10,6 +10,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "start": "Balcombe, West Sussex, UK",
   "end": "Nordkapp, Norway",
   "routeShape": "ambiguous-point-to-point",
+  "researchDepth": "candidate-plan",
   "assumptions": [],
   "corridors": [],
   "recommendedCorridorId": "hybrid-sweden-northern-norway",
@@ -69,6 +70,12 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `immersive`
 - `exhaustive`
 
+`researchDepth`:
+
+- `sketch`
+- `candidate-plan`
+- `implementation-ready`
+
 `RoutePhase.status`:
 
 - `researchable`
@@ -89,6 +96,12 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `seasonal-access`
 - `permit-or-booking`
 - `road-status-check`
+
+`logisticsGate.severity`:
+
+- `blocking-decision`
+- `pre-implementation-check`
+- `travel-time-validation`
 
 ## CorridorOption
 
@@ -191,6 +204,7 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "id": "darien-gap-vehicle-shipping",
   "name": "Darien Gap vehicle shipping",
   "type": "route-discontinuity",
+  "severity": "blocking-decision",
   "between": ["Panama", "Colombia"],
   "impact": "Vehicle travel is not continuous; plan vehicle shipping and passenger transfer separately.",
   "requiredDecision": "Choose shipping method, ports, agent, and timing before implementing this phase.",
@@ -199,6 +213,8 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "sources": []
 }
 ```
+
+Use `blocking-decision` only when the route cannot be planned or implemented until the user chooses an option. Use `pre-implementation-check` when the agent can continue researching but the issue must be resolved before writing trip data. Use `travel-time-validation` for routine current checks such as road, weather, ferry, access, or seasonal status that should be refreshed close to travel.
 
 ## CandidateStop
 
