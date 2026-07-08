@@ -46,4 +46,20 @@ describe('trip realtime', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
+
+  it('cancels pending active trip data callbacks on unsubscribe', () => {
+    vi.useFakeTimers();
+    const { supabase, handlers } = createSupabaseMock();
+    const onChange = vi.fn();
+    const unsubscribe = createSupabaseTripRealtime(supabase as never).subscribeToTripData('trip-id', onChange);
+
+    handlers[0]();
+    unsubscribe();
+
+    vi.advanceTimersByTime(150);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(supabase.removeChannel).toHaveBeenCalled();
+    vi.useRealTimers();
+  });
 });

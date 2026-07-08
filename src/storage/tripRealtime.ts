@@ -5,10 +5,12 @@ export type TripRealtimeSubscriptions = {
   subscribeToTripData(tripId: string, onChange: () => void): () => void;
 };
 
-function debounce(callback: () => void, delayMs: number) {
+type CancellableDebouncedCallback = (() => void) & { cancel: () => void };
+
+function debounce(callback: () => void, delayMs: number): CancellableDebouncedCallback {
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  return () => {
+  const debounced = () => {
     if (timer) clearTimeout(timer);
 
     timer = setTimeout(() => {
@@ -16,6 +18,14 @@ function debounce(callback: () => void, delayMs: number) {
       callback();
     }, delayMs);
   };
+
+  debounced.cancel = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+  };
+
+  return debounced;
 }
 
 export function createSupabaseTripRealtime(supabase: SupabaseClient): TripRealtimeSubscriptions {
@@ -42,6 +52,7 @@ export function createSupabaseTripRealtime(supabase: SupabaseClient): TripRealti
         .subscribe();
 
       return () => {
+        debounced.cancel();
         void supabase.removeChannel(channel);
       };
     },

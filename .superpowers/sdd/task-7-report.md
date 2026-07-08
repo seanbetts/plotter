@@ -70,3 +70,20 @@ DONE_WITH_CONCERNS
 ## Concerns
 
 - The task brief has a small inconsistency: the sample realtime helper implementation debounces trip directory changes, but the sample helper test expects the trip table callback to fire immediately without advancing timers. I followed the explicit test contract from the brief: trip directory callbacks fire immediately, active trip data callbacks debounce bursts by 150 ms.
+
+## Task 7 Fix Addendum
+
+- Added a regression test covering the unsubscribe race for active trip data changes.
+- Updated the debounced callback helper to expose a minimal `cancel()` path.
+- `subscribeToTripData()` now cancels any pending debounce before removing the Supabase channel, so a stale `reload()` cannot fire after unsubscribe.
+
+## Verification
+
+- `npm test -- src/storage/tripRealtime.test.ts`
+  - Passed: 1 file, 3 tests.
+- `npm test -- src/storage/tripRealtime.test.ts src/storage/appRepository.test.ts src/hooks/useTripWorkspace.test.tsx src/App.test.tsx`
+  - Passed: 4 files, 57 tests.
+- `npm test`
+  - Passed: 50 files, 581 tests.
+- `npm run build`
+  - Passed: `tsc -b && vite build`.
