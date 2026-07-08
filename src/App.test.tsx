@@ -208,8 +208,10 @@ function mockTripWorkspace(overrides: Partial<ReturnType<typeof useTripWorkspace
     createTrip: vi.fn(),
     renameTrip: vi.fn(),
     deleteTrip: vi.fn(),
+    refreshTrips: vi.fn(),
+    realtime: null,
     ...overrides,
-  });
+  } as ReturnType<typeof useTripWorkspace>);
 }
 
 vi.mock('./hooks/useTripWorkspace', () => ({
@@ -416,6 +418,45 @@ describe('App', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
     );
+  });
+
+  it('subscribes to trip realtime changes and cleans up channels', async () => {
+    const refreshTrips = vi.fn(async () => undefined);
+    const unsubscribeTrips = vi.fn();
+    const unsubscribeTripData = vi.fn();
+    const tripsChanges: Array<() => void> = [];
+    const tripDataChanges: Array<() => void> = [];
+    const realtime = {
+      subscribeToTrips: vi.fn((onChange: () => void) => {
+        tripsChanges.push(onChange);
+        return unsubscribeTrips;
+      }),
+      subscribeToTripData: vi.fn((tripId: string, onChange: () => void) => {
+        expect(tripId).toBe(tripsMock[0].id);
+        tripDataChanges.push(onChange);
+        return unsubscribeTripData;
+      }),
+    };
+    mockTripWorkspace({
+      refreshTrips,
+      realtime,
+    } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    const { unmount } = render(<App />);
+
+    await waitFor(() => expect(realtime.subscribeToTrips).toHaveBeenCalledTimes(1));
+    expect(realtime.subscribeToTripData).toHaveBeenCalledTimes(1);
+
+    tripsChanges[0]();
+    expect(refreshTrips).toHaveBeenCalledTimes(1);
+
+    repositoryMock.listDestinations.mockClear();
+    tripDataChanges[0]();
+    await waitFor(() => expect(repositoryMock.listDestinations).toHaveBeenCalledTimes(1));
+
+    unmount();
+    expect(unsubscribeTrips).toHaveBeenCalledTimes(1);
+    expect(unsubscribeTripData).toHaveBeenCalledTimes(1);
   });
 
   it('renders the trip selector above the stop panel and clears selected stop when the active trip changes', async () => {
