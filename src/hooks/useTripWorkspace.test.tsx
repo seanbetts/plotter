@@ -203,4 +203,36 @@ describe('useTripWorkspace', () => {
     expect(result.current.activeTrip?.id).toBe(third.id);
     expect(createTripRepository).toHaveBeenLastCalledWith(third.id);
   });
+
+  it('creates and activates a replacement trip when refresh finds no trips', async () => {
+    const first = createTrip('First', 'first-trip');
+    const localStorage = createLocalStorage(null);
+    const { storage, directory, createTripRepository, setTrips } = createStorage([first]);
+
+    const { result } = renderHook(() =>
+      useTripWorkspace({
+        createStorage: async () => storage,
+        localStorage,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeTrip?.id).toBe(first.id));
+
+    setTrips([]);
+
+    await act(async () => {
+      await result.current.refreshTrips();
+    });
+
+    expect(directory.createTrip).toHaveBeenCalledWith({ name: 'World tour' });
+    expect(result.current.trips).toHaveLength(1);
+    expect(result.current.activeTrip?.name).toBe('World tour');
+    expect(result.current.repository).not.toBeNull();
+    expect(createTripRepository).toHaveBeenLastCalledWith(result.current.activeTrip!.id);
+    expect(localStorage.setItem).toHaveBeenLastCalledWith(
+      selectedTripStorageKey,
+      result.current.activeTrip!.id,
+    );
+    expect(localStorage.removeItem).not.toHaveBeenCalled();
+  });
 });

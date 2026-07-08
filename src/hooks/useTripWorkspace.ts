@@ -195,7 +195,12 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
   const refreshTrips = useCallback(async () => {
     if (!storage) return;
 
-    const nextTrips = await storage.directory.listTrips();
+    let nextTrips = await storage.directory.listTrips();
+    if (nextTrips.length === 0) {
+      const replacementTrip = await storage.directory.createTrip({ name: 'World tour' });
+      nextTrips = [replacementTrip];
+    }
+
     const currentActive = activeTripRef.current;
     const nextActive = currentActive
       ? nextTrips.find((trip) => trip.id === currentActive.id) ?? nextTrips[0] ?? null

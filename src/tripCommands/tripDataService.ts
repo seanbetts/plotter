@@ -177,6 +177,23 @@ function normalizeOrderedDestinations(destinations: Destination[]) {
       ));
 }
 
+function omitStopLinks(stop: Destination): Destination {
+  return {
+    ...stop,
+    research: {
+      ...stop.research,
+      links: [],
+    },
+  };
+}
+
+function omitActivityLinks(activity: Activity): Activity {
+  return {
+    ...activity,
+    links: [],
+  };
+}
+
 async function resolveStopLocation(
   draft: Pick<StopDraft, 'name' | 'place'>,
   dependencies: TripDataServiceDependencies,
@@ -490,12 +507,19 @@ export function createTripDataService(
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
         const trip = await findTripSummary(dependencies.directory, tripId);
         const repository = dependencies.createTripRepository(trip.id);
-        const stops = normalizeOrderedDestinations(await repository.listDestinations());
+        const stops = normalizeOrderedDestinations(await repository.listDestinations())
+          .map((stop) => (input.includeLinks ? stop : omitStopLinks(stop)));
         const routeLegs = await repository.listRouteLegs();
         const activitiesByStopId = input.includeActivities
           ? Object.fromEntries(
             await Promise.all(
-              stops.map(async (stop) => [stop.id, await repository.listActivities(stop.id)] as const),
+              stops.map(async (stop) => {
+                const activities = await repository.listActivities(stop.id);
+                return [
+                  stop.id,
+                  input.includeLinks ? activities : activities.map(omitActivityLinks),
+                ] as const;
+              }),
             ),
           )
           : undefined;

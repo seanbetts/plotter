@@ -31,6 +31,10 @@ describe('trip command validation', () => {
     });
   });
 
+  it('allows stop patches to clear notes with an empty string', () => {
+    expect(validateStopPatch({ notes: '' })).toEqual({ notes: '' });
+  });
+
   it('requires stop drafts to include a place query or coordinates', () => {
     for (const input of [{ name: 'Lisbon' }, { name: 'Lisbon', place: {} }]) {
       expect(() => validateStopDraft(input)).toThrow(TripCommandValidationError);
@@ -72,6 +76,27 @@ describe('trip command validation', () => {
       tags: ['cave', 'outdoors'],
       place: { query: 'Smoo Cave, Durness' },
     });
+  });
+
+  it('allows activity patches to clear description and notes with empty strings', () => {
+    expect(validateActivityPatch({
+      description: '',
+      notes: '',
+    })).toEqual({
+      description: '',
+      notes: '',
+    });
+  });
+
+  it('rejects decimal expected stay days', () => {
+    expect(() => validateStopDraft({
+      name: 'Tongue',
+      place: { coordinates: { lat: 58.492089, lng: -4.427364 } },
+      expectedStayDays: 1.5,
+    })).toThrow('stop.expectedStayDays must be a positive integer.');
+    expect(() => validateStopPatch({ expectedStayDays: 2.25 })).toThrow(
+      'patch.expectedStayDays must be a positive integer.',
+    );
   });
 
   it('requires stop patches to include at least one field', () => {

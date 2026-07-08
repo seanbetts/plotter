@@ -567,13 +567,59 @@ describe('TripDataService links and activities', () => {
 
     expect(result.ok).toBe(true);
     expect(enrichLink).toHaveBeenCalledWith('https://www.alnwickcastle.com/', 0);
-    const trip = await service.getTrip({ tripId: created.trip.id });
+    const trip = await service.getTrip({ tripId: created.trip.id, includeLinks: true });
     expect(trip.ok && trip.trip.stops[0].research.links[0]).toMatchObject({
       id: 'link-0',
       title: 'Alnwick Castle',
       url: 'https://www.alnwickcastle.com/',
       sortOrder: 0,
     });
+  });
+
+  it('omits stop and activity links from getTrip unless includeLinks is true', async () => {
+    const { service } = createHarness();
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Durness', place: { coordinates: { lat: 58.5689, lng: -4.7454 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    const activity = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Smoo Cave' },
+    });
+    if (!activity.ok) throw new Error('Expected activity creation to pass.');
+
+    await service.addStopLink({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      url: 'https://www.visitscotland.com/places-to-go/north-coast-500',
+    });
+    await service.addActivityLink({
+      tripId: created.trip.id,
+      activityId: activity.activity.id,
+      url: 'https://www.visitscotland.com/info/see-do/smoo-cave-p245811',
+    });
+
+    const withoutLinks = await service.getTrip({
+      tripId: created.trip.id,
+      includeActivities: true,
+    });
+    expect(withoutLinks.ok).toBe(true);
+    if (!withoutLinks.ok) return;
+    expect(withoutLinks.trip.stops[0].research.links).toEqual([]);
+    expect(withoutLinks.trip.activitiesByStopId?.[created.stops[0].id]?.[0]?.links).toEqual([]);
+
+    const withLinks = await service.getTrip({
+      tripId: created.trip.id,
+      includeActivities: true,
+      includeLinks: true,
+    });
+    expect(withLinks.ok).toBe(true);
+    if (!withLinks.ok) return;
+    expect(withLinks.trip.stops[0].research.links).toHaveLength(1);
+    expect(withLinks.trip.activitiesByStopId?.[created.stops[0].id]?.[0]?.links).toHaveLength(1);
   });
 
   it('deletes stop links and re-densifies the remaining sort order', async () => {
@@ -595,7 +641,7 @@ describe('TripDataService links and activities', () => {
       url: 'https://www.visitalnwick.org.uk/',
     });
 
-    const beforeDelete = await service.getTrip({ tripId: created.trip.id });
+    const beforeDelete = await service.getTrip({ tripId: created.trip.id, includeLinks: true });
     if (!beforeDelete.ok) throw new Error('Expected trip load to pass.');
 
     const result = await service.deleteStopLink({
@@ -605,7 +651,7 @@ describe('TripDataService links and activities', () => {
     });
 
     expect(result.ok).toBe(true);
-    const afterDelete = await service.getTrip({ tripId: created.trip.id });
+    const afterDelete = await service.getTrip({ tripId: created.trip.id, includeLinks: true });
     expect(afterDelete.ok && afterDelete.trip.stops[0].research.links).toMatchObject([
       {
         url: 'https://www.visitalnwick.org.uk/',
@@ -823,6 +869,7 @@ describe('TripDataService links and activities', () => {
     const tripWithActivities = await service.getTrip({
       tripId: created.trip.id,
       includeActivities: true,
+      includeLinks: true,
     });
     if (!tripWithActivities.ok) throw new Error('Expected trip load to pass.');
     const links = tripWithActivities.trip.activitiesByStopId?.[created.stops[0].id]?.[0]?.links ?? [];
@@ -837,6 +884,7 @@ describe('TripDataService links and activities', () => {
     const afterDelete = await service.getTrip({
       tripId: created.trip.id,
       includeActivities: true,
+      includeLinks: true,
     });
     expect(afterDelete.ok && afterDelete.trip.activitiesByStopId?.[created.stops[0].id]?.[0]?.links).toMatchObject([
       {

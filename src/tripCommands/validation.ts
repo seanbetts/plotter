@@ -34,6 +34,19 @@ function requiredString(value: unknown, label: string, path: string) {
   return trimmed;
 }
 
+function optionalRequiredString(value: unknown, label: string, path: string): string | undefined {
+  if (value === undefined) return undefined;
+  return requiredString(value, label, path);
+}
+
+function optionalClearableString(value: unknown, path: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') {
+    throw new TripCommandValidationError('INVALID_STRING', `${path} must be a string.`, path);
+  }
+  return value.trim();
+}
+
 function optionalStringArray(value: unknown, path: string): string[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) {
@@ -54,10 +67,10 @@ function optionalStringArray(value: unknown, path: string): string[] | undefined
 function optionalPositiveInteger(value: unknown, path: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 1) {
+  if (!Number.isFinite(parsed) || parsed < 1 || !Number.isInteger(parsed)) {
     throw new TripCommandValidationError('INVALID_POSITIVE_INTEGER', `${path} must be a positive integer.`, path);
   }
-  return Math.floor(parsed);
+  return parsed;
 }
 
 function validateCoordinates(value: unknown, path: string): Coordinates | undefined {
@@ -162,10 +175,10 @@ export function validateStopPatch(input: unknown, path = 'patch'): StopPatch {
   }
 
   const patch: StopPatch = {};
-  const name = optionalString(input.name, `${path}.name`);
+  const name = optionalRequiredString(input.name, 'Stop name', `${path}.name`);
   const place = validatePlaceInput(input.place, `${path}.place`, { required: false });
   const expectedStayDays = optionalPositiveInteger(input.expectedStayDays, `${path}.expectedStayDays`);
-  const notes = optionalString(input.notes, `${path}.notes`);
+  const notes = optionalClearableString(input.notes, `${path}.notes`);
   const tags = optionalStringArray(input.tags, `${path}.tags`);
 
   if (name !== undefined) patch.name = name;
@@ -204,9 +217,9 @@ export function validateActivityPatch(input: unknown, path = 'patch'): ActivityP
   }
 
   const patch: ActivityPatch = {};
-  const title = optionalString(input.title, `${path}.title`);
-  const description = optionalString(input.description, `${path}.description`);
-  const notes = optionalString(input.notes, `${path}.notes`);
+  const title = optionalRequiredString(input.title, 'Activity title', `${path}.title`);
+  const description = optionalClearableString(input.description, `${path}.description`);
+  const notes = optionalClearableString(input.notes, `${path}.notes`);
   const tags = optionalStringArray(input.tags, `${path}.tags`);
   const place = validatePlaceInput(input.place, `${path}.place`, { required: false });
 
