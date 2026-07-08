@@ -7,6 +7,7 @@ import {
 import type { PlaceSearchResult } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute, calculateOpenRouteServiceRouteOptions } from './adapters/openRouteService';
 import { ActivityPanel } from './components/ActivityPanel';
+import { AppStatusPanel } from './components/AppStatusPanel';
 import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
 import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
@@ -88,6 +89,48 @@ const activitySearchRadiusKm = 100;
 const mapStopConfirmationApproxSize = {
   width: 320,
   height: 260,
+};
+const statusPanelMapPlaceholderDestination: Destination = {
+  id: 'app-status-map-placeholder',
+  name: 'App status placeholder',
+  countryRegion: 'Atlantic Ocean',
+  coordinates: { lat: 0, lng: 0 },
+  location: createLegacyLocation({
+    name: 'App status placeholder',
+    countryRegion: 'Atlantic Ocean',
+  }),
+  order: 0,
+  status: 'idea',
+  priority: 'low',
+  timing: {
+    idealMonths: [],
+    expectedStayDays: 0,
+    provisionalStartDate: '',
+    provisionalEndDate: '',
+  },
+  why: {
+    summary: '',
+    highlights: '',
+    personalRationale: '',
+  },
+  media: [],
+  research: {
+    notes: '',
+    links: [],
+    bookReferences: [],
+  },
+  activities: {
+    items: [],
+  },
+  routeContext: {
+    previousNextNotes: '',
+    drivingNotes: '',
+    borderShippingNotes: '',
+    notes: '',
+  },
+  tags: [],
+  createdAt: '1970-01-01T00:00:00.000Z',
+  updatedAt: '1970-01-01T00:00:00.000Z',
 };
 
 function formatCoordinate(value: number) {
@@ -246,24 +289,16 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
       <main className="app-shell">
         <section className="map-stage" aria-label="World tour map workspace">
           <MapCanvas
-            destinations={[]}
+            destinations={[statusPanelMapPlaceholderDestination]}
             routeLegs={[]}
             selectedDestinationId={null}
             onSelectDestination={() => undefined}
           />
-          <div
-            className={error ? 'app-status app-status-error' : 'app-status'}
-            role={error ? 'alert' : 'status'}
-          >
-            {error ? (
-              <>
-                <strong>{error.title}</strong>
-                <span>{error.message}</span>
-              </>
-            ) : (
-              'Loading trip data'
-            )}
-          </div>
+          <AppStatusPanel
+            status={error ? 'error' : 'loading'}
+            title={error?.title ?? 'Loading world tour'}
+            message={error?.message ?? 'Preparing your trip map.'}
+          />
         </section>
       </main>
     );
@@ -400,6 +435,34 @@ function TripWorkspace({
     () => (selectedDestination ? activitiesByDestinationId[selectedDestination.id] ?? [] : []),
     [activitiesByDestinationId, selectedDestination],
   );
+  const appStatusPanel = useMemo(() => {
+    if (isInteractionLocked) {
+      return {
+        status: 'loading' as const,
+        title: 'Loading world tour',
+        message: 'Preparing your trip map.',
+      };
+    }
+
+    if (error) {
+      return {
+        status: 'error' as const,
+        title: 'Unable to load trip data',
+        message: error,
+        onRetry: reload,
+      };
+    }
+
+    if (destinations.length === 0) {
+      return {
+        status: 'empty' as const,
+        title: 'No stops in this trip yet',
+        message: 'Search for a destination or add a stop from the map.',
+      };
+    }
+
+    return null;
+  }, [destinations.length, error, isInteractionLocked, reload]);
   const tagSuggestions = useMemo(
     () =>
       buildTagSuggestions([
@@ -447,6 +510,8 @@ function TripWorkspace({
   const pendingMapStopMaxHeight = pendingMapStopPosition
     ? getAvailableOverlayHeight(pendingMapStopPosition)
     : undefined;
+  const mapCanvasDestinations =
+    appStatusPanel && destinations.length === 0 ? [statusPanelMapPlaceholderDestination] : destinations;
 
   const restorePendingMapStopFocus = useCallback(() => {
     const previouslyFocusedElement = previouslyFocusedMapStopElementRef.current;
@@ -1040,7 +1105,7 @@ function TripWorkspace({
     <main className="app-shell">
       <section className="map-stage" aria-label="World tour map workspace">
         <MapCanvas
-          destinations={destinations}
+          destinations={mapCanvasDestinations}
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
           focusedActivities={selectedDestinationActivities}
@@ -1049,7 +1114,7 @@ function TripWorkspace({
           onSelectActivity={setSelectedActivityId}
           onRequestAddStop={openPendingMapStop}
         />
-        {!isInteractionLocked ? (
+        {!isInteractionLocked && !error ? (
           <>
             <TopToolbar
               searchPlaces={searchStopPlaces}
@@ -1209,15 +1274,13 @@ function TripWorkspace({
             onClose={() => setPreviewMedia(null)}
           />
         ) : null}
-        {isInteractionLocked ? (
-          <div className="app-status" role="status">
-            Loading trip data
-          </div>
-        ) : null}
-        {error ? (
-          <div className="app-status app-status-error" role="alert">
-            {error}
-          </div>
+        {appStatusPanel ? (
+          <AppStatusPanel
+            status={appStatusPanel.status}
+            title={appStatusPanel.title}
+            message={appStatusPanel.message}
+            onRetry={'onRetry' in appStatusPanel ? appStatusPanel.onRetry : undefined}
+          />
         ) : null}
       </section>
     </main>

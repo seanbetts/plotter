@@ -288,6 +288,10 @@ vi.mock('maplibre-gl', () => ({
   },
 }));
 
+async function waitForTripReady() {
+  await waitFor(() => expect(screen.queryByText('Loading world tour')).not.toBeInTheDocument());
+}
+
 describe('App', () => {
   beforeEach(() => {
     repositoryMock.destinations = [];
@@ -385,7 +389,7 @@ describe('App', () => {
     vi.stubGlobal('Image', FakeImage);
   });
 
-  it('shows a storage bootstrap error when the app repository cannot be prepared', async () => {
+  it('shows a centered storage bootstrap error when the app repository cannot be prepared', async () => {
     mockTripWorkspace({
       repository: null,
       error: {
@@ -396,10 +400,11 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Trip storage unavailable');
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Unable to create an anonymous Supabase session.',
-    );
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveClass('app-status-panel', 'app-status-panel--error');
+    expect(alert).toHaveTextContent('Trip storage unavailable');
+    expect(alert).toHaveTextContent('Unable to create an anonymous Supabase session.');
+    expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
   });
 
@@ -459,6 +464,61 @@ describe('App', () => {
     expect(unsubscribeTripData).toHaveBeenCalledTimes(1);
   });
 
+  it('shows one centered loading panel while app clients and trip data load', async () => {
+    const initialDestinations = createDeferred<Destination[]>();
+    const initialRouteLegs = createDeferred<RouteLeg[]>();
+    repositoryMock.initialDestinations = initialDestinations.promise;
+    repositoryMock.initialRouteLegs = initialRouteLegs.promise;
+
+    render(<App />);
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveClass('app-status-panel', 'app-status-panel--loading');
+    expect(status).toHaveTextContent('Loading world tour');
+    expect(status).toHaveTextContent('Preparing your trip map.');
+    expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument();
+    expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+
+    await act(async () => {
+      initialDestinations.resolve([]);
+      initialRouteLegs.resolve([]);
+    });
+    await waitForTripReady();
+  });
+
+  it('shows an empty trip panel with normal add controls after an empty trip loads', async () => {
+    repositoryMock.initialDestinations = Promise.resolve([]);
+    repositoryMock.initialRouteLegs = Promise.resolve([]);
+
+    render(<App />);
+
+    expect(await screen.findByText('No stops in this trip yet')).toBeInTheDocument();
+    const status = screen.getByRole('status');
+    expect(status).toHaveClass('app-status-panel', 'app-status-panel--empty');
+    expect(status).toHaveTextContent('Search for a destination or add a stop from the map.');
+    expect(screen.getByLabelText('Search for a destination')).toBeInTheDocument();
+    expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
+  });
+
+  it('shows active trip data load errors in the centered status panel and retries with reload', async () => {
+    repositoryMock.initialDestinations = Promise.reject(new Error('Trip rows unavailable.'));
+    repositoryMock.initialRouteLegs = Promise.resolve([]);
+
+    render(<App />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveClass('app-status-panel', 'app-status-panel--error');
+    expect(alert).toHaveTextContent('Unable to load trip data');
+    expect(alert).toHaveTextContent('Trip rows unavailable.');
+    expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
+
+    repositoryMock.initialDestinations = Promise.resolve([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('No stops in this trip yet')).toBeInTheDocument();
+  });
+
   it('renders the trip selector above the stop panel and clears selected stop when the active trip changes', async () => {
     const firstDestination = createDestination({
       name: 'Paris',
@@ -467,7 +527,7 @@ describe('App', () => {
     repositoryMock.initialDestinations = Promise.resolve([firstDestination]);
     const { rerender } = render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await userEvent.click(await screen.findByRole('button', { name: 'Select Paris' }));
     expect(screen.getByRole('complementary', { name: 'Paris profile' })).toBeInTheDocument();
 
@@ -485,7 +545,7 @@ describe('App', () => {
     });
     rerender(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     expect(screen.getByRole('button', { name: /current trip: Japan winter/i })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Paris profile' })).not.toBeInTheDocument();
   });
@@ -510,7 +570,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
 
     await userEvent.type(screen.getByLabelText('Search for a destination'), 'Kyoto');
     await userEvent.click(await screen.findByRole('option', { name: 'Kyoto, Japan' }));
@@ -550,7 +610,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
 
     await user.type(screen.getByLabelText('Search for a destination'), 'Istanbul');
     await user.click(await screen.findByRole('option', { name: 'Istanbul, Turkey' }));
@@ -592,7 +652,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
 
     expect(screen.getByLabelText('Itinerary')).toHaveClass('is-collapsed');
     expect(screen.getByText('1 stop')).toBeInTheDocument();
@@ -629,7 +689,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
 
     const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
@@ -667,7 +727,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
 
     const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
@@ -701,7 +761,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
 
     const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
@@ -821,7 +881,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
 
     await openContextMenuMapStop({ lat: 51.0576, lng: -0.1342 });
@@ -877,7 +937,7 @@ describe('App', () => {
   it('does not render a toolbar action for adding a stop at the map center', async () => {
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
     const map = maplibreMock.mapInstances.at(-1)!;
     map.getCenter.mockReturnValue({ lat: 48.8566, lng: 2.3522 });
@@ -899,7 +959,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
     expect(screen.getByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
     expect(screen.getByText('Start')).toBeInTheDocument();
@@ -944,7 +1004,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Home, United Kingdom' }));
     await user.click(screen.getByRole('button', { name: 'Add tag' }));
 
@@ -975,7 +1035,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
 
     expect(await screen.findByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
@@ -1029,7 +1089,7 @@ describe('App', () => {
 
     render(<App webImageSearchClient={webImageSearchClient} />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, Ile-de-France, France' }));
     await user.type(await screen.findByLabelText('Search web images'), 'mural');
     await user.click(await screen.findByRole('option', { name: 'Import Paris mural from Example Source' }));
@@ -1098,7 +1158,7 @@ describe('App', () => {
 
     render(<App webImageSearchClient={webImageSearchClient} />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Home, Balcombe, West Sussex, United Kingdom' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Ouse Valley Viaduct' }));
     const activityPanel = await screen.findByRole('complementary', { name: 'Ouse Valley Viaduct activity' });
@@ -1178,7 +1238,7 @@ describe('App', () => {
 
     render(<App webImageSearchClient={webImageSearchClient} />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.type(await screen.findByLabelText('Search web images'), 'mural');
     await user.click(await screen.findByRole('option', { name: 'Import Paris mural from Example Source' }));
@@ -1235,7 +1295,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
     await user.click(await screen.findByRole('button', { name: 'Open full image: Balcombe lane' }));
 
@@ -1297,7 +1357,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Balcombe, United Kingdom' }));
     await user.click(await screen.findByRole('button', { name: 'Show image 2: Garden' }));
 
@@ -1347,7 +1407,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
 
     expect(screen.getByRole('heading', { name: 'Paris Activities' })).toBeInTheDocument();
@@ -1404,7 +1464,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.type(screen.getByLabelText('Search for an activity'), 'Louvre');
     await user.click(await screen.findByRole('option', { name: 'Louvre Museum, Rue de Rivoli, 75001 Paris, France' }));
@@ -1447,7 +1507,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
 
@@ -1479,7 +1539,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await userEvent.click(screen.getByRole('button', { name: 'Paris, France' }));
     await screen.findByRole('complementary', { name: 'Paris profile' });
 
@@ -1525,7 +1585,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Bakery crawl' }));
     const activityPanel = screen.getByRole('complementary', { name: 'Bakery crawl activity' });
@@ -1581,7 +1641,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Select Balcombe' }));
     const stopPanel = screen.getByRole('complementary', { name: 'Balcombe profile' });
     await user.click(within(stopPanel).getByRole('button', { name: 'Edit coordinates' }));
@@ -1655,7 +1715,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
     const activityPanel = screen.getByRole('complementary', { name: 'Louvre activity' });
@@ -1700,7 +1760,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
 
@@ -1745,7 +1805,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
 
@@ -1780,7 +1840,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
     const input = screen.getByLabelText('Choose activity images file input') as HTMLInputElement;
@@ -1838,7 +1898,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Show image 2: Museum wing' }));
 
@@ -1893,7 +1953,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Show image 2: Museum wing' }));
     await user.click(screen.getByRole('button', { name: 'Open full image: Museum wing' }));
@@ -1968,7 +2028,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
     const activityPanel = screen.getByRole('complementary', { name: 'Louvre activity' });
@@ -2032,7 +2092,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Open full image: Paris street' }));
     const preview = screen.getByRole('dialog', { name: 'Image preview' });
@@ -2101,7 +2161,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     await user.click(await screen.findByRole('button', { name: 'Select activity Louvre' }));
     await user.upload(
@@ -2163,7 +2223,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await waitForTripReady();
     await user.click(screen.getByRole('button', { name: 'Paris, France' }));
     expect(await screen.findByRole('button', { name: 'Open full image: Paris street' })).toBeInTheDocument();
 
@@ -2182,7 +2242,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(screen.getByText('Loading trip data')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading world tour');
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add stop at map center' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
@@ -2196,9 +2256,11 @@ describe('App', () => {
 
     expect(repositoryMock.saveDestination).not.toHaveBeenCalled();
 
-    initialDestinations.resolve([]);
-    initialRouteLegs.resolve([]);
-    await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+    await act(async () => {
+      initialDestinations.resolve([]);
+      initialRouteLegs.resolve([]);
+    });
+    await waitForTripReady();
     expect(screen.getByLabelText('Search for a destination')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import trip data' })).not.toBeInTheDocument();
@@ -2284,7 +2346,7 @@ function triggerMapLayerEvent(map: MockMap, eventName: string, layerId: string, 
 }
 
 async function openContextMenuMapStop(coordinates: Destination['coordinates']) {
-  await waitFor(() => expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument());
+  await waitForTripReady();
   await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
 
   const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
