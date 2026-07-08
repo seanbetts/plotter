@@ -341,12 +341,13 @@ test('opens an activity panel with image region beside the selected stop', async
 
   await expect(stopPanel).toBeVisible();
 
-  await stopPanel.getByLabel('Search for an activity').fill(activityTitle);
-  await stopPanel.getByRole('button', { name: 'Add activity' }).click();
+  const activitySearchInput = stopPanel.getByLabel('Search for an activity');
+  await activitySearchInput.fill(activityTitle);
+  await activitySearchInput.press('Enter');
 
   const activitySelect = stopPanel.getByRole('button', { name: `Select activity ${activityTitle}` });
   await expect(activitySelect).toBeVisible();
-  await activitySelect.click();
+  await expect(activitySelect).toHaveAttribute('aria-current', 'true');
 
   const activityPanel = page.getByRole('complementary', { name: `${activityTitle} activity` });
   await expect(activityPanel).toBeVisible();
