@@ -101,6 +101,8 @@ Do not invent alternate corridors when the canonical route is already defined. D
 
 If the official route has meaningful practical or adventure variants, keep the route model canonical and express the variants with stop and activity tags first.
 
+For long official routes, keep the route canonical but split it into phases before candidate stop selection. Do not flatten a multi-region official route into one global ranked stop list.
+
 ### Mega-Corridor
 
 Example: Pan-American Highway from Alaska to Patagonia.
