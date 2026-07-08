@@ -646,6 +646,12 @@ function TripWorkspace({
   }, [selectedActivityId, selectedDestinationActivities, selectedDestinationId]);
 
   useEffect(() => {
+    if (!isInteractionLocked) return;
+
+    setRouteAlternativesState(null);
+  }, [isInteractionLocked]);
+
+  useEffect(() => {
     if (!error) return;
 
     setRouteAlternativesState(null);
@@ -1207,7 +1213,10 @@ function TripWorkspace({
             </div>
           </section>
         ) : null}
-        {!error && routeAlternativesState && activeRouteAlternativesOrigin && activeRouteAlternativesTarget ? (
+        {!isBlockingStatusState &&
+        routeAlternativesState &&
+        activeRouteAlternativesOrigin &&
+        activeRouteAlternativesTarget ? (
           <RouteAlternativesPanel
             originName={activeRouteAlternativesOrigin.name}
             targetName={activeRouteAlternativesTarget.name}

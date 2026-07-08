@@ -809,6 +809,84 @@ describe('App', () => {
     );
   });
 
+  it('hides an open route alternatives panel while trip data reloads in the loading state', async () => {
+    const user = userEvent.setup();
+    const tripDataChanges: Array<() => void> = [];
+    const reloadDestinations = createDeferred<Destination[]>();
+    const reloadRouteLegs = createDeferred<RouteLeg[]>();
+    const realtime = {
+      subscribeToTrips: vi.fn(() => vi.fn()),
+      subscribeToTripData: vi.fn((tripId: string, onChange: () => void) => {
+        expect(tripId).toBe(tripsMock[0].id);
+        tripDataChanges.push(onChange);
+        return vi.fn();
+      }),
+    };
+    vi.mocked(searchMapTilerPlaces)
+      .mockResolvedValueOnce([
+        createPlaceSearchResult({
+          id: 'place-paris',
+          label: 'Paris, France',
+          placeName: 'Paris',
+          regionName: '',
+          countryName: 'France',
+          coordinates: { lat: 48.8566, lng: 2.3522 },
+        }),
+      ])
+      .mockResolvedValueOnce([
+        createPlaceSearchResult({
+          id: 'place-rome',
+          label: 'Rome, Italy',
+          placeName: 'Rome',
+          regionName: '',
+          countryName: 'Italy',
+          coordinates: { lat: 41.9028, lng: 12.4964 },
+        }),
+      ]);
+    repositoryMock.initialDestinations = Promise.resolve([]);
+    repositoryMock.initialRouteLegs = Promise.resolve([]);
+    mockTripWorkspace({ realtime } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+
+    await waitForTripReady();
+
+    await user.type(screen.getByLabelText('Search for a destination'), 'Paris');
+    await user.click(await screen.findByRole('option', { name: 'Paris, France' }));
+    await user.clear(screen.getByLabelText('Search for a destination'));
+    await user.type(screen.getByLabelText('Search for a destination'), 'Rome');
+    await user.click(await screen.findByRole('option', { name: 'Rome, Italy' }));
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Edit route from Paris to Rome',
+      }),
+    );
+
+    expect(await screen.findByRole('dialog', { name: 'Edit route from Paris to Rome' })).toBeInTheDocument();
+    expect(await screen.findByText('Avoid highways')).toBeInTheDocument();
+
+    repositoryMock.listDestinations.mockImplementationOnce(async () => reloadDestinations.promise);
+    repositoryMock.listRouteLegs.mockImplementationOnce(async () => reloadRouteLegs.promise);
+
+    act(() => {
+      tripDataChanges[0]?.();
+    });
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading world tour');
+    expect(screen.queryByRole('dialog', { name: 'Edit route from Paris to Rome' })).not.toBeInTheDocument();
+
+    await act(async () => {
+      reloadDestinations.resolve(repositoryMock.destinations);
+      reloadRouteLegs.resolve(repositoryMock.routeLegs);
+      await reloadDestinations.promise;
+      await reloadRouteLegs.promise;
+    });
+
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(screen.queryByRole('dialog', { name: 'Edit route from Paris to Rome' })).not.toBeInTheDocument();
+  });
+
   it('remembers when the stops panel is collapsed', async () => {
     const destination = createDestination({
       name: 'Brest',
