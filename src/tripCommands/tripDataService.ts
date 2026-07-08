@@ -125,6 +125,23 @@ function ensureStopIdList(stopIds: string[]) {
   return normalized;
 }
 
+function ensureActivityIdList(activityIds: string[]) {
+  const normalized: string[] = [];
+  for (const [index, activityId] of activityIds.entries()) {
+    const trimmed = trimRequiredString(activityId, `activityIds[${index}]`, `activityIds[${index}]`);
+    if (normalized.includes(trimmed)) {
+      throw new TripCommandValidationError(
+        'DUPLICATE_ACTIVITY_ID',
+        `Duplicate activity id '${trimmed}'.`,
+        `activityIds[${index}]`,
+      );
+    }
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
 async function findTripSummary(directory: TripDataServiceDependencies['directory'], tripId: string) {
   const trip = (await directory.listTrips()).find((candidate) => candidate.id === tripId);
   if (!trip) {
@@ -1046,18 +1063,18 @@ export function createTripDataService(
         if (!stop) return notFoundResult('stop', stopId);
         const activities = await repository.listActivities(stopId);
         const activitiesById = new Map(activities.map((activity) => [activity.id, activity]));
+        const normalizedActivityIds = ensureActivityIdList(input.activityIds);
 
-        for (const [index, activityId] of input.activityIds.entries()) {
-          const normalizedActivityId = trimRequiredString(activityId, `activityIds[${index}]`, `activityIds[${index}]`);
-          if (!activitiesById.has(normalizedActivityId)) {
-            return commandError('ACTIVITY_NOT_FOUND', `Activity '${normalizedActivityId}' was not found.`, `activityIds[${index}]`);
+        for (const [index, activityId] of normalizedActivityIds.entries()) {
+          if (!activitiesById.has(activityId)) {
+            return commandError('ACTIVITY_NOT_FOUND', `Activity '${activityId}' was not found.`, `activityIds[${index}]`);
           }
         }
 
         const changed = emptyChanged();
 
         if (options?.dryRun) {
-          const reordered = reorderActivityModels(activities, input.activityIds);
+          const reordered = reorderActivityModels(activities, normalizedActivityIds);
           changed.activitiesUpdated.push(...reordered.map((activity) => activity.title));
           return commandSuccess(`Would reorder activities for ${stop.name}.`, {
             activities: reordered,
@@ -1065,7 +1082,7 @@ export function createTripDataService(
           });
         }
 
-        const reordered = await repository.reorderActivities(stopId, input.activityIds);
+        const reordered = await repository.reorderActivities(stopId, normalizedActivityIds);
         changed.activitiesUpdated.push(...reordered.map((activity) => activity.title));
         return commandSuccess(`Reordered activities for ${stop.name}.`, {
           activities: reordered,

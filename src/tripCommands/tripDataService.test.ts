@@ -1,20 +1,44 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTripDataService } from './tripDataService';
+import type { LinkEnricher } from './types';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 
-function createHarness() {
+function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
   const trips: TripSummary[] = [];
   const repositories = new Map<string, {
     destinations: Destination[];
     routeLegs: RouteLeg[];
     activities: import('../domain/types').Activity[];
+    reorderActivities: ReturnType<typeof vi.fn>;
   }>();
 
   const createTripRepository = (tripId: string): TripRepository => {
-    const data = repositories.get(tripId) ?? { destinations: [], routeLegs: [], activities: [] };
-    repositories.set(tripId, data);
+    const data = repositories.get(tripId) ?? (() => {
+      const repoData = {
+        destinations: [] as Destination[],
+        routeLegs: [] as RouteLeg[],
+        activities: [] as import('../domain/types').Activity[],
+        reorderActivities: vi.fn(async (destinationId: string, orderedActivityIds: string[]) => {
+          const requestedIds = new Set(orderedActivityIds);
+          const activitiesById = new Map(repoData.activities.map((activity) => [activity.id, activity]));
+          const ordered = [
+            ...orderedActivityIds
+              .map((id) => activitiesById.get(id))
+              .filter((activity): activity is Activity => Boolean(activity)),
+            ...repoData.activities.filter((activity) => activity.destinationId === destinationId && !requestedIds.has(activity.id)),
+          ].map((activity, order) => ({ ...activity, order }));
+          repoData.activities = [
+            ...repoData.activities.filter((activity) => activity.destinationId !== destinationId),
+            ...ordered,
+          ];
+          return ordered;
+        }),
+      };
+      repositories.set(tripId, repoData);
+      return repoData;
+    })();
 
     return {
       async listDestinations() {
@@ -75,21 +99,7 @@ function createHarness() {
       async deleteActivity(activityId) {
         data.activities = data.activities.filter((activity) => activity.id !== activityId);
       },
-      async reorderActivities(destinationId, orderedActivityIds) {
-        const requestedIds = new Set(orderedActivityIds);
-        const activitiesById = new Map(data.activities.map((activity) => [activity.id, activity]));
-        const ordered = [
-          ...orderedActivityIds
-            .map((id) => activitiesById.get(id))
-            .filter((activity): activity is Activity => Boolean(activity)),
-          ...data.activities.filter((activity) => activity.destinationId === destinationId && !requestedIds.has(activity.id)),
-        ].map((activity, order) => ({ ...activity, order }));
-        data.activities = [
-          ...data.activities.filter((activity) => activity.destinationId !== destinationId),
-          ...ordered,
-        ];
-        return ordered;
-      },
+      reorderActivities: data.reorderActivities,
       async listDestinationMedia() {
         return [];
       },
@@ -207,6 +217,7 @@ function createHarness() {
     createTripRepository,
     resolvePlace,
     calculateRoute,
+    enrichLink: overrides?.enrichLink,
   });
 
   return { service, trips, repositories, resolvePlace, calculateRoute };
@@ -534,7 +545,14 @@ describe('TripDataService trips and stops', () => {
 
 describe('TripDataService links and activities', () => {
   it('adds stop links using the link enricher', async () => {
-    const { service } = createHarness();
+    const enrichLink = vi.fn(async (url: string, sortOrder: number) => ({
+      id: `link-${sortOrder}`,
+      title: 'Alnwick Castle',
+      url,
+      domain: new URL(url).hostname,
+      sortOrder,
+    }));
+    const { service } = createHarness({ enrichLink });
     const created = await service.createTrip({
       name: 'NC500',
       stops: [{ name: 'Alnwick', place: { coordinates: { lat: 55.426423, lng: -1.60645 } } }],
@@ -548,8 +566,11 @@ describe('TripDataService links and activities', () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(enrichLink).toHaveBeenCalledWith('https://www.alnwickcastle.com/', 0);
     const trip = await service.getTrip({ tripId: created.trip.id });
     expect(trip.ok && trip.trip.stops[0].research.links[0]).toMatchObject({
+      id: 'link-0',
+      title: 'Alnwick Castle',
       url: 'https://www.alnwickcastle.com/',
       sortOrder: 0,
     });
@@ -680,6 +701,56 @@ describe('TripDataService links and activities', () => {
       stopId: created.stops[0].id,
     });
     expect(afterDelete.ok && afterDelete.activities.map((activity) => activity.title)).toEqual([
+      'Balnakeil Beach',
+    ]);
+  });
+
+  it('rejects duplicate activity ids when reordering activities', async () => {
+    const { service, repositories } = createHarness();
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Durness', place: { coordinates: { lat: 58.5689, lng: -4.7454 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    const first = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Smoo Cave' },
+    });
+    const second = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Balnakeil Beach' },
+    });
+    if (!first.ok || !second.ok) throw new Error('Expected activity creation to pass.');
+
+    const repoState = repositories.get(created.trip.id);
+    if (!repoState) throw new Error('Expected repository to exist.');
+    repoState.reorderActivities.mockClear();
+
+    const result = await service.reorderActivities({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activityIds: [first.activity.id, second.activity.id, first.activity.id],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'DUPLICATE_ACTIVITY_ID',
+        message: `Duplicate activity id '${first.activity.id}'.`,
+        path: 'activityIds[2]',
+      },
+    });
+    expect(repoState.reorderActivities).not.toHaveBeenCalled();
+
+    const after = await service.listActivities({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+    });
+    expect(after.ok && after.activities.map((activity) => activity.title)).toEqual([
+      'Smoo Cave',
       'Balnakeil Beach',
     ]);
   });
