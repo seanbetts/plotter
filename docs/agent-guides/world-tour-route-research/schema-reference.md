@@ -14,6 +14,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "corridors": [],
   "recommendedCorridorId": "hybrid-sweden-northern-norway",
   "scopeDecision": null,
+  "expeditionViability": null,
   "phases": [],
   "logisticsGates": [],
   "stops": [],
@@ -33,6 +34,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `region-loop`
 - `open-ended-route-family`
 - `regional-corridor`
+- `remote-expedition-track`
 
 `priority`:
 
@@ -120,6 +122,42 @@ For open-ended geopolitical route families, use `corridors` as a corridor viabil
   "sectionOptions": []
 }
 ```
+
+## ExpeditionViability
+
+Use `expeditionViability` before candidate stop selection for remote expedition tracks where logistics, access, permits, and recovery risk determine whether the route is viable.
+
+```json
+{
+  "status": "researchable",
+  "seasonWindow": "May to September",
+  "requiredVehicle": "High-clearance 4WD with long-range fuel, water, spares, recovery equipment, and communications.",
+  "permits": [
+    {
+      "name": "Canning Stock Route visitor permit",
+      "status": "required",
+      "sourceIds": ["kuju-wangka-permit-system"]
+    }
+  ],
+  "fuelWaterPlan": [
+    "Confirm fuel, food, and water availability before departure.",
+    "Carry enough range for long remote legs between confirmed resupply points."
+  ],
+  "communicationsAndRecovery": [
+    "No mobile reception should be assumed.",
+    "Carry satellite communications and recovery equipment."
+  ],
+  "officialRoadConditionSources": [],
+  "bailoutOptions": [],
+  "culturalAccessNotes": [
+    "Do not list culturally sensitive sites as activities unless public visitor access is explicitly confirmed."
+  ],
+  "blockers": [],
+  "requiredDecision": "Confirm permits, season, vehicle suitability, resupply, communications, and bailout plan before stop selection."
+}
+```
+
+Allowed `expeditionViability.status` values match `RoutePhase.status`: `researchable`, `blocked`, or `deferred`.
 
 ## RoutePhase
 
@@ -282,6 +320,7 @@ If one of these details matters to the recommendation, describe the caveat in `n
 - Approved candidate `tags` become stop or activity tags.
 - Candidate and activity `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
+- Expedition viability details become route-level planning notes or stop notes on the nearest practical anchor.
 - Coordinates are passed only when sourced.
 - Route geometry is never authored.
 - Blocked or deferred phases are not implemented as stops or activities until the user approves a resolved restart, skip, or deferral plan.

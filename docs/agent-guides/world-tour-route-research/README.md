@@ -37,6 +37,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Mega-corridors: decompose into phases first.
 - Region loops: choose loop direction, base regions, and density first.
 - Open-ended route families: compare route concepts and corridor viability before ranking stops.
+- Remote expedition tracks: prove logistics viability before candidate stop selection.
 
 3. Build the candidate pool with three source layers:
 
@@ -75,6 +76,7 @@ Do not invent new tags during research. If a useful detail does not fit the cont
 - Prefer a deliberate mix of iconic anchors, landscape, culture, wildlife, rest, resupply, scenic transit, and practical detours.
 - For official scenic routes, choose base stops first and attach discovery points as activities.
 - For mega-corridors, research each phase independently and do not produce one global ranked stop list.
+- For remote expedition tracks, complete the logistics viability pass before scoring stops. Treat camps, wells, fuel points, exit tracks, and recovery towns as practical anchors rather than attractions.
 
 8. Produce a route research plan using `schema-reference.md`.
 
@@ -127,6 +129,12 @@ Compare route concepts before ranking stops. Make assumptions explicit.
 
 For geopolitical route families such as Silk Road routes, produce a corridor viability matrix before candidate stop selection. Each corridor option should state its status, blockers, restart options, researchable phases, and the user decision required before implementation. Do not select stops for blocked or deferred corridors unless the user explicitly asks to research a reachable subsection.
 
+### Remote Expedition Track
+
+Example: Canning Stock Route.
+
+Before selecting stops, produce an expedition viability pass that covers permits, season window, required vehicle capability, fuel and water legs, communications and recovery requirements, official road-condition sources, bailout or exit options, and culturally sensitive or restricted areas. Candidate stops should emphasize practical anchors such as camps, wells, fuel points, access tracks, exit tracks, and recovery towns. Do not treat culturally sensitive sites as activities unless a source explicitly confirms public visitor access is appropriate.
+
 ## Source Weighting By Region
 
 - North America: Overland Trail Guides, iOverlander, official park sources, Google Maps, recent trip reports.
@@ -135,6 +143,7 @@ For geopolitical route families such as Silk Road routes, produce a corridor via
 - Africa: Tracks4Africa, iOverlander, Bradt, national park sites, overlander blogs, Expedition Portal, Horizons Unlimited.
 - Central Asia: Caravanistan-style route intelligence, iOverlander, traveller blogs, YouTube, Wikiloc, Google Maps where coverage is strong.
 - Australia and New Zealand: Hema, Wikicamps Australia, iOverlander, national park sites, 4x4 forums, YouTube, official tourism pages.
+- Remote expedition tracks: permit authorities, traditional-owner or land-council permit systems, local shires, road-condition authorities, official tourism access pages, emergency services guidance, specialist route guides, recent traveller condition reports.
 
 ## Approval-Gated Handoff
 
