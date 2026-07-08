@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTripDataService } from './tripDataService';
-import type { Destination, RouteLeg } from '../domain/types';
+import type { Activity, Destination, RouteLeg } from '../domain/types';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 
@@ -45,17 +45,50 @@ function createHarness() {
       async listActivities(destinationId) {
         return data.activities.filter((activity) => activity.destinationId === destinationId);
       },
-      async createActivity() {
-        throw new Error('Not needed in this test.');
+      async createActivity(input) {
+        const timestamp = new Date().toISOString();
+        const activity = {
+          id: crypto.randomUUID(),
+          destinationId: input.destinationId,
+          order: input.order ?? data.activities.filter((activity) => activity.destinationId === input.destinationId).length,
+          title: input.title,
+          description: '',
+          category: 'other' as const,
+          status: 'idea' as const,
+          priority: 'medium' as const,
+          location: input.location,
+          links: [],
+          notes: '',
+          tags: [],
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        data.activities.push(activity);
+        return activity;
       },
-      async updateActivity() {
-        throw new Error('Not needed in this test.');
+      async updateActivity(activityId, patch) {
+        const activity = data.activities.find((candidate) => candidate.id === activityId);
+        if (!activity) throw new Error('Activity not found.');
+        Object.assign(activity, patch, { updatedAt: new Date().toISOString() });
+        return activity;
       },
-      async deleteActivity() {
-        throw new Error('Not needed in this test.');
+      async deleteActivity(activityId) {
+        data.activities = data.activities.filter((activity) => activity.id !== activityId);
       },
-      async reorderActivities() {
-        throw new Error('Not needed in this test.');
+      async reorderActivities(destinationId, orderedActivityIds) {
+        const requestedIds = new Set(orderedActivityIds);
+        const activitiesById = new Map(data.activities.map((activity) => [activity.id, activity]));
+        const ordered = [
+          ...orderedActivityIds
+            .map((id) => activitiesById.get(id))
+            .filter((activity): activity is Activity => Boolean(activity)),
+          ...data.activities.filter((activity) => activity.destinationId === destinationId && !requestedIds.has(activity.id)),
+        ].map((activity, order) => ({ ...activity, order }));
+        data.activities = [
+          ...data.activities.filter((activity) => activity.destinationId !== destinationId),
+          ...ordered,
+        ];
+        return ordered;
       },
       async listDestinationMedia() {
         return [];
@@ -102,15 +135,34 @@ function createHarness() {
     };
   };
 
-  const resolvePlace = vi.fn(async ({ place, fallbackName }: { place: { coordinates?: { lat: number; lng: number } }; fallbackName: string }) => ({
+  const resolvePlace = vi.fn(async ({
+    place,
+    fallbackName,
+    profile,
+  }: {
+    place: { coordinates?: { lat: number; lng: number } };
+    fallbackName: string;
+    profile: 'stop' | 'activity';
+  }) => ({
     coordinates: place.coordinates ?? { lat: 58.492089, lng: -4.427364 },
-    location: {
-      placeName: fallbackName,
-      regionName: '',
-      countryName: 'Scotland',
-      sourceLabel: `${fallbackName}, Scotland`,
-      sourceProvider: 'legacy' as const,
-    },
+    ...(profile === 'activity'
+      ? {
+          activityLocation: {
+            name: fallbackName,
+            address: `${fallbackName}, Scotland`,
+            coordinates: place.coordinates ?? { lat: 58.492089, lng: -4.427364 },
+            sourceProvider: 'manual' as const,
+          },
+        }
+      : {
+          location: {
+            placeName: fallbackName,
+            regionName: '',
+            countryName: 'Scotland',
+            sourceLabel: `${fallbackName}, Scotland`,
+            sourceProvider: 'legacy' as const,
+          },
+        }),
   }));
   const calculateRoute = vi.fn(async ({ origin, target }: { origin: { lat: number; lng: number }; target: { lat: number; lng: number } }) => ({
     distanceKm: 10,
@@ -478,26 +530,212 @@ describe('TripDataService trips and stops', () => {
       },
     });
   });
+});
 
-  it('returns structured unsupported results for activity and link methods', async () => {
+describe('TripDataService links and activities', () => {
+  it('adds stop links using the link enricher', async () => {
     const { service } = createHarness();
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Alnwick', place: { coordinates: { lat: 55.426423, lng: -1.60645 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
 
-    const activities = await service.listActivities({ tripId: 'trip-1', stopId: 'stop-1' });
-    const addStopLink = await service.addStopLink({ tripId: 'trip-1', stopId: 'stop-1', url: 'https://example.com' });
+    const result = await service.addStopLink({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      url: 'https://www.alnwickcastle.com/',
+    });
 
-    expect(activities).toEqual({
-      ok: false,
-      error: {
-        code: 'COMMAND_NOT_IMPLEMENTED',
-        message: 'Activity commands land in Task 5.',
+    expect(result.ok).toBe(true);
+    const trip = await service.getTrip({ tripId: created.trip.id });
+    expect(trip.ok && trip.trip.stops[0].research.links[0]).toMatchObject({
+      url: 'https://www.alnwickcastle.com/',
+      sortOrder: 0,
+    });
+  });
+
+  it('deletes stop links and re-densifies the remaining sort order', async () => {
+    const { service } = createHarness();
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Alnwick', place: { coordinates: { lat: 55.426423, lng: -1.60645 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    await service.addStopLink({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      url: 'https://www.alnwickcastle.com/',
+    });
+    await service.addStopLink({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      url: 'https://www.visitalnwick.org.uk/',
+    });
+
+    const beforeDelete = await service.getTrip({ tripId: created.trip.id });
+    if (!beforeDelete.ok) throw new Error('Expected trip load to pass.');
+
+    const result = await service.deleteStopLink({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      linkId: beforeDelete.trip.stops[0].research.links[0].id,
+    });
+
+    expect(result.ok).toBe(true);
+    const afterDelete = await service.getTrip({ tripId: created.trip.id });
+    expect(afterDelete.ok && afterDelete.trip.stops[0].research.links).toMatchObject([
+      {
+        url: 'https://www.visitalnwick.org.uk/',
+        sortOrder: 0,
+      },
+    ]);
+  });
+
+  it('creates and updates an activity with visible details', async () => {
+    const { service } = createHarness();
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Durness', place: { coordinates: { lat: 58.5689, lng: -4.7454 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    const activityResult = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Smoo Cave', place: { coordinates: { lat: 58.5634, lng: -4.7212 } } },
+    });
+
+    expect(activityResult.ok).toBe(true);
+    if (!activityResult.ok) return;
+    const updateResult = await service.updateActivity({
+      tripId: created.trip.id,
+      activityId: activityResult.activity.id,
+      patch: {
+        description: 'Sea cave near Durness.',
+        notes: 'Visit before driving to Shore.',
+        tags: ['outdoors'],
       },
     });
-    expect(addStopLink).toEqual({
-      ok: false,
-      error: {
-        code: 'COMMAND_NOT_IMPLEMENTED',
-        message: 'Link commands land in Task 5.',
-      },
+
+    expect(updateResult.ok).toBe(true);
+    if (!updateResult.ok) return;
+    expect(updateResult.activity).toMatchObject({
+      title: 'Smoo Cave',
+      description: 'Sea cave near Durness.',
+      notes: 'Visit before driving to Shore.',
+      tags: ['outdoors'],
     });
+  });
+
+  it('lists, reorders, and deletes activities under one stop', async () => {
+    const { service } = createHarness();
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Durness', place: { coordinates: { lat: 58.5689, lng: -4.7454 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    const first = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Smoo Cave' },
+    });
+    const second = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Balnakeil Beach' },
+    });
+    if (!first.ok || !second.ok) throw new Error('Expected activity creation to pass.');
+
+    const listed = await service.listActivities({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+    });
+    expect(listed.ok && listed.activities.map((activity) => activity.title)).toEqual([
+      'Smoo Cave',
+      'Balnakeil Beach',
+    ]);
+
+    const reordered = await service.reorderActivities({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activityIds: [second.activity.id, first.activity.id],
+    });
+    expect(reordered.ok && reordered.activities.map((activity) => activity.title)).toEqual([
+      'Balnakeil Beach',
+      'Smoo Cave',
+    ]);
+    expect(reordered.ok && reordered.activities.map((activity) => activity.order)).toEqual([0, 1]);
+
+    const deleted = await service.deleteActivity(
+      { tripId: created.trip.id, activityId: first.activity.id },
+      { yes: true },
+    );
+    expect(deleted.ok).toBe(true);
+
+    const afterDelete = await service.listActivities({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+    });
+    expect(afterDelete.ok && afterDelete.activities.map((activity) => activity.title)).toEqual([
+      'Balnakeil Beach',
+    ]);
+  });
+
+  it('adds and deletes activity links with stable ordering', async () => {
+    const { service } = createHarness();
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Durness', place: { coordinates: { lat: 58.5689, lng: -4.7454 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    const activity = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Smoo Cave' },
+    });
+    if (!activity.ok) throw new Error('Expected activity creation to pass.');
+
+    const firstLink = await service.addActivityLink({
+      tripId: created.trip.id,
+      activityId: activity.activity.id,
+      url: 'https://www.visitscotland.com/info/see-do/smoo-cave-p245811',
+    });
+    const secondLink = await service.addActivityLink({
+      tripId: created.trip.id,
+      activityId: activity.activity.id,
+      url: 'https://en.wikipedia.org/wiki/Smoo_Cave',
+    });
+
+    expect(firstLink.ok).toBe(true);
+    expect(secondLink.ok).toBe(true);
+
+    const tripWithActivities = await service.getTrip({
+      tripId: created.trip.id,
+      includeActivities: true,
+    });
+    if (!tripWithActivities.ok) throw new Error('Expected trip load to pass.');
+    const links = tripWithActivities.trip.activitiesByStopId?.[created.stops[0].id]?.[0]?.links ?? [];
+
+    const deleted = await service.deleteActivityLink({
+      tripId: created.trip.id,
+      activityId: activity.activity.id,
+      linkId: links[0].id,
+    });
+
+    expect(deleted.ok).toBe(true);
+    const afterDelete = await service.getTrip({
+      tripId: created.trip.id,
+      includeActivities: true,
+    });
+    expect(afterDelete.ok && afterDelete.trip.activitiesByStopId?.[created.stops[0].id]?.[0]?.links).toMatchObject([
+      {
+        url: 'https://en.wikipedia.org/wiki/Smoo_Cave',
+        sortOrder: 0,
+      },
+    ]);
   });
 });

@@ -1,5 +1,6 @@
+import { createActivity as createDomainActivity, reorderActivities as reorderActivityModels, updateActivity as updateDomainActivity } from '../domain/activities';
 import { createDestination, updateDestination } from '../domain/destinations';
-import { sortResearchLinks } from '../domain/researchLinks';
+import { createFallbackResearchLink, reorderResearchLinks, sortResearchLinks } from '../domain/researchLinks';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
@@ -17,8 +18,11 @@ import type {
 } from './types';
 import {
   TripCommandValidationError,
+  validateActivityDraft,
+  validateActivityPatch,
   validateStopDraft,
   validateStopPatch,
+  validateUrlInput,
 } from './validation';
 
 export type CommandOptions = {
@@ -176,6 +180,45 @@ async function resolveStopLocation(
     coordinates: draft.place.coordinates,
     location: undefined,
   };
+}
+
+function fallbackActivityLocation(
+  title: string,
+  coordinates: NonNullable<NonNullable<Activity['location']>['coordinates']>,
+): NonNullable<Activity['location']> {
+  return {
+    name: title,
+    address: 'TBC',
+    coordinates,
+    sourceProvider: 'manual',
+  };
+}
+
+async function resolveActivityLocation(
+  draft: Pick<Activity, 'title'> & { place: NonNullable<import('./types').ActivityDraft['place']> },
+  dependencies: TripDataServiceDependencies,
+  path: string,
+) {
+  if (dependencies.resolvePlace) {
+    const resolved = await dependencies.resolvePlace({
+      place: draft.place,
+      profile: 'activity',
+      fallbackName: draft.title,
+    });
+
+    return resolved.activityLocation
+      ?? (resolved.coordinates ? fallbackActivityLocation(draft.title, resolved.coordinates) : undefined);
+  }
+
+  if (!draft.place.coordinates) {
+    throw new TripCommandValidationError(
+      'PLACE_RESOLVER_REQUIRED',
+      'A place resolver is required when coordinates are omitted.',
+      path,
+    );
+  }
+
+  return fallbackActivityLocation(draft.title, draft.place.coordinates);
 }
 
 async function destinationFromDraft(
@@ -366,6 +409,16 @@ function notFoundResult<T>(entity: 'trip' | 'stop', id: string): CommandResult<T
   );
 }
 
+async function findActivity(repository: TripRepository, activityId: string) {
+  const destinations = await repository.listDestinations();
+  for (const destination of destinations) {
+    const activities = await repository.listActivities(destination.id);
+    const activity = activities.find((candidate) => candidate.id === activityId);
+    if (activity) return { destination, activity };
+  }
+  throw new Error('Activity not found.');
+}
+
 async function withCommandHandling<T>(execute: () => Promise<CommandResult<T>>): Promise<CommandResult<T>> {
   try {
     return await execute();
@@ -380,6 +433,10 @@ async function withCommandHandling<T>(execute: () => Promise<CommandResult<T>>):
 
     if (error instanceof Error && error.message === 'Stop not found.') {
       return commandError('STOP_NOT_FOUND', 'Stop not found.');
+    }
+
+    if (error instanceof Error && error.message === 'Activity not found.') {
+      return commandError('ACTIVITY_NOT_FOUND', 'Activity not found.');
     }
 
     return genericErrorResult(error);
@@ -853,40 +910,301 @@ export function createTripDataService(
       });
     },
 
-    async listActivities() {
-      return unsupported('Activity commands land in Task 5.');
+    async listActivities(input) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const stopId = trimRequiredString(input.stopId, 'Stop id', 'stopId');
+        const repository = dependencies.createTripRepository(tripId);
+        const stop = (await repository.listDestinations()).find((candidate) => candidate.id === stopId);
+        if (!stop) return notFoundResult('stop', stopId);
+
+        const activities = await repository.listActivities(stopId);
+        return commandSuccess(
+          `Loaded ${activities.length} activit${activities.length === 1 ? 'y' : 'ies'} for ${stop.name}.`,
+          { activities },
+        );
+      });
     },
 
-    async createActivity() {
-      return unsupported('Activity commands land in Task 5.');
+    async createActivity(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const stopId = trimRequiredString(input.stopId, 'Stop id', 'stopId');
+        const repository = dependencies.createTripRepository(tripId);
+        const stop = (await repository.listDestinations()).find((candidate) => candidate.id === stopId);
+        if (!stop) return notFoundResult('stop', stopId);
+
+        const draft = validateActivityDraft(input.activity, 'activity');
+        const location = draft.place
+          ? await resolveActivityLocation({ title: draft.title, place: draft.place }, dependencies, 'activity.place')
+          : undefined;
+        const changed = emptyChanged();
+        changed.activitiesAdded.push(draft.title);
+
+        if (options?.dryRun) {
+          return commandSuccess(`Would create activity ${draft.title}.`, {
+            activity: createDomainActivity({
+              destinationId: stopId,
+              title: draft.title,
+              order: (await repository.listActivities(stopId)).length,
+              ...(location ? { location } : {}),
+            }),
+            changed,
+          });
+        }
+
+        const activity = await repository.createActivity({
+          destinationId: stopId,
+          title: draft.title,
+          ...(location ? { location } : {}),
+        });
+
+        return commandSuccess(`Created activity ${activity.title}.`, {
+          activity,
+          changed,
+        });
+      });
     },
 
-    async updateActivity() {
-      return unsupported('Activity commands land in Task 5.');
+    async updateActivity(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const activityId = trimRequiredString(input.activityId, 'Activity id', 'activityId');
+        const repository = dependencies.createTripRepository(tripId);
+        const { activity } = await findActivity(repository, activityId);
+        const patch = validateActivityPatch(input.patch, 'patch');
+
+        const updatePatch: Partial<Omit<Activity, 'id' | 'destinationId' | 'createdAt' | 'updatedAt'>> = {};
+        if (patch.title !== undefined) updatePatch.title = patch.title;
+        if (patch.description !== undefined) updatePatch.description = patch.description;
+        if (patch.notes !== undefined) updatePatch.notes = patch.notes;
+        if (patch.tags !== undefined) updatePatch.tags = patch.tags;
+        if (patch.place !== undefined) {
+          updatePatch.location = await resolveActivityLocation(
+            {
+              title: patch.title ?? activity.title,
+              place: patch.place,
+            },
+            dependencies,
+            'patch.place',
+          );
+        }
+
+        const changed = emptyChanged();
+        changed.activitiesUpdated.push(patch.title ?? activity.title);
+
+        if (options?.dryRun) {
+          return commandSuccess(`Would update activity ${activity.title}.`, {
+            activity: updateDomainActivity(activity, updatePatch),
+            changed,
+          });
+        }
+
+        const updatedActivity = await repository.updateActivity(activityId, updatePatch);
+        return commandSuccess(`Updated activity ${updatedActivity.title}.`, {
+          activity: updatedActivity,
+          changed,
+        });
+      });
     },
 
-    async deleteActivity() {
-      return unsupported('Activity commands land in Task 5.');
+    async deleteActivity(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const activityId = trimRequiredString(input.activityId, 'Activity id', 'activityId');
+        const repository = dependencies.createTripRepository(tripId);
+        const { activity } = await findActivity(repository, activityId);
+        const confirmation = ensureConfirmed(
+          options,
+          `Deleting activity ${activity.title} requires --yes or --dry-run.`,
+        );
+        if (confirmation) return confirmation;
+
+        const changed = emptyChanged();
+        changed.activitiesDeleted.push(activity.title);
+
+        if (options?.dryRun) {
+          return commandSuccess(`Would delete activity ${activity.title}.`, { changed });
+        }
+
+        await repository.deleteActivity(activityId);
+        return commandSuccess(`Deleted activity ${activity.title}.`, { changed });
+      });
     },
 
-    async reorderActivities() {
-      return unsupported('Activity commands land in Task 5.');
+    async reorderActivities(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const stopId = trimRequiredString(input.stopId, 'Stop id', 'stopId');
+        const repository = dependencies.createTripRepository(tripId);
+        const stop = (await repository.listDestinations()).find((candidate) => candidate.id === stopId);
+        if (!stop) return notFoundResult('stop', stopId);
+        const activities = await repository.listActivities(stopId);
+        const activitiesById = new Map(activities.map((activity) => [activity.id, activity]));
+
+        for (const [index, activityId] of input.activityIds.entries()) {
+          const normalizedActivityId = trimRequiredString(activityId, `activityIds[${index}]`, `activityIds[${index}]`);
+          if (!activitiesById.has(normalizedActivityId)) {
+            return commandError('ACTIVITY_NOT_FOUND', `Activity '${normalizedActivityId}' was not found.`, `activityIds[${index}]`);
+          }
+        }
+
+        const changed = emptyChanged();
+
+        if (options?.dryRun) {
+          const reordered = reorderActivityModels(activities, input.activityIds);
+          changed.activitiesUpdated.push(...reordered.map((activity) => activity.title));
+          return commandSuccess(`Would reorder activities for ${stop.name}.`, {
+            activities: reordered,
+            changed,
+          });
+        }
+
+        const reordered = await repository.reorderActivities(stopId, input.activityIds);
+        changed.activitiesUpdated.push(...reordered.map((activity) => activity.title));
+        return commandSuccess(`Reordered activities for ${stop.name}.`, {
+          activities: reordered,
+          changed,
+        });
+      });
     },
 
-    async addStopLink() {
-      return unsupported('Link commands land in Task 5.');
+    async addStopLink(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const stopId = trimRequiredString(input.stopId, 'Stop id', 'stopId');
+        const url = validateUrlInput(input.url, 'url');
+        const repository = dependencies.createTripRepository(tripId);
+        const stop = normalizeDestinationLinks(
+          (await repository.listDestinations()).find((candidate) => candidate.id === stopId)
+          ?? (() => {
+            throw new Error('Stop not found.');
+          })(),
+        );
+        const nextLink = await (dependencies.enrichLink ?? (async (linkUrl, sortOrder) => createFallbackResearchLink(linkUrl, { sortOrder })))(
+          url,
+          stop.research.links.length,
+        );
+        const nextStop = normalizeDestinationLinks(
+          updateDestination(stop, {
+            research: {
+              ...stop.research,
+              links: [...stop.research.links, nextLink],
+            },
+          }),
+        );
+        const changed = emptyChanged();
+        changed.linksAdded.push(nextLink.url);
+
+        if (options?.dryRun) {
+          return commandSuccess(`Would add link to ${stop.name}.`, { changed });
+        }
+
+        await repository.saveDestination(nextStop);
+        return commandSuccess(`Added link to ${stop.name}.`, { changed });
+      });
     },
 
-    async deleteStopLink() {
-      return unsupported('Link commands land in Task 5.');
+    async deleteStopLink(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const stopId = trimRequiredString(input.stopId, 'Stop id', 'stopId');
+        const linkId = trimRequiredString(input.linkId, 'Link id', 'linkId');
+        const repository = dependencies.createTripRepository(tripId);
+        const stop = normalizeDestinationLinks(
+          (await repository.listDestinations()).find((candidate) => candidate.id === stopId)
+          ?? (() => {
+            throw new Error('Stop not found.');
+          })(),
+        );
+        const removedLink = stop.research.links.find((link) => link.id === linkId);
+        if (!removedLink) {
+          return commandError('LINK_NOT_FOUND', `Link '${linkId}' was not found.`, 'linkId');
+        }
+
+        const nextLinks = reorderResearchLinks(
+          stop.research.links.filter((link) => link.id !== linkId),
+          stop.research.links.filter((link) => link.id !== linkId).map((link) => link.id),
+        );
+        const nextStop = normalizeDestinationLinks(
+          updateDestination(stop, {
+            research: {
+              ...stop.research,
+              links: nextLinks,
+            },
+          }),
+        );
+        const changed = emptyChanged();
+        changed.linksDeleted.push(removedLink.url);
+
+        if (options?.dryRun) {
+          return commandSuccess(`Would delete link from ${stop.name}.`, { changed });
+        }
+
+        await repository.saveDestination(nextStop);
+        return commandSuccess(`Deleted link from ${stop.name}.`, { changed });
+      });
     },
 
-    async addActivityLink() {
-      return unsupported('Link commands land in Task 5.');
+    async addActivityLink(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const activityId = trimRequiredString(input.activityId, 'Activity id', 'activityId');
+        const url = validateUrlInput(input.url, 'url');
+        const repository = dependencies.createTripRepository(tripId);
+        const { activity } = await findActivity(repository, activityId);
+        const nextLink = await (dependencies.enrichLink ?? (async (linkUrl, sortOrder) => createFallbackResearchLink(linkUrl, { sortOrder })))(
+          url,
+          activity.links.length,
+        );
+        const nextLinks = sortResearchLinks([...activity.links, nextLink]);
+        const changed = emptyChanged();
+        changed.linksAdded.push(nextLink.url);
+
+        if (options?.dryRun) {
+          return commandSuccess(`Would add link to activity ${activity.title}.`, {
+            changed,
+          });
+        }
+
+        await repository.updateActivity(activityId, { links: nextLinks });
+        return commandSuccess(`Added link to activity ${activity.title}.`, { changed });
+      });
     },
 
-    async deleteActivityLink() {
-      return unsupported('Link commands land in Task 5.');
+    async deleteActivityLink(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        await findTripSummary(dependencies.directory, tripId);
+        const activityId = trimRequiredString(input.activityId, 'Activity id', 'activityId');
+        const linkId = trimRequiredString(input.linkId, 'Link id', 'linkId');
+        const repository = dependencies.createTripRepository(tripId);
+        const { activity } = await findActivity(repository, activityId);
+        const removedLink = activity.links.find((link) => link.id === linkId);
+        if (!removedLink) {
+          return commandError('LINK_NOT_FOUND', `Link '${linkId}' was not found.`, 'linkId');
+        }
+
+        const remainingLinks = activity.links.filter((link) => link.id !== linkId);
+        const nextLinks = reorderResearchLinks(remainingLinks, remainingLinks.map((link) => link.id));
+        const changed = emptyChanged();
+        changed.linksDeleted.push(removedLink.url);
+
+        if (options?.dryRun) {
+          return commandSuccess(`Would delete link from activity ${activity.title}.`, { changed });
+        }
+
+        await repository.updateActivity(activityId, { links: nextLinks });
+        return commandSuccess(`Deleted link from activity ${activity.title}.`, { changed });
+      });
     },
   };
 }
