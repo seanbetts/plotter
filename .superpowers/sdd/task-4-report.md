@@ -73,3 +73,17 @@
 - Commit should include only:
   - `src/tripCommands/tripDataService.ts`
   - `src/tripCommands/tripDataService.test.ts`
+
+### Review Fix Addendum
+- Addressed reviewer feedback that `createTrip` could fall through to a generic `COMMAND_FAILED` when `stops` was malformed.
+- Added explicit `stops` array validation in `createTrip`, matching the existing `replaceStops` guard and returning `INVALID_STOPS` with path `stops`.
+- Added a focused regression test for `createTrip({ name: 'NC500', stops: {} as never })` that asserts:
+  - `ok: false`
+  - structured validation error output
+  - no trip creation side effect
+
+### Verification
+- `npm test -- src/tripCommands/tripDataService.test.ts`
+  - passed (`1` file, `11` tests)
+- `npm test`
+  - passed (`47` files, `560` tests)

@@ -161,6 +161,21 @@ function createHarness() {
 }
 
 describe('TripDataService trips and stops', () => {
+  it('rejects malformed createTrip stops input with a validation error', async () => {
+    const { service, trips } = createHarness();
+
+    const result = await service.createTrip({
+      name: 'NC500',
+      stops: {} as never,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('INVALID_STOPS');
+    expect(result.error.message).toBe('stops must be an array.');
+    expect(trips).toHaveLength(0);
+  });
+
   it('creates a trip with ordered overnight stops and derived route legs', async () => {
     const { service, calculateRoute } = createHarness();
 

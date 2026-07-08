@@ -436,6 +436,10 @@ export function createTripDataService(
     async createTrip(input, options) {
       return withCommandHandling(async () => {
         const name = trimRequiredString(input.name, 'Trip name', 'name');
+        if (input.stops !== undefined && !Array.isArray(input.stops)) {
+          throw new TripCommandValidationError('INVALID_STOPS', 'stops must be an array.', 'stops');
+        }
+
         const stopDrafts = (input.stops ?? []).map((stop, index) => validateStopDraft(stop, `stops[${index}]`));
         const stops = await Promise.all(
           stopDrafts.map((stopDraft, index) => destinationFromDraft(stopDraft, index, dependencies)),
