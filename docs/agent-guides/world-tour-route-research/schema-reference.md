@@ -67,7 +67,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `immersive`
 - `exhaustive`
 
-`phaseStatus`:
+`RoutePhase.status`:
 
 - `researchable`
 - `blocked`
@@ -161,6 +161,7 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "score": 4,
   "suggestedStay": "1 night",
   "tags": ["practical-route", "resupply", "buffer-stop"],
+  "placeQuery": "Alta, Finnmark, Norway",
   "coordinates": { "lat": 69.9689, "lng": 23.2716 },
   "whyItMatters": "Useful Arctic base before Honningsvag and Nordkapp.",
   "vehicleConfidence": "good",
@@ -180,6 +181,7 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "priority": "must-do",
   "score": 5,
   "tags": ["viewpoint", "seasonal-access"],
+  "placeQuery": "North Cape Plateau, Nordkapp, Norway",
   "coordinates": { "lat": 71.1695, "lng": 25.783 },
   "whyItMatters": "Symbolic destination at the end of the route.",
   "vehicleConfidence": "check",
@@ -254,6 +256,7 @@ Do not include these values in a route research plan as app-writeable data:
 - Stop sort indexes, timestamps, sync metadata, row IDs, or direct Supabase table shapes.
 - Link previews, downloaded media, image uploads, or local file references.
 - Final activity/stop IDs or ownership metadata.
+- App-resolved address fields or provider location metadata. Use `placeQuery` for source address or venue text that should help the app resolve a place.
 
 If one of these details matters to the recommendation, describe the caveat in `notes`, `logisticsGates`, `openQuestions`, or `implementationNotes` instead of treating it as data for the trip CLI to write.
 
@@ -261,6 +264,8 @@ If one of these details matters to the recommendation, describe the caveat in `n
 
 - Approved `CandidateStop` records become stop drafts for the trip CLI.
 - Approved `CandidateActivity` records become activities under the nearest approved stop.
+- Approved `placeQuery` values become `place.query` for both stop and activity writes.
+- Approved `coordinates` values become `place.coordinates` for both stop and activity writes.
 - Approved candidate `tags` become stop or activity tags.
 - Candidate and activity `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
