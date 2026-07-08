@@ -1,0 +1,187 @@
+# Route Research Schema Reference
+
+Use this schema for route research plans. Markdown tables are acceptable for human-facing output, but field names should stay stable so another agent can implement the approved plan through the trip data CLI.
+
+## RouteResearchPlan
+
+```json
+{
+  "routeName": "Home to Nordkapp",
+  "start": "Balcombe, West Sussex, UK",
+  "end": "Nordkapp, Norway",
+  "routeShape": "ambiguous-point-to-point",
+  "assumptions": [],
+  "corridors": [],
+  "recommendedCorridorId": "hybrid-sweden-northern-norway",
+  "scopeDecision": null,
+  "phases": [],
+  "logisticsGates": [],
+  "stops": [],
+  "openQuestions": [],
+  "implementationNotes": []
+}
+```
+
+## Allowed Values
+
+`routeShape`:
+
+- `ambiguous-point-to-point`
+- `official-scenic-route`
+- `mega-corridor`
+- `region-loop`
+- `open-ended-route-family`
+- `regional-corridor`
+
+`priority`:
+
+- `must-do`
+- `strong`
+- `optional`
+- `practical`
+
+`classification`:
+
+- `anchor`
+- `experience`
+- `scenic-transit`
+- `practical`
+- `buffer`
+
+`vehicleConfidence`:
+
+- `good`
+- `check`
+- `likely-difficult`
+
+`evidenceLevel`:
+
+- `high`
+- `medium`
+- `low`
+
+`density`:
+
+- `compressed`
+- `immersive`
+- `exhaustive`
+
+## CorridorOption
+
+```json
+{
+  "id": "hybrid-sweden-northern-norway",
+  "name": "Hybrid Sweden northbound with scenic northern Norway",
+  "summary": "Efficient southern transit, then scenic Arctic Norway.",
+  "strengths": ["Fewer ferry dependencies"],
+  "tradeoffs": ["Less fjord-heavy than the coast route"],
+  "evidenceLevel": "medium",
+  "sources": []
+}
+```
+
+## ScopeDecision
+
+```json
+{
+  "coverage": "full-route",
+  "direction": "north-to-south",
+  "density": "immersive",
+  "rationale": "The canonical route is already defined, so stop selection should choose base stops along that route.",
+  "sectionOptions": []
+}
+```
+
+## RoutePhase
+
+```json
+{
+  "id": "central-america",
+  "name": "Central America",
+  "summary": "Guatemala to Panama, with border and security validation before final routing.",
+  "start": "Guatemala",
+  "end": "Panama City, Panama",
+  "routeShape": "regional-corridor",
+  "density": "immersive",
+  "corridorOptions": [],
+  "logisticsGateIds": ["darien-gap-vehicle-shipping"],
+  "candidateStops": [],
+  "openQuestions": []
+}
+```
+
+## LogisticsGate
+
+```json
+{
+  "id": "darien-gap-vehicle-shipping",
+  "name": "Darien Gap vehicle shipping",
+  "type": "route-discontinuity",
+  "between": ["Panama", "Colombia"],
+  "impact": "Vehicle travel is not continuous; plan vehicle shipping and passenger transfer separately.",
+  "requiredDecision": "Choose shipping method, ports, agent, and timing before implementing this phase.",
+  "vehicleConfidence": "check",
+  "evidenceLevel": "high",
+  "sources": []
+}
+```
+
+## CandidateStop
+
+```json
+{
+  "name": "Alta",
+  "countryRegion": "Finnmark, Norway",
+  "stopType": ["town", "practical", "buffer"],
+  "classification": ["practical", "buffer"],
+  "priority": "strong",
+  "score": 4,
+  "suggestedStay": "1 night",
+  "coordinates": { "lat": 69.9689, "lng": 23.2716 },
+  "whyItMatters": "Useful Arctic base before Honningsvag and Nordkapp.",
+  "vehicleConfidence": "good",
+  "evidenceLevel": "medium",
+  "notes": "Validate current road and weather conditions close to travel.",
+  "sources": [],
+  "activities": []
+}
+```
+
+## CandidateActivity
+
+```json
+{
+  "title": "North Cape Plateau",
+  "activityType": ["landmark", "viewpoint"],
+  "priority": "must-do",
+  "score": 5,
+  "coordinates": { "lat": 71.1695, "lng": 25.783 },
+  "whyItMatters": "Symbolic destination at the end of the route.",
+  "vehicleConfidence": "check",
+  "evidenceLevel": "high",
+  "notes": "Winter access may require convoy travel on the final E69 section.",
+  "sources": []
+}
+```
+
+## SourceEvidence
+
+```json
+{
+  "title": "Visit Nordkapp practical information",
+  "url": "https://www.nordkapp.no/practical-info/",
+  "sourceType": "official",
+  "usedFor": ["seasonal access", "vehicle confidence"],
+  "retrievedAt": "2026-07-08",
+  "confidence": "high"
+}
+```
+
+## Implementation Mapping
+
+- Approved `CandidateStop` records become stop drafts for the trip CLI.
+- Approved `CandidateActivity` records become activities under the nearest approved stop.
+- Candidate and activity `sources.url` values become stop or activity links.
+- Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
+- Coordinates are passed only when sourced.
+- Route geometry is never authored.
