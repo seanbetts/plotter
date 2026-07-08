@@ -10,6 +10,8 @@ The trip CLI lets agents and local scripts read and write Supabase-backed world-
 4. Wrapper authors should dry-run agent-authored writes before applying them.
 5. Use `--yes` only after the user has approved the change.
 6. The open app refreshes automatically through Supabase realtime after CLI writes.
+7. The Node CLI reuses a local anonymous Supabase session so repeated commands do not create a new anonymous user each time.
+8. Use `--summary` for large dry-runs when full route geometry would make the JSON hard to review.
 
 ## Command List
 
@@ -46,6 +48,8 @@ npm run trip -- delete-stop-link --trip-id <id> --stop-id <id> --link-id <id>
 
 Link commands are flag-based only. `add-stop-link` and `add-activity-link` take `--url`; delete commands take `--link-id`. They do not accept JSON input files.
 
+Adding a link is idempotent. If the parent stop or activity already has the same normalized URL, or link preview enrichment canonicalizes the requested URL to an existing stored URL, the command returns success without adding a duplicate.
+
 ### Activities
 
 ```bash
@@ -65,7 +69,7 @@ npm run trip -- delete-activity-link --trip-id <id> --activity-id <id> --link-id
 
 ## Output Contract
 
-Commands print JSON to stdout by default. Pass `--pretty` for formatted output.
+Commands print JSON to stdout by default. Pass `--pretty` for formatted output. Pass `--summary` to return `ok`, `summary`, `changed`, and entity counts without full stop, activity, or route geometry payloads.
 
 Successful responses use a shared envelope:
 
@@ -213,6 +217,7 @@ When turning prose, notes, or booking material into trip commands:
 
 - `--dry-run` is supported on every write command, including create, update, link, delete, and reorder paths.
 - Prefer dry-run first for any agent-authored write before applying it.
+- Add `--summary` to dry-runs with many stops or route legs so the preview stays readable.
 - `--yes` confirms the write path for destructive commands.
 - `replace-stops`, `delete`, `delete-stop`, `delete-activity`, and bulk reorder commands should default to preview-first behavior in wrappers.
 - A wrapper should present the structured command and the dry-run result before applying a user-approved write.
@@ -239,12 +244,16 @@ A future Codex skill wrapper should document:
 - the rule to manipulate stops and let the service derive routes
 - the explicit link commands for stop and activity research URLs
 - that image automation is not part of v1
+- that repeated CLI calls reuse the same local Supabase anonymous session, but large batches should still prefer one long-running process or small command groups
+- that `--summary` is available for compact previews and link-add commands are idempotent
 
 The wrapper should prefer narrow commands such as `insert-stop`, `update-stop`, `reorder-stops`, `create-activity`, `update-activity`, and link add/delete commands unless the user explicitly asks for a broad replacement.
 
 ## Environment
 
 The CLI reads `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`, then creates or reuses an anonymous Supabase session with the publishable key.
+
+The Node CLI stores its reusable anonymous session in `~/.world-tour/trip-cli-session-<supabase-host>.json` with file mode `0600`. If the cached session cannot be restored, the CLI clears it and creates a fresh anonymous session.
 
 Optional environment values used by the command layer:
 

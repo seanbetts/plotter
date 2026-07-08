@@ -1,7 +1,7 @@
 import { createActivity as createDomainActivity, reorderActivities as reorderActivityModels, updateActivity as updateDomainActivity } from '../domain/activities';
 import { createDestination, updateDestination } from '../domain/destinations';
-import { createFallbackResearchLink, reorderResearchLinks, sortResearchLinks } from '../domain/researchLinks';
-import type { Activity, Destination, RouteLeg } from '../domain/types';
+import { createFallbackResearchLink, normalizeResearchLinkUrl, reorderResearchLinks, sortResearchLinks } from '../domain/researchLinks';
+import type { Activity, Destination, ResearchLink, RouteLeg } from '../domain/types';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import {
@@ -164,6 +164,15 @@ function normalizeDestinationLinks(destination: Destination): Destination {
       notes: destination.research.notes ?? '',
     },
   };
+}
+
+function comparableLinkUrl(url: string) {
+  return normalizeResearchLinkUrl(url).replace(/\/$/, '');
+}
+
+function hasResearchLinkUrl(links: ResearchLink[], url: string) {
+  const candidateUrl = comparableLinkUrl(url);
+  return links.some((link) => comparableLinkUrl(link.url) === candidateUrl);
 }
 
 function normalizeOrderedDestinations(destinations: Destination[]) {
@@ -1132,10 +1141,19 @@ export function createTripDataService(
             throw new Error('Stop not found.');
           })(),
         );
+        const changed = emptyChanged();
+        if (hasResearchLinkUrl(stop.research.links, url)) {
+          return commandSuccess(`Link already exists on ${stop.name}.`, { changed });
+        }
+
         const nextLink = await (dependencies.enrichLink ?? (async (linkUrl, sortOrder) => createFallbackResearchLink(linkUrl, { sortOrder })))(
           url,
           stop.research.links.length,
         );
+        if (hasResearchLinkUrl(stop.research.links, nextLink.url)) {
+          return commandSuccess(`Link already exists on ${stop.name}.`, { changed });
+        }
+
         const nextStop = normalizeDestinationLinks(
           updateDestination(stop, {
             research: {
@@ -1144,7 +1162,6 @@ export function createTripDataService(
             },
           }),
         );
-        const changed = emptyChanged();
         changed.linksAdded.push(nextLink.url);
 
         if (options?.dryRun) {
@@ -1206,12 +1223,20 @@ export function createTripDataService(
         const url = validateUrlInput(input.url, 'url');
         const repository = dependencies.createTripRepository(tripId);
         const { activity } = await findActivity(repository, activityId);
+        const changed = emptyChanged();
+        if (hasResearchLinkUrl(activity.links, url)) {
+          return commandSuccess(`Link already exists on activity ${activity.title}.`, { changed });
+        }
+
         const nextLink = await (dependencies.enrichLink ?? (async (linkUrl, sortOrder) => createFallbackResearchLink(linkUrl, { sortOrder })))(
           url,
           activity.links.length,
         );
+        if (hasResearchLinkUrl(activity.links, nextLink.url)) {
+          return commandSuccess(`Link already exists on activity ${activity.title}.`, { changed });
+        }
+
         const nextLinks = sortResearchLinks([...activity.links, nextLink]);
-        const changed = emptyChanged();
         changed.linksAdded.push(nextLink.url);
 
         if (options?.dryRun) {

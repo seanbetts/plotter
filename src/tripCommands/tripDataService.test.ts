@@ -576,6 +576,39 @@ describe('TripDataService links and activities', () => {
     });
   });
 
+  it('does not add duplicate stop links after enrichment canonicalizes the URL', async () => {
+    const enrichLink = vi.fn(async (_url: string, sortOrder: number) => ({
+      id: `link-${sortOrder}`,
+      title: 'Apple Maps',
+      url: 'https://maps.apple.com/place?coordinate=55.415557%2C-1.705992&name=Alnwick%20Castle',
+      domain: 'maps.apple.com',
+      sortOrder,
+    }));
+    const { service } = createHarness({ enrichLink });
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Alnwick', place: { coordinates: { lat: 55.426423, lng: -1.60645 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    await service.addStopLink({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      url: 'https://maps.apple.com/?q=Alnwick%20Castle',
+    });
+    const duplicate = await service.addStopLink({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      url: 'https://maps.apple.com/?q=Alnwick%20Castle',
+    });
+
+    expect(duplicate.ok).toBe(true);
+    expect(duplicate.ok && duplicate.summary).toContain('already exists');
+    expect(duplicate.ok && duplicate.changed.linksAdded).toEqual([]);
+    const trip = await service.getTrip({ tripId: created.trip.id, includeLinks: true });
+    expect(trip.ok && trip.trip.stops[0].research.links).toHaveLength(1);
+  });
+
   it('omits stop and activity links from getTrip unless includeLinks is true', async () => {
     const { service } = createHarness();
     const created = await service.createTrip({
@@ -892,5 +925,49 @@ describe('TripDataService links and activities', () => {
         sortOrder: 0,
       },
     ]);
+  });
+
+  it('does not add duplicate activity links after enrichment canonicalizes the URL', async () => {
+    const enrichLink = vi.fn(async (_url: string, sortOrder: number) => ({
+      id: `link-${sortOrder}`,
+      title: 'Smoo Cave',
+      url: 'https://maps.apple.com/place?coordinate=58.5634%2C-4.7212&name=Smoo%20Cave',
+      domain: 'maps.apple.com',
+      sortOrder,
+    }));
+    const { service } = createHarness({ enrichLink });
+    const created = await service.createTrip({
+      name: 'NC500',
+      stops: [{ name: 'Durness', place: { coordinates: { lat: 58.5689, lng: -4.7454 } } }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    const activity = await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: { title: 'Smoo Cave' },
+    });
+    if (!activity.ok) throw new Error('Expected activity creation to pass.');
+
+    await service.addActivityLink({
+      tripId: created.trip.id,
+      activityId: activity.activity.id,
+      url: 'https://maps.apple.com/?q=Smoo%20Cave',
+    });
+    const duplicate = await service.addActivityLink({
+      tripId: created.trip.id,
+      activityId: activity.activity.id,
+      url: 'https://maps.apple.com/?q=Smoo%20Cave',
+    });
+
+    expect(duplicate.ok).toBe(true);
+    expect(duplicate.ok && duplicate.summary).toContain('already exists');
+    expect(duplicate.ok && duplicate.changed.linksAdded).toEqual([]);
+    const trip = await service.getTrip({
+      tripId: created.trip.id,
+      includeActivities: true,
+      includeLinks: true,
+    });
+    expect(trip.ok && trip.trip.activitiesByStopId?.[created.stops[0].id]?.[0]?.links).toHaveLength(1);
   });
 });

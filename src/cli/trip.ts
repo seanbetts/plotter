@@ -33,6 +33,10 @@ type CliResult = {
 
 type JsonRecord = Record<string, unknown>;
 
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function parseTripCliArgs(argv: string[]): ParsedArgs {
   const [command = 'help', ...rest] = argv;
   const flags: Record<string, string | boolean> = {};
@@ -88,6 +92,54 @@ function writeStructuredError(write: (value: string) => void, message: string, c
 
 function errorMessage(caught: unknown) {
   return caught instanceof Error ? caught.message : 'Trip CLI failed.';
+}
+
+function setCount(counts: Record<string, number>, key: string, value: unknown) {
+  if (Array.isArray(value)) {
+    counts[key] = value.length;
+  }
+}
+
+function summarizeActivitiesByStopId(counts: Record<string, number>, value: unknown) {
+  if (!isRecord(value)) return;
+
+  counts.activities = Object.values(value).reduce<number>(
+    (total, activities) => total + (Array.isArray(activities) ? activities.length : 0),
+    0,
+  );
+}
+
+function summarizeCommandResult(result: unknown) {
+  if (!isRecord(result) || result.ok !== true) {
+    return result;
+  }
+
+  const summary: JsonRecord = {
+    ok: true,
+    summary: result.summary,
+  };
+
+  if ('changed' in result) {
+    summary.changed = result.changed;
+  }
+
+  const counts: Record<string, number> = {};
+  setCount(counts, 'trips', result.trips);
+  setCount(counts, 'stops', result.stops);
+  setCount(counts, 'routeLegs', result.routeLegs);
+  setCount(counts, 'activities', result.activities);
+
+  if (isRecord(result.trip)) {
+    setCount(counts, 'stops', result.trip.stops);
+    setCount(counts, 'routeLegs', result.trip.routeLegs);
+    summarizeActivitiesByStopId(counts, result.trip.activitiesByStopId);
+  }
+
+  if (Object.keys(counts).length > 0) {
+    summary.counts = counts;
+  }
+
+  return summary;
 }
 
 async function readIdList(
@@ -287,7 +339,8 @@ export async function runTripCli(input: RunTripCliInput) {
         throw new Error(`Unknown trip command '${command}'.`);
     }
 
-    input.write(`${JSON.stringify(result, null, flags.pretty ? 2 : 0)}\n`);
+    const output = flags.summary ? summarizeCommandResult(result) : result;
+    input.write(`${JSON.stringify(output, null, flags.pretty ? 2 : 0)}\n`);
     return typeof result === 'object' && result !== null && 'ok' in result && result.ok === false ? 1 : 0;
   } catch (caught) {
     writeStructuredError(input.writeError, errorMessage(caught));

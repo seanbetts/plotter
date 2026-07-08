@@ -101,6 +101,50 @@ describe('runTripCli', () => {
     expect(writeError).not.toHaveBeenCalled();
   });
 
+  it('prints compact command summaries without large route geometry when requested', async () => {
+    const { service, readFile, write, writeError } = createCliHarness({
+      replaceStops: vi.fn(async () => ({
+        ok: true,
+        summary: 'Would replace stops.',
+        changed: { stopsAdded: ['Alnwick'], routesRecalculated: 1 },
+        stops: [{ id: 'stop-1', name: 'Alnwick' }],
+        routeLegs: [
+          {
+            id: 'leg-1',
+            status: 'ready',
+            geometry: {
+              type: 'LineString',
+              coordinates: [[-1.7, 55.4]],
+            },
+          },
+        ],
+      })),
+    });
+    readFile.mockResolvedValueOnce('[{"name":"Alnwick","place":{"coordinates":{"lat":55.4,"lng":-1.7}}}]');
+
+    const exitCode = await runTripCli({
+      argv: ['replace-stops', '--trip-id', 'trip-1', '--input', '/tmp/stops.json', '--dry-run', '--summary', '--pretty'],
+      service: service as never,
+      readFile,
+      write,
+      writeError,
+    });
+
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(write.mock.calls[0]?.[0] ?? '{}');
+    expect(payload).toEqual({
+      ok: true,
+      summary: 'Would replace stops.',
+      changed: { stopsAdded: ['Alnwick'], routesRecalculated: 1 },
+      counts: {
+        stops: 1,
+        routeLegs: 1,
+      },
+    });
+    expect(write.mock.calls[0]?.[0]).not.toContain('coordinates');
+    expect(writeError).not.toHaveBeenCalled();
+  });
+
   it('routes every supported command to the matching service method with parsed inputs', async () => {
     const { service, readFile, write, writeError } = createCliHarness();
     readFile
