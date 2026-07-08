@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { createTripDataService } from './tripDataService';
 import type { LinkEnricher } from './types';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
@@ -11,7 +11,7 @@ function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
     destinations: Destination[];
     routeLegs: RouteLeg[];
     activities: import('../domain/types').Activity[];
-    reorderActivities: ReturnType<typeof vi.fn>;
+    reorderActivities: Mock<TripRepository['reorderActivities']>;
   }>();
 
   const createTripRepository = (tripId: string): TripRepository => {

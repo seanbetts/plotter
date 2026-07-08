@@ -1,7 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 
-export const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? '';
-export const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? '';
+type RuntimeImportMeta = ImportMeta & {
+  env?: Record<string, string | undefined>;
+};
+
+const runtimeImportMetaEnv = (import.meta as RuntimeImportMeta).env;
+
+function readRuntimeEnv(name: string) {
+  const importMetaValue = runtimeImportMetaEnv?.[name];
+  if (typeof importMetaValue === 'string' && importMetaValue.length > 0) {
+    return importMetaValue;
+  }
+
+  if (typeof process !== 'undefined') {
+    return process.env[name] ?? '';
+  }
+
+  return '';
+}
+
+export const supabaseUrl = readRuntimeEnv('VITE_SUPABASE_URL');
+export const supabasePublishableKey = readRuntimeEnv('VITE_SUPABASE_PUBLISHABLE_KEY');
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabasePublishableKey);
 
