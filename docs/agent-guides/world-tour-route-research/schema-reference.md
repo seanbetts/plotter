@@ -73,6 +73,12 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `blocked`
 - `deferred`
 
+`CorridorOption.status`:
+
+- `researchable`
+- `blocked`
+- `deferred`
+
 `logisticsGate.type`:
 
 - `route-discontinuity`
@@ -89,12 +95,19 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "id": "hybrid-sweden-northern-norway",
   "name": "Hybrid Sweden northbound with scenic northern Norway",
   "summary": "Efficient southern transit, then scenic Arctic Norway.",
+  "status": "researchable",
   "strengths": ["Fewer ferry dependencies"],
   "tradeoffs": ["Less fjord-heavy than the coast route"],
+  "blockers": [],
+  "restartOptions": [],
+  "researchablePhaseIds": ["southern-transit", "arctic-norway"],
+  "requiredDecision": "Choose this as the default corridor before detailed stop selection.",
   "evidenceLevel": "medium",
   "sources": []
 }
 ```
+
+For open-ended geopolitical route families, use `corridors` as a corridor viability matrix before selecting candidate stops. Put border closures, visa constraints, conflict advisories, permit requirements, shipping constraints, and hard seasonal issues in `blockers`; put overfly, shipping, restart, or deferral choices in `restartOptions`.
 
 ## ScopeDecision
 

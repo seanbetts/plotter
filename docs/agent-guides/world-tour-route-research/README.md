@@ -36,7 +36,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Official scenic routes: decide scope, direction, and density first.
 - Mega-corridors: decompose into phases first.
 - Region loops: choose loop direction, base regions, and density first.
-- Open-ended route families: compare route concepts before ranking stops.
+- Open-ended route families: compare route concepts and corridor viability before ranking stops.
 
 3. Build the candidate pool with three source layers:
 
@@ -124,6 +124,8 @@ Choose loop direction, major regions, and density first. Balance landscapes, tow
 Example: best Patagonian overland route.
 
 Compare route concepts before ranking stops. Make assumptions explicit.
+
+For geopolitical route families such as Silk Road routes, produce a corridor viability matrix before candidate stop selection. Each corridor option should state its status, blockers, restart options, researchable phases, and the user decision required before implementation. Do not select stops for blocked or deferred corridors unless the user explicitly asks to research a reachable subsection.
 
 ## Source Weighting By Region
 
