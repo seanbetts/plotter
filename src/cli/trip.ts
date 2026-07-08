@@ -23,6 +23,14 @@ type RunTripCliInput = {
   writeError: (value: string) => void;
 };
 
+type CliResult = {
+  ok: false;
+  error: {
+    code: string;
+    message: string;
+  };
+};
+
 type JsonRecord = Record<string, unknown>;
 
 export function parseTripCliArgs(argv: string[]): ParsedArgs {
@@ -64,6 +72,22 @@ async function readJson(path: string | undefined, readFileImpl: RunTripCliInput[
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function writeStructuredError(write: (value: string) => void, message: string, code = 'COMMAND_FAILED') {
+  const payload: CliResult = {
+    ok: false,
+    error: {
+      code,
+      message,
+    },
+  };
+
+  write(`${JSON.stringify(payload)}\n`);
+}
+
+function errorMessage(caught: unknown) {
+  return caught instanceof Error ? caught.message : 'Trip CLI failed.';
 }
 
 async function readIdList(
@@ -266,7 +290,7 @@ export async function runTripCli(input: RunTripCliInput) {
     input.write(`${JSON.stringify(result, null, flags.pretty ? 2 : 0)}\n`);
     return typeof result === 'object' && result !== null && 'ok' in result && result.ok === false ? 1 : 0;
   } catch (caught) {
-    input.writeError(`${caught instanceof Error ? caught.message : 'Trip CLI failed.'}\n`);
+    writeStructuredError(input.writeError, errorMessage(caught));
     return 1;
   }
 }
@@ -291,24 +315,58 @@ function createCliService() {
   };
 }
 
-async function main() {
-  const { supabase, service } = createCliService();
-  await ensureNodeAnonymousSession(supabase);
+type RunTripProgramInput = {
+  argv?: string[];
+  createService?: typeof createCliService;
+  ensureSession?: typeof ensureNodeAnonymousSession;
+  readFile?: (path: string) => Promise<string>;
+  write?: (value: string) => void;
+  writeError?: (value: string) => void;
+  stdout?: typeof process.stdout.write;
+  stderr?: typeof process.stderr.write;
+  setExitCode?: (code: number) => void;
+};
 
-  const exitCode = await runTripCli({
-    argv: process.argv.slice(2),
-    service,
-    readFile: (path) => readFile(path, 'utf8'),
-    write: (value) => {
+export async function runTripProgram(input: RunTripProgramInput = {}) {
+  try {
+    const createService = input.createService ?? createCliService;
+    const ensureSession = input.ensureSession ?? ensureNodeAnonymousSession;
+    const readFileImpl = input.readFile ?? ((path: string) => readFile(path, 'utf8'));
+    const write = input.write ?? ((value: string) => {
       process.stdout.write(value);
-    },
-    writeError: (value) => {
+    });
+    const writeError = input.writeError ?? ((value: string) => {
       process.stderr.write(value);
-    },
-  });
-  process.exitCode = exitCode;
+    });
+    const setExitCode = input.setExitCode ?? ((code: number) => {
+      process.exitCode = code;
+    });
+
+    const { supabase, service } = createService();
+    await ensureSession(supabase);
+
+    const exitCode = await runTripCli({
+      argv: input.argv ?? process.argv.slice(2),
+      service,
+      readFile: readFileImpl,
+      write,
+      writeError,
+    });
+    setExitCode(exitCode);
+    return exitCode;
+  } catch (caught) {
+    const writeError = input.writeError ?? ((value: string) => {
+      process.stderr.write(value);
+    });
+    const setExitCode = input.setExitCode ?? ((code: number) => {
+      process.exitCode = code;
+    });
+    writeStructuredError(writeError, errorMessage(caught));
+    setExitCode(1);
+    return 1;
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  void main();
+  void runTripProgram({ argv: process.argv.slice(2) });
 }

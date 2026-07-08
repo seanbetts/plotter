@@ -186,3 +186,28 @@ Result:
 - No functional concerns about the Task 6 CLI runtime at handoff.
 - Verification emitted repeated Node `localStorage` experimental warnings during Vitest runs; those warnings did not affect pass/fail outcomes.
 - I also ran `npm run lint` as an extra check. It still reports unrelated pre-existing lint failures in `src/App.tsx`, `src/storage/tripRepository.ts`, `src/tripCommands/tripDataService.ts`, and `tests/world-tour.spec.ts`. I fixed the one new CLI-test lint nit that came from this task, but I did not broaden scope into those older files.
+
+## Review Fix Addendum
+
+I tightened the CLI error path so every thrown failure now emits a structured JSON envelope with `ok: false` and `error.code: 'COMMAND_FAILED'`.
+
+### Verification for this fix
+
+```bash
+npm test -- src/cli/tripCli.test.ts
+npm test -- src/cli/nodeSupabase.test.ts
+npm test
+npm run build
+```
+
+Results:
+
+- `npm test -- src/cli/tripCli.test.ts`: passed (`8/8`)
+- `npm test -- src/cli/nodeSupabase.test.ts`: passed (`1/1`)
+- `npm test`: passed (`49` files, `575` tests)
+- `npm run build`: passed
+
+### Notes
+
+- `src/cli/trip.ts` now wraps both command execution and startup/bootstrap failures in the same JSON error schema.
+- `src/cli/tripCli.test.ts` now covers both a thrown command failure and a startup failure from CLI bootstrap.

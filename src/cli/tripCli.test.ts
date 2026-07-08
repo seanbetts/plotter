@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseTripCliArgs, runTripCli } from './trip';
+import { parseTripCliArgs, runTripCli, runTripProgram } from './trip';
 
 type MockService = Record<string, ReturnType<typeof vi.fn>>;
 
@@ -271,7 +271,7 @@ describe('runTripCli', () => {
     });
   });
 
-  it('writes an error and returns non-zero when command execution throws', async () => {
+  it('writes structured JSON and returns non-zero when command execution throws', async () => {
     const { service, readFile, write, writeError } = createCliHarness({
       listTrips: vi.fn(async () => {
         throw new Error('Boom.');
@@ -288,6 +288,39 @@ describe('runTripCli', () => {
 
     expect(exitCode).toBe(1);
     expect(write).not.toHaveBeenCalled();
-    expect(writeError).toHaveBeenCalledWith('Boom.\n');
+    expect(JSON.parse(writeError.mock.calls[0]?.[0] ?? '{}')).toMatchObject({
+      ok: false,
+      error: {
+        code: 'COMMAND_FAILED',
+        message: 'Boom.',
+      },
+    });
+  });
+
+  it('writes structured JSON and returns non-zero when startup fails', async () => {
+    const write = vi.fn();
+    const writeError = vi.fn();
+
+    const exitCode = await runTripProgram({
+      argv: ['list'],
+      createService: vi.fn(() => {
+        throw new Error('No Supabase.');
+      }),
+      ensureSession: vi.fn(),
+      readFile: vi.fn(),
+      write,
+      writeError,
+      setExitCode: vi.fn(),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(write).not.toHaveBeenCalled();
+    expect(JSON.parse(writeError.mock.calls[0]?.[0] ?? '{}')).toMatchObject({
+      ok: false,
+      error: {
+        code: 'COMMAND_FAILED',
+        message: 'No Supabase.',
+      },
+    });
   });
 });
