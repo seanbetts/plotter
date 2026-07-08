@@ -56,17 +56,19 @@ Capture the minimum context needed to research the route:
 
 If some context is missing, use conservative defaults and call them out in the plan.
 
-### 2. Decide The Route Corridor
+### 2. Decide The Route Shape
 
-For long, cross-border, or ambiguous trips, compare corridors before selecting stops.
+Before selecting stops, identify the route shape and choose the right planning move.
 
-Example: a home-to-Nordkapp request should not immediately produce one stop list. It should first compare corridors such as:
+For long, cross-border, or ambiguous trips, compare corridors before selecting stops. Example: a home-to-Nordkapp request should not immediately produce one stop list. It should first compare corridors such as:
 
 - efficient Nordic transit through Germany, Denmark, Sweden, Finland, and northern Norway
 - Norway-heavy scenic route using Denmark-Norway ferries and the Norwegian coast
 - hybrid route using efficient transit for the south and scenic northern Norway for the final third
 
-The skill should recommend one corridor by default and preserve plausible alternatives in the plan. Short or obvious routes may skip this phase.
+For official named scenic routes, do not invent alternate corridors when the canonical route is already defined. Decide scope, direction, and density instead. Example: a Wild Atlantic Way request should decide whether the user wants the full route or a section, north-to-south or south-to-north, and compressed, immersive, or exhaustive coverage before choosing base stops.
+
+The skill should recommend one corridor or scope by default and preserve plausible alternatives in the plan. Short or obvious routes may keep this section brief.
 
 ### 3. Build The Candidate Pool
 
@@ -169,9 +171,11 @@ The plan should include:
 
 - route name
 - assumptions
-- corridor options considered
-- recommended corridor
-- rejected or alternate corridors
+- route shape
+- corridor options considered, when applicable
+- recommended corridor, when applicable
+- scope, direction, and density decisions for official scenic routes
+- rejected or alternate corridors, sections, or scopes
 - ordered candidate stops
 - candidate activities grouped under stops
 - source evidence
@@ -205,12 +209,18 @@ The route research plan can be written in Markdown for human review, with embedd
   "routeName": "Home to Nordkapp",
   "start": "Balcombe, West Sussex, UK",
   "end": "Nordkapp, Norway",
+  "routeShape": "ambiguous-point-to-point",
   "assumptions": [
     "Home means Balcombe.",
     "Default style is hybrid: efficient transit plus scenic northern Norway."
   ],
   "corridors": [],
   "recommendedCorridorId": "hybrid-sweden-northern-norway",
+  "scopeDecision": {
+    "coverage": "full-route",
+    "direction": "south-to-north",
+    "density": "immersive"
+  },
   "stops": [],
   "openQuestions": [],
   "implementationNotes": []
@@ -228,6 +238,23 @@ The route research plan can be written in Markdown for human review, with embedd
   "tradeoffs": ["Less fjord-heavy than the coast route"],
   "evidenceLevel": "medium",
   "sources": []
+}
+```
+
+### ScopeDecision
+
+```json
+{
+  "coverage": "full-route",
+  "direction": "north-to-south",
+  "density": "immersive",
+  "rationale": "The route is an official scenic route, so stop selection should choose base stops along the canonical route instead of comparing alternate corridors.",
+  "sectionOptions": [
+    "Donegal and Sligo",
+    "Mayo and Galway",
+    "Clare and Kerry",
+    "West Cork"
+  ]
 }
 ```
 
@@ -311,19 +338,23 @@ Generated route research outputs should not be committed by default. They can li
 - If a stop sounds good but lacks recent validation, do not promote it to must-do.
 - If a candidate is unsuitable for a large vehicle, keep it only if there is a realistic parking/base alternative.
 - If research sources disagree, do not smooth over the conflict; record it in notes.
-- If the route is too broad, split it into corridors or phases before selecting final stops.
+- If the route is too broad, split it into corridors, official sections, or phases before selecting final stops.
+- If an official scenic route has many discovery points, choose base stops first and attach viewpoints, beaches, hikes, islands, food stops, and historic sites as activities.
 
 ## Stress Test Expectations
 
 The design should handle these route shapes:
 
 - single-corridor scenic road, such as the North Coast 500
+- official long scenic route with many discovery points, such as the Wild Atlantic Way
 - long point-to-point expedition route, such as home to Nordkapp
 - multi-country overland corridor, such as Europe to Central Asia
 - region loop, such as Morocco or Iceland
 - open-ended route family, such as "best Patagonian overland route"
 
 For long or ambiguous examples, the skill must make corridor selection explicit before stop selection.
+
+For official scenic routes, the skill must make scope, direction, and density explicit before stop selection. It should avoid turning every discovery point into a route stop.
 
 ## Future App Opportunities
 
@@ -343,8 +374,10 @@ Initial verification should be example-driven:
 
 1. Ask the skill for a home-to-Nordkapp route.
 2. Confirm it compares corridors before stop selection.
-3. Confirm it produces candidate stops, activities, scores, evidence, and links.
-4. Confirm it does not write app data.
-5. Approve a small subset and verify the existing trip data skill can implement it through the CLI.
+3. Ask the skill for a Wild Atlantic Way route.
+4. Confirm it chooses scope, direction, and density before stop selection.
+5. Confirm it produces base stops, nested activities, scores, evidence, and links.
+6. Confirm it does not write app data.
+7. Approve a small subset and verify the existing trip data skill can implement it through the CLI.
 
 The first implementation should include at least one saved example output in the skill or guide documentation so future agents can see the expected standard.
