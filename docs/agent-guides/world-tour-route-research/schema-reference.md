@@ -18,6 +18,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "logisticsGates": [],
   "stops": [],
   "openQuestions": [],
+  "unsupportedData": [],
   "implementationNotes": []
 }
 ```
@@ -112,6 +113,8 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 
 ## LogisticsGate
 
+Use `logisticsGates` as the canonical home for route constraints and validation items that must be resolved before implementation.
+
 ```json
 {
   "id": "darien-gap-vehicle-shipping",
@@ -176,6 +179,18 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "confidence": "high"
 }
 ```
+
+## Unsupported Data
+
+Do not include these values in a route research plan as app-writeable data:
+
+- Route geometry, encoded polylines, route-leg alternatives, or calculated distances/durations.
+- Normalized app locations, reverse-geocoded labels, provider place IDs, or location enrichment that the app can calculate.
+- Stop sort indexes, timestamps, sync metadata, row IDs, or direct Supabase table shapes.
+- Link previews, downloaded media, image uploads, or local file references.
+- Final activity/stop IDs or ownership metadata.
+
+If one of these details matters to the recommendation, describe the caveat in `notes`, `logisticsGates`, `openQuestions`, or `implementationNotes` instead of treating it as data for the trip CLI to write.
 
 ## Implementation Mapping
 

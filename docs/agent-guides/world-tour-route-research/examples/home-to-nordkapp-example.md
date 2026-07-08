@@ -43,6 +43,26 @@ Recommended corridor: `hybrid-sweden-northern-norway`.
 | --- | --- | --- | --- | --- | --- | --- |
 | Honningsvag | North Cape Plateau | must-do | 5 | check | high | Final destination activity. Winter access may require convoy travel. |
 
+## Source Evidence
+
+| ID | Source | Type | Used For | Confidence |
+| --- | --- | --- | --- | --- |
+| nordkapp-practical | [Visit Nordkapp practical information](https://www.nordkapp.no/practical-info/) | official | E69 winter convoy/access warning for the North Cape Plateau | high |
+| vegvesen-convoy | [Statens vegvesen convoy driving guidance](https://www.vegvesen.no/en/traffic-information/traffic-safety/how-to-drive-in-a-convoy/) | official | Convoy safety requirements and vehicle preparation | high |
+| vegvesen-traffic | [Statens vegvesen traffic information](https://www.vegvesen.no/trafikk) | official | Current road closures, traffic messages, and camera checks near travel | high |
+| helgelandskysten | [Norwegian Scenic Route Helgelandskysten](https://www.nasjonaleturistveger.no/en/routes/helgelandskysten/) | official | Optional Norway-heavy coast corridor ferry/scenic tradeoff | high |
+| hirtshals-kristiansand | [Fjord Line Hirtshals-Kristiansand](https://fjordline.com/en/p/our-ferry-routes/hirtshals-kristiansand) | operator | Denmark-Norway ferry option for Norway-heavy corridor | medium |
+
+Retrieved: 2026-07-08.
+
+## Logistics Gates
+
+| ID | Gate | Applies To | Required Decision | Vehicle | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| nordkapp-e69-seasonal-access | E69/North Cape Plateau seasonal access | Honningsvag to North Cape Plateau | Check current Statens vegvesen traffic status and Visit Nordkapp convoy guidance close to travel; add buffer if winter or severe weather is possible. | check | high |
+| denmark-norway-ferry-choice | Denmark-Norway ferry choice | Norway-heavy coast corridor | Choose whether to cross directly to Norway by ferry or continue through Sweden before implementation. | good | medium |
+| helgeland-ferry-chain | Helgelandskysten ferry chain | Norway-heavy coast corridor | If this corridor is chosen, validate current ferry timetables and decide whether the scenic delay is worth it. | check | high |
+
 ## Open Questions
 
 - Exact travel season.
@@ -53,5 +73,6 @@ Recommended corridor: `hybrid-sweden-northern-norway`.
 
 - Approved overnight/base rows become trip stops.
 - North Cape Plateau becomes an activity under Honningsvag.
-- Current official road and access sources should be linked before implementation.
+- Source evidence links become stop or activity links where relevant.
+- Logistics gate warnings become stop notes, activity notes, or implementation notes.
 - Route geometry is left to the app.
