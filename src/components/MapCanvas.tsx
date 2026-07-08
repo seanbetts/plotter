@@ -117,6 +117,7 @@ const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 const styleUrl = mapTilerApiKey
   ? `https://api.maptiler.com/maps/streets-v4/style.json?key=${mapTilerApiKey}`
   : 'https://demotiles.maplibre.org/style.json';
+const missingMapTilerSpriteIds = new Set(['road_', ' ']);
 const cityLabelFontStack = mapTilerApiKey
   ? ['Roboto Regular', 'Noto Sans Regular']
   : ['Open Sans Semibold'];
@@ -363,6 +364,14 @@ const mapDetailCategories: MapDetailCategory[] = [
   },
   { id: 'park-label', label: 'Park labels', group: 'Labels', idPatterns: ['park-label'], defaultVisible: false },
 ];
+
+function createTransparentPlaceholderImage() {
+  return {
+    width: 1,
+    height: 1,
+    data: new Uint8Array(4),
+  };
+}
 const mapDetailGroups = Array.from(new Set(mapDetailCategories.map((category) => category.group)));
 const zoom1EnabledCategories = [
   'water',
@@ -1579,6 +1588,11 @@ export function MapCanvas({
         source: 'context-menu',
       });
     };
+    const handleStyleImageMissing = (event: maplibregl.MapStyleImageMissingEvent) => {
+      if (!missingMapTilerSpriteIds.has(event.id) || map.hasImage(event.id)) return;
+
+      map.addImage(event.id, createTransparentPlaceholderImage());
+    };
 
     map.on('load', handleLoad);
     map.on('move', handleMapMove);
@@ -1592,6 +1606,7 @@ export function MapCanvas({
     map.on('mouseenter', activityPointsLayerId, handleActivityMouseEnter);
     map.on('mouseleave', activityPointsLayerId, handleActivityMouseLeave);
     map.on('contextmenu', handleContextMenu);
+    map.on('styleimagemissing', handleStyleImageMissing);
 
     mapRef.current = map;
 
@@ -1608,6 +1623,7 @@ export function MapCanvas({
       map.off('mouseenter', activityPointsLayerId, handleActivityMouseEnter);
       map.off('mouseleave', activityPointsLayerId, handleActivityMouseLeave);
       map.off('contextmenu', handleContextMenu);
+      map.off('styleimagemissing', handleStyleImageMissing);
       longPressStartRef.current = null;
       clearLongPressTimer();
       map.remove();
