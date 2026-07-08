@@ -46,6 +46,29 @@ describe('web image search styles', () => {
   });
 });
 
+describe('app status panel styles', () => {
+  it('centers the app-owned startup panel over the map', () => {
+    expect(styles).toMatch(/\.app-status-panel\s*{[^}]*position:\s*absolute;[^}]*left:\s*50%;[^}]*top:\s*50%;/s);
+    expect(styles).toMatch(/\.app-status-panel\s*{[^}]*width:\s*min\(420px,\s*calc\(100vw - 32px\)\);/s);
+    expect(styles).toMatch(/\.app-status-panel\s*{[^}]*transform:\s*translate\(-50%,\s*-50%\);/s);
+    expect(styles).toMatch(/\.app-status-panel\s*{[^}]*border-radius:\s*var\(--radius-panel\);/s);
+  });
+
+  it('uses an animated spinner with reduced motion support', () => {
+    expect(styles).toMatch(/\.app-status-panel__spinner\s*{[^}]*animation:\s*status-spin 900ms linear infinite;/s);
+    expect(styles).toMatch(/@keyframes status-spin\s*{[^}]*to\s*{[^}]*transform:\s*rotate\(360deg\);[^}]*}/s);
+    expect(styles).toMatch(
+      /@media \(prefers-reduced-motion:\s*reduce\)\s*{[^}]*\.app-status-panel__spinner\s*{[^}]*animation:\s*none;/s,
+    );
+  });
+
+  it('styles status errors and retry actions with existing tokens', () => {
+    expect(styles).toMatch(/\.app-status-panel--error\s*{[^}]*border-color:\s*var\(--border-danger\);/s);
+    expect(styles).toMatch(/\.app-status-panel--error \.app-status-panel__copy strong\s*{[^}]*color:\s*var\(--color-danger\);/s);
+    expect(styles).toMatch(/\.app-status-panel__retry\s*{[^}]*background:\s*var\(--color-accent\);/s);
+  });
+});
+
 describe('link preview card styles', () => {
   it('anchors delete buttons to the bottom-right corner of the image area', () => {
     expect(styles).toMatch(/\.link-preview-card\s*{[^}]*container-type:\s*inline-size;/s);
