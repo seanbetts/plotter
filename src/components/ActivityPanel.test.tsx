@@ -355,39 +355,32 @@ describe('ActivityPanel', () => {
     const imageRegion = within(panel).getByRole('region', { name: 'Activity images' });
     const linksSection = within(panel).getByRole('region', { name: 'Louvre Links' });
     const detailsSection = within(panel).getByRole('region', { name: 'Louvre Details' });
-    const description = within(detailsSection).getByLabelText('Louvre Description');
     const notes = within(detailsSection).getByLabelText('Louvre Notes');
     const tagsGroup = within(panel).getByRole('group', { name: 'Louvre Tags' });
 
     expect(within(linksSection).getByText('Louvre Links')).toBeInTheDocument();
     expect(within(detailsSection).getByText('Louvre Details')).toBeInTheDocument();
+    expect(within(detailsSection).queryByLabelText('Louvre Description')).not.toBeInTheDocument();
     expect(imageRegion.compareDocumentPosition(linksSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(linksSection.compareDocumentPosition(detailsSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(description.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(detailsSection.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notes.compareDocumentPosition(tagsGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('saves description and notes with labels based on the activity title', () => {
+  it('saves notes with a label based on the activity title', () => {
     const props = createProps();
 
     render(<ActivityPanel {...props} />);
 
     expect(screen.queryByLabelText('Activity status')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Activity priority')).not.toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText('Louvre Description'), {
-      target: { value: 'Spend the morning in the galleries.' },
-    });
-    fireEvent.blur(screen.getByLabelText('Louvre Description'));
+    expect(screen.queryByLabelText('Louvre Description')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Louvre Notes'), {
       target: { value: 'Check Friday late opening.' },
     });
     fireEvent.blur(screen.getByLabelText('Louvre Notes'));
 
-    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(1, props.activity.id, {
-      description: 'Spend the morning in the galleries.',
-    });
-    expect(props.onUpdateActivity).toHaveBeenNthCalledWith(2, props.activity.id, {
+    expect(props.onUpdateActivity).toHaveBeenCalledWith(props.activity.id, {
       notes: 'Check Friday late opening.',
     });
   });

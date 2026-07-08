@@ -728,7 +728,8 @@ describe('DestinationProfile', () => {
     expect(screen.queryByLabelText('Highlights')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Personal rationale')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Ideal months')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Research notes')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Samarkand Details' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Samarkand Notes')).toBeInTheDocument();
     expect(screen.queryByLabelText('Route notes')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save destination' })).not.toBeInTheDocument();
   });
@@ -767,6 +768,56 @@ describe('DestinationProfile', () => {
       expect.objectContaining({
         name: 'Home',
         location: destination.location,
+      }),
+    );
+  });
+
+  it('autosaves stop notes while preserving existing research links and book references', async () => {
+    setupAutosaveTimers();
+    const destination: Destination = {
+      ...createDestination({
+        name: 'Balcombe',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+      }),
+      research: {
+        notes: 'Existing stop note.',
+        links: [
+          {
+            id: 'link-1',
+            title: 'Village guide',
+            url: 'https://balcombe.example/guide',
+            domain: 'balcombe.example',
+            sortOrder: 0,
+          },
+        ],
+        bookReferences: [
+          {
+            id: 'book-1',
+            source: 'Other',
+            reference: 'Sussex Walks',
+            note: 'Chapter 3',
+          },
+        ],
+      },
+    };
+    const onUpdate = vi.fn();
+
+    render(<DestinationProfile {...defaultMediaProps} destination={destination} onUpdate={onUpdate} onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('Balcombe Notes'), {
+      target: { value: 'Check pub garden and station parking.' },
+    });
+
+    expect(onUpdate).not.toHaveBeenCalled();
+    await advanceAutosave();
+
+    expect(onUpdate).toHaveBeenCalledWith(
+      destination.id,
+      expect.objectContaining({
+        research: {
+          ...destination.research,
+          notes: 'Check pub garden and station parking.',
+        },
       }),
     );
   });

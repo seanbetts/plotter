@@ -24,6 +24,7 @@ type DestinationFormState = {
   sourceKey: string;
   name: string;
   expectedStayDays: string;
+  notes: string;
   tags: string[];
   links: ResearchLink[];
 };
@@ -140,6 +141,7 @@ const createFormState = (destination: Destination): DestinationFormState => ({
   sourceKey: destinationSourceKey(destination),
   name: destination.name,
   expectedStayDays: String(destination.timing.expectedStayDays),
+  notes: destination.research.notes,
   tags: destination.tags,
   links: destination.research.links,
 });
@@ -160,12 +162,15 @@ const createPatchFromForm = (
   const expectedStayDays = normalizeExpectedStayDays(form.expectedStayDays);
   const tags = form.tags;
   const links = form.links;
+  const notes = form.notes;
   const linksChanged = !researchLinksMatch(links, destination.research.links);
+  const notesChanged = notes !== destination.research.notes;
   const hasChanges =
     name !== destination.name ||
     expectedStayDays !== destination.timing.expectedStayDays ||
     !listsMatch(tags, destination.tags) ||
-    linksChanged;
+    linksChanged ||
+    notesChanged;
 
   if (!hasChanges) {
     return null;
@@ -181,9 +186,10 @@ const createPatchFromForm = (
     tags,
   };
 
-  if (linksChanged) {
+  if (linksChanged || notesChanged) {
     patch.research = {
       ...destination.research,
+      notes,
       links,
     };
   }
@@ -473,6 +479,8 @@ function DestinationProfileForm({
     : '';
   const tagsLabel = `${destinationTitle.trim() || destination.name} Tags`;
   const activitiesLabel = `${destinationTitle.trim() || destination.name} Activities`;
+  const detailsLabel = `${destinationTitle.trim() || destination.name} Details`;
+  const notesLabel = `${destinationTitle.trim() || destination.name} Notes`;
   const expectedStayDays = normalizeExpectedStayDays(form.expectedStayDays);
   const expectedStayDaysLabel = expectedStayDays === 1 ? 'Day' : 'Days';
   const copyButtonClassName = ['profile-coordinate-copy', copyStatus === 'copied' ? 'is-copied' : '']
@@ -707,6 +715,20 @@ function DestinationProfileForm({
         previewClient={linkPreviewClient}
         onChange={(links) => updateForm({ links })}
       />
+
+      <section className="activity-details-section" aria-label={detailsLabel}>
+        <div className="activity-details-header">
+          <h2>{detailsLabel}</h2>
+        </div>
+        <label>
+          {notesLabel}
+          <textarea
+            aria-label={notesLabel}
+            value={form.notes}
+            onChange={(event) => updateForm({ notes: event.target.value })}
+          />
+        </label>
+      </section>
 
       <ActivityList
         title={activitiesLabel}

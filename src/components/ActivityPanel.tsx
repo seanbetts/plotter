@@ -37,7 +37,7 @@ type ActivityPanelProps = {
   onImportWebImage?: (result: WebImageSearchResult) => Promise<void> | void;
 };
 
-type ActivityDraft = Pick<Activity, 'title' | 'description' | 'notes' | 'tags' | 'links'>;
+type ActivityDraft = Pick<Activity, 'title' | 'notes' | 'tags' | 'links'>;
 type ActivityDraftField = keyof ActivityDraft;
 type CoordinateDraft = {
   lat: string;
@@ -47,7 +47,6 @@ type CoordinateDraft = {
 function createActivityDraft(activity: Activity): ActivityDraft {
   return {
     title: activity.title,
-    description: activity.description,
     notes: activity.notes,
     tags: activity.tags,
     links: activity.links,
@@ -202,21 +201,18 @@ function ActivityPanelForm({
   const dirtyFieldsRef = useRef(new Set<ActivityDraftField>());
   const fieldEditRevisionRef = useRef<Record<ActivityDraftField, number>>({
     title: 0,
-    description: 0,
     notes: 0,
     tags: 0,
     links: 0,
   });
   const fieldSaveRevisionRef = useRef<Record<ActivityDraftField, number>>({
     title: 0,
-    description: 0,
     notes: 0,
     tags: 0,
     links: 0,
   });
   const sourceKey = activitySourceKey(activity);
   const activityTitle = activity.title;
-  const activityDescription = activity.description;
   const activityNotes = activity.notes;
   const activityTags = activity.tags;
   const activityLinks = activity.links;
@@ -239,14 +235,12 @@ function ActivityPanelForm({
       };
 
       if (!shouldPreserveDraft('title', activityTitle)) acceptPersistedField('title');
-      if (!shouldPreserveDraft('description', activityDescription)) acceptPersistedField('description');
       if (!shouldPreserveDraft('notes', activityNotes)) acceptPersistedField('notes');
       if (!shouldPreserveDraft('tags', activityTags)) acceptPersistedField('tags');
       if (!shouldPreserveDraft('links', activityLinks)) acceptPersistedField('links');
 
       const nextDraft = {
         title: dirtyFieldsRef.current.has('title') ? current.title : activityTitle,
-        description: dirtyFieldsRef.current.has('description') ? current.description : activityDescription,
         notes: dirtyFieldsRef.current.has('notes') ? current.notes : activityNotes,
         tags: dirtyFieldsRef.current.has('tags') ? current.tags : activityTags,
         links: dirtyFieldsRef.current.has('links') ? current.links : activityLinks,
@@ -259,7 +253,6 @@ function ActivityPanelForm({
     setCoordinateError('');
     setCoordinateDraft(createCoordinateDraft(activityCoordinates));
   }, [
-    activityDescription,
     activityLinks,
     activityCoordinates,
     activityNotes,
@@ -611,15 +604,6 @@ function ActivityPanelForm({
         <div className="activity-details-header">
           <h2>{detailsLabel}</h2>
         </div>
-        <label>
-          {draft.title.trim() || 'Activity'} Description
-          <textarea
-            aria-label={`${draft.title.trim() || 'Activity'} Description`}
-            value={draft.description}
-            onChange={(event) => updateDraft('description', event.target.value)}
-            onBlur={() => void commitDraft('description')}
-          />
-        </label>
         <label>
           {draft.title.trim() || 'Activity'} Notes
           <textarea
