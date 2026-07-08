@@ -17,6 +17,8 @@ type MockMap = {
   getSource: Mock;
   addSource: Mock;
   addLayer: Mock;
+  hasImage: Mock;
+  addImage: Mock;
   getLayer: Mock;
   getStyle: Mock;
   setLayoutProperty: Mock;
@@ -54,6 +56,8 @@ const maplibreMock = vi.hoisted(() => {
         sources.set(sourceId, source);
       }),
       addLayer: vi.fn(),
+      hasImage: vi.fn(() => false),
+      addImage: vi.fn(),
       getLayer: vi.fn(),
       getStyle: vi.fn(() => ({
         layers: [
@@ -523,7 +527,7 @@ describe('MapCanvas', () => {
     expect(screen.getByRole('button', { name: 'Select Cappadocia' })).toHaveClass('is-selected');
   });
 
-  it('renders the empty planning map label with no destinations', () => {
+  it('leaves empty-trip messaging to the app shell', () => {
     render(
       <MapCanvas
         destinations={[]}
@@ -533,7 +537,7 @@ describe('MapCanvas', () => {
       />,
     );
 
-    expect(screen.getByText('Blank planning map')).toHaveClass('map-empty-label', 'is-prominent');
+    expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
   });
 
   it('does not render the route leg count badge', () => {
@@ -589,6 +593,47 @@ describe('MapCanvas', () => {
     expect(map.setLayoutProperty).toHaveBeenCalledWith('road_minor', 'visibility', 'none');
     expect(map.setLayoutProperty).toHaveBeenCalledWith('Water', 'visibility', 'visible');
     expect(map.setPaintProperty).not.toHaveBeenCalled();
+  });
+
+  it('adds transparent placeholders only for known missing MapTiler road sprites', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const imageMissingHandler = map.on.mock.calls.find(([eventName]) => eventName === 'styleimagemissing')?.[1];
+
+    expect(imageMissingHandler).toBeTypeOf('function');
+
+    act(() => {
+      imageMissingHandler({ id: 'road_' });
+      imageMissingHandler({ id: ' ' });
+      imageMissingHandler({ id: 'poi_missing' });
+    });
+
+    expect(map.addImage).toHaveBeenCalledTimes(2);
+    expect(map.addImage).toHaveBeenCalledWith(
+      'road_',
+      expect.objectContaining({
+        width: 1,
+        height: 1,
+        data: expect.any(Uint8Array),
+      }),
+    );
+    expect(map.addImage).toHaveBeenCalledWith(
+      ' ',
+      expect.objectContaining({
+        width: 1,
+        height: 1,
+        data: expect.any(Uint8Array),
+      }),
+    );
+    expect(map.addImage).not.toHaveBeenCalledWith('poi_missing', expect.anything());
   });
 
   it('adds focused activity sources and layers after the selected destination layer', () => {

@@ -14,7 +14,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Treat overnight or base locations as candidate stops.
 - Treat non-overnight sights, hikes, tours, food stops, viewpoints, and experiences as candidate activities under a nearby candidate stop.
 - Put caveats, scores, vehicle warnings, logistics gates, source conflicts, and open validation items in notes.
-- Recommend stop and activity tags for route variants, constraints, themes, and practical roles.
+- Recommend stop and activity tags only from the controlled tag vocabulary, preserving approved route variants, constraints, themes, and practical roles for handoff.
 - Use source coordinates when available.
 - Keep source links with each candidate.
 - Require user approval before handing the plan to the trip data CLI.
@@ -36,7 +36,8 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Official scenic routes: decide scope, direction, and density first.
 - Mega-corridors: decompose into phases first.
 - Region loops: choose loop direction, base regions, and density first.
-- Open-ended route families: compare route concepts before ranking stops.
+- Open-ended route families: compare route concepts and corridor viability before ranking stops.
+- Remote expedition tracks: prove logistics viability before candidate stop selection.
 
 3. Build the candidate pool with three source layers:
 
@@ -60,12 +61,14 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - practical
 - buffer
 
-6. Recommend tags for each candidate:
+6. Recommend tags for each candidate from the controlled vocabulary:
 
-- Route variants: `official-route`, `sealed-route`, `4wd-route`, `adventure-variant`, `practical-route`, `optional-detour`.
-- Access constraints: `high-clearance-4wd`, `seasonal-access`, `road-status-check`, `wet-season-risk`, `permit-or-booking`.
-- Practical roles: `remote-resupply`, `fuel-critical`, `recovery-stop`, `buffer-stop`.
-- Experience themes: concise tags such as `gorge`, `wildlife`, `coast`, `culture`, `walk`, `viewpoint`, `food`.
+- Route variants: `official-route`, `practical-route`, `adventure-variant`, `optional-detour`.
+- Access and logistics: `road-status-check`, `seasonal-access`, `permit-or-booking`, `border-crossing`, `high-clearance-4wd`.
+- Stop roles: `resupply`, `recovery-stop`, `buffer-stop`.
+- Experience themes: `history`, `nature`, `coast`, `mountains`, `gorge`, `caves`, `wildlife`, `culture`, `food`, `walk`, `viewpoint`.
+
+Do not invent new tags during research. If a useful detail does not fit the controlled vocabulary, put it in `notes`, `logisticsGates`, or `openQuestions`.
 
 7. Balance and prune:
 
@@ -73,6 +76,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Prefer a deliberate mix of iconic anchors, landscape, culture, wildlife, rest, resupply, scenic transit, and practical detours.
 - For official scenic routes, choose base stops first and attach discovery points as activities.
 - For mega-corridors, research each phase independently and do not produce one global ranked stop list.
+- For remote expedition tracks, complete the logistics viability pass before scoring stops. Treat camps, wells, fuel points, exit tracks, and recovery towns as practical anchors rather than attractions.
 
 8. Produce a route research plan using `schema-reference.md`.
 
@@ -99,11 +103,17 @@ Do not invent alternate corridors when the canonical route is already defined. D
 
 If the official route has meaningful practical or adventure variants, keep the route model canonical and express the variants with stop and activity tags first.
 
+For long official routes, keep the route canonical but split it into phases before candidate stop selection. Do not flatten a multi-region official route into one global ranked stop list.
+
 ### Mega-Corridor
 
 Example: Pan-American Highway from Alaska to Patagonia.
 
 Decompose into phases before stop selection. Add logistics gates for route discontinuities, borders, vehicle shipping, import limits, permits, ferry constraints, and seasonal road constraints.
+
+#### Blocked Mega-Corridors
+
+If a phase is blocked by current travel advice, active conflict, border closure, vehicle shipping or import constraints, or seasonal closure, do not produce a single continuous stop list. Mark the phase as `blocked` or `deferred`, add a `route-discontinuity` logistics gate, and propose restart options such as overflying, vehicle shipping, restarting with a rental or local vehicle, or deferring the route. Produce candidate stops only for phases that are researchable or explicitly approved.
 
 ### Region Loop
 
@@ -117,6 +127,14 @@ Example: best Patagonian overland route.
 
 Compare route concepts before ranking stops. Make assumptions explicit.
 
+For geopolitical route families such as Silk Road routes, produce a corridor viability matrix before candidate stop selection. Each corridor option should state its status, blockers, restart options, researchable phases, and the user decision required before implementation. Do not select stops for blocked or deferred corridors unless the user explicitly asks to research a reachable subsection.
+
+### Remote Expedition Track
+
+Example: Canning Stock Route.
+
+Before selecting stops, produce an expedition viability pass that covers permits, season window, required vehicle capability, fuel and water legs, communications and recovery requirements, official road-condition sources, bailout or exit options, and culturally sensitive or restricted areas. Candidate stops should emphasize practical anchors such as camps, wells, fuel points, access tracks, exit tracks, and recovery towns. Do not treat culturally sensitive sites as activities unless a source explicitly confirms public visitor access is appropriate.
+
 ## Source Weighting By Region
 
 - North America: Overland Trail Guides, iOverlander, official park sources, Google Maps, recent trip reports.
@@ -125,6 +143,7 @@ Compare route concepts before ranking stops. Make assumptions explicit.
 - Africa: Tracks4Africa, iOverlander, Bradt, national park sites, overlander blogs, Expedition Portal, Horizons Unlimited.
 - Central Asia: Caravanistan-style route intelligence, iOverlander, traveller blogs, YouTube, Wikiloc, Google Maps where coverage is strong.
 - Australia and New Zealand: Hema, Wikicamps Australia, iOverlander, national park sites, 4x4 forums, YouTube, official tourism pages.
+- Remote expedition tracks: permit authorities, traditional-owner or land-council permit systems, local shires, road-condition authorities, official tourism access pages, emergency services guidance, specialist route guides, recent traveller condition reports.
 
 ## Approval-Gated Handoff
 
@@ -132,14 +151,15 @@ After user approval, switch to the trip data workflow:
 
 1. Convert only approved route content to app data.
 2. For mega-corridors, implement approved phases or phase subsets rather than flattening the whole speculative route.
-3. Convert approved overnight or base candidates to trip stops.
-4. Convert approved non-overnight candidates to activities.
-5. Preserve approved candidate tags as stop or activity tags.
-6. Store source URLs as stop or activity links.
-7. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
-8. Use source coordinates when available.
-9. Let the app calculate routes and derived data.
-10. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
+3. For blocked or deferred mega-corridor phases, do not create stops or activities until the user approves a resolved restart, skip, or deferral plan.
+4. Convert approved overnight or base candidates to trip stops.
+5. Convert approved non-overnight candidates to activities.
+6. Preserve approved candidate tags as stop or activity tags.
+7. Store source URLs as stop or activity links.
+8. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
+9. Use source coordinates when available.
+10. Let the app calculate routes and derived data.
+11. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
 
 ## References
 

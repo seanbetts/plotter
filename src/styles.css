@@ -128,31 +128,6 @@ select {
   inset: 0;
 }
 
-.map-empty-label {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 168px;
-  transform: translate(-50%, -50%);
-  border: 1px solid rgb(var(--color-text-rgb) / 0.18);
-  border-radius: var(--radius-panel);
-  padding: 10px 14px;
-  color: var(--color-text);
-  background: var(--surface-overlay-menu);
-  box-shadow: var(--shadow-panel);
-  font-size: 0.86rem;
-  font-weight: 800;
-  letter-spacing: 0;
-  line-height: 1.2;
-  pointer-events: none;
-  -webkit-backdrop-filter: blur(12px) saturate(1.18);
-  backdrop-filter: blur(12px) saturate(1.18);
-}
-
 .map-destination-label-layer {
   position: absolute;
   inset: 0;
@@ -2833,38 +2808,97 @@ select {
   background: var(--color-accent-hover);
 }
 
-.app-status {
+.app-status-panel {
   position: absolute;
-  top: 76px;
-  left: 16px;
+  left: 50%;
+  top: 50%;
   z-index: 13;
   display: grid;
-  gap: 4px;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 9px 11px;
+  width: min(420px, calc(100vw - 32px));
+  justify-items: center;
+  gap: 14px;
+  transform: translate(-50%, -50%);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-panel);
+  padding: 22px 24px;
   color: var(--color-text);
   background: var(--surface-overlay-strong);
   box-shadow: var(--shadow-panel);
+  text-align: center;
   -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
-  backdrop-filter: blur(var(--blur-overlay));
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
-  font-size: 0.86rem;
 }
 
-.app-status strong,
-.app-status span {
+.app-status-panel__spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid rgb(var(--color-text-rgb) / 0.16);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: status-spin 900ms linear infinite;
+}
+
+.app-status-panel__copy {
+  display: grid;
+  gap: 6px;
+}
+
+.app-status-panel__copy strong,
+.app-status-panel__copy span {
   color: inherit;
 }
 
-.app-status strong {
-  font-size: 0.82rem;
+.app-status-panel__copy strong {
+  font-size: 1.08rem;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
-.app-status-error {
+.app-status-panel__copy span {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.app-status-panel--error {
   border-color: var(--border-danger);
+}
+
+.app-status-panel--error .app-status-panel__copy strong {
   color: var(--color-danger);
+}
+
+.app-status-panel__retry {
+  min-height: 36px;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 0 14px;
+  color: white;
+  background: var(--color-accent);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.app-status-panel__retry:hover,
+.app-status-panel__retry:focus-visible {
+  background: var(--color-accent-hover);
+}
+
+.app-status-panel__retry:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@keyframes status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-status-panel__spinner {
+    animation: none;
+  }
 }
 
 @media (max-width: 760px) {
@@ -2904,13 +2938,6 @@ select {
     bottom: 16px;
     top: auto !important;
     transform: none;
-  }
-
-  .app-status {
-    top: 112px;
-    right: 12px;
-    left: 12px;
-    max-width: none;
   }
 
   .trip-selector-anchor {

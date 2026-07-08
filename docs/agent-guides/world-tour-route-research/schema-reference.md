@@ -14,6 +14,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "corridors": [],
   "recommendedCorridorId": "hybrid-sweden-northern-norway",
   "scopeDecision": null,
+  "expeditionViability": null,
   "phases": [],
   "logisticsGates": [],
   "stops": [],
@@ -33,6 +34,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `region-loop`
 - `open-ended-route-family`
 - `regional-corridor`
+- `remote-expedition-track`
 
 `priority`:
 
@@ -67,6 +69,27 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `immersive`
 - `exhaustive`
 
+`RoutePhase.status`:
+
+- `researchable`
+- `blocked`
+- `deferred`
+
+`CorridorOption.status`:
+
+- `researchable`
+- `blocked`
+- `deferred`
+
+`logisticsGate.type`:
+
+- `route-discontinuity`
+- `border-crossing`
+- `vehicle-shipping`
+- `seasonal-access`
+- `permit-or-booking`
+- `road-status-check`
+
 ## CorridorOption
 
 ```json
@@ -74,12 +97,19 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "id": "hybrid-sweden-northern-norway",
   "name": "Hybrid Sweden northbound with scenic northern Norway",
   "summary": "Efficient southern transit, then scenic Arctic Norway.",
+  "status": "researchable",
   "strengths": ["Fewer ferry dependencies"],
   "tradeoffs": ["Less fjord-heavy than the coast route"],
+  "blockers": [],
+  "restartOptions": [],
+  "researchablePhaseIds": ["southern-transit", "arctic-norway"],
+  "requiredDecision": "Choose this as the default corridor before detailed stop selection.",
   "evidenceLevel": "medium",
   "sources": []
 }
 ```
+
+For open-ended geopolitical route families, use `corridors` as a corridor viability matrix before selecting candidate stops. Put border closures, visa constraints, conflict advisories, permit requirements, shipping constraints, and hard seasonal issues in `blockers`; put overfly, shipping, restart, or deferral choices in `restartOptions`.
 
 ## ScopeDecision
 
@@ -93,6 +123,42 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 }
 ```
 
+## ExpeditionViability
+
+Use `expeditionViability` before candidate stop selection for remote expedition tracks where logistics, access, permits, and recovery risk determine whether the route is viable.
+
+```json
+{
+  "status": "researchable",
+  "seasonWindow": "May to September",
+  "requiredVehicle": "High-clearance 4WD with long-range fuel, water, spares, recovery equipment, and communications.",
+  "permits": [
+    {
+      "name": "Canning Stock Route visitor permit",
+      "status": "required",
+      "sourceIds": ["kuju-wangka-permit-system"]
+    }
+  ],
+  "fuelWaterPlan": [
+    "Confirm fuel, food, and water availability before departure.",
+    "Carry enough range for long remote legs between confirmed resupply points."
+  ],
+  "communicationsAndRecovery": [
+    "No mobile reception should be assumed.",
+    "Carry satellite communications and recovery equipment."
+  ],
+  "officialRoadConditionSources": [],
+  "bailoutOptions": [],
+  "culturalAccessNotes": [
+    "Do not list culturally sensitive sites as activities unless public visitor access is explicitly confirmed."
+  ],
+  "blockers": [],
+  "requiredDecision": "Confirm permits, season, vehicle suitability, resupply, communications, and bailout plan before stop selection."
+}
+```
+
+Allowed `expeditionViability.status` values match `RoutePhase.status`: `researchable`, `blocked`, or `deferred`.
+
 ## RoutePhase
 
 ```json
@@ -103,13 +169,18 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "start": "Guatemala",
   "end": "Panama City, Panama",
   "routeShape": "regional-corridor",
+  "status": "researchable",
   "density": "immersive",
   "corridorOptions": [],
   "logisticsGateIds": ["darien-gap-vehicle-shipping"],
   "candidateStops": [],
-  "openQuestions": []
+  "openQuestions": [],
+  "blockedReason": null,
+  "restartOptions": []
 }
 ```
+
+For blocked or deferred phases, keep `candidateStops` empty unless the user explicitly approves researching a reachable subsection. Use `blockedReason` to explain the hard constraint and `restartOptions` for choices such as overflying, vehicle shipping, restarting with a rental or local vehicle, or deferring the phase.
 
 ## LogisticsGate
 
@@ -140,7 +211,8 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "priority": "strong",
   "score": 4,
   "suggestedStay": "1 night",
-  "tags": ["practical-route", "remote-resupply", "buffer-stop"],
+  "tags": ["practical-route", "resupply", "buffer-stop"],
+  "placeQuery": "Alta, Finnmark, Norway",
   "coordinates": { "lat": 69.9689, "lng": 23.2716 },
   "whyItMatters": "Useful Arctic base before Honningsvag and Nordkapp.",
   "vehicleConfidence": "good",
@@ -159,7 +231,8 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "activityType": ["landmark", "viewpoint"],
   "priority": "must-do",
   "score": 5,
-  "tags": ["must-do", "viewpoint", "seasonal-access"],
+  "tags": ["viewpoint", "seasonal-access"],
+  "placeQuery": "North Cape Plateau, Nordkapp, Norway",
   "coordinates": { "lat": 71.1695, "lng": 25.783 },
   "whyItMatters": "Symbolic destination at the end of the route.",
   "vehicleConfidence": "check",
@@ -171,28 +244,44 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
 
 ## Tag Guidance
 
-Use `tags` for lightweight routing, filtering, and UI badges. Prefer short, reusable lowercase tags.
+Use `tags` for lightweight routing, filtering, and UI badges. Tags must come from this controlled vocabulary.
 
 Route variant tags:
 
 - `official-route`
-- `sealed-route`
-- `4wd-route`
 - `adventure-variant`
 - `practical-route`
 - `optional-detour`
 
-Constraint and capability tags:
+Access and logistics tags:
 
-- `high-clearance-4wd`
-- `seasonal-access`
 - `road-status-check`
-- `wet-season-risk`
-- `remote-resupply`
-- `fuel-critical`
+- `seasonal-access`
 - `permit-or-booking`
+- `border-crossing`
+- `high-clearance-4wd`
 
-Experience and role tags should stay concise, such as `gorge`, `coast`, `wildlife`, `culture`, `walk`, `viewpoint`, `food`, `recovery-stop`, or `buffer-stop`.
+Stop role tags:
+
+- `resupply`
+- `recovery-stop`
+- `buffer-stop`
+
+Experience tags:
+
+- `history`
+- `nature`
+- `coast`
+- `mountains`
+- `gorge`
+- `caves`
+- `wildlife`
+- `culture`
+- `food`
+- `walk`
+- `viewpoint`
+
+Do not invent route-specific tags during research. If a useful detail does not fit the vocabulary, put it in `notes`, `logisticsGates`, or `openQuestions`.
 
 Tags are not a separate route-variant model. If a route later needs first-class alternatives, use tags as the evidence for what should be promoted.
 
@@ -218,6 +307,7 @@ Do not include these values in a route research plan as app-writeable data:
 - Stop sort indexes, timestamps, sync metadata, row IDs, or direct Supabase table shapes.
 - Link previews, downloaded media, image uploads, or local file references.
 - Final activity/stop IDs or ownership metadata.
+- App-resolved address fields or provider location metadata. Use `placeQuery` for source address or venue text that should help the app resolve a place.
 
 If one of these details matters to the recommendation, describe the caveat in `notes`, `logisticsGates`, `openQuestions`, or `implementationNotes` instead of treating it as data for the trip CLI to write.
 
@@ -225,8 +315,12 @@ If one of these details matters to the recommendation, describe the caveat in `n
 
 - Approved `CandidateStop` records become stop drafts for the trip CLI.
 - Approved `CandidateActivity` records become activities under the nearest approved stop.
+- Approved `placeQuery` values become `place.query` for both stop and activity writes.
+- Approved `coordinates` values become `place.coordinates` for both stop and activity writes.
 - Approved candidate `tags` become stop or activity tags.
 - Candidate and activity `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
+- Expedition viability details become route-level planning notes or stop notes on the nearest practical anchor.
 - Coordinates are passed only when sourced.
 - Route geometry is never authored.
+- Blocked or deferred phases are not implemented as stops or activities until the user approves a resolved restart, skip, or deferral plan.

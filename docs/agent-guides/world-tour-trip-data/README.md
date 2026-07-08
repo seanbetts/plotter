@@ -12,8 +12,9 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 - Treat overnight locations as stops.
 - Treat non-overnight visits, tours, meals, viewpoints, walks, and events as activities under the nearest relevant stop.
 - Put booking refs, costs, times, and source caveats in stop or activity `notes`; do not invent structured date/time fields.
-- Preserve approved stop and activity `tags`, including route-variant, access-constraint, theme, and practical-role tags from route research.
-- Use source coordinates when present; otherwise provide a specific `place.query`.
+- Preserve approved stop and activity `tags` from route research, including route-variant, access-constraint, theme, and practical-role tags. Tags should already come from the controlled route-research vocabulary.
+- For both stops and activities, use source coordinates when present and otherwise provide a specific `place.query`.
+- Do not write address fields directly. The app resolves address/location metadata from `place.query` or `place.coordinates`.
 - Use `--summary` for large dry-runs to avoid huge route geometry output.
 - Link-add commands are idempotent; retrying an existing URL should be safe.
 - Image import/upload is not part of the CLI v1 surface.
@@ -39,6 +40,8 @@ For detailed inspection, omit `--summary`.
 - ordered overnight stays -> ordered stop drafts
 - accommodation/provider/map URLs for overnight places -> stop links
 - day activities/tours/events between overnight stays -> activity drafts
+- source venue names, addresses, or route-research `placeQuery` values -> stop or activity `place.query`
+- source lat/lng values or route-research `coordinates` values -> stop or activity `place.coordinates`
 - activity/provider/map URLs -> activity links
 - booking references and uncertain source notes -> `notes`
 - approved source or route-research `tags` -> stop or activity `tags`

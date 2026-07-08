@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   createBoundingBoxAroundCoordinates,
   resolveMapTilerCoordinates,
@@ -7,6 +7,7 @@ import {
 import type { PlaceSearchResult } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute, calculateOpenRouteServiceRouteOptions } from './adapters/openRouteService';
 import { ActivityPanel } from './components/ActivityPanel';
+import { AppStatusPanel } from './components/AppStatusPanel';
 import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
 import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
@@ -89,6 +90,17 @@ const mapStopConfirmationApproxSize = {
   width: 320,
   height: 260,
 };
+const blockingStatusMapStyles = `
+  .map-stage--blocking-status .map-canvas {
+    pointer-events: none;
+  }
+
+  .map-stage--blocking-status .map-destination-label-layer,
+  .map-stage--blocking-status .map-accessible-destination-list,
+  .map-stage--blocking-status .map-add-stop-menu {
+    display: none;
+  }
+`;
 
 function formatCoordinate(value: number) {
   return value.toFixed(4);
@@ -244,26 +256,19 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
   if (!repository || !linkPreviewClient || !webImageSearchClient) {
     return (
       <main className="app-shell">
-        <section className="map-stage" aria-label="World tour map workspace">
+        <style>{blockingStatusMapStyles}</style>
+        <section className="map-stage map-stage--blocking-status" aria-label="World tour map workspace">
           <MapCanvas
             destinations={[]}
             routeLegs={[]}
             selectedDestinationId={null}
             onSelectDestination={() => undefined}
           />
-          <div
-            className={error ? 'app-status app-status-error' : 'app-status'}
-            role={error ? 'alert' : 'status'}
-          >
-            {error ? (
-              <>
-                <strong>{error.title}</strong>
-                <span>{error.message}</span>
-              </>
-            ) : (
-              'Loading trip data'
-            )}
-          </div>
+          <AppStatusPanel
+            status={error ? 'error' : 'loading'}
+            title={error?.title ?? 'Loading world tour'}
+            message={error?.message ?? 'Preparing your trip map.'}
+          />
         </section>
       </main>
     );
@@ -400,6 +405,34 @@ function TripWorkspace({
     () => (selectedDestination ? activitiesByDestinationId[selectedDestination.id] ?? [] : []),
     [activitiesByDestinationId, selectedDestination],
   );
+  const appStatusPanel = useMemo(() => {
+    if (isInteractionLocked) {
+      return {
+        status: 'loading' as const,
+        title: 'Loading world tour',
+        message: 'Preparing your trip map.',
+      };
+    }
+
+    if (error) {
+      return {
+        status: 'error' as const,
+        title: 'Unable to load trip data',
+        message: error,
+        onRetry: reload,
+      };
+    }
+
+    if (destinations.length === 0) {
+      return {
+        status: 'empty' as const,
+        title: 'No stops in this trip yet',
+        message: 'Search for a destination or add a stop from the map.',
+      };
+    }
+
+    return null;
+  }, [destinations.length, error, isInteractionLocked, reload]);
   const tagSuggestions = useMemo(
     () =>
       buildTagSuggestions([
@@ -447,6 +480,13 @@ function TripWorkspace({
   const pendingMapStopMaxHeight = pendingMapStopPosition
     ? getAvailableOverlayHeight(pendingMapStopPosition)
     : undefined;
+  const isBlockingStatusState = isInteractionLocked || Boolean(error);
+  const mapStageClassName = [
+    'map-stage',
+    isBlockingStatusState ? 'map-stage--blocking-status' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const restorePendingMapStopFocus = useCallback(() => {
     const previouslyFocusedElement = previouslyFocusedMapStopElementRef.current;
@@ -575,6 +615,22 @@ function TripWorkspace({
       setSelectedActivityId(null);
     }
   }, [selectedActivityId, selectedDestinationActivities, selectedDestinationId]);
+
+  useEffect(() => {
+    if (!isInteractionLocked) return;
+
+    setRouteAlternativesState(null);
+  }, [isInteractionLocked]);
+
+  useEffect(() => {
+    if (!error) return;
+
+    setRouteAlternativesState(null);
+    setPendingMapStop(null);
+    setSelectedDestinationId(null);
+    setSelectedActivityId(null);
+    setPreviewMedia(null);
+  }, [error]);
 
   useEffect(() => {
     if (!selectedActivityPanelId) return;
@@ -1038,18 +1094,19 @@ function TripWorkspace({
 
   return (
     <main className="app-shell">
-      <section className="map-stage" aria-label="World tour map workspace">
+      <style>{blockingStatusMapStyles}</style>
+      <section className={mapStageClassName} aria-label="World tour map workspace">
         <MapCanvas
           destinations={destinations}
           routeLegs={routeLegs}
           selectedDestinationId={selectedDestinationId}
           focusedActivities={selectedDestinationActivities}
           selectedActivityId={selectedActivityId}
-          onSelectDestination={handleSelectDestination}
-          onSelectActivity={setSelectedActivityId}
-          onRequestAddStop={openPendingMapStop}
+          onSelectDestination={isBlockingStatusState ? () => undefined : handleSelectDestination}
+          onSelectActivity={isBlockingStatusState ? undefined : setSelectedActivityId}
+          onRequestAddStop={isBlockingStatusState ? undefined : openPendingMapStop}
         />
-        {!isInteractionLocked ? (
+        {!isInteractionLocked && !error ? (
           <>
             <TopToolbar
               searchPlaces={searchStopPlaces}
@@ -1083,7 +1140,7 @@ function TripWorkspace({
             </div>
           </>
         ) : null}
-        {!isInteractionLocked && pendingMapStop && pendingMapStopPosition ? (
+        {!isBlockingStatusState && pendingMapStop && pendingMapStopPosition ? (
           <section
             ref={pendingMapStopDialogRef}
             className="map-stop-confirmation"
@@ -1125,7 +1182,10 @@ function TripWorkspace({
             </div>
           </section>
         ) : null}
-        {routeAlternativesState && activeRouteAlternativesOrigin && activeRouteAlternativesTarget ? (
+        {!isBlockingStatusState &&
+        routeAlternativesState &&
+        activeRouteAlternativesOrigin &&
+        activeRouteAlternativesTarget ? (
           <RouteAlternativesPanel
             originName={activeRouteAlternativesOrigin.name}
             targetName={activeRouteAlternativesTarget.name}
@@ -1138,7 +1198,7 @@ function TripWorkspace({
             onClose={closeRouteAlternatives}
           />
         ) : null}
-        {!isInteractionLocked && selectedDestination ? (
+        {!isInteractionLocked && !error && selectedDestination ? (
           <div className="workspace-panels">
             {selectedActivity ? (
               <ActivityPanel
@@ -1189,7 +1249,7 @@ function TripWorkspace({
             />
           </div>
         ) : null}
-        {!isInteractionLocked && previewMediaItem ? (
+        {!isInteractionLocked && !error && previewMediaItem ? (
           <DestinationImagePreviewModal
             mediaItem={previewMediaItem}
             canMoveLeft={previewMediaNavigationItems.length > 1}
@@ -1209,15 +1269,13 @@ function TripWorkspace({
             onClose={() => setPreviewMedia(null)}
           />
         ) : null}
-        {isInteractionLocked ? (
-          <div className="app-status" role="status">
-            Loading trip data
-          </div>
-        ) : null}
-        {error ? (
-          <div className="app-status app-status-error" role="alert">
-            {error}
-          </div>
+        {appStatusPanel ? (
+          <AppStatusPanel
+            status={appStatusPanel.status}
+            title={appStatusPanel.title}
+            message={appStatusPanel.message}
+            onRetry={'onRetry' in appStatusPanel ? appStatusPanel.onRetry : undefined}
+          />
         ) : null}
       </section>
     </main>

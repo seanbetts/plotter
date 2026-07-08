@@ -44,6 +44,17 @@ npm run trip -- delete-activity-link --trip-id <id> --activity-id <id> --link-id
 
 ## Writable JSON
 
+Place input is shared by stops and activities:
+
+```json
+{
+  "query": "Museu Nacional do Azulejo, Lisbon",
+  "coordinates": { "lat": 38.7241, "lng": -9.1041 }
+}
+```
+
+Use `query`, `coordinates`, or both. Do not provide an `address` field directly; the app resolves address/location metadata from the place input when possible.
+
 Trip draft:
 
 ```json
@@ -70,7 +81,7 @@ Stop draft:
 
 Stop patch uses the same writable fields as stop draft, but all optional and no `id`.
 
-Use stop `tags` for approved route variants, access constraints, themes, and practical roles such as `official-route`, `4wd-route`, `optional-detour`, `road-status-check`, `remote-resupply`, or `recovery-stop`.
+Use stop `tags` for approved route variants, access constraints, themes, and practical roles from the controlled route-research tag vocabulary.
 
 Activity draft:
 
@@ -78,12 +89,13 @@ Activity draft:
 {
   "title": "Museu Nacional do Azulejo",
   "place": {
-    "query": "Museu Nacional do Azulejo, Lisbon"
+    "query": "Museu Nacional do Azulejo, Lisbon",
+    "coordinates": { "lat": 38.7241, "lng": -9.1041 }
   }
 }
 ```
 
-Activity drafts intentionally stay minimal. To add activity tags, notes, description, or a refined place after creation, run `update-activity` with an activity patch.
+Activity drafts intentionally stay focused, but they can include `place.query`, `place.coordinates`, or both. To add activity tags, notes, description, or a refined place after creation, run `update-activity` with an activity patch.
 
 Activity patch:
 
@@ -92,14 +104,15 @@ Activity patch:
   "title": "Museu Nacional do Azulejo",
   "description": "Tile museum in a former convent.",
   "notes": "Check opening days before going.",
-  "tags": ["culture", "tiles"],
+  "tags": ["culture", "history"],
   "place": {
+    "query": "Museu Nacional do Azulejo, Lisbon",
     "coordinates": { "lat": 38.7241, "lng": -9.1041 }
   }
 }
 ```
 
-Use activity `tags` for approved themes, constraints, and route-variant context such as `walk`, `viewpoint`, `seasonal-access`, `permit-or-booking`, or `adventure-variant`.
+Use activity `tags` for approved themes, constraints, and route-variant context from the controlled route-research tag vocabulary.
 
 Reorder input:
 
