@@ -70,6 +70,8 @@ Stop draft:
 
 Stop patch uses the same writable fields as stop draft, but all optional and no `id`.
 
+Use stop `tags` for approved route variants, access constraints, themes, and practical roles such as `official-route`, `4wd-route`, `optional-detour`, `road-status-check`, `remote-resupply`, or `recovery-stop`.
+
 Activity draft:
 
 ```json
@@ -80,6 +82,8 @@ Activity draft:
   }
 }
 ```
+
+Activity drafts intentionally stay minimal. To add activity tags, notes, description, or a refined place after creation, run `update-activity` with an activity patch.
 
 Activity patch:
 
@@ -94,6 +98,8 @@ Activity patch:
   }
 }
 ```
+
+Use activity `tags` for approved themes, constraints, and route-variant context such as `walk`, `viewpoint`, `seasonal-access`, `permit-or-booking`, or `adventure-variant`.
 
 Reorder input:
 

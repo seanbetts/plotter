@@ -14,6 +14,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Treat overnight or base locations as candidate stops.
 - Treat non-overnight sights, hikes, tours, food stops, viewpoints, and experiences as candidate activities under a nearby candidate stop.
 - Put caveats, scores, vehicle warnings, logistics gates, source conflicts, and open validation items in notes.
+- Recommend stop and activity tags for route variants, constraints, themes, and practical roles.
 - Use source coordinates when available.
 - Keep source links with each candidate.
 - Require user approval before handing the plan to the trip data CLI.
@@ -59,16 +60,23 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - practical
 - buffer
 
-6. Balance and prune:
+6. Recommend tags for each candidate:
+
+- Route variants: `official-route`, `sealed-route`, `4wd-route`, `adventure-variant`, `practical-route`, `optional-detour`.
+- Access constraints: `high-clearance-4wd`, `seasonal-access`, `road-status-check`, `wet-season-risk`, `permit-or-booking`.
+- Practical roles: `remote-resupply`, `fuel-critical`, `recovery-stop`, `buffer-stop`.
+- Experience themes: concise tags such as `gorge`, `wildlife`, `coast`, `culture`, `walk`, `viewpoint`, `food`.
+
+7. Balance and prune:
 
 - Avoid repeated versions of the same experience.
 - Prefer a deliberate mix of iconic anchors, landscape, culture, wildlife, rest, resupply, scenic transit, and practical detours.
 - For official scenic routes, choose base stops first and attach discovery points as activities.
 - For mega-corridors, research each phase independently and do not produce one global ranked stop list.
 
-7. Produce a route research plan using `schema-reference.md`.
+8. Produce a route research plan using `schema-reference.md`.
 
-8. Stop for user review. Do not implement until the user explicitly approves implementation.
+9. Stop for user review. Do not implement until the user explicitly approves implementation.
 
 ## Route Shapes
 
@@ -88,6 +96,8 @@ Do not invent alternate corridors when the canonical route is already defined. D
 - direction
 - compressed, immersive, or exhaustive density
 - base stops versus nested activities
+
+If the official route has meaningful practical or adventure variants, keep the route model canonical and express the variants with stop and activity tags first.
 
 ### Mega-Corridor
 
@@ -124,11 +134,12 @@ After user approval, switch to the trip data workflow:
 2. For mega-corridors, implement approved phases or phase subsets rather than flattening the whole speculative route.
 3. Convert approved overnight or base candidates to trip stops.
 4. Convert approved non-overnight candidates to activities.
-5. Store source URLs as stop or activity links.
-6. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
-7. Use source coordinates when available.
-8. Let the app calculate routes and derived data.
-9. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
+5. Preserve approved candidate tags as stop or activity tags.
+6. Store source URLs as stop or activity links.
+7. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
+8. Use source coordinates when available.
+9. Let the app calculate routes and derived data.
+10. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
 
 ## References
 
