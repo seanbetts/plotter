@@ -1171,7 +1171,7 @@ function TripWorkspace({
             </div>
           </>
         ) : null}
-        {!isInteractionLocked && pendingMapStop && pendingMapStopPosition ? (
+        {!isBlockingStatusState && pendingMapStop && pendingMapStopPosition ? (
           <section
             ref={pendingMapStopDialogRef}
             className="map-stop-confirmation"
