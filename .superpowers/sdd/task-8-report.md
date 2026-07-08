@@ -6,7 +6,8 @@ Created `docs/trip-cli.md` as the agent-facing documentation for the trip CLI. T
 
 - the full command list for trips, stops, links, activities, and activity links
 - safe read / dry-run / apply workflow guidance
-- JSON input shapes for trip, stop, place, link, activity, and reorder commands
+- JSON input shapes for trip, stop, place, activity, and reorder commands
+- flag-based link inputs for `add-stop-link`, `delete-stop-link`, `add-activity-link`, and `delete-activity-link`
 - the shared output envelope for success and failure responses
 - what the service calculates versus what agents may author
 - itinerary interpretation rules for stops, activities, and links
@@ -37,6 +38,9 @@ Build emitted an existing Vite chunk-size warning, but the build completed succe
 ## Self-Review Findings
 
 - The doc uses the real CLI command names from `src/cli/trip.ts`, including `list`, `get`, `reorder-stops`, `list-activities`, and the link commands.
+- The doc now reflects the real flag-based link command contract instead of implying a JSON `LinkDraft`.
+- The dry-run guidance now states that every write command supports `--dry-run`, including create, update, link, delete, and reorder paths.
+- The insert-stop examples now treat `--after-stop-id` and `--before-stop-id` as independent anchors.
 - The doc documents the actual environment contract used by the CLI: `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`, plus optional MapTiler and OpenRouteService keys.
 - The wrapper guidance explicitly tells future agents to manipulate stops and let the service derive routes, links, and defaults.
 - The doc avoids introducing any markdown import convention, per the task brief.

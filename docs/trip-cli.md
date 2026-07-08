@@ -6,9 +6,10 @@ The trip CLI lets agents and local scripts read and write Supabase-backed world-
 
 1. Read current state with `npm run trip -- list` and `npm run trip -- get --trip-id <id> --include-activities --include-links`.
 2. Prefer narrow commands such as `insert-stop`, `update-stop`, `create-activity`, and link add/delete commands.
-3. Use `--dry-run` for broad or destructive writes.
-4. Use `--yes` only after the user has approved the change.
-5. The open app refreshes automatically through Supabase realtime after CLI writes.
+3. Every write command supports `--dry-run`, including create, update, link, delete, and reorder paths.
+4. Wrapper authors should dry-run agent-authored writes before applying them.
+5. Use `--yes` only after the user has approved the change.
+6. The open app refreshes automatically through Supabase realtime after CLI writes.
 
 ## Command List
 
@@ -27,11 +28,14 @@ npm run trip -- rename --trip-id <id> --name "North Coast 500 Trip"
 
 ```bash
 npm run trip -- replace-stops --trip-id <id> --input ./stops.json --dry-run
-npm run trip -- insert-stop --trip-id <id> --after-stop-id <id> --before-stop-id <id> --input ./stop.json
+npm run trip -- insert-stop --trip-id <id> --after-stop-id <id> --input ./stop.json
+npm run trip -- insert-stop --trip-id <id> --before-stop-id <id> --input ./stop.json
 npm run trip -- update-stop --trip-id <id> --stop-id <id> --input ./patch.json
 npm run trip -- delete-stop --trip-id <id> --stop-id <id> --dry-run
 npm run trip -- reorder-stops --trip-id <id> --input ./stop-order.json --strict
 ```
+
+`--after-stop-id` and `--before-stop-id` are independent optional anchors. Pass both only when they describe the intended insertion gap.
 
 ### Stop Links
 
@@ -39,6 +43,8 @@ npm run trip -- reorder-stops --trip-id <id> --input ./stop-order.json --strict
 npm run trip -- add-stop-link --trip-id <id> --stop-id <id> --url https://example.com
 npm run trip -- delete-stop-link --trip-id <id> --stop-id <id> --link-id <id>
 ```
+
+Link commands are flag-based only. `add-stop-link` and `add-activity-link` take `--url`; delete commands take `--link-id`. They do not accept JSON input files.
 
 ### Activities
 
@@ -134,16 +140,6 @@ Same writable fields as `StopDraft`, but all optional and `id` is not allowed in
 
 Use `coordinates` when the anchor is known. Use `query` as enrichment context. Both may be present.
 
-### LinkDraft
-
-```json
-{
-  "url": "https://example.com/lisbon-guide"
-}
-```
-
-Agents provide only the URL. The service derives the rest.
-
 ### ActivityDraft
 
 ```json
@@ -215,7 +211,8 @@ When turning prose, notes, or booking material into trip commands:
 
 ## Dry-Run And Apply
 
-- `--dry-run` previews destructive or broad changes without saving.
+- `--dry-run` is supported on every write command, including create, update, link, delete, and reorder paths.
+- Prefer dry-run first for any agent-authored write before applying it.
 - `--yes` confirms the write path for destructive commands.
 - `replace-stops`, `delete`, `delete-stop`, `delete-activity`, and bulk reorder commands should default to preview-first behavior in wrappers.
 - A wrapper should present the structured command and the dry-run result before applying a user-approved write.
