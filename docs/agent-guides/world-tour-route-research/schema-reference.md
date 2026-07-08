@@ -140,6 +140,7 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "priority": "strong",
   "score": 4,
   "suggestedStay": "1 night",
+  "tags": ["practical-route", "resupply", "buffer-stop"],
   "coordinates": { "lat": 69.9689, "lng": 23.2716 },
   "whyItMatters": "Useful Arctic base before Honningsvag and Nordkapp.",
   "vehicleConfidence": "good",
@@ -158,6 +159,7 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "activityType": ["landmark", "viewpoint"],
   "priority": "must-do",
   "score": 5,
+  "tags": ["viewpoint", "seasonal-access"],
   "coordinates": { "lat": 71.1695, "lng": 25.783 },
   "whyItMatters": "Symbolic destination at the end of the route.",
   "vehicleConfidence": "check",
@@ -166,6 +168,49 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "sources": []
 }
 ```
+
+## Tag Guidance
+
+Use `tags` for lightweight routing, filtering, and UI badges. Tags must come from this controlled vocabulary.
+
+Route variant tags:
+
+- `official-route`
+- `adventure-variant`
+- `practical-route`
+- `optional-detour`
+
+Access and logistics tags:
+
+- `road-status-check`
+- `seasonal-access`
+- `permit-or-booking`
+- `border-crossing`
+- `high-clearance-4wd`
+
+Stop role tags:
+
+- `resupply`
+- `recovery-stop`
+- `buffer-stop`
+
+Experience tags:
+
+- `history`
+- `nature`
+- `coast`
+- `mountains`
+- `gorge`
+- `caves`
+- `wildlife`
+- `culture`
+- `food`
+- `walk`
+- `viewpoint`
+
+Do not invent route-specific tags during research. If a useful detail does not fit the vocabulary, put it in `notes`, `logisticsGates`, or `openQuestions`.
+
+Tags are not a separate route-variant model. If a route later needs first-class alternatives, use tags as the evidence for what should be promoted.
 
 ## SourceEvidence
 
@@ -196,6 +241,7 @@ If one of these details matters to the recommendation, describe the caveat in `n
 
 - Approved `CandidateStop` records become stop drafts for the trip CLI.
 - Approved `CandidateActivity` records become activities under the nearest approved stop.
+- Approved candidate `tags` become stop or activity tags.
 - Candidate and activity `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
 - Coordinates are passed only when sourced.

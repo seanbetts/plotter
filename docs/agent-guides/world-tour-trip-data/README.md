@@ -12,6 +12,7 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 - Treat overnight locations as stops.
 - Treat non-overnight visits, tours, meals, viewpoints, walks, and events as activities under the nearest relevant stop.
 - Put booking refs, costs, times, and source caveats in stop or activity `notes`; do not invent structured date/time fields.
+- Preserve approved stop and activity `tags` from route research. Tags should already come from the controlled route-research vocabulary.
 - Use source coordinates when present; otherwise provide a specific `place.query`.
 - Use `--summary` for large dry-runs to avoid huge route geometry output.
 - Link-add commands are idempotent; retrying an existing URL should be safe.
@@ -40,6 +41,7 @@ For detailed inspection, omit `--summary`.
 - day activities/tours/events between overnight stays -> activity drafts
 - activity/provider/map URLs -> activity links
 - booking references and uncertain source notes -> `notes`
+- approved source or route-research `tags` -> stop or activity `tags`
 
 4. Choose the least broad write:
 
@@ -59,7 +61,7 @@ npm run trip -- replace-stops --trip-id <trip-id> --input /tmp/stops.json --dry-
 npm run trip -- replace-stops --trip-id <trip-id> --input /tmp/stops.json --yes --summary --pretty
 ```
 
-7. Add activities and links with narrow commands. For activity details, create first, then update details after the activity id exists.
+7. Add activities and links with narrow commands. For activity details, create first, then update details, notes, and tags after the activity id exists.
 
 8. Verify with a readback:
 

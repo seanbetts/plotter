@@ -25,23 +25,23 @@ Recommended corridor: `hybrid-sweden-northern-norway`.
 
 ## Candidate Stops
 
-| Order | Stop | Priority | Score | Stay | Vehicle | Evidence | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Balcombe | practical | 2 | departure | good | high | Route anchor only. |
-| 2 | Hamburg or Lubeck | practical | 2 | 1 night | good | medium | Breaks the long transit through northern Germany. |
-| 3 | Copenhagen / Malmo | strong | 3 | 1 night | good | medium | Gateway into Sweden; choose exact base after parking/accommodation validation. |
-| 4 | High Coast, Sweden | strong | 4 | 1-2 nights | good | medium | Distinct landscape break on the northbound transit. |
-| 5 | Lulea | practical | 2 | 1 night | good | medium | Arctic Sweden resupply and buffer stop. |
-| 6 | Rovaniemi | strong | 3 | 1 night | good | medium | Finland Arctic base; useful before the final northern push. |
-| 7 | Inari / Saariselka | strong | 4 | 1-2 nights | check | medium | Northern Finland nature base; validate season and road/weather conditions. |
-| 8 | Alta | strong | 4 | 1 night | good | medium | Practical Arctic Norway base before Honningsvag and Nordkapp. |
-| 9 | Honningsvag | must-do | 4 | 1 night | check | high | Base for North Cape Plateau. Validate road/weather conditions near travel. |
+| Order | Stop | Priority | Score | Stay | Tags | Vehicle | Evidence | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Balcombe | practical | 2 | departure | `practical-route` | good | high | Route anchor only. |
+| 2 | Hamburg or Lubeck | practical | 2 | 1 night | `practical-route`, `buffer-stop` | good | medium | Breaks the long transit through northern Germany. |
+| 3 | Copenhagen / Malmo | strong | 3 | 1 night | `practical-route`, `culture` | good | medium | Gateway into Sweden; choose exact base after parking/accommodation validation. |
+| 4 | High Coast, Sweden | strong | 4 | 1-2 nights | `coast`, `optional-detour` | good | medium | Distinct landscape break on the northbound transit. |
+| 5 | Lulea | practical | 2 | 1 night | `practical-route`, `resupply`, `buffer-stop` | good | medium | Arctic Sweden resupply and buffer stop. |
+| 6 | Rovaniemi | strong | 3 | 1 night | `official-route`, `nature`, `buffer-stop` | good | medium | Finland Arctic base; useful before the final northern push. |
+| 7 | Inari / Saariselka | strong | 4 | 1-2 nights | `adventure-variant`, `nature`, `seasonal-access` | check | medium | Northern Finland nature base; validate season and road/weather conditions. |
+| 8 | Alta | strong | 4 | 1 night | `practical-route`, `resupply`, `buffer-stop` | good | medium | Practical Arctic Norway base before Honningsvag and Nordkapp. |
+| 9 | Honningsvag | must-do | 4 | 1 night | `official-route`, `seasonal-access` | check | high | Base for North Cape Plateau. Validate road/weather conditions near travel. |
 
 ## Candidate Activities
 
-| Stop | Activity | Priority | Score | Vehicle | Evidence | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| Honningsvag | North Cape Plateau | must-do | 5 | check | high | Final destination activity. Winter access may require convoy travel. |
+| Stop | Activity | Priority | Score | Tags | Vehicle | Evidence | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Honningsvag | North Cape Plateau | must-do | 5 | `viewpoint`, `seasonal-access`, `road-status-check` | check | high | Final destination activity. Winter access may require convoy travel. |
 
 ## Source Evidence
 
@@ -73,6 +73,7 @@ Retrieved: 2026-07-08.
 
 - Approved overnight/base rows become trip stops.
 - North Cape Plateau becomes an activity under Honningsvag.
+- Approved tags become stop or activity tags in the trip CLI payloads.
 - Source evidence links become stop or activity links where relevant.
 - Logistics gate warnings become stop notes, activity notes, or implementation notes.
 - Route geometry is left to the app.
