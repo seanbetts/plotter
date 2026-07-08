@@ -90,11 +90,7 @@ const mapStopConfirmationApproxSize = {
   width: 320,
   height: 260,
 };
-const statusSurfaceMapStyles = `
-  .map-stage--status-surface .map-empty-label {
-    display: none;
-  }
-
+const blockingStatusMapStyles = `
   .map-stage--blocking-status .map-canvas {
     pointer-events: none;
   }
@@ -216,28 +212,11 @@ function getAvailableOverlayHeight(position: OverlayPosition) {
   )}px`;
 }
 
-function useSuppressStatusMapEmptyLabel(
-  stageRef: React.RefObject<HTMLElement | null>,
-  shouldSuppress: boolean,
-) {
-  useLayoutEffect(() => {
-    if (!shouldSuppress) return;
-
-    const label = stageRef.current?.querySelector<HTMLElement>('.map-empty-label');
-    if (!label) return;
-
-    label.textContent = '';
-    label.setAttribute('aria-hidden', 'true');
-    label.style.display = 'none';
-  }, [shouldSuppress, stageRef]);
-}
-
 export default function App({ webImageSearchClient: injectedWebImageSearchClient }: AppProps = {}) {
   const [linkPreviewClient, setLinkPreviewClient] = useState<LinkPreviewClient | null>(null);
   const [webImageSearchClient, setWebImageSearchClient] = useState<WebImageSearchClient | null>(
     injectedWebImageSearchClient ?? null,
   );
-  const statusStageRef = useRef<HTMLElement | null>(null);
   const {
     trips,
     activeTrip,
@@ -274,17 +253,11 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     });
   }, [refreshTrips, realtime]);
 
-  useSuppressStatusMapEmptyLabel(statusStageRef, !repository || !linkPreviewClient || !webImageSearchClient);
-
   if (!repository || !linkPreviewClient || !webImageSearchClient) {
     return (
       <main className="app-shell">
-        <style>{statusSurfaceMapStyles}</style>
-        <section
-          ref={statusStageRef}
-          className="map-stage map-stage--status-surface map-stage--blocking-status"
-          aria-label="World tour map workspace"
-        >
+        <style>{blockingStatusMapStyles}</style>
+        <section className="map-stage map-stage--blocking-status" aria-label="World tour map workspace">
           <MapCanvas
             destinations={[]}
             routeLegs={[]}
@@ -510,12 +483,10 @@ function TripWorkspace({
   const isBlockingStatusState = isInteractionLocked || Boolean(error);
   const mapStageClassName = [
     'map-stage',
-    appStatusPanel ? 'map-stage--status-surface' : '',
     isBlockingStatusState ? 'map-stage--blocking-status' : '',
   ]
     .filter(Boolean)
     .join(' ');
-  const mapStageRef = useRef<HTMLElement | null>(null);
 
   const restorePendingMapStopFocus = useCallback(() => {
     const previouslyFocusedElement = previouslyFocusedMapStopElementRef.current;
@@ -660,8 +631,6 @@ function TripWorkspace({
     setSelectedActivityId(null);
     setPreviewMedia(null);
   }, [error]);
-
-  useSuppressStatusMapEmptyLabel(mapStageRef, Boolean(appStatusPanel));
 
   useEffect(() => {
     if (!selectedActivityPanelId) return;
@@ -1125,8 +1094,8 @@ function TripWorkspace({
 
   return (
     <main className="app-shell">
-      <style>{statusSurfaceMapStyles}</style>
-      <section ref={mapStageRef} className={mapStageClassName} aria-label="World tour map workspace">
+      <style>{blockingStatusMapStyles}</style>
+      <section className={mapStageClassName} aria-label="World tour map workspace">
         <MapCanvas
           destinations={destinations}
           routeLegs={routeLegs}
