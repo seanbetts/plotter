@@ -68,7 +68,9 @@ For long, cross-border, or ambiguous trips, compare corridors before selecting s
 
 For official named scenic routes, do not invent alternate corridors when the canonical route is already defined. Decide scope, direction, and density instead. Example: a Wild Atlantic Way request should decide whether the user wants the full route or a section, north-to-south or south-to-north, and compressed, immersive, or exhaustive coverage before choosing base stops.
 
-The skill should recommend one corridor or scope by default and preserve plausible alternatives in the plan. Short or obvious routes may keep this section brief.
+For mega-corridors or expedition routes, decompose into phases before selecting stops. Example: a Pan-American Highway request should split into phases such as Alaska and Canada, Lower 48 and Mexico, Central America, Darien logistics, Northern Andes, and Patagonia. Each phase gets its own corridor or scope decision, stop density, candidate stops, and validation needs.
+
+The skill should recommend one corridor, scope, or phase structure by default and preserve plausible alternatives in the plan. Short or obvious routes may keep this section brief.
 
 ### 3. Build The Candidate Pool
 
@@ -175,6 +177,8 @@ The plan should include:
 - corridor options considered, when applicable
 - recommended corridor, when applicable
 - scope, direction, and density decisions for official scenic routes
+- phase structure for mega-corridors
+- logistics gates for route discontinuities, ferries, borders, vehicle import limits, permits, and seasonal access constraints
 - rejected or alternate corridors, sections, or scopes
 - ordered candidate stops
 - candidate activities grouped under stops
@@ -190,13 +194,15 @@ The skill stops after presenting the route research plan.
 
 If the user approves implementation, the agent should use the existing trip data skill:
 
-1. Convert approved overnight/base candidates to trip stops.
-2. Convert approved non-overnight candidates to activities.
-3. Store source URLs as stop or activity links.
-4. Put scores, vehicle warnings, caveats, timing, costs, and evidence notes into stop or activity notes.
-5. Use source coordinates when available.
-6. Let the app calculate routes and derived data.
-7. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
+1. Convert only approved route content to app data.
+2. For mega-corridors, implement approved phases or phase subsets rather than flattening the entire speculative route.
+3. Convert approved overnight/base candidates to trip stops.
+4. Convert approved non-overnight candidates to activities.
+5. Store source URLs as stop or activity links.
+6. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
+7. Use source coordinates when available.
+8. Let the app calculate routes and derived data.
+9. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
 
 ## Output Schema
 
@@ -221,6 +227,8 @@ The route research plan can be written in Markdown for human review, with embedd
     "direction": "south-to-north",
     "density": "immersive"
   },
+  "phases": [],
+  "logisticsGates": [],
   "stops": [],
   "openQuestions": [],
   "implementationNotes": []
@@ -237,6 +245,42 @@ The route research plan can be written in Markdown for human review, with embedd
   "strengths": ["Fewer ferry dependencies", "Good Arctic highlights"],
   "tradeoffs": ["Less fjord-heavy than the coast route"],
   "evidenceLevel": "medium",
+  "sources": []
+}
+```
+
+### RoutePhase
+
+```json
+{
+  "id": "central-america",
+  "name": "Central America",
+  "summary": "Guatemala to Panama, with border and security validation before final routing.",
+  "start": "Guatemala",
+  "end": "Panama City, Panama",
+  "routeShape": "regional-corridor",
+  "density": "immersive",
+  "corridorOptions": [],
+  "logisticsGateIds": ["darien-gap-vehicle-shipping"],
+  "candidateStops": [],
+  "openQuestions": [
+    "Whether to route through El Salvador, Honduras, or both."
+  ]
+}
+```
+
+### LogisticsGate
+
+```json
+{
+  "id": "darien-gap-vehicle-shipping",
+  "name": "Darien Gap vehicle shipping",
+  "type": "route-discontinuity",
+  "between": ["Panama", "Colombia"],
+  "impact": "Vehicle travel is not continuous; plan vehicle shipping and passenger transfer separately.",
+  "requiredDecision": "Choose shipping method, ports, agent, and timing before implementing this phase.",
+  "vehicleConfidence": "check",
+  "evidenceLevel": "high",
   "sources": []
 }
 ```
@@ -340,6 +384,8 @@ Generated route research outputs should not be committed by default. They can li
 - If research sources disagree, do not smooth over the conflict; record it in notes.
 - If the route is too broad, split it into corridors, official sections, or phases before selecting final stops.
 - If an official scenic route has many discovery points, choose base stops first and attach viewpoints, beaches, hikes, islands, food stops, and historic sites as activities.
+- If a mega-corridor spans multiple countries or months of travel, decompose it into phases and research each phase independently.
+- If the route has a discontinuity or hard logistical constraint, add a logistics gate rather than pretending it is a normal stop.
 
 ## Stress Test Expectations
 
@@ -347,6 +393,7 @@ The design should handle these route shapes:
 
 - single-corridor scenic road, such as the North Coast 500
 - official long scenic route with many discovery points, such as the Wild Atlantic Way
+- mega-corridor or expedition route, such as the Pan-American Highway from Alaska to Patagonia
 - long point-to-point expedition route, such as home to Nordkapp
 - multi-country overland corridor, such as Europe to Central Asia
 - region loop, such as Morocco or Iceland
@@ -355,6 +402,8 @@ The design should handle these route shapes:
 For long or ambiguous examples, the skill must make corridor selection explicit before stop selection.
 
 For official scenic routes, the skill must make scope, direction, and density explicit before stop selection. It should avoid turning every discovery point into a route stop.
+
+For mega-corridors, the skill must produce phases first. It should not produce one global ranked stop list across the whole route.
 
 ## Future App Opportunities
 
@@ -376,8 +425,10 @@ Initial verification should be example-driven:
 2. Confirm it compares corridors before stop selection.
 3. Ask the skill for a Wild Atlantic Way route.
 4. Confirm it chooses scope, direction, and density before stop selection.
-5. Confirm it produces base stops, nested activities, scores, evidence, and links.
-6. Confirm it does not write app data.
-7. Approve a small subset and verify the existing trip data skill can implement it through the CLI.
+5. Ask the skill for a Pan-American Highway route.
+6. Confirm it decomposes the route into phases and marks the Darien Gap as a logistics gate.
+7. Confirm it produces base stops, nested activities, scores, evidence, and links.
+8. Confirm it does not write app data.
+9. Approve a small subset and verify the existing trip data skill can implement it through the CLI.
 
 The first implementation should include at least one saved example output in the skill or guide documentation so future agents can see the expected standard.
