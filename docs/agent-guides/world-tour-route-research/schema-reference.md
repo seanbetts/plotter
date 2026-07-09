@@ -18,6 +18,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
   "expeditionViability": null,
   "phases": [],
   "logisticsGates": [],
+  "sourceEvidence": [],
   "stops": [],
   "openQuestions": [],
   "unsupportedData": [],
@@ -74,7 +75,7 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 
 - `sketch`
 - `candidate-plan`
-- `implementation-ready`
+- `handoff-ready`
 
 `RoutePhase.status`:
 
@@ -96,12 +97,29 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `seasonal-access`
 - `permit-or-booking`
 - `road-status-check`
+- `safety-advisory`
+- `vehicle-import`
+- `insurance-customs`
+- `restricted-area`
+- `ferry-or-operator`
 
 `logisticsGate.severity`:
 
 - `blocking-decision`
 - `pre-implementation-check`
 - `travel-time-validation`
+
+`sourceType`:
+
+- `official`
+- `operator`
+- `community`
+- `guidebook`
+- `map`
+- `review`
+- `trip-report`
+- `media`
+- `user-provided`
 
 ## CorridorOption
 
@@ -205,6 +223,10 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
   "name": "Darien Gap vehicle shipping",
   "type": "route-discontinuity",
   "severity": "blocking-decision",
+  "appliesToRecommendedRoute": true,
+  "appliesToVariantId": null,
+  "appliesToPhaseId": "central-america",
+  "conditionalOn": null,
   "between": ["Panama", "Colombia"],
   "impact": "Vehicle travel is not continuous; plan vehicle shipping and passenger transfer separately.",
   "requiredDecision": "Choose shipping method, ports, agent, and timing before implementing this phase.",
@@ -214,9 +236,19 @@ Use `logisticsGates` as the canonical home for route constraints and validation 
 }
 ```
 
-Use `blocking-decision` only when the route cannot be planned or implemented until the user chooses an option. Use `pre-implementation-check` when the agent can continue researching but the issue must be resolved before writing trip data. Use `travel-time-validation` for routine current checks such as road, weather, ferry, access, or seasonal status that should be refreshed close to travel.
+Use `blocking-decision` only when the affected route, phase, or variant cannot be planned or implemented until the user chooses an option. Use `pre-implementation-check` when the agent can continue researching but the issue must be resolved before writing affected trip data. Use `travel-time-validation` for routine current checks such as road, weather, ferry, access, or seasonal status that should be refreshed close to travel.
+
+Gate scope matters. A conditional gate on an unchosen variant is not a blocker for the recommended route. Use `appliesToRecommendedRoute`, `appliesToVariantId`, `appliesToPhaseId`, and `conditionalOn` to show what the gate affects.
+
+Severity-specific handoff:
+
+- `blocking-decision`: do not write affected stops or activities yet.
+- `pre-implementation-check`: resolve before writing affected data, or preserve as a note only if the user explicitly approves.
+- `travel-time-validation`: safe to write as a refresh reminder note.
 
 ## CandidateStop
+
+Top-level `stops` array order is canonical for implementation. For phased routes, preserve phase order first, then `candidateStops` order inside each phase. If a human-facing table is flattened, include an explicit order column.
 
 ```json
 {
@@ -234,12 +266,14 @@ Use `blocking-decision` only when the route cannot be planned or implemented unt
   "vehicleConfidence": "good",
   "evidenceLevel": "medium",
   "notes": "Validate current road and weather conditions close to travel.",
-  "sources": [],
+  "sources": ["vegvesen-traffic"],
   "activities": []
 }
 ```
 
 ## CandidateActivity
+
+Schema-native activities should stay nested under their parent `CandidateStop`. If a human-facing table is flattened, include the parent stop name so the trip data agent can attach the activity correctly.
 
 ```json
 {
@@ -254,7 +288,7 @@ Use `blocking-decision` only when the route cannot be planned or implemented unt
   "vehicleConfidence": "check",
   "evidenceLevel": "high",
   "notes": "Winter access may require convoy travel on the final E69 section.",
-  "sources": []
+  "sources": ["nordkapp-practical", "vegvesen-traffic"]
 }
 ```
 
@@ -301,10 +335,13 @@ Do not invent route-specific tags during research. If a useful detail does not f
 
 Tags are not a separate route-variant model. If a route later needs first-class alternatives, use tags as the evidence for what should be promoted.
 
+If a useful tag is repeatedly missing, add the proposed value and rationale to `implementationNotes` or `openQuestions`; do not place it in candidate `tags` until the controlled vocabulary is updated.
+
 ## SourceEvidence
 
 ```json
 {
+  "id": "nordkapp-practical",
   "title": "Visit Nordkapp practical information",
   "url": "https://www.nordkapp.no/practical-info/",
   "sourceType": "official",
@@ -313,6 +350,8 @@ Tags are not a separate route-variant model. If a route later needs first-class 
   "confidence": "high"
 }
 ```
+
+Use `sourceEvidence` as the top-level canonical source table for a route research plan. Source IDs are required whenever candidates, logistics gates, corridors, or phases refer to sources by ID. Candidate `sources` may contain source IDs or inline source evidence objects; prefer source IDs in `candidate-plan` and `handoff-ready` outputs. Allowed `sourceType` values are listed above.
 
 ## Unsupported Data
 
@@ -334,8 +373,11 @@ If one of these details matters to the recommendation, describe the caveat in `n
 - Approved `placeQuery` values become `place.query` for both stop and activity writes.
 - Approved `coordinates` values become `place.coordinates` for both stop and activity writes.
 - Approved candidate `tags` become stop or activity tags.
-- Candidate and activity `sources.url` values become stop or activity links.
+- Candidate and activity source IDs or inline `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
+- `blocking-decision` gates prevent writing affected content until resolved.
+- `pre-implementation-check` gates are resolved before writing affected content or preserved as notes if the user approves.
+- `travel-time-validation` gates are safe to write as refresh reminder notes.
 - Expedition viability details become route-level planning notes or stop notes on the nearest practical anchor.
 - Coordinates are passed only when sourced.
 - Route geometry is never authored.

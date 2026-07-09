@@ -37,9 +37,25 @@ This guide is research-only. It produces a reviewable route research plan. It do
 
 - `sketch`: route shape, recommended direction or corridor, key alternatives, hard blockers, and a small candidate spine.
 - `candidate-plan`: enough stops, activities, tags, sources, and logistics notes for the user to review the proposed trip.
-- `implementation-ready`: the approved handoff artifact with stable fields, source links, `placeQuery` or sourced coordinates, and notes ready for the trip data CLI.
+- `handoff-ready`: the approved research artifact with stable fields, source links, `placeQuery` or sourced coordinates, and notes ready for trip data review. This is not permission to write app data.
 
-Default to `sketch` for broad or uncertain requests, `candidate-plan` when the user asks to plan a trip, and `implementation-ready` only after the route direction is approved or the user explicitly asks for implementation-ready detail.
+Default to `sketch` for broad or uncertain requests, `candidate-plan` when the user asks to plan a trip, and `handoff-ready` only after the route direction is approved or the user explicitly asks for handoff detail. Do not switch to the trip data guide or run the trip CLI until the user gives a separate final approval such as "implement this approved plan."
+
+| Depth | Use When | User-Facing Size | Sources | Stops And Activities |
+| --- | --- | --- | --- | --- |
+| `sketch` | The route is broad, ambiguous, or early-stage. | Recommendation, 1-3 alternatives, blockers, and next decision. | Cite route-defining and blocker sources only. No full source table by default. | About 3-7 spine stops or phases. Activities only if they change the route decision. |
+| `candidate-plan` | The user wants a reviewable trip plan. | Recommendation, material variants, compact stop/activity preview, and approval question. | Cite key route, stop, and validation sources. Full source table can stay in the handoff artifact. | Enough ordered stops for the proposed route or phase. Activities should be selective and nested under stops. |
+| `handoff-ready` | Direction is approved or the user asks to prepare a handoff artifact. | Short summary plus any remaining approval questions. | Stable source IDs, source URLs, `placeQuery` or sourced coordinates, and notes ready for review. | Ordered stops and nested activities that can be converted by the trip data guide after final write approval. |
+
+Route shape defaults:
+
+| Route Shape | Default Depth | Expected Output |
+| --- | --- | --- |
+| Simple scenic road trip | `sketch` | Short recommendation, light stop spine, routine validations only. |
+| Official scenic route | `candidate-plan` | Scope, direction, phases if long, base stops, selective nested activities. |
+| Mega-corridor or blocked corridor | `sketch` | Phase or corridor viability, blockers, restart options; no stops for blocked phases. |
+| Open-ended route family | `sketch` | Route concepts and corridor viability before stop ranking. |
+| Remote expedition track | `sketch` | Expedition viability first; stops only after logistics are researchable. |
 
 3. Decide the route shape before selecting stops:
 
@@ -81,6 +97,8 @@ Default to `sketch` for broad or uncertain requests, `candidate-plan` when the u
 
 Do not invent new tags during research. If a useful detail does not fit the controlled vocabulary, put it in `notes`, `logisticsGates`, or `openQuestions`.
 
+If the same missing concept appears repeatedly across routes, add it to `implementationNotes` as a proposed tag addition. Do not use proposed tags in candidate `tags` until the controlled vocabulary is explicitly updated.
+
 8. Balance and prune:
 
 - Avoid repeated versions of the same experience.
@@ -88,7 +106,7 @@ Do not invent new tags during research. If a useful detail does not fit the cont
 - For official scenic routes, choose base stops first and attach discovery points as activities.
 - For mega-corridors, research each phase independently and do not produce one global ranked stop list.
 - For remote expedition tracks, complete the logistics viability pass before scoring stops. Treat camps, wells, fuel points, exit tracks, and recovery towns as practical anchors rather than attractions.
-- When adding logistics gates, set severity: `blocking-decision` for user choices that stop planning, `pre-implementation-check` for issues that must be resolved before writing data, and `travel-time-validation` for routine checks close to travel.
+- When adding logistics gates, set severity and scope: `blocking-decision` for choices that stop the affected route plan, `pre-implementation-check` for issues that must be resolved before writing affected data, and `travel-time-validation` for routine checks close to travel.
 
 9. Present the user-facing plan first, then include schema-shaped details only when needed for review or handoff.
 
@@ -104,7 +122,7 @@ Default output should be easy to scan:
 4. A compact stop and activity preview at the chosen research depth.
 5. The approval question or next decision.
 
-Keep route-shape labels, internal field names, evidence details, and full JSON-like structures out of the main response unless they help the user make a decision or the user asks for implementation-ready output. Use the schema reference as the stable handoff contract between agents.
+Keep route-shape labels, internal field names, evidence details, and full JSON-like structures out of the main response unless they help the user make a decision or the user asks for handoff-ready output. Use the schema reference as the stable handoff contract between agents.
 
 ## Decision Ownership
 
@@ -122,10 +140,22 @@ The user should decide:
 - high-consequence corridor, direction, or route variant choices
 - season, vehicle, safety, comfort, or border-risk choices that materially affect feasibility
 - whether to skip, defer, ship, overfly, or restart around a blocked phase
-- whether to expand from `sketch` to `candidate-plan` or from `candidate-plan` to `implementation-ready`
+- whether to expand from `sketch` to `candidate-plan` or from `candidate-plan` to `handoff-ready`
 - final approval before any trip data is written
 
 Phrase user decisions in plain travel terms, not schema terms.
+
+The agent may recommend a default route, but the user must approve choices that materially change safety, border exposure, season, vehicle suitability, budget, or the character of the trip.
+
+## Logistics Gate Handoff
+
+Gate severity controls implementation behavior for the route content the gate applies to:
+
+- `blocking-decision`: do not write affected stops or activities until the user chooses a route option, restart, skip, shipping, overfly, deferral, permit, or other required decision.
+- `pre-implementation-check`: research may continue, but resolve the issue before writing affected trip data unless the user explicitly approves preserving it as a note.
+- `travel-time-validation`: safe to write approved trip data; preserve the check as a stop, activity, or implementation note to refresh close to travel.
+
+A gate only blocks the route, phase, or variant it applies to. Do not present a conditional gate on an unchosen variant as a blocker for the recommended route.
 
 ## Route Shapes
 
@@ -192,7 +222,7 @@ Before selecting stops, produce an expedition viability pass that covers permits
 
 ## Approval-Gated Handoff
 
-After user approval, switch to the trip data workflow:
+After the user gives final approval to implement an approved route research plan, switch to the trip data workflow:
 
 1. Convert only approved route content to app data.
 2. For mega-corridors, implement approved phases or phase subsets rather than flattening the whole speculative route.
@@ -209,5 +239,6 @@ After user approval, switch to the trip data workflow:
 ## References
 
 - See `schema-reference.md` for the plan schema and allowed values.
-- See `examples/home-to-nordkapp-example.md` for a compact example output.
+- See `examples/home-to-nordkapp-user-response-example.md` for the default user-facing output shape.
+- See `examples/home-to-nordkapp-handoff-artifact-example.md` for optional handoff-ready detail.
 - See `../world-tour-trip-data/README.md` for the approved implementation workflow after user approval.
