@@ -64,8 +64,14 @@ Depth requirements:
 | Depth | Required Fields Or Sections |
 | --- | --- |
 | `sketch` | Recommendation, material alternatives, blockers or validations, next decision, and about 3-7 spine stops, phases, or corridor options when useful. Full source tables, scoring, and tags are optional. |
-| `candidate-plan` | Ordered candidate stops or phases, selective nested activities, approved tag suggestions, key source IDs or links, logistics gates with severity and scope, and open questions. |
+| `candidate-plan` | Ordered candidate stops or phases, selective nested activities, approved tag suggestions, key source IDs or links, logistics gates with severity and scope, and open questions. Default to one phase or about 8-15 stops unless the user asks for exhaustive detail. |
 | `handoff-ready` | Everything needed for trip-data review: canonical stop order, parent activity mapping, stable `sourceEvidence`, `placeQuery` or sourced coordinates where available, source IDs, logistics gate scope, notes, unsupported data, and implementation notes. |
+
+Implicit depth consent:
+
+- "Give me options", "which route would you take", or "is this viable?" means `sketch`.
+- "Plan a route", "make me a 10-day trip", or "build a reviewable itinerary" means `candidate-plan`.
+- "Prepare this for handoff", "make this import-ready", or "turn the approved plan into trip data inputs" means `handoff-ready`, but still requires separate final approval before app writes.
 
 3. Decide the route shape before selecting stops:
 

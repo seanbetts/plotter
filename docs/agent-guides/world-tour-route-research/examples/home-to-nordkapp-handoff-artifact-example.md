@@ -47,6 +47,106 @@ Flattened activity tables must include the parent stop.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Honningsvag | North Cape Plateau | must-do | 5 | `viewpoint`, `seasonal-access`, `road-status-check` | check | high | nordkapp-practical, vegvesen-traffic | Final destination activity. Winter access may require convoy travel. |
 
+## Schema-Native Handoff Excerpt
+
+For handoff-ready output, preserve schema-native fields even if the user-facing summary used compact tables. Repeat this shape for every approved stop and nested activity.
+
+```json
+{
+  "sourceEvidence": [
+    {
+      "id": "nordkapp-practical",
+      "title": "Visit Nordkapp practical information",
+      "url": "https://www.nordkapp.no/practical-info/",
+      "sourceType": "official",
+      "usedFor": ["seasonal access", "vehicle confidence"],
+      "retrievedAt": "2026-07-08",
+      "confidence": "high"
+    },
+    {
+      "id": "vegvesen-traffic",
+      "title": "Statens vegvesen traffic information",
+      "url": "https://www.vegvesen.no/trafikk",
+      "sourceType": "official",
+      "usedFor": ["road status", "travel-time validation"],
+      "retrievedAt": "2026-07-08",
+      "confidence": "high"
+    }
+  ],
+  "stops": [
+    {
+      "name": "Alta",
+      "countryRegion": "Finnmark, Norway",
+      "stopType": ["town", "practical", "buffer"],
+      "classification": ["practical", "buffer"],
+      "priority": "strong",
+      "score": 4,
+      "suggestedStay": "1 night",
+      "tags": ["practical-route", "resupply", "buffer-stop"],
+      "placeQuery": "Alta, Finnmark, Norway",
+      "coordinates": { "lat": 69.9689, "lng": 23.2716 },
+      "whyItMatters": "Practical Arctic Norway base before Honningsvag and Nordkapp.",
+      "vehicleConfidence": "good",
+      "evidenceLevel": "medium",
+      "notes": "Validate current road and weather conditions close to travel.",
+      "sources": ["vegvesen-traffic"],
+      "activities": []
+    },
+    {
+      "name": "Honningsvag",
+      "countryRegion": "Finnmark, Norway",
+      "stopType": ["town", "destination-base"],
+      "classification": ["anchor", "practical"],
+      "priority": "must-do",
+      "score": 4,
+      "suggestedStay": "1 night",
+      "tags": ["official-route", "seasonal-access"],
+      "placeQuery": "Honningsvag, Finnmark, Norway",
+      "coordinates": { "lat": 70.9821, "lng": 25.9704 },
+      "whyItMatters": "Overnight base for North Cape Plateau.",
+      "vehicleConfidence": "check",
+      "evidenceLevel": "high",
+      "notes": "Validate E69 and weather conditions near travel.",
+      "sources": ["nordkapp-practical", "vegvesen-traffic"],
+      "activities": [
+        {
+          "title": "North Cape Plateau",
+          "activityType": ["landmark", "viewpoint"],
+          "priority": "must-do",
+          "score": 5,
+          "tags": ["viewpoint", "seasonal-access", "road-status-check"],
+          "placeQuery": "North Cape Plateau, Nordkapp, Norway",
+          "coordinates": { "lat": 71.1695, "lng": 25.783 },
+          "whyItMatters": "Symbolic endpoint of the route.",
+          "vehicleConfidence": "check",
+          "evidenceLevel": "high",
+          "notes": "Winter access may require convoy travel.",
+          "sources": ["nordkapp-practical", "vegvesen-traffic"]
+        }
+      ]
+    }
+  ],
+  "logisticsGates": [
+    {
+      "id": "nordkapp-e69-seasonal-access",
+      "name": "E69/North Cape Plateau seasonal access",
+      "type": "road-status-check",
+      "severity": "travel-time-validation",
+      "appliesToRecommendedRoute": true,
+      "appliesToVariantId": "hybrid-sweden-northern-norway",
+      "appliesToPhaseId": null,
+      "conditionalOn": "Always applies near travel.",
+      "between": ["Honningsvag", "North Cape Plateau"],
+      "impact": "Access can depend on current road, weather, and convoy conditions.",
+      "requiredDecision": "Refresh current road and weather status close to travel.",
+      "vehicleConfidence": "check",
+      "evidenceLevel": "high",
+      "sources": ["nordkapp-practical", "vegvesen-traffic"]
+    }
+  ]
+}
+```
+
 ## Source Evidence
 
 | ID | Source | Type | Used For | Confidence |
