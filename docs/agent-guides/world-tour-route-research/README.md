@@ -41,6 +41,8 @@ This guide is research-only. It produces a reviewable route research plan. It do
 
 Default to `sketch` for broad or uncertain requests, `candidate-plan` when the user asks to plan a trip, and `handoff-ready` only after the route direction is approved or the user explicitly asks for handoff detail. Do not switch to the trip data guide or run the trip CLI until the user gives a separate final approval such as "implement this approved plan."
 
+Older references to `implementation-ready` mean `handoff-ready`. Do not emit `implementation-ready` in new route research plans.
+
 | Depth | Use When | User-Facing Size | Sources | Stops And Activities |
 | --- | --- | --- | --- | --- |
 | `sketch` | The route is broad, ambiguous, or early-stage. | Recommendation, 1-3 alternatives, blockers, and next decision. | Cite route-defining and blocker sources only. No full source table by default. | About 3-7 spine stops or phases. Activities only if they change the route decision. |
@@ -56,6 +58,14 @@ Route shape defaults:
 | Mega-corridor or blocked corridor | `sketch` | Phase or corridor viability, blockers, restart options; no stops for blocked phases. |
 | Open-ended route family | `sketch` | Route concepts and corridor viability before stop ranking. |
 | Remote expedition track | `sketch` | Expedition viability first; stops only after logistics are researchable. |
+
+Depth requirements:
+
+| Depth | Required Fields Or Sections |
+| --- | --- |
+| `sketch` | Recommendation, material alternatives, blockers or validations, next decision, and about 3-7 spine stops, phases, or corridor options when useful. Full source tables, scoring, and tags are optional. |
+| `candidate-plan` | Ordered candidate stops or phases, selective nested activities, approved tag suggestions, key source IDs or links, logistics gates with severity and scope, and open questions. |
+| `handoff-ready` | Everything needed for trip-data review: canonical stop order, parent activity mapping, stable `sourceEvidence`, `placeQuery` or sourced coordinates where available, source IDs, logistics gate scope, notes, unsupported data, and implementation notes. |
 
 3. Decide the route shape before selecting stops:
 
@@ -99,6 +109,8 @@ Do not invent new tags during research. If a useful detail does not fit the cont
 
 If the same missing concept appears repeatedly across routes, add it to `implementationNotes` as a proposed tag addition. Do not use proposed tags in candidate `tags` until the controlled vocabulary is explicitly updated.
 
+Candidate future tags backlog: `city`, `scenic-drive`, `ferry`, `camping`, `lake`, `desert`, and `beach`. These are not part of the controlled vocabulary until explicitly promoted.
+
 8. Balance and prune:
 
 - Avoid repeated versions of the same experience.
@@ -108,7 +120,7 @@ If the same missing concept appears repeatedly across routes, add it to `impleme
 - For remote expedition tracks, complete the logistics viability pass before scoring stops. Treat camps, wells, fuel points, exit tracks, and recovery towns as practical anchors rather than attractions.
 - When adding logistics gates, set severity and scope: `blocking-decision` for choices that stop the affected route plan, `pre-implementation-check` for issues that must be resolved before writing affected data, and `travel-time-validation` for routine checks close to travel.
 
-9. Present the user-facing plan first, then include schema-shaped details only when needed for review or handoff.
+9. Present the user-facing plan first. Do not include the handoff artifact unless the user asks for it or another agent needs the handoff contract.
 
 10. Stop for user review. Do not implement until the user explicitly approves implementation.
 
@@ -146,6 +158,14 @@ The user should decide:
 Phrase user decisions in plain travel terms, not schema terms.
 
 The agent may recommend a default route, but the user must approve choices that materially change safety, border exposure, season, vehicle suitability, budget, or the character of the trip.
+
+Ask versus assume examples:
+
+- Assume mixed scenic/practical style if the user gives no preference.
+- Assume routine road, ferry, weather, and access checks can be preserved as validation notes.
+- Ask before choosing border exposure through Russia, Iran, the Sahel, active conflict areas, or other materially risky corridors.
+- Ask before committing to winter Arctic driving, remote high-clearance 4WD tracks, vehicle shipping, major ferry-dependent variants, or carnet/customs-heavy routes.
+- Ask before expanding from a light `sketch` into `handoff-ready` detail unless the user has already requested a writeable handoff artifact.
 
 ## Logistics Gate Handoff
 
@@ -195,6 +215,12 @@ If a phase is blocked by current travel advice, active conflict, border closure,
 Example: Morocco or Iceland.
 
 Choose loop direction, major regions, and density first. Balance landscapes, towns, recovery stops, and logistics.
+
+### Regional Corridor
+
+Example: Cairo to Cape Town section, Balkan transit, or a named cross-country corridor.
+
+Use this when the route is narrower than a mega-corridor but broader than a simple point-to-point drive. Compare practical alignments, borders, safety or access constraints, and anchor stops before producing a candidate plan.
 
 ### Open-Ended Route Family
 

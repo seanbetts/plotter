@@ -77,6 +77,8 @@ Use this schema for route research plans. Markdown tables are acceptable for hum
 - `candidate-plan`
 - `handoff-ready`
 
+Older references to `implementation-ready` mean `handoff-ready`. Do not emit `implementation-ready` in new plans.
+
 `RoutePhase.status`:
 
 - `researchable`
@@ -215,7 +217,7 @@ For blocked or deferred phases, keep `candidateStops` empty unless the user expl
 
 ## LogisticsGate
 
-Use `logisticsGates` as the canonical home for route constraints and validation items that must be resolved before implementation.
+Use `logisticsGates` as the canonical home for route blockers, pre-write checks, and travel-time refresh reminders.
 
 ```json
 {
@@ -336,6 +338,8 @@ Do not invent route-specific tags during research. If a useful detail does not f
 Tags are not a separate route-variant model. If a route later needs first-class alternatives, use tags as the evidence for what should be promoted.
 
 If a useful tag is repeatedly missing, add the proposed value and rationale to `implementationNotes` or `openQuestions`; do not place it in candidate `tags` until the controlled vocabulary is updated.
+
+Candidate future tags backlog: `city`, `scenic-drive`, `ferry`, `camping`, `lake`, `desert`, and `beach`. These are not allowed candidate tags until explicitly promoted into the controlled vocabulary.
 
 ## SourceEvidence
 
