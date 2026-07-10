@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Activity, Coordinates, Destination, RouteLeg } from '../domain/types';
+import { calmBasemapStyle, mapLabelFontStack, mapStyleUrl, readMapLayerColors } from '../map/mapPresentation';
+import { buildRenderableRouteFeatures } from '../map/tripRouteFeatures';
+import type { RouteFeatureProperties } from '../map/tripRouteFeatures';
 import { formatStopMarker } from './stopLabels';
 
 export type MapAddStopRequest = {
@@ -39,12 +42,6 @@ type ActivityFeatureProperties = {
   title: string;
   order: number;
   selected: boolean;
-};
-
-type RouteFeatureProperties = {
-  id: string;
-  type: RouteLeg['type'] | 'failed';
-  status: RouteLeg['status'];
 };
 
 type CityFeatureProperties = {
@@ -113,37 +110,13 @@ type MapDetailCategory = {
   defaultVisible: boolean;
 };
 
-const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
-const styleUrl = mapTilerApiKey
-  ? `https://api.maptiler.com/maps/streets-v4/style.json?key=${mapTilerApiKey}`
-  : 'https://demotiles.maplibre.org/style.json';
 const missingMapTilerSpriteIds = new Set(['road_', ' ']);
-const cityLabelFontStack = mapTilerApiKey
-  ? ['Roboto Regular', 'Noto Sans Regular']
-  : ['Open Sans Semibold'];
-const shouldRenderFallbackMajorCities = !mapTilerApiKey;
+const shouldRenderFallbackMajorCities = !import.meta.env.VITE_MAPTILER_API_KEY;
 const majorCityMinZoom = 5;
 const destinationLabelMinZoom = 4;
 const showMapDetailDevTools = import.meta.env.VITE_ENABLE_MAP_DETAIL_DEV_TOOLS === 'true';
 const minDetailZoom = 1;
 const maxDetailZoom = 18;
-const hiddenBasemapLayerPatterns = [
-  'aerialway',
-  'barrier',
-  'building',
-  'contour',
-  'housenumber',
-  'landuse',
-  'mountain',
-  'park-label',
-  'parking',
-  'poi',
-  'rail',
-  'shop',
-  'trail',
-  'transit',
-];
-const softenedLineLayerPatterns = ['minor', 'path', 'track', 'service'];
 const mapDetailCategories: MapDetailCategory[] = [
   { id: 'water', label: 'Water', group: 'Natural', sourceLayers: ['water'], defaultVisible: true },
   { id: 'waterway', label: 'Rivers & streams', group: 'Natural', sourceLayers: ['waterway'], defaultVisible: true },
@@ -543,28 +516,6 @@ const activityLabelCollisionPaddingPx = 6;
 const activityLabelApproxCharacterWidthPx = 7.2;
 const activityLabelHorizontalChromePx = 18;
 
-const mapColorTokenFallbacks = {
-  '--color-accent': '#d9467a',
-  '--color-accent-rgb': '217 70 122',
-  '--color-map-selected': '#f7f0d0',
-  '--color-route-shipping': '#7ec8e3',
-  '--color-text': '#f5efe3',
-  '--color-text-rgb': '245 239 227',
-  '--color-text-inverse': '#111814',
-  '--color-text-inverse-rgb': '17 24 20',
-};
-
-function readCssToken(tokenName: keyof typeof mapColorTokenFallbacks) {
-  if (typeof window === 'undefined') {
-    return mapColorTokenFallbacks[tokenName];
-  }
-
-  return (
-    window.getComputedStyle(document.documentElement).getPropertyValue(tokenName).trim() ||
-    mapColorTokenFallbacks[tokenName]
-  );
-}
-
 function clampPaddingPair(leading: number, trailing: number, viewportSize: number): [number, number] {
   if (!Number.isFinite(viewportSize) || viewportSize <= 0) {
     return [leading, trailing];
@@ -590,25 +541,6 @@ function stopFocusPaddingForMap(map: Pick<maplibregl.Map, 'getContainer'>) {
   const [top, bottom] = clampPaddingPair(stopFocusPreferredPadding.top, stopFocusPreferredPadding.bottom, height);
 
   return { top, right, bottom, left };
-}
-
-function readCssRgbToken(tokenName: keyof typeof mapColorTokenFallbacks, alpha: number) {
-  const rgbChannels = readCssToken(tokenName).split(/\s+/).join(', ');
-
-  return `rgba(${rgbChannels}, ${alpha})`;
-}
-
-function getMapLayerColors() {
-  return {
-    accent: readCssToken('--color-accent'),
-    accentHalo: readCssRgbToken('--color-accent-rgb', 0.22),
-    selected: readCssToken('--color-map-selected'),
-    shipping: readCssToken('--color-route-shipping'),
-    text: readCssToken('--color-text'),
-    textInverse: readCssToken('--color-text-inverse'),
-    cityText: readCssRgbToken('--color-text-inverse-rgb', 0.82),
-    cityHalo: readCssRgbToken('--color-text-rgb', 0.82),
-  };
 }
 
 function emptyFeatureCollection<TGeometry extends Point | LineString, TProperties>(): FeatureCollection<
@@ -772,10 +704,6 @@ function visibleActivityLabels(
     }));
 }
 
-function findDestination(destinations: Destination[], destinationId: string) {
-  return destinations.find((destination) => destination.id === destinationId);
-}
-
 function selectedDestinationForFocus(
   destinations: Destination[],
   selectedDestinationId: string | null,
@@ -783,70 +711,6 @@ function selectedDestinationForFocus(
   return selectedDestinationId
     ? destinations.find((candidate) => candidate.id === selectedDestinationId) ?? null
     : null;
-}
-
-function straightLineGeometry(origin: Destination, target: Destination): LineString {
-  return {
-    type: 'LineString',
-    coordinates: [
-      [origin.coordinates.lng, origin.coordinates.lat],
-      [target.coordinates.lng, target.coordinates.lat],
-    ],
-  };
-}
-
-function hasUsableLineString(geometry: RouteLeg['geometry']): geometry is LineString {
-  return geometry?.type === 'LineString' && geometry.coordinates.length >= 2;
-}
-
-function routeGeometryForLeg(destinations: Destination[], leg: RouteLeg): LineString | null {
-  if (leg.type === 'driving-auto' && leg.status === 'ready' && hasUsableLineString(leg.geometry)) {
-    return leg.geometry;
-  }
-
-  const origin = findDestination(destinations, leg.originDestinationId);
-  const target = findDestination(destinations, leg.targetDestinationId);
-  if (!origin || !target) return null;
-
-  if (leg.type === 'shipping-manual') {
-    return hasUsableLineString(leg.geometry) ? leg.geometry : straightLineGeometry(origin, target);
-  }
-
-  if (leg.status === 'failed') {
-    return straightLineGeometry(origin, target);
-  }
-
-  return null;
-}
-
-function routeTypeForLeg(leg: RouteLeg): RouteFeatureProperties['type'] {
-  return leg.status === 'failed' ? 'failed' : leg.type;
-}
-
-function buildRouteFeatures(
-  destinations: Destination[],
-  routeLegs: RouteLeg[],
-): FeatureCollection<LineString, RouteFeatureProperties> {
-  return {
-    type: 'FeatureCollection',
-    features: routeLegs.flatMap((leg) => {
-      const geometry = routeGeometryForLeg(destinations, leg);
-      if (!geometry) return [];
-
-      return [
-        {
-          type: 'Feature' as const,
-          id: leg.id,
-          geometry,
-          properties: {
-            id: leg.id,
-            type: routeTypeForLeg(leg),
-            status: leg.status,
-          },
-        },
-      ];
-    }),
-  };
 }
 
 function getGeoJsonSource(map: maplibregl.Map, sourceId: string) {
@@ -965,21 +829,6 @@ function applyMapDetailSettings(map: maplibregl.Map, settings: Record<string, bo
       'visibility',
       settings[category.id] ? 'visible' : 'none',
     );
-  }
-}
-
-function calmBasemapStyle(map: maplibregl.Map) {
-  const layers = map.getStyle()?.layers ?? [];
-
-  for (const layer of layers) {
-    if (layerMatchesPattern(layer.id, hiddenBasemapLayerPatterns)) {
-      map.setLayoutProperty(layer.id, 'visibility', 'none');
-      continue;
-    }
-
-    if (layer.type === 'line' && layerMatchesPattern(layer.id, softenedLineLayerPatterns)) {
-      map.setPaintProperty(layer.id, 'line-opacity', 0.32);
-    }
   }
 }
 
@@ -1226,7 +1075,7 @@ export function MapCanvas({
     setSourceData(
       map,
       routesSourceId,
-      buildRouteFeatures(latestDestinationsRef.current, latestRouteLegsRef.current),
+      buildRenderableRouteFeatures(latestDestinationsRef.current, latestRouteLegsRef.current),
     );
     if (shouldRenderFallbackMajorCities) {
       setSourceData(map, majorCitiesSourceId, buildMajorCityFeatures());
@@ -1354,7 +1203,7 @@ export function MapCanvas({
   const addMapLayers = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
-    const mapColors = getMapLayerColors();
+    const mapColors = readMapLayerColors();
 
     if (!map.getSource(destinationsSourceId)) {
       map.addSource(destinationsSourceId, {
@@ -1501,7 +1350,7 @@ export function MapCanvas({
         minzoom: majorCityMinZoom,
         layout: {
           'text-field': ['get', 'name'],
-          'text-font': cityLabelFontStack,
+          'text-font': mapLabelFontStack,
           'text-offset': [0.7, 0],
           'text-size': 11,
           'text-anchor': 'left',
@@ -1528,7 +1377,7 @@ export function MapCanvas({
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleUrl,
+      style: mapStyleUrl,
       center: [18, 24],
       zoom: 1.4,
       attributionControl: false,
