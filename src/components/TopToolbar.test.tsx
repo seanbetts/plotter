@@ -118,7 +118,7 @@ describe('TopToolbar', () => {
 
   it('shows a retryable local error', async () => {
     const user = userEvent.setup();
-    renderToolbar({
+    const { rerenderToolbar } = renderToolbar({
       canExportTripMap: true,
       onExportTripMap: vi.fn().mockRejectedValue(new Error('failed')),
     });
@@ -126,6 +126,12 @@ describe('TopToolbar', () => {
     await user.click(screen.getByRole('button', { name: 'Download trip map' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't export trip map. Try again.");
+
+    rerenderToolbar({ canExportTripMap: false });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    rerenderToolbar({ canExportTripMap: true });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('describes destination and coordinate search in the placeholder', () => {
