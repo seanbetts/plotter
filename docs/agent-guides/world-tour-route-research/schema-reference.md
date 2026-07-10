@@ -238,15 +238,19 @@ Use `logisticsGates` as the canonical home for route blockers, pre-write checks,
 }
 ```
 
-Use `blocking-decision` only when the affected route, phase, or variant cannot be planned or implemented until the user chooses an option. Use `pre-implementation-check` when the agent can continue researching but the issue must be resolved before writing affected trip data. Use `travel-time-validation` for routine current checks such as road, weather, ferry, access, or seasonal status that should be refreshed close to travel.
+Use `blocking-decision` only when the affected route, phase, or variant cannot be planned or implemented until the user chooses an option. Use `pre-implementation-check` when the agent can continue researching but the issue must be resolved before writing affected trip data. Use `travel-time-validation` for routine current checks such as road, weather, ferry, access, seasonal status, ambitious driving days, ferry-dependent days, remote access, or dense activity days that should be refreshed close to travel.
 
-Gate scope matters. A conditional gate on an unchosen variant is not a blocker for the recommended route. Use `appliesToRecommendedRoute`, `appliesToVariantId`, `appliesToPhaseId`, and `conditionalOn` to show what the gate affects.
+Gate scope matters. A conditional gate on an unchosen variant is not a blocker for the recommended route. A gate in one mega-corridor phase is not a blocker for unrelated researchable phases. Use `appliesToRecommendedRoute`, `appliesToVariantId`, `appliesToPhaseId`, and `conditionalOn` to show what the gate affects.
 
 Severity-specific handoff:
 
 - `blocking-decision`: do not write affected stops or activities yet.
 - `pre-implementation-check`: resolve before writing affected data, or preserve as a note only if the user explicitly approves.
 - `travel-time-validation`: safe to write as a refresh reminder note.
+
+Scope `travel-time-validation` to the affected route, phase, variant, stop pair, or activity day. Do not use it as a blocker unless the uncertainty changes the route choice.
+
+For mega-corridors, every blocking or pre-implementation gate should identify the affected phase or variant and the required user decision. Preserve researchable phases separately from gated, blocked, or deferred phases.
 
 ## CandidateStop
 
@@ -296,7 +300,7 @@ Schema-native activities should stay nested under their parent `CandidateStop`. 
 
 ## Tag Guidance
 
-Use `tags` for lightweight routing, filtering, and UI badges. Tags must come from this controlled vocabulary.
+Use `tags` for lightweight routing, filtering, UI badges, and handoff. Tags must come from this controlled vocabulary.
 
 Route variant tags:
 
@@ -335,6 +339,8 @@ Experience tags:
 
 Do not invent route-specific tags during research. If a useful detail does not fit the vocabulary, put it in `notes`, `logisticsGates`, or `openQuestions`.
 
+Use the fewest tags that materially distinguish the candidate. Do not apply broad experience tags to every stop on a route just because the whole route has that theme. For official scenic routes, `official-route` may be common across base stops, but experience tags should describe the specific stop or activity. Prefer activity-level tags when the theme belongs to a sight, walk, meal, or viewpoint rather than the overnight base.
+
 Tags are not a separate route-variant model. If a route later needs first-class alternatives, use tags as the evidence for what should be promoted.
 
 If a useful tag is repeatedly missing, add the proposed value and rationale to `implementationNotes` or `openQuestions`; do not place it in candidate `tags` until the controlled vocabulary is updated.
@@ -356,6 +362,10 @@ Candidate future tags backlog: `city`, `scenic-drive`, `ferry`, `camping`, `lake
 ```
 
 Use `sourceEvidence` as the top-level canonical source table for a route research plan. Source IDs are required whenever candidates, logistics gates, corridors, or phases refer to sources by ID. Candidate `sources` may contain source IDs or inline source evidence objects; prefer source IDs in `candidate-plan` and `handoff-ready` outputs. Allowed `sourceType` values are listed above.
+
+The user-facing answer may cite sources compactly, but the research artifact should keep route-defining claims, safety or advisory claims, operator/logistics claims, anchor stops, material activities, and validation gates traceable to source IDs or links.
+
+If the visible answer names a specific authority, advisory, ferry, shipper, operator, permit body, or official route source, include a visible link in the answer or a matching `sourceEvidence` entry in the handoff artifact.
 
 ## Unsupported Data
 

@@ -14,9 +14,10 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Treat overnight or base locations as candidate stops.
 - Treat non-overnight sights, hikes, tours, food stops, viewpoints, and experiences as candidate activities under a nearby candidate stop.
 - Put caveats, scores, vehicle warnings, logistics gates, source conflicts, and open validation items in notes.
-- Recommend stop and activity tags only from the controlled tag vocabulary, preserving approved route variants, constraints, themes, and practical roles for handoff.
+- Recommend stop and activity tags only from the controlled tag vocabulary, preserving approved route variants, constraints, themes, and practical roles for handoff without over-tagging.
 - Use source coordinates when available.
 - Keep source links with each candidate.
+- Keep source evidence internally even when the user-facing answer only shows compact citations.
 - Keep the rich schema as the agent handoff artifact. The default user-facing output should be decision-oriented, not a schema dump.
 - Use the smallest research depth that answers the request.
 - Ask the user only for high-consequence decisions. Make conservative agent-owned decisions explicit in assumptions.
@@ -45,7 +46,7 @@ Older references to `implementation-ready` mean `handoff-ready`. Do not emit `im
 
 | Depth | Use When | User-Facing Size | Sources | Stops And Activities |
 | --- | --- | --- | --- | --- |
-| `sketch` | The route is broad, ambiguous, or early-stage. | Recommendation, 1-3 alternatives, blockers, and next decision. | Cite route-defining and blocker sources only. No full source table by default. | About 3-7 spine stops or phases. Activities only if they change the route decision. |
+| `sketch` | The route is broad, ambiguous, or early-stage. | Recommendation, 1-3 alternatives, blockers, and next decision. | Cite route-defining, advisory, operator, and blocker sources that are named in the answer. No full source table by default. | About 3-7 spine stops or phases. Activities only if they change the route decision. |
 | `candidate-plan` | The user wants a reviewable trip plan. | Recommendation, material variants, compact stop/activity preview, and approval question. | Cite key route, stop, and validation sources. Full source table can stay in the handoff artifact. | Enough ordered stops for the proposed route or phase. Activities should be selective and nested under stops. |
 | `handoff-ready` | Direction is approved or the user asks to prepare a handoff artifact. | Short summary plus any remaining approval questions. | Stable source IDs, source URLs, `placeQuery` or sourced coordinates, and notes ready for review. | Ordered stops and nested activities that can be converted by the trip data guide after final write approval. |
 
@@ -88,6 +89,10 @@ Implicit depth consent:
 - Stop-discovery sources: iOverlander, park4night, Google Maps reviews and photos, AllTrails, Komoot, Wikiloc, UNESCO, official maps, high-quality blogs and trip reports.
 - Validation sources: recent official pages, recent traveller reviews, recent iOverlander or park4night comments, recent YouTube or blog reports, satellite or Street View evidence, current access and restriction pages.
 
+Maintain source-backed candidates and gates even when the visible response stays compact. In `sketch` and `candidate-plan`, route-defining claims, safety or advisory claims, operator/logistics claims, anchor stops, material activities, and validation gates should be traceable to source IDs or links. The full `sourceEvidence` table can remain in the handoff artifact unless the user asks to inspect it.
+
+Do not name a specific external authority, advisory, ferry, shipper, operator, permit body, or official route source in the user-facing answer unless the visible answer includes a link or the handoff artifact records a matching `sourceEvidence` entry.
+
 5. Score each candidate:
 
 - 5: essential anchor
@@ -111,6 +116,8 @@ Implicit depth consent:
 - Stop roles: `resupply`, `recovery-stop`, `buffer-stop`.
 - Experience themes: `history`, `nature`, `coast`, `mountains`, `gorge`, `caves`, `wildlife`, `culture`, `food`, `walk`, `viewpoint`.
 
+Use the fewest tags that materially help routing, filtering, UI badges, or handoff. Do not apply broad experience tags to every stop on a route just because the whole route has that theme. For official scenic routes, `official-route` may be common across base stops, but experience tags should describe what makes the specific stop or activity distinctive. Prefer activity-level tags when the theme belongs to a sight, walk, meal, or viewpoint rather than the overnight base.
+
 Do not invent new tags during research. If a useful detail does not fit the controlled vocabulary, put it in `notes`, `logisticsGates`, or `openQuestions`.
 
 If the same missing concept appears repeatedly across routes, add it to `implementationNotes` as a proposed tag addition. Do not use proposed tags in candidate `tags` until the controlled vocabulary is explicitly updated.
@@ -125,6 +132,7 @@ Candidate future tags backlog: `city`, `scenic-drive`, `ferry`, `camping`, `lake
 - For mega-corridors, research each phase independently and do not produce one global ranked stop list.
 - For remote expedition tracks, complete the logistics viability pass before scoring stops. Treat camps, wells, fuel points, exit tracks, and recovery towns as practical anchors rather than attractions.
 - When adding logistics gates, set severity and scope: `blocking-decision` for choices that stop the affected route plan, `pre-implementation-check` for issues that must be resolved before writing affected data, and `travel-time-validation` for routine checks close to travel.
+- Add `travel-time-validation` notes or gates for ambitious days or phases that combine long driving, ferry dependency, seasonal roads, remote access, or several major activities. Scope the validation to the affected day, phase, stop pair, or variant; do not turn it into a blocker unless the travel-time uncertainty changes the route choice.
 
 9. Present the user-facing plan first. Do not include the handoff artifact unless the user asks for it or another agent needs the handoff contract.
 
@@ -183,6 +191,8 @@ Gate severity controls implementation behavior for the route content the gate ap
 
 A gate only blocks the route, phase, or variant it applies to. Do not present a conditional gate on an unchosen variant as a blocker for the recommended route.
 
+For mega-corridors, a gate in one phase should not stop planning or writing researchable phases. State which phases can be researched or implemented now, which phase is blocked or deferred, and what user decision is needed to unlock the gated phase.
+
 ## Route Shapes
 
 ### Ambiguous Point-To-Point
@@ -210,11 +220,20 @@ For long official routes, keep the route canonical but split it into phases befo
 
 Example: Pan-American Highway from Alaska to Patagonia.
 
-Decompose into phases before stop selection. Add logistics gates for route discontinuities, borders, vehicle shipping, import limits, permits, ferry constraints, and seasonal road constraints.
+Decompose into phases before stop selection. Add logistics gates for route discontinuities, borders, vehicle shipping, import limits, permits, ferry constraints, safety advisories, and seasonal road constraints.
+
+A mega-corridor `sketch` should include:
+
+- recommended strategy or spine
+- 2-3 material alternatives, such as scenic-practical, fastest-practical, sectional/restart, seasonal reversal, shipping/overfly, or skip/defer options
+- phase list with high-level status for each phase: researchable, gated, blocked, or deferred
+- logistics gates with affected phase, severity, required decision, and source link or source ID
+- clear statement of which phases can be developed next without resolving unrelated gates
+- next user decision in plain travel terms
 
 #### Blocked Mega-Corridors
 
-If a phase is blocked by current travel advice, active conflict, border closure, vehicle shipping or import constraints, or seasonal closure, do not produce a single continuous stop list. Mark the phase as `blocked` or `deferred`, add a `route-discontinuity` logistics gate, and propose restart options such as overflying, vehicle shipping, restarting with a rental or local vehicle, or deferring the route. Produce candidate stops only for phases that are researchable or explicitly approved.
+If a phase is blocked by current travel advice, active conflict, border closure, vehicle shipping or import constraints, or seasonal closure, do not produce a single continuous stop list. Mark the phase as `blocked` or `deferred`, add the relevant logistics gate, and propose restart options such as overflying, vehicle shipping, restarting with a rental or local vehicle, or deferring the route. Produce candidate stops only for phases that are researchable or explicitly approved. Continue planning unaffected phases when the user asks for them.
 
 ### Region Loop
 
