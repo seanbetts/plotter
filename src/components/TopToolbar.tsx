@@ -47,18 +47,44 @@ function TripMapExportAction({
   onExportTripMap,
 }: Pick<TopToolbarProps, 'canExportTripMap' | 'onExportTripMap'>) {
   const [isExporting, setIsExporting] = useState(false);
+
+  return (
+    <TripMapExportGeneration
+      key={canExportTripMap ? 'available' : 'unavailable'}
+      canExportTripMap={canExportTripMap}
+      isExporting={isExporting}
+      onExportFinished={() => setIsExporting(false)}
+      onExportStarted={() => setIsExporting(true)}
+      onExportTripMap={onExportTripMap}
+    />
+  );
+}
+
+type TripMapExportGenerationProps = Pick<TopToolbarProps, 'canExportTripMap' | 'onExportTripMap'> & {
+  isExporting: boolean;
+  onExportFinished: () => void;
+  onExportStarted: () => void;
+};
+
+function TripMapExportGeneration({
+  canExportTripMap,
+  isExporting,
+  onExportFinished,
+  onExportStarted,
+  onExportTripMap,
+}: TripMapExportGenerationProps) {
   const [exportError, setExportError] = useState<string | null>(null);
 
   const handleExportTripMap = async () => {
     setExportError(null);
-    setIsExporting(true);
+    onExportStarted();
 
     try {
       await onExportTripMap();
     } catch {
       setExportError("Couldn't export trip map. Try again.");
     } finally {
-      setIsExporting(false);
+      onExportFinished();
     }
   };
 
@@ -119,11 +145,7 @@ export function TopToolbar({
           );
         }}
       />
-      <TripMapExportAction
-        key={canExportTripMap ? 'available' : 'unavailable'}
-        canExportTripMap={canExportTripMap}
-        onExportTripMap={onExportTripMap}
-      />
+      <TripMapExportAction canExportTripMap={canExportTripMap} onExportTripMap={onExportTripMap} />
     </header>
   );
 }

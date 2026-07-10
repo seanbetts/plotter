@@ -116,6 +116,25 @@ describe('TopToolbar', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('keeps the pending export locked across availability changes', async () => {
+    const request = deferred<void>();
+    const onExportTripMap = vi.fn(() => request.promise);
+    const user = userEvent.setup();
+    const { rerenderToolbar } = renderToolbar({ canExportTripMap: true, onExportTripMap });
+
+    await user.click(screen.getByRole('button', { name: 'Download trip map' }));
+    rerenderToolbar({ canExportTripMap: false });
+    rerenderToolbar({ canExportTripMap: true });
+
+    const pendingButton = screen.getByRole('button', { name: 'Generating trip map' });
+    expect(pendingButton).toBeDisabled();
+    await user.click(pendingButton);
+    expect(onExportTripMap).toHaveBeenCalledTimes(1);
+
+    request.resolve();
+    expect(await screen.findByRole('button', { name: 'Download trip map' })).toBeEnabled();
+  });
+
   it('shows a retryable local error', async () => {
     const user = userEvent.setup();
     const { rerenderToolbar } = renderToolbar({
