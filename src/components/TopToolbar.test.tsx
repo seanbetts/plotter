@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import { TopToolbar } from './TopToolbar';
@@ -13,6 +14,19 @@ function deferred<T>() {
   });
 
   return { promise, resolve, reject };
+}
+
+function renderToolbar(overrides: Partial<ComponentProps<typeof TopToolbar>> = {}) {
+  return render(
+    <TopToolbar
+      canExportTripMap={false}
+      onAddDestination={vi.fn()}
+      onExportTripMap={vi.fn()}
+      resolveSearchResult={vi.fn()}
+      searchPlaces={vi.fn()}
+      {...overrides}
+    />,
+  );
 }
 
 const balcombeResult = {
@@ -48,14 +62,48 @@ const parisResult = {
 } satisfies Extract<PlaceSearchResult, { kind: 'place' }>;
 
 describe('TopToolbar', () => {
+  it('renders export to the right of search', () => {
+    const { container } = renderToolbar({ canExportTripMap: true });
+    const camera = screen.getByRole('button', { name: 'Download trip map' });
+
+    expect(container.querySelector('.top-toolbar')?.lastElementChild).toBe(camera);
+  });
+
+  it('disables export when there are no stops', () => {
+    renderToolbar({ canExportTripMap: false });
+
+    expect(screen.getByRole('button', { name: 'Download trip map' })).toBeDisabled();
+  });
+
+  it('prevents repeat clicks while pending', async () => {
+    const request = deferred<void>();
+    const onExportTripMap = vi.fn(() => request.promise);
+    const user = userEvent.setup();
+    renderToolbar({ canExportTripMap: true, onExportTripMap });
+
+    await user.click(screen.getByRole('button', { name: 'Download trip map' }));
+
+    expect(screen.getByRole('button', { name: 'Generating trip map' })).toBeDisabled();
+    expect(onExportTripMap).toHaveBeenCalledTimes(1);
+
+    request.resolve();
+    expect(await screen.findByRole('button', { name: 'Download trip map' })).toBeEnabled();
+  });
+
+  it('shows a retryable local error', async () => {
+    const user = userEvent.setup();
+    renderToolbar({
+      canExportTripMap: true,
+      onExportTripMap: vi.fn().mockRejectedValue(new Error('failed')),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Download trip map' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't export trip map. Try again.");
+  });
+
   it('describes destination and coordinate search in the placeholder', () => {
-    render(
-      <TopToolbar
-        onAddDestination={vi.fn()}
-        resolveSearchResult={vi.fn()}
-        searchPlaces={vi.fn()}
-      />,
-    );
+    renderToolbar();
 
     expect(screen.getByPlaceholderText('Find a city, town, or region')).toBeInTheDocument();
   });
@@ -64,13 +112,11 @@ describe('TopToolbar', () => {
     const user = userEvent.setup();
     const onAddDestination = vi.fn();
     const searchPlaces = vi.fn().mockResolvedValue([balcombeResult]);
-    render(
-      <TopToolbar
-        onAddDestination={onAddDestination}
-        resolveSearchResult={vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>)}
-        searchPlaces={searchPlaces}
-      />,
-    );
+    renderToolbar({
+      onAddDestination,
+      resolveSearchResult: vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>),
+      searchPlaces,
+    });
 
     await user.type(screen.getByLabelText('Search for a destination'), 'Balcombe');
 
@@ -100,13 +146,10 @@ describe('TopToolbar', () => {
       },
     ]);
 
-    render(
-      <TopToolbar
-        onAddDestination={vi.fn()}
-        resolveSearchResult={vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>)}
-        searchPlaces={searchPlaces}
-      />,
-    );
+    renderToolbar({
+      resolveSearchResult: vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>),
+      searchPlaces,
+    });
 
     await user.type(screen.getByLabelText('Search for a destination'), 'Sagres');
 
@@ -121,13 +164,11 @@ describe('TopToolbar', () => {
     const onAddDestination = vi.fn();
     const searchPlaces = vi.fn().mockResolvedValue([balcombeResult, parisResult]);
 
-    render(
-      <TopToolbar
-        onAddDestination={onAddDestination}
-        resolveSearchResult={vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>)}
-        searchPlaces={searchPlaces}
-      />,
-    );
+    renderToolbar({
+      onAddDestination,
+      resolveSearchResult: vi.fn(async (result) => result as Extract<PlaceSearchResult, { kind: 'place' }>),
+      searchPlaces,
+    });
 
     await user.type(screen.getByLabelText('Search for a destination'), 'B');
     await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('B'));
@@ -160,13 +201,7 @@ describe('TopToolbar', () => {
     const secondSearch = deferred<PlaceSearchResult[]>();
     const searchPlaces = vi.fn().mockReturnValueOnce(firstSearch.promise).mockReturnValueOnce(secondSearch.promise);
 
-    render(
-      <TopToolbar
-        onAddDestination={vi.fn()}
-        resolveSearchResult={vi.fn()}
-        searchPlaces={searchPlaces}
-      />,
-    );
+    renderToolbar({ searchPlaces });
 
     const input = screen.getByLabelText('Search for a destination');
     await user.type(input, 'Paris');
@@ -220,13 +255,7 @@ describe('TopToolbar', () => {
     const user = userEvent.setup();
     const searchPlaces = vi.fn().mockResolvedValueOnce([balcombeResult]).mockRejectedValueOnce(new Error('Search unavailable'));
 
-    render(
-      <TopToolbar
-        onAddDestination={vi.fn()}
-        resolveSearchResult={vi.fn()}
-        searchPlaces={searchPlaces}
-      />,
-    );
+    renderToolbar({ searchPlaces });
 
     const input = screen.getByLabelText('Search for a destination');
     await user.type(input, 'Balcombe');
@@ -247,13 +276,7 @@ describe('TopToolbar', () => {
     const user = userEvent.setup();
     const searchPlaces = vi.fn().mockResolvedValueOnce([balcombeResult]).mockRejectedValueOnce(new Error('Search unavailable'));
 
-    render(
-      <TopToolbar
-        onAddDestination={vi.fn()}
-        resolveSearchResult={vi.fn()}
-        searchPlaces={searchPlaces}
-      />,
-    );
+    renderToolbar({ searchPlaces });
 
     const input = screen.getByLabelText('Search for a destination');
     await user.type(input, 'Balcombe');
@@ -276,13 +299,7 @@ describe('TopToolbar', () => {
     const user = userEvent.setup();
     const searchPlaces = vi.fn().mockResolvedValue([balcombeResult]);
 
-    render(
-      <TopToolbar
-        onAddDestination={vi.fn()}
-        resolveSearchResult={vi.fn()}
-        searchPlaces={searchPlaces}
-      />,
-    );
+    renderToolbar({ searchPlaces });
 
     const input = screen.getByLabelText('Search for a destination');
     await user.type(input, 'Balcombe');
@@ -304,7 +321,9 @@ describe('TopToolbar', () => {
     render(
       <div onKeyDown={onAncestorKeyDown}>
         <TopToolbar
+          canExportTripMap={false}
           onAddDestination={vi.fn()}
+          onExportTripMap={vi.fn()}
           resolveSearchResult={vi.fn()}
           searchPlaces={searchPlaces}
         />
@@ -335,13 +354,11 @@ describe('TopToolbar', () => {
     } satisfies Extract<PlaceSearchResult, { kind: 'coordinates' }>;
     const searchPlaces = vi.fn().mockResolvedValue([coordinateResult]);
 
-    render(
-      <TopToolbar
-        onAddDestination={onAddDestination}
-        searchPlaces={searchPlaces}
-        resolveSearchResult={vi.fn(async () => balcombeResult)}
-      />,
-    );
+    renderToolbar({
+      onAddDestination,
+      resolveSearchResult: vi.fn(async () => balcombeResult),
+      searchPlaces,
+    });
 
     await user.type(screen.getByLabelText('Search for a destination'), '51.0576, -0.1342');
     await waitFor(() => expect(searchPlaces).toHaveBeenCalledWith('51.0576, -0.1342'));
@@ -359,13 +376,7 @@ describe('TopToolbar', () => {
   });
 
   it('does not render temporary import and export controls', () => {
-    render(
-      <TopToolbar
-        onAddDestination={vi.fn()}
-        resolveSearchResult={vi.fn()}
-        searchPlaces={vi.fn()}
-      />,
-    );
+    renderToolbar();
 
     expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import trip data' })).not.toBeInTheDocument();

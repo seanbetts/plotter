@@ -5,6 +5,16 @@ import { describe, expect, it } from 'vitest';
 
 const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
 
+describe('trip map export styles', () => {
+  it('keeps busy and error feedback local to the toolbar action', () => {
+    expect(styles).toMatch(/\.trip-map-export-spinner\s*{[^}]*animation:\s*route-spin 900ms linear infinite;/s);
+    expect(styles).toMatch(/\.trip-map-export-error\s*{[^}]*position:\s*absolute;/s);
+    expect(styles).toMatch(
+      /@media \(prefers-reduced-motion:\s*reduce\)\s*{[^}]*\.trip-map-export-spinner\s*{[^}]*animation:\s*none;/s,
+    );
+  });
+});
+
 describe('image preview styles', () => {
   it('renders full-screen preview images full bleed instead of letterboxed', () => {
     expect(styles).toMatch(/\.image-preview-frame img\s*{[^}]*object-fit:\s*cover;/s);
