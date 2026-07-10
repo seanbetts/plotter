@@ -21,13 +21,19 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Keep the rich schema as the agent handoff artifact. The default user-facing output should be decision-oriented, not a schema dump.
 - Use the smallest research depth that answers the request. Explicit depth requests or clear itinerary wording set the target depth. An unresolved high-consequence corridor or hard feasibility decision may temporarily cap the response at `sketch`; ordinary agent-owned choices such as loop direction, base regions, and density do not. Route-shape defaults apply only when the prompt does not otherwise establish depth.
 - Ask the user only for high-consequence decisions. Make conservative agent-owned decisions explicit in assumptions.
+- Treat this guide as the domain-specific brainstorming workflow for live route planning. Do not layer a generic brainstorming or one-question-at-a-time discovery workflow on top of it.
+- Give the user a useful route recommendation after at most one compact clarification round. Ask a second follow-up only when one unresolved answer would make every plausible route unsafe or non-viable.
+- When the user asks the agent to recommend a parameter such as duration, pace, direction, or density, recommend a default and continue instead of returning the decision as another prerequisite question.
+- Treat dimensions, booking details, tyre rules, timetables, and similar operational details as explicit assumptions or scoped validation items unless the missing fact invalidates every plausible route.
+- Do not inspect route-specific examples or prior route outputs while answering a live request. Files under `examples/` are synthetic validation fixtures for skill development, not planning context or research evidence.
+- Do not search memory, prior task transcripts, or previous route plans for destination-specific facts, assumptions, or recommendations unless the user explicitly asks to continue or review that work. If the host requires a memory pass, query only app and workflow conventions; do not include destination names, countries, route names, or prior itinerary terms in the memory query. Current route claims must come from the user's request and fresh research.
 - In a recommended spine, choose a single default base or phase for each position. Keep meaningful route variants in the alternatives section instead of leaving ordinary stop choices as slash-separated or "A or B" options.
 - Keep the recommended spine to overnight bases or route phases. If the endpoint or sight is not an overnight location, nest it as an activity under the final base rather than promoting it to a stop.
 - Require user approval before handing the plan to the trip data CLI.
 
 ## Workflow
 
-1. Clarify the request only as much as needed:
+1. Clarify the request only as much as needed. Use one compact clarification round before the first useful route output. A second follow-up is allowed only when one unresolved answer would make every plausible route unsafe or non-viable:
 
 - start and end locations
 - intended season or timing, if known
@@ -35,6 +41,8 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - approximate duration or desired stop count
 - vehicle constraints, especially large expedition truck suitability
 - desired research depth, if the user has a preference
+
+Do not ask for every item in this list. Ask only for missing information that materially changes feasibility or the recommended corridor. If the user asks what duration, pace, direction, or density you recommend, choose a conservative default and proceed. Preserve non-blocking operational unknowns as assumptions or scoped validation items.
 
 2. Choose the smallest useful research depth:
 
@@ -166,6 +174,8 @@ The agent should decide:
 - routine validation notes that do not change the route choice
 - a recommended default route when the trade-offs are clear
 - ordinary base and stop choices within the recommended route
+- a conservative duration, pace, direction, or density when the user asks for a recommendation
+- conservative placeholders for non-blocking operational details, recorded as assumptions or validation items
 
 The user should decide:
 
@@ -179,12 +189,20 @@ Phrase user decisions in plain travel terms, not schema terms.
 
 The agent may recommend a default route, but the user must approve choices that materially change safety, border exposure, season, vehicle suitability, budget, or the character of the trip.
 
+Interaction budget:
+
+- Before the first useful recommendation, ask at most one compact clarification round.
+- A second follow-up is permitted only when a single unresolved answer would make every plausible route unsafe or non-viable. State why it blocks planning.
+- Do not serially collect operational details. Dimensions, tyre specification, booking classification, ferry category, and similar facts normally become scoped checks attached to the affected route or phase.
+- A request for the agent's recommendation is permission to choose a conservative default, explain it, and continue.
+- If the user signals impatience or asks for the route, stop discovery immediately, state assumptions, and provide the smallest useful plan.
+
 Ask versus assume examples:
 
 - Assume mixed scenic/practical style if the user gives no preference.
 - Assume routine road, ferry, weather, and access checks can be preserved as validation notes only when current evidence does not invalidate the affected route.
 - Ask before choosing border exposure through Russia, Iran, the Sahel, active conflict areas, or other materially risky corridors.
-- Ask before committing to winter Arctic driving, remote high-clearance 4WD tracks, vehicle shipping, major ferry-dependent variants, or carnet/customs-heavy routes.
+- Ask before committing to winter remote driving, remote high-clearance 4WD tracks, vehicle shipping, major ferry-dependent variants, or carnet/customs-heavy routes when the prompt has not already established that choice.
 - Ask before expanding from a light `sketch` into `handoff-ready` detail unless the user has already requested a writeable handoff artifact.
 
 ## Logistics Gate Handoff
@@ -205,15 +223,15 @@ For mega-corridors, a gate in one phase should not stop planning or writing rese
 
 ### Ambiguous Point-To-Point
 
-Example: home to Nordkapp.
+Example: home to a remote endpoint with two materially different corridors.
 
 Start at `sketch` unless the user has already approved a corridor. Compare corridors before selecting detailed stops, preserve plausible alternatives, and recommend one default corridor. The recommended spine should contain one default base or phase at each position; resolve ordinary choices such as neighbouring overnight towns yourself and keep only material route variants in the alternatives section.
 
-The approval question should state the route-defining assumptions in plain travel terms. For example: "Should I develop the 12-15 day summer route through Sweden and Finland?" After approval, expand that corridor to `candidate-plan`.
+The approval question should state the route-defining assumptions in plain travel terms. For example: "Should I develop the 12-15 day summer route using the efficient inland corridor?" After approval, expand that corridor to `candidate-plan`.
 
 ### Official Scenic Route
 
-Example: Wild Atlantic Way.
+Example: a signed national coastal route.
 
 Do not invent alternate corridors when the canonical route is already defined. Decide:
 
@@ -228,7 +246,7 @@ For long official routes, keep the route canonical but split it into phases befo
 
 ### Mega-Corridor
 
-Example: Pan-American Highway from Alaska to Patagonia.
+Example: a continent-spanning overland corridor with a physical discontinuity.
 
 Decompose into phases before stop selection. Add logistics gates for route discontinuities, borders, vehicle shipping, import limits, permits, ferry constraints, safety advisories, and seasonal road constraints.
 
@@ -247,7 +265,7 @@ If a phase is blocked by current travel advice, active conflict, border closure,
 
 ### Region Loop
 
-Example: Morocco or Iceland.
+Example: a country-scale scenic loop.
 
 Choose loop direction, major regions, and density first. Balance landscapes, towns, recovery stops, and logistics.
 
@@ -255,28 +273,28 @@ Loop direction, base regions, and density are agent-owned unless they materially
 
 ### Regional Corridor
 
-Example: Cairo to Cape Town section, Balkan transit, or a named cross-country corridor.
+Example: a capital-to-capital regional crossing or a named cross-country corridor.
 
 Use this when the route is narrower than a mega-corridor but broader than a simple point-to-point drive. Compare practical alignments, borders, safety or access constraints, and anchor stops before producing a candidate plan.
 
 ### Open-Ended Route Family
 
-Example: best Patagonian overland route.
+Example: the best overland route through a multi-country region.
 
 Compare route concepts before ranking stops. Make assumptions explicit.
 
-For geopolitical route families such as Silk Road routes, produce a corridor viability matrix before candidate stop selection. Each corridor option should state its status, blockers, restart options, researchable phases, and the user decision required before implementation. Do not select stops for blocked or deferred corridors unless the user explicitly asks to research a reachable subsection.
+For geopolitical route families spanning several materially different border corridors, produce a corridor viability matrix before candidate stop selection. Each corridor option should state its status, blockers, restart options, researchable phases, and the user decision required before implementation. Do not select stops for blocked or deferred corridors unless the user explicitly asks to research a reachable subsection.
 
 ### Remote Expedition Track
 
-Example: Canning Stock Route.
+Example: a remote desert stock route.
 
 Before selecting stops, produce an expedition viability pass that covers permits, season window, required vehicle capability, fuel and water legs, communications and recovery requirements, official road-condition sources, bailout or exit options, and culturally sensitive or restricted areas. Candidate stops should emphasize practical anchors such as camps, wells, fuel points, access tracks, exit tracks, and recovery towns. Do not treat culturally sensitive sites as activities unless a source explicitly confirms public visitor access is appropriate.
 
 ## Source Weighting By Region
 
 - North America: Overland Trail Guides, iOverlander, official park sources, Google Maps, recent trip reports.
-- South America: iOverlander, official park pages, Google Maps, AllTrails or Komoot, Pan-American blogs.
+- South America: iOverlander, official park pages, Google Maps, AllTrails or Komoot, and long-distance overland blogs.
 - Europe: park4night, Google Maps, official tourism and park sites, Komoot, AllTrails, road-trip guides.
 - Africa: Tracks4Africa, iOverlander, Bradt, national park sites, overlander blogs, Expedition Portal, Horizons Unlimited.
 - Central Asia: Caravanistan-style route intelligence, iOverlander, traveller blogs, YouTube, Wikiloc, Google Maps where coverage is strong.
@@ -302,6 +320,7 @@ After the user gives final approval to implement an approved route research plan
 ## References
 
 - See `schema-reference.md` for the plan schema and allowed values.
-- See `examples/home-to-nordkapp-user-response-example.md` for the default user-facing output shape.
-- See `examples/home-to-nordkapp-handoff-artifact-example.md` for optional handoff-ready detail.
+- Files under `examples/` are synthetic validation fixtures. Do not read them while researching or planning a live route, and never reuse their assumptions, locations, recommendations, or placeholder sources as evidence.
+- See `examples/ambiguous-point-to-point-user-response-fixture.md` only when validating the default user-facing output shape.
+- See `examples/ambiguous-point-to-point-handoff-artifact-fixture.md` only when validating optional handoff-ready structure.
 - See `../world-tour-trip-data/README.md` for the approved implementation workflow after user approval.

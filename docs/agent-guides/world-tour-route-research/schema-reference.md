@@ -2,18 +2,20 @@
 
 Use this schema for route research plans. Markdown tables are acceptable for human-facing output, but field names should stay stable so another agent can implement the approved plan through the trip data CLI.
 
+All values in the JSON examples are synthetic structural fixtures. Reserved `example.com` URLs are placeholders; a live plan must use current, traceable sources and must not reuse fixture assumptions or recommendations.
+
 ## RouteResearchPlan
 
 ```json
 {
-  "routeName": "Home to Nordkapp",
-  "start": "Balcombe, West Sussex, UK",
-  "end": "Nordkapp, Norway",
+  "routeName": "Home to Remote Endpoint",
+  "start": "Home",
+  "end": "Remote Endpoint",
   "routeShape": "ambiguous-point-to-point",
   "researchDepth": "candidate-plan",
   "assumptions": [],
   "corridors": [],
-  "recommendedCorridorId": "hybrid-sweden-northern-norway",
+  "recommendedCorridorId": "hybrid-scenic-finish",
   "scopeDecision": null,
   "expeditionViability": null,
   "phases": [],
@@ -127,15 +129,15 @@ Older references to `implementation-ready` mean `handoff-ready`. Do not emit `im
 
 ```json
 {
-  "id": "hybrid-sweden-northern-norway",
-  "name": "Hybrid Sweden northbound with scenic northern Norway",
-  "summary": "Efficient southern transit, then scenic Arctic Norway.",
+  "id": "hybrid-scenic-finish",
+  "name": "Efficient inland transit with a scenic finish",
+  "summary": "Efficient long-distance transit, then a scenic final region.",
   "status": "researchable",
   "strengths": ["Fewer ferry dependencies"],
-  "tradeoffs": ["Less fjord-heavy than the coast route"],
+  "tradeoffs": ["Misses some scenery on the fully scenic corridor"],
   "blockers": [],
   "restartOptions": [],
-  "researchablePhaseIds": ["southern-transit", "arctic-norway"],
+  "researchablePhaseIds": ["long-distance-transit", "destination-region"],
   "requiredDecision": "Choose this as the default corridor before detailed stop selection.",
   "evidenceLevel": "medium",
   "sources": []
@@ -167,9 +169,9 @@ Use `expeditionViability` before candidate stop selection for remote expedition 
   "requiredVehicle": "High-clearance 4WD with long-range fuel, water, spares, recovery equipment, and communications.",
   "permits": [
     {
-      "name": "Canning Stock Route visitor permit",
+      "name": "Remote track visitor permit",
       "status": "required",
-      "sourceIds": ["kuju-wangka-permit-system"]
+      "sourceIds": ["current-permit-authority"]
     }
   ],
   "fuelWaterPlan": [
@@ -196,16 +198,16 @@ Allowed `expeditionViability.status` values match `RoutePhase.status`: `research
 
 ```json
 {
-  "id": "central-america",
-  "name": "Central America",
-  "summary": "Guatemala to Panama, with border and security validation before final routing.",
-  "start": "Guatemala",
-  "end": "Panama City, Panama",
+  "id": "regional-transit",
+  "name": "Regional transit",
+  "summary": "A cross-border regional phase with access validation before final routing.",
+  "start": "Regional Gateway",
+  "end": "Transfer Port",
   "routeShape": "regional-corridor",
   "status": "researchable",
   "density": "immersive",
   "corridorOptions": [],
-  "logisticsGateIds": ["darien-gap-vehicle-shipping"],
+  "logisticsGateIds": ["route-discontinuity-transfer"],
   "candidateStops": [],
   "openQuestions": [],
   "blockedReason": null,
@@ -221,15 +223,15 @@ Use `logisticsGates` as the canonical home for route blockers, pre-write checks,
 
 ```json
 {
-  "id": "darien-gap-vehicle-shipping",
-  "name": "Darien Gap vehicle shipping",
+  "id": "route-discontinuity-transfer",
+  "name": "Route discontinuity transfer",
   "type": "route-discontinuity",
   "severity": "blocking-decision",
   "appliesToRecommendedRoute": true,
   "appliesToVariantId": null,
-  "appliesToPhaseId": "central-america",
+  "appliesToPhaseId": "regional-transit",
   "conditionalOn": null,
-  "between": ["Panama", "Colombia"],
+  "between": ["Transfer Port", "Restart Port"],
   "impact": "Vehicle travel is not continuous; plan vehicle shipping and passenger transfer separately.",
   "requiredDecision": "Choose shipping method, ports, agent, and timing before implementing this phase.",
   "vehicleConfidence": "check",
@@ -260,21 +262,21 @@ Top-level `stops` array order is canonical for implementation. For phased routes
 
 ```json
 {
-  "name": "Alta",
-  "countryRegion": "Finnmark, Norway",
+  "name": "Final Resupply Base",
+  "countryRegion": "Destination Region",
   "stopType": ["town", "practical", "buffer"],
   "classification": ["practical", "buffer"],
   "priority": "strong",
   "score": 4,
   "suggestedStay": "1 night",
   "tags": ["practical-route", "resupply", "buffer-stop"],
-  "placeQuery": "Alta, Finnmark, Norway",
-  "coordinates": { "lat": 69.9689, "lng": 23.2716 },
-  "whyItMatters": "Useful Arctic base before Honningsvag and Nordkapp.",
+  "placeQuery": "Final Resupply Base, Destination Region",
+  "coordinates": { "lat": 45.0, "lng": 7.0 },
+  "whyItMatters": "Useful resupply and buffer base before the remote endpoint.",
   "vehicleConfidence": "good",
   "evidenceLevel": "medium",
   "notes": "Validate current road and weather conditions close to travel.",
-  "sources": ["vegvesen-traffic"],
+  "sources": ["current-road-authority"],
   "activities": []
 }
 ```
@@ -285,18 +287,18 @@ Schema-native activities should stay nested under their parent `CandidateStop`. 
 
 ```json
 {
-  "title": "North Cape Plateau",
+  "title": "Remote Endpoint Viewpoint",
   "activityType": ["landmark", "viewpoint"],
   "priority": "must-do",
   "score": 5,
   "tags": ["viewpoint", "seasonal-access"],
-  "placeQuery": "North Cape Plateau, Nordkapp, Norway",
-  "coordinates": { "lat": 71.1695, "lng": 25.783 },
+  "placeQuery": "Remote Endpoint Viewpoint, Destination Region",
+  "coordinates": { "lat": 45.5, "lng": 7.5 },
   "whyItMatters": "Symbolic destination at the end of the route.",
   "vehicleConfidence": "check",
   "evidenceLevel": "high",
-  "notes": "Winter access may require convoy travel on the final E69 section.",
-  "sources": ["nordkapp-practical", "vegvesen-traffic"]
+  "notes": "Seasonal access may require a controlled final-road procedure.",
+  "sources": ["current-access-authority", "current-road-authority"]
 }
 ```
 
@@ -353,12 +355,12 @@ Candidate future tags backlog: `city`, `scenic-drive`, `ferry`, `camping`, `lake
 
 ```json
 {
-  "id": "nordkapp-practical",
-  "title": "Visit Nordkapp practical information",
-  "url": "https://www.nordkapp.no/practical-info/",
+  "id": "current-access-authority",
+  "title": "Current access authority",
+  "url": "https://example.com/current-access-authority",
   "sourceType": "official",
   "usedFor": ["seasonal access", "vehicle confidence"],
-  "retrievedAt": "2026-07-08",
+  "retrievedAt": "2026-07-10",
   "confidence": "high"
 }
 ```
