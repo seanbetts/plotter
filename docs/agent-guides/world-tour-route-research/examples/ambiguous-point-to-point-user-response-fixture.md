@@ -2,7 +2,9 @@
 
 This is a synthetic skill-validation fixture, not a route recommendation. Never use its assumptions, locations, or placeholder evidence in a live planning request.
 
-Assumptions: one-way travel, 12-15 days, summer, a standard road vehicle, and a mixed scenic/practical pace.
+Assumptions: one-way summer travel, a standard road vehicle, and a mixed scenic/practical pace. No duration limit was supplied.
+
+Recommended duration: 15 days. A reasonable range is 13-17 days without materially changing the route; 15 days leaves enough time for the scenic bases and final access buffer rather than treating every base as a transit night.
 
 Recommended route: use the efficient inland corridor, then take the scenic approach through the destination region. This keeps the long transit practical without losing the distinctive final section.
 
@@ -36,4 +38,4 @@ Validation notes:
 
 Live output would cite current route-authority and access sources here. They are intentionally omitted from this synthetic fixture.
 
-Should I develop this 12-15 day summer trip using the efficient inland corridor with the scenic final approach for a standard road vehicle?
+Does a 15-day version feel about right, or should I deliberately reshape it into a shorter or longer trip?

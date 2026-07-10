@@ -13,6 +13,12 @@ All values in the JSON examples are synthetic structural fixtures. Reserved `exa
   "end": "Remote Endpoint",
   "routeShape": "ambiguous-point-to-point",
   "researchDepth": "candidate-plan",
+  "recommendedDuration": {
+    "days": 15,
+    "rangeDays": { "min": 13, "max": 17 },
+    "rationale": "Balances efficient transit with meaningful scenic bases and a final access buffer."
+  },
+  "plannedDurationDays": 15,
   "assumptions": [],
   "corridors": [],
   "recommendedCorridorId": "hybrid-scenic-finish",
@@ -28,6 +34,10 @@ All values in the JSON examples are synthetic structural fixtures. Reserved `exa
   "implementationNotes": []
 }
 ```
+
+`recommendedDuration.days` is the research skill's naturally paced recommendation. `rangeDays` is optional and should be narrow enough to remain the same trip shape. `plannedDurationDays` is the exact duration of the currently approved itinerary; it may differ from the recommendation after user feedback.
+
+At handoff-ready depth, `plannedDurationDays` is required and must equal the sum of every stop's positive integer `expectedStayDays`. This is an objective handoff consistency check, not permission for the trip-data skill or app audit to assess itinerary quality.
 
 ## Allowed Values
 
@@ -271,6 +281,7 @@ Top-level `stops` array order is canonical for implementation. For phased routes
   "priority": "strong",
   "score": 4,
   "suggestedStay": "1 night",
+  "expectedStayDays": 2,
   "tags": ["practical-route", "resupply", "buffer-stop"],
   "placeQuery": "Final Resupply Base, Destination Region",
   "coordinates": { "lat": 45.0, "lng": 7.0 },
@@ -284,6 +295,8 @@ Top-level `stops` array order is canonical for implementation. For phased routes
 ```
 
 Candidate stop `key` values are required in `handoff-ready` artifacts. They must be unique, stable, and suitable for adjacent route-leg references.
+
+`expectedStayDays` is required at `handoff-ready` depth. `suggestedStay` remains useful for human review at earlier depths.
 
 ## CandidateActivity
 
@@ -414,6 +427,7 @@ If one of these details matters to the recommendation, describe the caveat in `n
 - Approved route-leg directives become `shipping-manual` entries between adjacent full-manifest stop keys.
 - Candidate and activity source IDs or inline `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
+- Preserve approved stop order, activities, `plannedDurationDays`, and `expectedStayDays` without judging or changing them.
 - `blocking-decision` gates prevent writing affected content until resolved.
 - `pre-implementation-check` gates are resolved before writing affected content or preserved as notes only when they do not invalidate the route and the user explicitly accepts the uncertainty.
 - `travel-time-validation` gates are safe to write as refresh reminder notes.

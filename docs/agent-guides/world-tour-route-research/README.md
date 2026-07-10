@@ -19,6 +19,10 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Keep source links with each candidate.
 - Keep source evidence internally even when the user-facing answer only shows compact citations.
 - Keep the rich schema as the agent handoff artifact. The default user-facing output should be decision-oriented, not a schema dump.
+- Recommend the route's natural duration after choosing and balancing its worthwhile content. Do not ask for a duration merely to begin planning.
+- Treat a user-supplied duration as a preference unless the user clearly describes it as fixed, exact, or a maximum.
+- If a preferred duration differs from the recommendation, explain the scope, pace, corridor, or activity trade-off before producing that variant.
+- If a hard duration limit cannot hold the proposed route comfortably, reduce scope or explicitly make the trip transit-heavy; do not compress every stay silently.
 - Use the smallest research depth that answers the request. Explicit depth requests or clear itinerary wording set the target depth. An unresolved high-consequence corridor or hard feasibility decision may temporarily cap the response at `sketch`; ordinary agent-owned choices such as loop direction, base regions, and density do not. Route-shape defaults apply only when the prompt does not otherwise establish depth.
 - Ask the user only for high-consequence decisions. Make conservative agent-owned decisions explicit in assumptions.
 - Treat this guide as the domain-specific brainstorming workflow for live route planning. Do not layer a generic brainstorming or one-question-at-a-time discovery workflow on top of it.
@@ -148,10 +152,13 @@ Candidate future tags backlog: `city`, `scenic-drive`, `ferry`, `camping`, `lake
 - When adding logistics gates, set severity and scope by consequence: `blocking-decision` when an unresolved condition invalidates the affected route until it is resolved or avoided, `pre-implementation-check` for non-invalidating issues that must be resolved before writing affected data, and `travel-time-validation` for routine checks close to travel.
 - Add `travel-time-validation` notes or gates for ambitious days or phases that combine long driving, ferry dependency, seasonal roads, remote access, or several major activities. Scope the validation to the affected day, phase, stop pair, or variant; do not turn it into a blocker unless the travel-time uncertainty changes the route choice.
 - Summarize the route's estimated driving burden at candidate-plan depth. Keep this decision-oriented rather than listing a calculated distance for every leg.
+- Treat one-day stops primarily as departure, arrival, transit, resupply, or buffer stops. Give activity bases enough time for their activities beyond the surrounding driving burden.
 
-9. Present the user-facing plan first. Do not include the handoff artifact unless the user asks for it or another agent needs the handoff contract.
+9. Derive the recommended duration after balancing candidates. At this point, recommend the route's natural duration from realistic relocation days, activity bases, recovery and resupply needs, and material weather, ferry, border, or remote-road buffers. Keep estimated driving burden in research; leave precise route calculations to the app. At handoff-ready depth, choose exact `expectedStayDays` values whose sum equals `plannedDurationDays`.
 
-10. Stop for user review. Do not implement until the user explicitly approves implementation.
+10. Present the user-facing plan first. Do not include the handoff artifact unless the user asks for it or another agent needs the handoff contract.
+
+11. Stop for user review. Do not implement until the user explicitly approves implementation.
 
 ## User-Facing Output
 
@@ -178,6 +185,7 @@ The agent should decide:
 - a recommended default route when the trade-offs are clear
 - ordinary base and stop choices within the recommended route
 - a conservative duration, pace, direction, or density when the user asks for a recommendation
+- the route's naturally paced recommended duration and, at handoff-ready depth, the exact `plannedDurationDays` and `expectedStayDays` allocation
 - conservative placeholders for non-blocking operational details, recorded as assumptions or validation items
 
 The user should decide:
@@ -191,6 +199,8 @@ The user should decide:
 Phrase user decisions in plain travel terms, not schema terms.
 
 The agent may recommend a default route, but the user must approve choices that materially change safety, border exposure, season, vehicle suitability, budget, or the character of the trip.
+
+Treat a user-supplied duration as a preference unless it is clearly fixed, exact, or a maximum. When a preferred duration differs from the recommendation, explain the scope, pace, corridor, or activity trade-off before producing that variant. For a hard duration limit that cannot hold the route comfortably, reduce scope or explicitly make the trip transit-heavy rather than silently compressing every stay.
 
 Interaction budget:
 
@@ -317,8 +327,9 @@ After the user gives final approval to implement an approved route research plan
 7. Store source URLs as stop or activity links.
 8. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
 9. Use source coordinates when available.
-10. Let the app calculate routes and derived data.
-11. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
+10. Preserve approved stop order, activities, `plannedDurationDays`, and `expectedStayDays` without judging or changing them.
+11. Let the app calculate routes and derived data.
+12. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
 
 ## References
 
