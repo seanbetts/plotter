@@ -49,6 +49,7 @@ Total: 15
 
 | Parent Stop | Activity | Priority | Tags | Evidence | Notes |
 | --- | --- | --- | --- | --- | --- |
+| Landscape base | Landscape viewpoint walk | strong | `nature`, `viewpoint` | medium | Core scenic activity with time beyond the surrounding driving burden. |
 | Destination base | Remote endpoint viewpoint | must-do | `viewpoint`, `seasonal-access`, `road-status-check` | high | Refresh access and weather near travel. |
 
 ## Schema-Native Handoff Excerpt
@@ -76,23 +77,83 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
   ],
   "stops": [
     {
+      "key": "home",
       "name": "Home",
+      "countryRegion": "Home Region",
+      "stopType": ["departure", "practical"],
+      "classification": ["practical"],
+      "priority": "practical",
+      "score": 5,
+      "suggestedStay": "1 day",
       "expectedStayDays": 1,
+      "tags": ["practical-route"],
+      "placeQuery": "Home, Home Region",
+      "coordinates": { "lat": 50.0, "lng": -1.0 },
+      "whyItMatters": "User-provided departure anchor for the approved route.",
+      "vehicleConfidence": "good",
+      "evidenceLevel": "high",
+      "notes": "Departure stop; route geometry and normalized location details are left to the app.",
+      "sources": [],
       "activities": []
     },
     {
+      "key": "continental-gateway",
       "name": "Continental gateway",
+      "countryRegion": "Continental Region",
+      "stopType": ["town", "practical", "buffer"],
+      "classification": ["practical", "buffer"],
+      "priority": "practical",
+      "score": 3,
+      "suggestedStay": "2 days",
       "expectedStayDays": 2,
+      "tags": ["practical-route", "buffer-stop"],
+      "placeQuery": "Continental gateway, Continental Region",
+      "coordinates": { "lat": 49.0, "lng": 3.0 },
+      "whyItMatters": "Conservative transit base that separates the long-distance route sections.",
+      "vehicleConfidence": "good",
+      "evidenceLevel": "low",
+      "notes": "Planning assumption. Validate adjacent legs using app-derived route times.",
+      "sources": [],
       "activities": []
     },
     {
+      "key": "inland-regional-base",
       "name": "Inland regional base",
+      "countryRegion": "Inland Region",
+      "stopType": ["town", "recovery"],
+      "classification": ["experience", "practical"],
+      "priority": "strong",
+      "score": 4,
+      "suggestedStay": "3 days",
       "expectedStayDays": 3,
+      "tags": ["practical-route", "recovery-stop"],
+      "placeQuery": "Inland regional base, Inland Region",
+      "coordinates": { "lat": 47.0, "lng": 6.0 },
+      "whyItMatters": "Meaningful inland base between transit sections, with recovery time.",
+      "vehicleConfidence": "good",
+      "evidenceLevel": "medium",
+      "notes": "Retain the approved recovery allocation instead of compressing it into transit nights.",
+      "sources": [],
       "activities": []
     },
     {
+      "key": "landscape-base",
       "name": "Landscape base",
+      "countryRegion": "Landscape Region",
+      "stopType": ["town", "nature-base"],
+      "classification": ["anchor", "experience"],
+      "priority": "strong",
+      "score": 5,
+      "suggestedStay": "4 days",
       "expectedStayDays": 4,
+      "tags": ["nature", "viewpoint"],
+      "placeQuery": "Landscape base, Landscape Region",
+      "coordinates": { "lat": 46.0, "lng": 7.0 },
+      "whyItMatters": "Scenic base with enough time for its activity beyond the surrounding driving burden.",
+      "vehicleConfidence": "good",
+      "evidenceLevel": "medium",
+      "notes": "Retain the approved scenic-base allocation.",
+      "sources": [],
       "activities": [
         {
           "title": "Landscape viewpoint walk",
@@ -101,6 +162,7 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
           "score": 4,
           "tags": ["nature", "viewpoint"],
           "placeQuery": "Landscape viewpoint, Destination region",
+          "coordinates": { "lat": 46.1, "lng": 7.1 },
           "whyItMatters": "Core scenic activity for the landscape base.",
           "vehicleConfidence": "good",
           "evidenceLevel": "medium",
@@ -110,6 +172,7 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
       ]
     },
     {
+      "key": "final-resupply-base",
       "name": "Final resupply base",
       "countryRegion": "Destination region",
       "stopType": ["town", "practical", "buffer"],
@@ -120,6 +183,7 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
       "expectedStayDays": 2,
       "tags": ["resupply", "buffer-stop"],
       "placeQuery": "Final resupply base, Destination region",
+      "coordinates": { "lat": 45.0, "lng": 7.0 },
       "whyItMatters": "Practical buffer before the destination base.",
       "vehicleConfidence": "good",
       "evidenceLevel": "low",
@@ -128,6 +192,7 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
       "activities": []
     },
     {
+      "key": "destination-base",
       "name": "Destination base",
       "countryRegion": "Destination region",
       "stopType": ["town", "destination-base"],
@@ -138,6 +203,7 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
       "expectedStayDays": 3,
       "tags": ["seasonal-access"],
       "placeQuery": "Destination base, Destination region",
+      "coordinates": { "lat": 44.0, "lng": 8.0 },
       "whyItMatters": "Overnight base for the remote endpoint, with a weather buffer.",
       "vehicleConfidence": "check",
       "evidenceLevel": "high",
@@ -151,6 +217,7 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
           "score": 5,
           "tags": ["viewpoint", "seasonal-access", "road-status-check"],
           "placeQuery": "Remote endpoint viewpoint, Destination region",
+          "coordinates": { "lat": 43.9, "lng": 8.1 },
           "whyItMatters": "Symbolic endpoint of the route.",
           "vehicleConfidence": "check",
           "evidenceLevel": "high",
