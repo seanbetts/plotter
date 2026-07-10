@@ -1,5 +1,5 @@
 import { Camera, LoaderCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import type { Coordinates, DestinationLocation } from '../domain/types';
 import { SearchCombobox } from './SearchCombobox';
@@ -51,11 +51,11 @@ export function TopToolbar({
 }: TopToolbarProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const canExportTripMapRef = useRef(canExportTripMap);
+  const visibleExportError = canExportTripMap ? exportError : null;
 
   useEffect(() => {
-    if (!canExportTripMap) {
-      setExportError(null);
-    }
+    canExportTripMapRef.current = canExportTripMap;
   }, [canExportTripMap]);
 
   const handleExportTripMap = async () => {
@@ -65,7 +65,9 @@ export function TopToolbar({
     try {
       await onExportTripMap();
     } catch {
-      setExportError("Couldn't export trip map. Try again.");
+      if (canExportTripMapRef.current) {
+        setExportError("Couldn't export trip map. Try again.");
+      }
     } finally {
       setIsExporting(false);
     }
@@ -110,9 +112,9 @@ export function TopToolbar({
           <Camera aria-hidden="true" />
         )}
       </button>
-      {exportError ? (
+      {visibleExportError ? (
         <span className="trip-map-export-error" role="alert">
-          {exportError}
+          {visibleExportError}
         </span>
       ) : null}
     </header>

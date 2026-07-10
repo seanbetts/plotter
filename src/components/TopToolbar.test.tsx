@@ -17,16 +17,22 @@ function deferred<T>() {
 }
 
 function renderToolbar(overrides: Partial<ComponentProps<typeof TopToolbar>> = {}) {
-  return render(
-    <TopToolbar
-      canExportTripMap={false}
-      onAddDestination={vi.fn()}
-      onExportTripMap={vi.fn()}
-      resolveSearchResult={vi.fn()}
-      searchPlaces={vi.fn()}
-      {...overrides}
-    />,
-  );
+  const props = {
+    canExportTripMap: false,
+    onAddDestination: vi.fn(),
+    onExportTripMap: vi.fn(),
+    resolveSearchResult: vi.fn(),
+    searchPlaces: vi.fn(),
+    ...overrides,
+  } satisfies ComponentProps<typeof TopToolbar>;
+  const result = render(<TopToolbar {...props} />);
+
+  return {
+    ...result,
+    rerenderToolbar(nextOverrides: Partial<ComponentProps<typeof TopToolbar>>) {
+      result.rerender(<TopToolbar {...props} {...nextOverrides} />);
+    },
+  };
 }
 
 const balcombeResult = {
@@ -83,11 +89,31 @@ describe('TopToolbar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Download trip map' }));
 
-    expect(screen.getByRole('button', { name: 'Generating trip map' })).toBeDisabled();
+    const pendingButton = screen.getByRole('button', { name: 'Generating trip map' });
+    expect(pendingButton).toBeDisabled();
+    expect(onExportTripMap).toHaveBeenCalledTimes(1);
+
+    await user.click(pendingButton);
     expect(onExportTripMap).toHaveBeenCalledTimes(1);
 
     request.resolve();
     expect(await screen.findByRole('button', { name: 'Download trip map' })).toBeEnabled();
+  });
+
+  it('does not show a pending export error after export becomes unavailable', async () => {
+    const request = deferred<void>();
+    const user = userEvent.setup();
+    const { rerenderToolbar } = renderToolbar({
+      canExportTripMap: true,
+      onExportTripMap: vi.fn(() => request.promise),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Download trip map' }));
+    rerenderToolbar({ canExportTripMap: false });
+    request.reject(new Error('failed'));
+
+    expect(await screen.findByRole('button', { name: 'Download trip map' })).toBeDisabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('shows a retryable local error', async () => {
