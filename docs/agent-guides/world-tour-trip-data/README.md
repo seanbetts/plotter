@@ -16,7 +16,7 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 - For both stops and activities, use source coordinates when present and otherwise provide a specific `place.query`.
 - Do not write address fields directly. The app resolves address/location metadata from `place.query` or `place.coordinates`.
 - Translate the approved research handoff faithfully. Do not reconsider stop selection, order, activities, pacing, stay allocation, or route semantics.
-- Preserve approved expectedStayDays; arithmetic validation is allowed, but itinerary-quality judgement belongs to route research.
+- Before manifest construction, verify the handoff `plannedDurationDays` equals the sum of every stop's `expectedStayDays`. If it differs, report the mismatch without replanning or changing the allocation. `plannedDurationDays` is handoff-only and is omitted from the CLI manifest because app duration is derived from stop stays.
 - Omit route directives for ordinary adjacent driving legs, including normal ferry, tunnel, bridge, and vehicle-shuttle crossings, so the app calculates them automatically.
 - Preserve shipping-manual only when the approved handoff explicitly marks a genuine route discontinuity or independent vehicle-shipping transfer. Never infer it from notes or links.
 - Use the versioned full manifest for agent-authored new trips so stops, activities, links, and explicit route discontinuities are written together.

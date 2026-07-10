@@ -32,7 +32,7 @@ Activity preview:
 
 Validation notes:
 
-- Use app-derived route times to split any over-ambitious transit legs when the detailed candidate plan is built.
+- Research estimates identify ambitious legs before handoff. If later app calculations reveal a material mismatch, trip-data reports it back without changing the plan.
 - Refresh the final access road and weather status close to travel.
 - Confirm vehicle dimensions only if the selected crossing or final access road imposes a material restriction.
 

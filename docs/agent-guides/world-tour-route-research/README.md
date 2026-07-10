@@ -45,7 +45,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - start and end locations
 - intended season or timing, if known
 - desired trip style: efficient, scenic, expedition, family, recovery-heavy, city-light, nature-heavy, or mixed
-- approximate duration or desired stop count
+- any fixed, exact, or maximum duration the user has already specified
 - vehicle constraints, especially large expedition truck suitability
 - desired research depth, if the user has a preference
 
