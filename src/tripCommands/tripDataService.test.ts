@@ -5,7 +5,7 @@ import type { Activity, Destination, RouteLeg } from '../domain/types';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import { createDestination } from '../domain/destinations';
-import { createRouteLeg } from '../domain/routeLegs';
+import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
 
 function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
   const trips: TripSummary[] = [];
@@ -486,7 +486,10 @@ describe('TripDataService trips and stops', () => {
       },
       provider: 'test',
       profile: 'driving-car',
-      routeKey: 'ready-key',
+      routeKey: createRouteKey({
+        origin: destinations[0].coordinates,
+        target: destinations[1].coordinates,
+      }),
       calculatedAt: '2026-07-10T12:00:00.000Z',
     });
     const failed = [
@@ -505,9 +508,16 @@ describe('TripDataService trips and stops', () => {
         error: 'OpenRouteService route calculation failed (HTTP 429)',
       }),
     ];
+    const staleNonAdjacentLeg = createRouteLeg({
+      originDestinationId: destinations[0].id,
+      targetDestinationId: destinations[3].id,
+      type: 'driving-auto',
+      status: 'ready',
+    });
     const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => {
       void routeLeg;
     });
+    const deleteRouteLeg = vi.fn(async () => {});
     const calculateRoute = vi.fn(async ({ origin, target }) => ({
       distanceKm: 120,
       travelTimeHours: 2.5,
@@ -520,8 +530,9 @@ describe('TripDataService trips and stops', () => {
     }));
     const repository = {
       listDestinations: vi.fn(async () => destinations),
-      listRouteLegs: vi.fn(async () => [ready, ...failed]),
+      listRouteLegs: vi.fn(async () => [ready, ...failed, staleNonAdjacentLeg]),
       saveRouteLeg,
+      deleteRouteLeg,
     } as unknown as TripRepository;
     const service = createTripDataService({
       directory: {
@@ -547,6 +558,8 @@ describe('TripDataService trips and stops', () => {
     expect(calculateRoute).toHaveBeenCalledTimes(2);
     expect(saveRouteLeg).toHaveBeenCalledTimes(2);
     expect(saveRouteLeg.mock.calls.map(([leg]) => leg.id)).toEqual(failed.map((leg) => leg.id));
+    expect(deleteRouteLeg).toHaveBeenCalledWith(staleNonAdjacentLeg.id);
+    expect(result.routeLegs).toHaveLength(3);
     expect(result.routeLegs[0]).toBe(ready);
     expect(result.failedRoutesBefore).toBe(2);
     expect(result.failedRoutesAfter).toBe(0);

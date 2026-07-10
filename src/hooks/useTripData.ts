@@ -48,6 +48,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const isMountedRef = useRef(false);
   const activeRepositoryTokenRef = useRef<object | null>(null);
   const reloadSequenceRef = useRef(0);
+  const routeReconciliationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const calculateRoute = options.calculateRoute;
   const repositoryToken = useMemo(() => ({ repository }), [repository]);
 
@@ -169,6 +170,32 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     await startReload(repositoryToken);
   }, [repositoryToken, startReload]);
 
+  const reconcilePersistedRouteLegs = useCallback(
+    (nextDestinations: Destination[]) => {
+      const generation = repositoryToken;
+      const reconcile = async () => {
+        if (!isActiveGeneration(generation)) return routeLegsRef.current;
+
+        const persistedRouteLegs = await repository.listRouteLegs();
+        if (!isActiveGeneration(generation)) return routeLegsRef.current;
+
+        return reconcileAndSaveRouteLegs({
+          destinations: nextDestinations,
+          currentRouteLegs: persistedRouteLegs,
+          repository,
+          calculateRoute,
+        });
+      };
+      const queuedReconciliation = routeReconciliationQueueRef.current.then(reconcile, reconcile);
+      routeReconciliationQueueRef.current = queuedReconciliation.then(
+        () => undefined,
+        () => undefined,
+      );
+      return queuedReconciliation;
+    },
+    [calculateRoute, isActiveGeneration, repository, repositoryToken],
+  );
+
   useEffect(() => {
     const generation = repositoryToken;
     let isCancelled = false;
@@ -221,12 +248,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             ...current,
             [destination.id]: current[destination.id] ?? [],
           }));
-          const nextRouteLegs = await reconcileAndSaveRouteLegs({
-            destinations: orderedDestinations,
-            currentRouteLegs: routeLegsRef.current,
-            repository,
-            calculateRoute,
-          });
+          const nextRouteLegs = await reconcilePersistedRouteLegs(orderedDestinations);
           if (!isActiveAction()) return destination;
 
           replaceRouteLegs(nextRouteLegs);
@@ -250,12 +272,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           const nextDestinations = updateDestinations((current) =>
             current.map((destination) => (destination.id === destinationId ? updated : destination)),
           );
-          const nextRouteLegs = await reconcileAndSaveRouteLegs({
-            destinations: nextDestinations,
-            currentRouteLegs: routeLegsRef.current,
-            repository,
-            calculateRoute,
-          });
+          const nextRouteLegs = await reconcilePersistedRouteLegs(nextDestinations);
           if (!isActiveAction()) return;
 
           replaceRouteLegs(nextRouteLegs);
@@ -275,19 +292,14 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             delete remaining[destinationId];
             return remaining;
           });
-          const remainingRouteLegs = updateRouteLegs((current) =>
+          updateRouteLegs((current) =>
             current.filter(
               (leg) =>
                 leg.originDestinationId !== destinationId &&
                 leg.targetDestinationId !== destinationId,
             ),
           );
-          const nextRouteLegs = await reconcileAndSaveRouteLegs({
-            destinations: nextDestinations,
-            currentRouteLegs: remainingRouteLegs,
-            repository,
-            calculateRoute,
-          });
+          const nextRouteLegs = await reconcilePersistedRouteLegs(nextDestinations);
           if (!isActiveAction()) return;
 
           replaceRouteLegs(nextRouteLegs);
@@ -315,22 +327,19 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             previousRouteLegs,
           );
           replaceRouteLegs(reconciliation.routeLegs);
-          const routeLegReconciliation = reconcileAndSaveRouteLegs({
-            destinations: orderedDestinations,
-            currentRouteLegs: previousRouteLegs,
-            repository,
-            calculateRoute,
-          }).then((nextRouteLegs) => {
+          const saveDestinations = Promise.all(
+            orderedDestinations.map((destination) => repository.saveDestination(destination)),
+          );
+          await saveDestinations;
+          if (!isActiveAction()) return;
+
+          const routeLegReconciliation = reconcilePersistedRouteLegs(orderedDestinations).then((nextRouteLegs) => {
             if (!isActiveAction()) return routeLegsRef.current;
 
             replaceRouteLegs(nextRouteLegs);
             return nextRouteLegs;
           });
-
-          const saveDestinations = Promise.all(
-            orderedDestinations.map((destination) => repository.saveDestination(destination)),
-          );
-          await Promise.all([saveDestinations, routeLegReconciliation]);
+          await routeLegReconciliation;
         },
 
         async addRouteLeg(input: {
@@ -366,8 +375,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             patch.status === 'ready' &&
             mergedRouteLeg.type === 'driving-auto' &&
             !hasPreservableDrivingRouteData(patch);
-          const updated = await finalizeRouteLeg({
-            routeLeg: isIncompleteReadyDrivingPatch
+          const routeLegForFinalization = isIncompleteReadyDrivingPatch
               ? {
                 ...mergedRouteLeg,
                 distanceKm: patch.distanceKm,
@@ -379,7 +387,25 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
                 calculatedAt: patch.calculatedAt,
                 error: patch.error,
               }
-              : mergedRouteLeg,
+              : mergedRouteLeg;
+          const pendingRouteLeg =
+            routeLegForFinalization.type === 'driving-auto' &&
+            !hasPreservableDrivingRouteData(routeLegForFinalization)
+              ? {
+                ...routeLegForFinalization,
+                status: 'pending' as const,
+                error: undefined,
+              }
+              : routeLegForFinalization;
+
+          if (pendingRouteLeg.status === 'pending') {
+            updateRouteLegs((current) =>
+              current.map((routeLeg) => (routeLeg.id === routeLegId ? pendingRouteLeg : routeLeg)),
+            );
+          }
+
+          const updated = await finalizeRouteLeg({
+            routeLeg: pendingRouteLeg,
             destinations: destinationsRef.current,
             calculateRoute,
           });
@@ -489,6 +515,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     [
       calculateRoute,
       isActiveGeneration,
+      reconcilePersistedRouteLegs,
       reload,
       replaceDestinations,
       replaceRouteLegs,

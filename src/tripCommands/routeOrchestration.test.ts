@@ -104,4 +104,58 @@ describe('route orchestration', () => {
     expect(routeLegs[0]).toBe(readyLeg);
     expect(calculateRoute).not.toHaveBeenCalled();
   });
+
+  it('does not retry failed route legs during ordinary reconciliation', async () => {
+    const origin = createDestination({
+      name: 'Ghent',
+      coordinates: { lat: 51.0538, lng: 3.725 },
+    });
+    const middle = createDestination({
+      name: 'Hamburg',
+      coordinates: { lat: 53.5502, lng: 10.0013 },
+    });
+    const target = createDestination({
+      name: 'Copenhagen',
+      coordinates: { lat: 55.6761, lng: 12.5683 },
+    });
+    const failedLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: middle.id,
+      type: 'driving-auto',
+      status: 'failed',
+      error: 'Load failed',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: middle.coordinates }),
+    });
+    const repository = createRepository([failedLeg]);
+    const calculateRoute = vi.fn(async ({ origin: routeOrigin, target: routeTarget }) => ({
+      distanceKm: 330,
+      travelTimeHours: 4.5,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [
+          [routeOrigin.lng, routeOrigin.lat],
+          [routeTarget.lng, routeTarget.lat],
+        ],
+      },
+      provider: 'test',
+      profile: 'driving-car' as const,
+    }));
+
+    const routeLegs = await reconcileAndSaveRouteLegs({
+      destinations: [origin, middle, target],
+      currentRouteLegs: [failedLeg],
+      repository,
+      calculateRoute,
+    });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(calculateRoute).toHaveBeenCalledWith({
+      origin: middle.coordinates,
+      target: target.coordinates,
+      profile: 'driving-car',
+    });
+    expect(routeLegs[0]).toBe(failedLeg);
+    expect(routeLegs[0]).toMatchObject({ status: 'failed', error: 'Load failed' });
+    expect(routeLegs[1]).toMatchObject({ status: 'ready' });
+  });
 });

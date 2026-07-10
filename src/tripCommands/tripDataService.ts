@@ -1,6 +1,7 @@
 import { createActivity as createDomainActivity, reorderActivities as reorderActivityModels, updateActivity as updateDomainActivity } from '../domain/activities';
 import { createDestination, updateDestination } from '../domain/destinations';
 import { createFallbackResearchLink, normalizeResearchLinkUrl, reorderResearchLinks, sortResearchLinks } from '../domain/researchLinks';
+import { reconcileRouteLegsForDestinations } from '../domain/routePlanner';
 import type { Activity, Destination, ResearchLink, RouteLeg } from '../domain/types';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
@@ -590,21 +591,30 @@ export function createTripDataService(
           repository.listDestinations(),
           repository.listRouteLegs(),
         ]);
-        const failedRouteLegs = currentRouteLegs.filter((routeLeg) => (
+        const reconciliation = reconcileRouteLegsForDestinations(destinations, currentRouteLegs);
+        const failedRoutesBefore = currentRouteLegs.filter((routeLeg) => (
           routeLeg.type === 'driving-auto' && routeLeg.status === 'failed'
+        )).length;
+        const routeLegsToCalculate = reconciliation.routeLegs.filter((routeLeg) => (
+          routeLeg.type === 'driving-auto' &&
+          (routeLeg.status === 'failed' || routeLeg.status === 'pending')
         ));
         const recalculatedRouteLegs = await calculateDrivingRouteLegs({
           destinations,
-          routeLegs: failedRouteLegs,
+          routeLegs: routeLegsToCalculate,
           calculateRoute: dependencies.calculateRoute,
+          retryFailed: true,
         });
         const recalculatedById = new Map(recalculatedRouteLegs.map((routeLeg) => [routeLeg.id, routeLeg]));
         const changedRouteLegs = recalculatedRouteLegs.filter((routeLeg, index) => (
-          routeLeg !== failedRouteLegs[index]
+          routeLeg !== routeLegsToCalculate[index]
         ));
-        await Promise.all(changedRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)));
+        await Promise.all([
+          ...reconciliation.removedRouteLegIds.map((routeLegId) => repository.deleteRouteLeg(routeLegId)),
+          ...changedRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)),
+        ]);
 
-        const routeLegs = currentRouteLegs.map((routeLeg) => recalculatedById.get(routeLeg.id) ?? routeLeg);
+        const routeLegs = reconciliation.routeLegs.map((routeLeg) => recalculatedById.get(routeLeg.id) ?? routeLeg);
         const destinationsById = new Map(destinations.map((destination) => [destination.id, destination]));
         const recalculatedRoutes = recalculatedRouteLegs.map((routeLeg) => ({
           routeLegId: routeLeg.id,
@@ -622,7 +632,7 @@ export function createTripDataService(
           `Recalculated ${changedRouteLegs.length} failed route${changedRouteLegs.length === 1 ? '' : 's'} for ${trip.name}; ${failedRoutesAfter} remain failed.`,
           {
             routeLegs,
-            failedRoutesBefore: failedRouteLegs.length,
+            failedRoutesBefore,
             failedRoutesAfter,
             recalculatedRoutes,
             changed,

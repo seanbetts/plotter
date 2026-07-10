@@ -43,6 +43,7 @@ export async function calculateDrivingRouteLegs(input: {
   destinations: Destination[];
   routeLegs: RouteLeg[];
   calculateRoute?: CalculateRoute;
+  retryFailed?: boolean;
 }): Promise<RouteLeg[]> {
   if (!input.calculateRoute) return input.routeLegs;
 
@@ -56,6 +57,7 @@ export async function calculateDrivingRouteLegs(input: {
     if (
       leg.type !== 'driving-auto' ||
       (leg.status === 'ready' && hasPreservableDrivingRouteData(leg)) ||
+      (leg.status === 'failed' && !input.retryFailed) ||
       !origin ||
       !target
     ) {

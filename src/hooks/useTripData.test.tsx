@@ -1118,6 +1118,46 @@ describe('useTripData', () => {
     ].sort());
   });
 
+  it('removes persisted non-adjacent route legs missing from local state', async () => {
+    const first = createDestination({ name: 'First', coordinates: { lat: 1, lng: 1 }, order: 0 });
+    const second = createDestination({ name: 'Second', coordinates: { lat: 2, lng: 2 }, order: 1 });
+    const third = createDestination({ name: 'Third', coordinates: { lat: 3, lng: 3 }, order: 2 });
+    const firstToSecond = createRouteLeg({
+      originDestinationId: first.id,
+      targetDestinationId: second.id,
+      type: 'driving-auto',
+    });
+    const secondToThird = createRouteLeg({
+      originDestinationId: second.id,
+      targetDestinationId: third.id,
+      type: 'driving-auto',
+    });
+    const staleFirstToThird = createRouteLeg({
+      originDestinationId: first.id,
+      targetDestinationId: third.id,
+      type: 'driving-auto',
+    });
+    const listRouteLegs = vi
+      .fn()
+      .mockResolvedValueOnce([firstToSecond, secondToThird])
+      .mockResolvedValue([firstToSecond, secondToThird, staleFirstToThird]);
+    const deleteRouteLeg = vi.fn(async () => {});
+    const repository = createMemoryRepository(Promise.resolve([first, second, third]), {
+      listRouteLegs,
+      deleteRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.reorderDestinations([first.id, second.id, third.id]);
+    });
+
+    expect(listRouteLegs).toHaveBeenCalledTimes(2);
+    expect(deleteRouteLeg).toHaveBeenCalledWith(staleFirstToThird.id);
+  });
+
   it('inserts new destinations at the best route position after the first stop', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));
@@ -1295,6 +1335,69 @@ describe('useTripData', () => {
           [-75.4794, 10.391],
         ],
       },
+    });
+  });
+
+  it('shows a failed route leg as pending while an explicit retry is in flight', async () => {
+    const origin = createDestination({
+      name: 'Ghent',
+      coordinates: { lat: 51.0538, lng: 3.725 },
+      order: 0,
+    });
+    const target = createDestination({
+      name: 'Hamburg',
+      coordinates: { lat: 53.5502, lng: 10.0013 },
+      order: 1,
+    });
+    const failedLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'failed',
+      error: 'Load failed',
+    });
+    const routeCalculation = createDeferred({
+      distanceKm: 610,
+      travelTimeHours: 6.5,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [
+          [origin.coordinates.lng, origin.coordinates.lat],
+          [target.coordinates.lng, target.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+    });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [failedLeg],
+    });
+    const calculateRoute = vi.fn(() => routeCalculation.promise);
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let retryPromise!: Promise<void>;
+    await act(async () => {
+      retryPromise = result.current.updateRouteLeg(failedLeg.id, { type: 'driving-auto' });
+      await Promise.resolve();
+    });
+
+    expect(result.current.routeLegs[0]).toMatchObject({
+      id: failedLeg.id,
+      status: 'pending',
+      error: undefined,
+    });
+
+    await act(async () => {
+      routeCalculation.resolve();
+      await retryPromise;
+    });
+
+    expect(result.current.routeLegs[0]).toMatchObject({
+      id: failedLeg.id,
+      status: 'ready',
+      distanceKm: 610,
     });
   });
 
