@@ -380,6 +380,75 @@ describe('TripDataService trips and stops', () => {
     expect(harness.deleteTrip).toHaveBeenCalledWith('bulk-trip-id');
   });
 
+  it('blocks a manifest with semantic errors before creating a trip', async () => {
+    const harness = createBulkManifestHarness();
+    harness.manifest.stops[0].activities![0].place = {
+      coordinates: { lat: -34.6037, lng: -58.3816 },
+    };
+
+    const result = await harness.service.createTrip(harness.manifest);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({
+      code: 'TRIP_AUDIT_FAILED',
+      message: 'Trip manifest has semantic audit errors.',
+      path: 'manifest',
+      details: {
+        audit: {
+          errors: 1,
+          issues: [expect.objectContaining({
+            code: 'ACTIVITY_DISTANCE_OUTLIER',
+            severity: 'error',
+          })],
+        },
+      },
+    });
+    expect(harness.createTrip).not.toHaveBeenCalled();
+    expect(harness.replaceTripData).not.toHaveBeenCalled();
+  });
+
+  it('audits persisted trip activities with the same semantic rules', async () => {
+    const { service } = createHarness();
+    const created = await service.createTrip({
+      name: 'Audit trip',
+      stops: [{
+        name: 'Larvik',
+        place: { coordinates: { lat: 59.0533, lng: 10.0352 } },
+      }],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+
+    const clean = await service.auditTrip({ tripId: created.trip.id });
+    expect(clean.ok && clean.audit).toEqual({ errors: 0, warnings: 0, issues: [] });
+
+    await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: {
+        title: 'Drive to A in Lofoten',
+        place: { coordinates: { lat: 67.8804, lng: 12.9826 } },
+      },
+    });
+    await service.createActivity({
+      tripId: created.trip.id,
+      stopId: created.stops[0].id,
+      activity: {
+        title: 'Stop at Sohlbergplassen',
+        place: { coordinates: { lat: 61.7797, lng: 10.1546 } },
+      },
+    });
+
+    const audited = await service.auditTrip({ tripId: created.trip.id });
+    expect(audited.ok).toBe(true);
+    if (!audited.ok) return;
+    expect(audited.audit.errors).toBe(2);
+    expect(audited.audit.issues.map((issue) => issue.code)).toEqual([
+      'ACTIVITY_DISTANCE_OUTLIER',
+      'ACTIVITY_DISTANCE_OUTLIER',
+    ]);
+  });
+
   it('rejects malformed createTrip stops input with a validation error', async () => {
     const { service, trips } = createHarness();
 

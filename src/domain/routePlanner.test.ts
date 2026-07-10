@@ -2,12 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { createDestination } from './destinations';
 import { createRouteLeg } from './routeLegs';
 import {
+  coordinateDistanceKm,
   findBestDestinationInsertionIndex,
   getDestinationInsertionCandidates,
   reconcileRouteLegsForDestinations,
 } from './routePlanner';
 
 describe('route planner helpers', () => {
+  it('calculates a known great-circle distance', () => {
+    expect(coordinateDistanceKm(
+      { lat: 51.5072, lng: -0.1276 },
+      { lat: 48.8566, lng: 2.3522 },
+    )).toBeCloseTo(343.5, 0);
+  });
+
   it('finds the best insertion point after the fixed first stop', () => {
     const balcombe = createDestination({
       name: 'Balcombe',

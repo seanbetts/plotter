@@ -8,6 +8,7 @@ import {
   reconcileAndSaveRouteLegs,
   type CalculateRoute,
 } from './routeOrchestration';
+import { auditTripSnapshot, type TripAuditReport } from './tripAudit';
 import { materializeTripManifest } from './tripManifest';
 import type {
   ChangedSummary,
@@ -36,7 +37,8 @@ export type CommandOptions = {
 export type TripDataService = {
   listTrips(): Promise<CommandResult<{ trips: Array<TripSummary & { stopCount: number }> }>>;
   getTrip(input: { tripId: string; includeActivities?: boolean; includeLinks?: boolean }): Promise<CommandResult<{ trip: TripWithData }>>;
-  createTrip(input: { name: string; stops?: unknown[] } | TripManifestDraft, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; stops: Destination[]; activities: Activity[]; routeLegs: RouteLeg[]; changed: ChangedSummary }>>;
+  auditTrip(input: { tripId: string }): Promise<CommandResult<{ audit: TripAuditReport }>>;
+  createTrip(input: { name: string; stops?: unknown[] } | TripManifestDraft, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; stops: Destination[]; activities: Activity[]; routeLegs: RouteLeg[]; changed: ChangedSummary; audit?: TripAuditReport }>>;
   deleteTrip(input: { tripId: string }, options?: CommandOptions): Promise<CommandResult<{ changed: ChangedSummary }>>;
   renameTrip(input: { tripId: string; name: string }, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; changed: ChangedSummary }>>;
   replaceStops(input: { tripId: string; stops: unknown[] }, options?: CommandOptions): Promise<CommandResult<{ stops: Destination[]; routeLegs: RouteLeg[]; changed: ChangedSummary }>>;
@@ -79,13 +81,19 @@ function unsupported<T>(summary: string): CommandResult<T> {
   };
 }
 
-function commandError<T>(code: string, message: string, path?: string): CommandResult<T> {
+function commandError<T>(
+  code: string,
+  message: string,
+  path?: string,
+  details?: { audit?: TripAuditReport },
+): CommandResult<T> {
   return {
     ok: false,
     error: {
       code,
       message,
       ...(path ? { path } : {}),
+      ...(details ? { details } : {}),
     },
   };
 }
@@ -547,11 +555,47 @@ export function createTripDataService(
       });
     },
 
+    async auditTrip(input) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        const trip = await findTripSummary(dependencies.directory, tripId);
+        const repository = dependencies.createTripRepository(trip.id);
+        const destinations = normalizeOrderedDestinations(await repository.listDestinations());
+        const [routeLegs, activitiesByStop] = await Promise.all([
+          repository.listRouteLegs(),
+          Promise.all(destinations.map((destination) => repository.listActivities(destination.id))),
+        ]);
+        const audit = auditTripSnapshot({
+          destinations,
+          routeLegs,
+          activities: activitiesByStop.flat(),
+        });
+
+        return commandSuccess(
+          `Audited trip ${trip.name}: ${audit.errors} errors, ${audit.warnings} warnings.`,
+          { audit },
+        );
+      });
+    },
+
     async createTrip(input, options) {
       return withCommandHandling(async () => {
         if ('manifestVersion' in input) {
           const manifest = validateTripManifest(input);
           const materialized = await materializeTripManifest(manifest, dependencies);
+          const audit = auditTripSnapshot({
+            destinations: materialized.destinations,
+            activities: materialized.activities,
+            routeLegs: materialized.routeLegs,
+          });
+          if (audit.errors > 0) {
+            return commandError(
+              'TRIP_AUDIT_FAILED',
+              'Trip manifest has semantic audit errors.',
+              'manifest',
+              { audit },
+            );
+          }
 
           if (options?.dryRun) {
             return commandSuccess(`Would create trip ${manifest.name}.`, {
@@ -566,6 +610,7 @@ export function createTripDataService(
               activities: materialized.activities,
               routeLegs: materialized.routeLegs,
               changed: materialized.changed,
+              audit,
             });
           }
 
@@ -592,6 +637,7 @@ export function createTripDataService(
             activities: materialized.activities,
             routeLegs: materialized.routeLegs,
             changed: materialized.changed,
+            audit,
           });
         }
 

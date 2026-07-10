@@ -2,6 +2,7 @@ import type { LineString } from 'geojson';
 import type { ResearchLink, Coordinates, ActivityLocation } from '../domain/types';
 import type { TripRepository } from '../storage/tripRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
+import type { TripAuditReport } from './tripAudit';
 
 export type PlaceInput = {
   query?: string;
@@ -72,6 +73,9 @@ export type CommandError = {
   code: string;
   message: string;
   path?: string;
+  details?: {
+    audit?: TripAuditReport;
+  };
 };
 
 export type CommandResult<T> =

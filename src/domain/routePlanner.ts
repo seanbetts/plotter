@@ -24,7 +24,7 @@ function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
 }
 
-function distanceKm(left: Coordinates, right: Coordinates) {
+export function coordinateDistanceKm(left: Coordinates, right: Coordinates) {
   const earthRadiusKm = 6371;
   const latDelta = degreesToRadians(right.lat - left.lat);
   const lngDelta = degreesToRadians(right.lng - left.lng);
@@ -194,7 +194,7 @@ export function getDestinationInsertionCandidates(
       {
         insertionIndex: destinations.length,
         previousDestinationId: onlyDestination.id,
-        addedDistanceKm: distanceKm(onlyDestination.coordinates, coordinates),
+        addedDistanceKm: coordinateDistanceKm(onlyDestination.coordinates, coordinates),
       },
     ];
   }
@@ -205,9 +205,9 @@ export function getDestinationInsertionCandidates(
     const previousDestination = destinations[insertionIndex - 1];
     const nextDestination = destinations[insertionIndex];
     const addedDistance =
-      distanceKm(previousDestination.coordinates, coordinates) +
-      distanceKm(coordinates, nextDestination.coordinates) -
-      distanceKm(previousDestination.coordinates, nextDestination.coordinates);
+      coordinateDistanceKm(previousDestination.coordinates, coordinates) +
+      coordinateDistanceKm(coordinates, nextDestination.coordinates) -
+      coordinateDistanceKm(previousDestination.coordinates, nextDestination.coordinates);
 
     candidates.push({
       insertionIndex,
@@ -221,7 +221,7 @@ export function getDestinationInsertionCandidates(
   candidates.push({
     insertionIndex: destinations.length,
     previousDestinationId: lastDestination.id,
-    addedDistanceKm: distanceKm(lastDestination.coordinates, coordinates),
+    addedDistanceKm: coordinateDistanceKm(lastDestination.coordinates, coordinates),
   });
 
   return candidates;
