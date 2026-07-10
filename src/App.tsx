@@ -31,6 +31,7 @@ import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
+import { downloadTripMap } from './map/tripMapExport';
 import { preloadImageUrls } from './media/imagePreloading';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { LinkPreviewClient } from './services/linkPreviewClient';
@@ -380,6 +381,18 @@ function TripWorkspace({
   const activeRouteAlternativesTarget = activeRouteAlternativesLeg
     ? destinationsById.get(activeRouteAlternativesLeg.targetDestinationId) ?? null
     : null;
+
+  const handleExportTripMap = useCallback(async () => {
+    if (!activeTrip || destinations.length === 0) {
+      throw new Error('Trip map export requires an active trip with at least one stop.');
+    }
+
+    await downloadTripMap({
+      tripName: activeTrip.name,
+      destinations,
+      routeLegs,
+    });
+  }, [activeTrip, destinations, routeLegs]);
 
   useEffect(() => {
     if (!realtime || !activeTrip) return undefined;
@@ -1109,9 +1122,11 @@ function TripWorkspace({
         {!isInteractionLocked && !error ? (
           <>
             <TopToolbar
+              canExportTripMap={Boolean(activeTrip) && destinations.length > 0}
               searchPlaces={searchStopPlaces}
               resolveSearchResult={resolveSearchResult}
               onAddDestination={handleAddDestination}
+              onExportTripMap={handleExportTripMap}
             />
             <div className="trip-selector-anchor">
               <TripSelector
