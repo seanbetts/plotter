@@ -142,21 +142,19 @@ describe('TripSelector', () => {
     expect(props.onRenameTrip).toHaveBeenCalledWith('trip-two', 'Renamed tour');
   });
 
-  it('renders delete as the same compact icon-button row as the other modes', async () => {
+  it('renders delete as one compact confirmation row without a trip-name field', async () => {
     renderSelector();
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete Japan winter' }));
 
     const dialog = screen.getByRole('dialog', { name: 'Delete trip' });
-    const tripField = screen.getByLabelText('Trip to delete');
     const cancelButton = screen.getByRole('button', { name: 'Cancel' });
     const deleteButton = screen.getByRole('button', { name: 'Delete Japan winter' });
 
-    expect(dialog.querySelector('.trip-selector__dialog-entry')).toContainElement(tripField);
-    expect(tripField).toHaveValue('Japan winter');
-    expect(tripField).toHaveAttribute('readonly');
-    expect(tripField).toHaveFocus();
+    expect(dialog.querySelector('.trip-selector__delete-confirmation')).toHaveTextContent('Delete Japan winter?');
+    expect(dialog.querySelector('input')).not.toBeInTheDocument();
+    expect(dialog).toHaveFocus();
     expect(cancelButton).toHaveTextContent('');
     expect(deleteButton).toHaveTextContent('');
     expect(deleteButton).toHaveClass('trip-selector__dialog-icon-button--danger');
@@ -173,7 +171,18 @@ describe('TripSelector', () => {
     expect(screen.queryByRole('dialog', { name: 'Delete trip' })).not.toBeInTheDocument();
   });
 
-  it('confirms delete with Enter from the focused trip field', async () => {
+  it('keeps Enter scoped to the focused delete action', async () => {
+    const props = renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete Japan winter' }));
+    await userEvent.keyboard('{Tab}{Enter}');
+
+    expect(props.onDeleteTrip).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Delete trip' })).not.toBeInTheDocument();
+  });
+
+  it('confirms delete with Enter from the focused dialog', async () => {
     const props = renderSelector();
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));

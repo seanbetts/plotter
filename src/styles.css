@@ -2033,6 +2033,22 @@ select {
   align-items: stretch;
 }
 
+.trip-selector__delete-confirmation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px 38px;
+  min-height: 38px;
+  gap: 6px;
+  align-items: center;
+}
+
+.trip-selector__delete-confirmation p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .trip-selector__dialog input {
   min-height: 38px;
   padding: 0 10px;

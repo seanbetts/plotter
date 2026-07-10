@@ -29,6 +29,7 @@ export function TripSelector({
   const [targetTrip, setTargetTrip] = useState<TripSummary | null>(null);
   const selectorRef = useRef<HTMLDivElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const deleteDialogRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!isOpen && !dialogMode) return undefined;
@@ -61,6 +62,11 @@ export function TripSelector({
 
   useEffect(() => {
     if (!dialogMode) return;
+
+    if (dialogMode === 'delete') {
+      deleteDialogRef.current?.focus();
+      return;
+    }
 
     nameInputRef.current?.focus();
   }, [dialogMode]);
@@ -213,7 +219,20 @@ export function TripSelector({
       ) : null}
 
       {dialogMode === 'delete' && targetTrip ? (
-        <section className="trip-selector__dialog" role="dialog" aria-modal="true" aria-label="Delete trip">
+        <section
+          ref={deleteDialogRef}
+          className="trip-selector__dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Delete trip"
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.target !== event.currentTarget) return;
+
+            event.preventDefault();
+            void confirmDelete();
+          }}
+        >
           <form
             className="trip-selector__dialog-form"
             onSubmit={(event) => {
@@ -221,15 +240,10 @@ export function TripSelector({
               void confirmDelete();
             }}
           >
-            <label htmlFor="trip-selector-delete-name">Delete trip?</label>
-            <div className="trip-selector__dialog-entry">
-              <input
-                id="trip-selector-delete-name"
-                ref={nameInputRef}
-                aria-label="Trip to delete"
-                value={targetTrip.name}
-                readOnly
-              />
+            <div className="trip-selector__delete-confirmation">
+              <p title={targetTrip.name}>
+                Delete <strong>{targetTrip.name}</strong>?
+              </p>
               <button
                 type="button"
                 className="trip-selector__dialog-icon-button"
