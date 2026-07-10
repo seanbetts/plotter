@@ -321,15 +321,17 @@ Schema-native activities should stay nested under their parent `CandidateStop`. 
 
 ## RouteLegDirective
 
-Use an explicit directive for every approved ferry or vehicle-shipping leg. Do not rely on candidate notes or a logistics gate alone to tell the trip-data agent that the app must not calculate a continuous driving route.
+Ordered adjacent stops use automatic app routing by default. Do not emit a route directive merely because the route includes an ordinary ferry, tunnel, bridge, or vehicle shuttle. Keep operator, booking, and timetable information in links, notes, or logistics gates.
+
+Emit shipping-manual only for an approved genuine route discontinuity or independent vehicle-shipping transfer that the app cannot represent as continuous driving. The directive is explicit because the trip-data skill must preserve research decisions rather than infer route mode from prose.
 
 ```json
 {
-  "fromStopKey": "larvik",
-  "toStopKey": "hirtshals",
+  "fromStopKey": "vehicle-shipping-origin",
+  "toStopKey": "vehicle-shipping-destination",
   "type": "shipping-manual",
-  "notes": "Approved vehicle ferry crossing.",
-  "sources": ["ferry-operator"]
+  "notes": "Approved vehicle-shipping transfer around a physical route discontinuity.",
+  "sources": ["shipping-operator"]
 }
 ```
 

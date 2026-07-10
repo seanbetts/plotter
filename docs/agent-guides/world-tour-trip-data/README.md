@@ -15,9 +15,12 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 - Preserve approved stop and activity `tags` from route research, including route-variant, access-constraint, theme, and practical-role tags. Tags should already come from the controlled route-research vocabulary.
 - For both stops and activities, use source coordinates when present and otherwise provide a specific `place.query`.
 - Do not write address fields directly. The app resolves address/location metadata from `place.query` or `place.coordinates`.
-- Use the versioned full manifest for agent-authored new trips so stops, activities, links, and manual ferry legs are written together.
+- Translate the approved research handoff faithfully. Do not reconsider stop selection, order, activities, pacing, stay allocation, or route semantics.
+- Preserve approved expectedStayDays; arithmetic validation is allowed, but itinerary-quality judgement belongs to route research.
+- Omit route directives for ordinary adjacent driving legs, including normal ferry, tunnel, bridge, and vehicle-shuttle crossings, so the app calculates them automatically.
+- Preserve shipping-manual only when the approved handoff explicitly marks a genuine route discontinuity or independent vehicle-shipping transfer. Never infer it from notes or links.
+- Use the versioned full manifest for agent-authored new trips so stops, activities, links, and explicit route discontinuities are written together.
 - Give every full-manifest stop a unique key and explicit positive `expectedStayDays`; use `1` for departure and return anchors.
-- Use `shipping-manual` route directives for approved ferry or vehicle-shipping legs. Do not rely on prose notes to select route mode.
 - Use `--summary` for large commands to avoid huge route geometry output.
 - Link-add commands are idempotent; retrying an existing URL should be safe.
 - Image import/upload is not part of the CLI v1 surface.

@@ -10,6 +10,8 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Do not mutate app data from this guide.
 - Do not write Supabase rows directly.
 - Do not author route geometry or app-derived fields.
+- Assume automatic driving routing between adjacent stops, including ordinary ferries, tunnels, bridges, and vehicle shuttles that a normal road route can contain.
+- Emit shipping-manual only for a genuine physical discontinuity or independent vehicle-shipping transfer that automatic driving routing cannot represent.
 - Re-check current ferry, road, border, weather, access, and seasonal restriction facts during each research run.
 - Treat overnight or base locations as candidate stops.
 - Treat non-overnight sights, hikes, tours, food stops, viewpoints, and experiences as candidate activities under a nearby candidate stop.

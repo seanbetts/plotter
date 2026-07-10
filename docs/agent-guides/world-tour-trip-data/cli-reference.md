@@ -110,16 +110,11 @@ Full trip manifest for an agent-authored new trip:
       ]
     }
   ],
-  "routeLegs": [
-    {
-      "fromStopKey": "larvik",
-      "toStopKey": "hirtshals",
-      "type": "shipping-manual",
-      "notes": "Approved vehicle ferry crossing."
-    }
-  ]
+  "routeLegs": []
 }
 ```
+
+The app calculates the ordinary ferry-inclusive Larvik-Hirtshals route automatically.
 
 Requirements:
 
@@ -128,8 +123,20 @@ Requirements:
 - Every stop has an explicit positive integer `expectedStayDays`; use `1` for departure and return anchors.
 - Omitted `tags`, `links`, `activities`, and `routeLegs` become empty arrays.
 - Use sourced coordinates for short or ambiguous names such as `A`, named viewpoints, trailheads, and ferry terminals. A specific query is otherwise sufficient.
-- Use `shipping-manual` only for an approved ferry or vehicle-shipping leg.
+- Omit route directives for ordinary adjacent driving legs, including normal ferry, tunnel, bridge, and vehicle-shuttle crossings.
+- Use `shipping-manual` only for an approved genuine route discontinuity or independent vehicle-shipping transfer that automatic driving routing cannot represent.
 - Do not author IDs, normalized `location` or address metadata, route geometry, distance, duration, provider fields, route keys, timestamps, or Supabase rows.
+
+Use an explicit directive only for an approved discontinuity that cannot be represented by automatic driving routing:
+
+```json
+{
+  "fromStopKey": "vehicle-shipping-origin",
+  "toStopKey": "vehicle-shipping-destination",
+  "type": "shipping-manual",
+  "notes": "Approved vehicle-shipping transfer around a physical route discontinuity."
+}
+```
 
 Stop draft:
 
