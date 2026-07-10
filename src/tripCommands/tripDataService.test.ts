@@ -4,6 +4,8 @@ import type { LinkEnricher } from './types';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
+import { createDestination } from '../domain/destinations';
+import { createRouteLeg } from '../domain/routeLegs';
 
 function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
   const trips: TripSummary[] = [];
@@ -447,6 +449,98 @@ describe('TripDataService trips and stops', () => {
       'ACTIVITY_DISTANCE_OUTLIER',
       'ACTIVITY_DISTANCE_OUTLIER',
     ]);
+  });
+
+  it('recalculates and saves only failed route legs', async () => {
+    const destinations = ['Home', 'Hamburg', 'Copenhagen', 'Stockholm'].map((name, order) => (
+      createDestination({
+        name,
+        coordinates: { lat: 50 + order, lng: order },
+        order,
+      })
+    ));
+    const ready = createRouteLeg({
+      originDestinationId: destinations[0].id,
+      targetDestinationId: destinations[1].id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 100,
+      travelTimeHours: 2,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[0, 50], [1, 51]],
+      },
+      provider: 'test',
+      profile: 'driving-car',
+      routeKey: 'ready-key',
+      calculatedAt: '2026-07-10T12:00:00.000Z',
+    });
+    const failed = [
+      createRouteLeg({
+        originDestinationId: destinations[1].id,
+        targetDestinationId: destinations[2].id,
+        type: 'driving-auto',
+        status: 'failed',
+        error: 'OpenRouteService route calculation failed (HTTP 429)',
+      }),
+      createRouteLeg({
+        originDestinationId: destinations[2].id,
+        targetDestinationId: destinations[3].id,
+        type: 'driving-auto',
+        status: 'failed',
+        error: 'OpenRouteService route calculation failed (HTTP 429)',
+      }),
+    ];
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => {
+      void routeLeg;
+    });
+    const calculateRoute = vi.fn(async ({ origin, target }) => ({
+      distanceKm: 120,
+      travelTimeHours: 2.5,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]],
+      },
+      provider: 'test',
+      profile: 'driving-car' as const,
+    }));
+    const repository = {
+      listDestinations: vi.fn(async () => destinations),
+      listRouteLegs: vi.fn(async () => [ready, ...failed]),
+      saveRouteLeg,
+    } as unknown as TripRepository;
+    const service = createTripDataService({
+      directory: {
+        listTrips: vi.fn(async () => [{
+          id: 'trip-1',
+          name: 'Nordkapp',
+          description: '',
+          createdAt: '',
+          updatedAt: '',
+        }]),
+        createTrip: vi.fn(),
+        updateTrip: vi.fn(),
+        deleteTrip: vi.fn(),
+      },
+      createTripRepository: vi.fn(() => repository),
+      calculateRoute,
+    });
+
+    const result = await service.recalculateFailedRoutes({ tripId: 'trip-1' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(calculateRoute).toHaveBeenCalledTimes(2);
+    expect(saveRouteLeg).toHaveBeenCalledTimes(2);
+    expect(saveRouteLeg.mock.calls.map(([leg]) => leg.id)).toEqual(failed.map((leg) => leg.id));
+    expect(result.routeLegs[0]).toBe(ready);
+    expect(result.failedRoutesBefore).toBe(2);
+    expect(result.failedRoutesAfter).toBe(0);
+    expect(result.recalculatedRoutes).toMatchObject([
+      { originName: 'Hamburg', targetName: 'Copenhagen', status: 'ready' },
+      { originName: 'Copenhagen', targetName: 'Stockholm', status: 'ready' },
+    ]);
+    expect(result.changed.routesRecalculated).toBe(2);
   });
 
   it('rejects malformed createTrip stops input with a validation error', async () => {

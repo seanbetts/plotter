@@ -102,6 +102,24 @@ describe('OpenRouteService adapter', () => {
     ).rejects.toThrow('OpenRouteService route calculation failed');
   });
 
+  it('includes the HTTP status in route calculation failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+      }),
+    );
+
+    await expect(
+      calculateOpenRouteServiceRoute({
+        apiKey: 'ors-key',
+        origin: { lat: 51.5072, lng: -0.1276 },
+        target: { lat: 48.8566, lng: 2.3522 },
+      }),
+    ).rejects.toThrow('OpenRouteService route calculation failed (HTTP 429)');
+  });
+
   it('rejects malformed GeoJSON route responses', async () => {
     vi.stubGlobal(
       'fetch',

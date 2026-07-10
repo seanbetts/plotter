@@ -5,6 +5,7 @@ import type { Activity, Destination, ResearchLink, RouteLeg } from '../domain/ty
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import {
+  calculateDrivingRouteLegs,
   reconcileAndSaveRouteLegs,
   type CalculateRoute,
 } from './routeOrchestration';
@@ -38,6 +39,18 @@ export type TripDataService = {
   listTrips(): Promise<CommandResult<{ trips: Array<TripSummary & { stopCount: number }> }>>;
   getTrip(input: { tripId: string; includeActivities?: boolean; includeLinks?: boolean }): Promise<CommandResult<{ trip: TripWithData }>>;
   auditTrip(input: { tripId: string }): Promise<CommandResult<{ audit: TripAuditReport }>>;
+  recalculateFailedRoutes(input: { tripId: string }): Promise<CommandResult<{
+    routeLegs: RouteLeg[];
+    failedRoutesBefore: number;
+    failedRoutesAfter: number;
+    recalculatedRoutes: Array<{
+      routeLegId: string;
+      originName: string;
+      targetName: string;
+      status: RouteLeg['status'];
+    }>;
+    changed: ChangedSummary;
+  }>>;
   createTrip(input: { name: string; stops?: unknown[] } | TripManifestDraft, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; stops: Destination[]; activities: Activity[]; routeLegs: RouteLeg[]; changed: ChangedSummary; audit?: TripAuditReport }>>;
   deleteTrip(input: { tripId: string }, options?: CommandOptions): Promise<CommandResult<{ changed: ChangedSummary }>>;
   renameTrip(input: { tripId: string; name: string }, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; changed: ChangedSummary }>>;
@@ -574,6 +587,56 @@ export function createTripDataService(
         return commandSuccess(
           `Audited trip ${trip.name}: ${audit.errors} errors, ${audit.warnings} warnings.`,
           { audit },
+        );
+      });
+    },
+
+    async recalculateFailedRoutes(input) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        const trip = await findTripSummary(dependencies.directory, tripId);
+        const repository = dependencies.createTripRepository(trip.id);
+        const [destinations, currentRouteLegs] = await Promise.all([
+          repository.listDestinations(),
+          repository.listRouteLegs(),
+        ]);
+        const failedRouteLegs = currentRouteLegs.filter((routeLeg) => (
+          routeLeg.type === 'driving-auto' && routeLeg.status === 'failed'
+        ));
+        const recalculatedRouteLegs = await calculateDrivingRouteLegs({
+          destinations,
+          routeLegs: failedRouteLegs,
+          calculateRoute: dependencies.calculateRoute,
+        });
+        const recalculatedById = new Map(recalculatedRouteLegs.map((routeLeg) => [routeLeg.id, routeLeg]));
+        const changedRouteLegs = recalculatedRouteLegs.filter((routeLeg, index) => (
+          routeLeg !== failedRouteLegs[index]
+        ));
+        await Promise.all(changedRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)));
+
+        const routeLegs = currentRouteLegs.map((routeLeg) => recalculatedById.get(routeLeg.id) ?? routeLeg);
+        const destinationsById = new Map(destinations.map((destination) => [destination.id, destination]));
+        const recalculatedRoutes = recalculatedRouteLegs.map((routeLeg) => ({
+          routeLegId: routeLeg.id,
+          originName: destinationsById.get(routeLeg.originDestinationId)?.name ?? routeLeg.originDestinationId,
+          targetName: destinationsById.get(routeLeg.targetDestinationId)?.name ?? routeLeg.targetDestinationId,
+          status: routeLeg.status,
+        }));
+        const failedRoutesAfter = routeLegs.filter((routeLeg) => (
+          routeLeg.type === 'driving-auto' && routeLeg.status === 'failed'
+        )).length;
+        const changed = emptyChanged();
+        changed.routesRecalculated = changedRouteLegs.length;
+
+        return commandSuccess(
+          `Recalculated ${changedRouteLegs.length} failed route${changedRouteLegs.length === 1 ? '' : 's'} for ${trip.name}; ${failedRoutesAfter} remain failed.`,
+          {
+            routeLegs,
+            failedRoutesBefore: failedRouteLegs.length,
+            failedRoutesAfter,
+            recalculatedRoutes,
+            changed,
+          },
         );
       });
     },

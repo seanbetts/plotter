@@ -35,7 +35,7 @@ type OpenRouteServiceFeatureCollection = FeatureCollection<LineString, OpenRoute
 
 class OpenRouteServiceRouteCalculationError extends Error {
   constructor(public readonly status?: number) {
-    super('OpenRouteService route calculation failed');
+    super(`OpenRouteService route calculation failed${status ? ` (HTTP ${status})` : ''}`);
   }
 }
 

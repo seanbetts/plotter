@@ -7,6 +7,13 @@ function createMockService(): MockService {
   return {
     listTrips: vi.fn(async () => ({ ok: true, summary: 'listed', trips: [] })),
     getTrip: vi.fn(async () => ({ ok: true, summary: 'loaded', trip: { id: 'trip-1' } })),
+    auditTrip: vi.fn(async () => ({ ok: true, summary: 'audited', audit: { errors: 0, warnings: 0, issues: [] } })),
+    recalculateFailedRoutes: vi.fn(async () => ({
+      ok: true,
+      summary: 'recalculated',
+      routeLegs: [],
+      changed: {},
+    })),
     createTrip: vi.fn(async () => ({ ok: true, summary: 'created', trip: { id: 'trip-1' } })),
     deleteTrip: vi.fn(async () => ({ ok: true, summary: 'deleted', changed: {} })),
     renameTrip: vi.fn(async () => ({ ok: true, summary: 'renamed', trip: { id: 'trip-1' }, changed: {} })),
@@ -139,6 +146,9 @@ describe('runTripCli', () => {
       counts: {
         stops: 1,
         routeLegs: 1,
+        readyRouteLegs: 1,
+        manualRouteLegs: 0,
+        failedRouteLegs: 0,
       },
     });
     expect(write.mock.calls[0]?.[0]).not.toContain('coordinates');
@@ -160,6 +170,7 @@ describe('runTripCli', () => {
     const commands: string[][] = [
       ['list'],
       ['get', '--trip-id', 'trip-1', '--include-activities', '--include-links'],
+      ['recalculate-failed-routes', '--trip-id', 'trip-1'],
       ['create', '--input', '/tmp/trip.json', '--dry-run', '--yes'],
       ['delete', '--trip-id', 'trip-1', '--dry-run', '--yes'],
       ['rename', '--trip-id', 'trip-1', '--name', 'Renamed Trip', '--dry-run', '--yes'],
@@ -196,6 +207,7 @@ describe('runTripCli', () => {
       includeActivities: true,
       includeLinks: true,
     });
+    expect(service.recalculateFailedRoutes).toHaveBeenCalledWith({ tripId: 'trip-1' });
     expect(service.createTrip).toHaveBeenCalledWith({ name: 'Road trip' }, { dryRun: true, yes: true });
     expect(service.deleteTrip).toHaveBeenCalledWith({ tripId: 'trip-1' }, { dryRun: true, yes: true });
     expect(service.renameTrip).toHaveBeenCalledWith({ tripId: 'trip-1', name: 'Renamed Trip' }, { dryRun: true, yes: true });
@@ -257,6 +269,42 @@ describe('runTripCli', () => {
       activityId: 'activity-1',
       linkId: 'link-2',
     }, { dryRun: true, yes: true });
+  });
+
+  it('summarizes route readiness after failed-only recalculation', async () => {
+    const { service, readFile, write, writeError } = createCliHarness({
+      recalculateFailedRoutes: vi.fn(async () => ({
+        ok: true,
+        summary: 'Recalculated 2 failed routes.',
+        changed: { routesRecalculated: 2 },
+        routeLegs: [
+          ...Array.from({ length: 23 }, (_, index) => ({ id: `ready-${index}`, status: 'ready' })),
+          { id: 'manual-1', status: 'manual' },
+          { id: 'manual-2', status: 'manual' },
+        ],
+      })),
+    });
+
+    const exitCode = await runTripCli({
+      argv: ['recalculate-failed-routes', '--trip-id', 'trip-1', '--summary'],
+      service: service as never,
+      readFile,
+      write,
+      writeError,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(write.mock.calls[0]?.[0] ?? '{}')).toEqual({
+      ok: true,
+      summary: 'Recalculated 2 failed routes.',
+      changed: { routesRecalculated: 2 },
+      counts: {
+        routeLegs: 25,
+        readyRouteLegs: 23,
+        manualRouteLegs: 2,
+        failedRouteLegs: 0,
+      },
+    });
   });
 
   it('accepts keyed id lists for reorder commands', async () => {

@@ -109,6 +109,15 @@ function summarizeActivitiesByStopId(counts: Record<string, number>, value: unkn
   );
 }
 
+function summarizeRouteLegs(counts: Record<string, number>, value: unknown) {
+  if (!Array.isArray(value)) return;
+
+  counts.routeLegs = value.length;
+  counts.readyRouteLegs = value.filter((routeLeg) => isRecord(routeLeg) && routeLeg.status === 'ready').length;
+  counts.manualRouteLegs = value.filter((routeLeg) => isRecord(routeLeg) && routeLeg.status === 'manual').length;
+  counts.failedRouteLegs = value.filter((routeLeg) => isRecord(routeLeg) && routeLeg.status === 'failed').length;
+}
+
 function summarizeCommandResult(result: unknown) {
   if (!isRecord(result) || result.ok !== true) {
     return result;
@@ -126,12 +135,12 @@ function summarizeCommandResult(result: unknown) {
   const counts: Record<string, number> = {};
   setCount(counts, 'trips', result.trips);
   setCount(counts, 'stops', result.stops);
-  setCount(counts, 'routeLegs', result.routeLegs);
+  summarizeRouteLegs(counts, result.routeLegs);
   setCount(counts, 'activities', result.activities);
 
   if (isRecord(result.trip)) {
     setCount(counts, 'stops', result.trip.stops);
-    setCount(counts, 'routeLegs', result.trip.routeLegs);
+    summarizeRouteLegs(counts, result.trip.routeLegs);
     summarizeActivitiesByStopId(counts, result.trip.activitiesByStopId);
   }
 
@@ -178,6 +187,11 @@ export async function runTripCli(input: RunTripCliInput) {
           tripId: stringFlag(flags, 'trip-id') ?? '',
           includeActivities: Boolean(flags['include-activities']),
           includeLinks: Boolean(flags['include-links']),
+        });
+        break;
+      case 'recalculate-failed-routes':
+        result = await input.service.recalculateFailedRoutes({
+          tripId: stringFlag(flags, 'trip-id') ?? '',
         });
         break;
       case 'create':
