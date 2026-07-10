@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createRouteKey, createRouteLeg, createStraightLineGeometry } from './routeLegs';
+import {
+  createManualRouteLeg,
+  createRouteKey,
+  createRouteLeg,
+  createStraightLineGeometry,
+} from './routeLegs';
 
 describe('route leg helpers', () => {
   it('creates a manual route leg between two destinations', () => {
@@ -51,5 +56,32 @@ describe('route leg helpers', () => {
       [-0.1276, 51.5072],
       [28.9784, 41.0082],
     ]);
+  });
+
+  it('creates a complete manual shipping leg with straight-line geometry', () => {
+    const leg = createManualRouteLeg({
+      origin: { lat: 59.05, lng: 10.03 },
+      target: { lat: 57.59, lng: 9.96 },
+      originDestinationId: 'larvik',
+      targetDestinationId: 'hirtshals',
+      notes: 'Vehicle ferry.',
+    });
+
+    expect(leg).toMatchObject({
+      originDestinationId: 'larvik',
+      targetDestinationId: 'hirtshals',
+      type: 'shipping-manual',
+      status: 'manual',
+      notes: 'Vehicle ferry.',
+      geometry: {
+        type: 'LineString',
+        coordinates: [[10.03, 59.05], [9.96, 57.59]],
+      },
+    });
+    expect(leg.distanceKm).toBeUndefined();
+    expect(leg.travelTimeHours).toBeUndefined();
+    expect(leg.provider).toBeUndefined();
+    expect(leg.profile).toBeUndefined();
+    expect(leg.routeKey).toBeUndefined();
   });
 });

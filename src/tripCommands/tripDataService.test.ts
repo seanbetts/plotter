@@ -224,6 +224,162 @@ function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
 }
 
 describe('TripDataService trips and stops', () => {
+  function createBulkManifestHarness(options?: { replaceError?: Error }) {
+    const replaceTripData = vi.fn(async () => {
+      if (options?.replaceError) throw options.replaceError;
+    });
+    const createActivity = vi.fn();
+    const updateActivity = vi.fn();
+    const repository = {
+      replaceTripData,
+      createActivity,
+      updateActivity,
+    } as unknown as TripRepository;
+    const createTrip = vi.fn(async ({ name }: { name: string }) => ({
+      id: 'bulk-trip-id',
+      name,
+      description: '',
+      createdAt: '2026-07-10T12:00:00.000Z',
+      updatedAt: '2026-07-10T12:00:00.000Z',
+    }));
+    const deleteTrip = vi.fn(async () => undefined);
+    const resolvePlace = vi.fn(async ({ place, fallbackName, profile }) => ({
+      coordinates: place.coordinates!,
+      ...(profile === 'stop'
+        ? {
+            location: {
+              placeName: fallbackName,
+              regionName: '',
+              countryName: 'Test country',
+              sourceLabel: fallbackName,
+              sourceProvider: 'legacy' as const,
+            },
+          }
+        : {
+            activityLocation: {
+              name: fallbackName,
+              address: `${fallbackName} address`,
+              coordinates: place.coordinates,
+              sourceProvider: 'manual' as const,
+            },
+          }),
+    }));
+    const enrichLink = vi.fn(async (url: string, sortOrder: number) => ({
+      id: `${url}-${sortOrder}`,
+      url,
+      title: url,
+      domain: 'example.com',
+      sortOrder,
+    }));
+    const calculateRoute = vi.fn(async ({ origin, target }) => ({
+      distanceKm: 50,
+      travelTimeHours: 1,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]],
+      },
+      provider: 'test',
+      profile: 'driving-car' as const,
+    }));
+    const service = createTripDataService({
+      directory: {
+        listTrips: vi.fn(async () => []),
+        createTrip,
+        updateTrip: vi.fn(),
+        deleteTrip,
+      },
+      createTripRepository: vi.fn(() => repository),
+      resolvePlace,
+      enrichLink,
+      calculateRoute,
+    });
+    const stops = Array.from({ length: 26 }, (_, index) => ({
+      key: `stop-${index}`,
+      name: `Stop ${index}`,
+      place: { coordinates: { lat: 40 + index * 0.1, lng: -5 + index * 0.1 } },
+      expectedStayDays: 1,
+      ...(index < 3 ? { links: [`https://example.com/stop-${index}`] } : {}),
+      ...(index < 15
+        ? {
+            activities: [{
+              title: `Activity ${index}`,
+              place: { coordinates: { lat: 40 + index * 0.1, lng: -4.99 + index * 0.1 } },
+              links: [`https://example.com/activity-${index}`],
+            }],
+          }
+        : {}),
+    }));
+    const manifest = {
+      manifestVersion: 1 as const,
+      name: 'Large overland trip',
+      stops,
+      routeLegs: [
+        { fromStopKey: 'stop-4', toStopKey: 'stop-5', type: 'shipping-manual' as const },
+        { fromStopKey: 'stop-15', toStopKey: 'stop-16', type: 'shipping-manual' as const },
+      ],
+    };
+
+    return {
+      service,
+      manifest,
+      repository,
+      replaceTripData,
+      createActivity,
+      updateActivity,
+      createTrip,
+      deleteTrip,
+      resolvePlace,
+      enrichLink,
+      calculateRoute,
+    };
+  }
+
+  it('creates a complete manifest with one bulk persistence call', async () => {
+    const harness = createBulkManifestHarness();
+
+    const result = await harness.service.createTrip(harness.manifest);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(harness.resolvePlace).toHaveBeenCalledTimes(41);
+    expect(harness.enrichLink).toHaveBeenCalledTimes(18);
+    expect(harness.calculateRoute).toHaveBeenCalledTimes(23);
+    expect(harness.replaceTripData).toHaveBeenCalledTimes(1);
+    expect(harness.createActivity).not.toHaveBeenCalled();
+    expect(harness.updateActivity).not.toHaveBeenCalled();
+    expect(harness.createTrip).toHaveBeenCalledTimes(1);
+    expect(result.stops).toHaveLength(26);
+    expect(result.activities).toHaveLength(15);
+    expect(result.changed.linksAdded).toHaveLength(18);
+    expect(result.routeLegs.filter((leg) => leg.status === 'ready')).toHaveLength(23);
+    expect(result.routeLegs.filter((leg) => leg.status === 'manual')).toHaveLength(2);
+  });
+
+  it('materializes a complete manifest dry-run without creating or persisting a trip', async () => {
+    const harness = createBulkManifestHarness();
+
+    const result = await harness.service.createTrip(harness.manifest, { dryRun: true });
+
+    expect(result.ok).toBe(true);
+    expect(harness.createTrip).not.toHaveBeenCalled();
+    expect(harness.replaceTripData).not.toHaveBeenCalled();
+    expect(harness.resolvePlace).toHaveBeenCalledTimes(41);
+    expect(harness.enrichLink).toHaveBeenCalledTimes(18);
+    expect(harness.calculateRoute).toHaveBeenCalledTimes(23);
+  });
+
+  it('deletes a newly created trip when bulk persistence fails', async () => {
+    const harness = createBulkManifestHarness({ replaceError: new Error('Bulk write failed.') });
+
+    const result = await harness.service.createTrip(harness.manifest);
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'COMMAND_FAILED', message: 'Bulk write failed.' },
+    });
+    expect(harness.deleteTrip).toHaveBeenCalledWith('bulk-trip-id');
+  });
+
   it('rejects malformed createTrip stops input with a validation error', async () => {
     const { service, trips } = createHarness();
 

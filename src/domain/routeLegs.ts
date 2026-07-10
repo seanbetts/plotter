@@ -23,6 +23,14 @@ type CreateRouteKeyInput = {
   profile?: string;
 };
 
+type CreateManualRouteLegInput = {
+  origin: Coordinates;
+  target: Coordinates;
+  originDestinationId: string;
+  targetDestinationId: string;
+  notes?: string;
+};
+
 const nowIso = () => new Date().toISOString();
 const createId = () => crypto.randomUUID();
 const defaultProfile = 'driving-car';
@@ -47,6 +55,17 @@ export function createStraightLineGeometry(origin: Coordinates, target: Coordina
       [target.lng, target.lat],
     ],
   };
+}
+
+export function createManualRouteLeg(input: CreateManualRouteLegInput): RouteLeg {
+  return createRouteLeg({
+    originDestinationId: input.originDestinationId,
+    targetDestinationId: input.targetDestinationId,
+    type: 'shipping-manual',
+    status: 'manual',
+    geometry: createStraightLineGeometry(input.origin, input.target),
+    notes: input.notes,
+  });
 }
 
 export function createRouteLeg(input: CreateRouteLegInput): RouteLeg {

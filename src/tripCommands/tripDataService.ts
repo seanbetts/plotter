@@ -8,12 +8,14 @@ import {
   reconcileAndSaveRouteLegs,
   type CalculateRoute,
 } from './routeOrchestration';
+import { materializeTripManifest } from './tripManifest';
 import type {
   ChangedSummary,
   CommandResult,
   StopDraft,
   StopPatch,
   TripDataServiceDependencies,
+  TripManifestDraft,
   TripWithData,
 } from './types';
 import {
@@ -22,6 +24,7 @@ import {
   validateActivityPatch,
   validateStopDraft,
   validateStopPatch,
+  validateTripManifest,
   validateUrlInput,
 } from './validation';
 
@@ -33,7 +36,7 @@ export type CommandOptions = {
 export type TripDataService = {
   listTrips(): Promise<CommandResult<{ trips: Array<TripSummary & { stopCount: number }> }>>;
   getTrip(input: { tripId: string; includeActivities?: boolean; includeLinks?: boolean }): Promise<CommandResult<{ trip: TripWithData }>>;
-  createTrip(input: { name: string; stops?: unknown[] }, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; stops: Destination[]; routeLegs: RouteLeg[]; changed: ChangedSummary }>>;
+  createTrip(input: { name: string; stops?: unknown[] } | TripManifestDraft, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; stops: Destination[]; activities: Activity[]; routeLegs: RouteLeg[]; changed: ChangedSummary }>>;
   deleteTrip(input: { tripId: string }, options?: CommandOptions): Promise<CommandResult<{ changed: ChangedSummary }>>;
   renameTrip(input: { tripId: string; name: string }, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; changed: ChangedSummary }>>;
   replaceStops(input: { tripId: string; stops: unknown[] }, options?: CommandOptions): Promise<CommandResult<{ stops: Destination[]; routeLegs: RouteLeg[]; changed: ChangedSummary }>>;
@@ -546,6 +549,52 @@ export function createTripDataService(
 
     async createTrip(input, options) {
       return withCommandHandling(async () => {
+        if ('manifestVersion' in input) {
+          const manifest = validateTripManifest(input);
+          const materialized = await materializeTripManifest(manifest, dependencies);
+
+          if (options?.dryRun) {
+            return commandSuccess(`Would create trip ${manifest.name}.`, {
+              trip: {
+                id: 'dry-run-trip',
+                name: manifest.name,
+                description: '',
+                createdAt: '',
+                updatedAt: '',
+              },
+              stops: materialized.destinations,
+              activities: materialized.activities,
+              routeLegs: materialized.routeLegs,
+              changed: materialized.changed,
+            });
+          }
+
+          const trip = await dependencies.directory.createTrip({ name: manifest.name });
+          const repository = dependencies.createTripRepository(trip.id);
+          try {
+            await repository.replaceTripData({
+              destinations: materialized.destinations,
+              activities: materialized.activities,
+              routeLegs: materialized.routeLegs,
+            });
+          } catch (persistenceError) {
+            try {
+              await dependencies.directory.deleteTrip(trip.id);
+            } catch {
+              // Preserve the bulk persistence error that caused the cleanup.
+            }
+            throw persistenceError;
+          }
+
+          return commandSuccess(`Created trip ${trip.name}.`, {
+            trip,
+            stops: materialized.destinations,
+            activities: materialized.activities,
+            routeLegs: materialized.routeLegs,
+            changed: materialized.changed,
+          });
+        }
+
         const name = trimRequiredString(input.name, 'Trip name', 'name');
         if (input.stops !== undefined && !Array.isArray(input.stops)) {
           throw new TripCommandValidationError('INVALID_STOPS', 'stops must be an array.', 'stops');
@@ -575,6 +624,7 @@ export function createTripDataService(
               updatedAt: '',
             },
             stops,
+            activities: [],
             routeLegs,
             changed,
           });
@@ -592,6 +642,7 @@ export function createTripDataService(
         return commandSuccess(`Created trip ${trip.name}.`, {
           trip,
           stops,
+          activities: [],
           routeLegs,
           changed,
         });
