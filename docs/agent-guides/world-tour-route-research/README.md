@@ -19,8 +19,9 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Keep source links with each candidate.
 - Keep source evidence internally even when the user-facing answer only shows compact citations.
 - Keep the rich schema as the agent handoff artifact. The default user-facing output should be decision-oriented, not a schema dump.
-- Use the smallest research depth that answers the request.
+- Use the smallest research depth that answers the request. For an ambiguous point-to-point route with no approved corridor, route-shape uncertainty takes precedence over generic wording such as "plan a route": start with a `sketch`, then expand the approved corridor to a `candidate-plan`.
 - Ask the user only for high-consequence decisions. Make conservative agent-owned decisions explicit in assumptions.
+- In a recommended spine, choose a single default base or phase for each position. Keep meaningful route variants in the alternatives section instead of leaving ordinary stop choices as slash-separated or "A or B" options.
 - Require user approval before handing the plan to the trip data CLI.
 
 ## Workflow
@@ -40,7 +41,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - `candidate-plan`: enough stops, activities, tags, sources, and logistics notes for the user to review the proposed trip.
 - `handoff-ready`: the approved research artifact with stable fields, source links, `placeQuery` or sourced coordinates, and notes ready for trip data review. This is not permission to write app data.
 
-Default to `sketch` for broad or uncertain requests, `candidate-plan` when the user asks to plan a trip, and `handoff-ready` only after the route direction is approved or the user explicitly asks for handoff detail. Do not switch to the trip data guide or run the trip CLI until the user gives a separate final approval such as "implement this approved plan."
+Default to `sketch` for broad or uncertain requests, `candidate-plan` when the user asks to plan a trip whose route shape is already clear, and `handoff-ready` only after the route direction is approved or the user explicitly asks for handoff detail. For an ambiguous point-to-point route, use `sketch` until the user approves a corridor; this route-shape rule takes precedence over the generic `candidate-plan` default for requests such as "plan a route." Do not switch to the trip data guide or run the trip CLI until the user gives a separate final approval such as "implement this approved plan."
 
 Older references to `implementation-ready` mean `handoff-ready`. Do not emit `implementation-ready` in new route research plans.
 
@@ -54,6 +55,7 @@ Route shape defaults:
 
 | Route Shape | Default Depth | Expected Output |
 | --- | --- | --- |
+| Ambiguous point-to-point | `sketch` until corridor approval | Compare corridors, recommend one default, and show a light single-choice spine; expand the approved corridor to `candidate-plan`. |
 | Simple scenic road trip | `sketch` | Short recommendation, light stop spine, routine validations only. |
 | Official scenic route | `candidate-plan` | Scope, direction, phases if long, base stops, selective nested activities. |
 | Mega-corridor or blocked corridor | `sketch` | Phase or corridor viability, blockers, restart options; no stops for blocked phases. |
@@ -71,7 +73,7 @@ Depth requirements:
 Implicit depth consent:
 
 - "Give me options", "which route would you take", or "is this viable?" means `sketch`.
-- "Plan a route", "make me a 10-day trip", or "build a reviewable itinerary" means `candidate-plan`.
+- "Plan a route", "make me a 10-day trip", or "build a reviewable itinerary" means `candidate-plan` when the route shape is already clear. An unapproved ambiguous point-to-point corridor starts at `sketch`.
 - "Prepare this for handoff", "make this import-ready", or "turn the approved plan into trip data inputs" means `handoff-ready`, but still requires separate final approval before app writes.
 
 3. Decide the route shape before selecting stops:
@@ -146,7 +148,7 @@ Default output should be easy to scan:
 2. Material alternatives or variants, only if they change the trip.
 3. Hard blockers, unresolved decisions, or time-sensitive validation items.
 4. A compact stop and activity preview at the chosen research depth.
-5. The approval question or next decision.
+5. The approval question or next decision, naming the material assumptions being approved, such as corridor or direction, season, duration or pace, vehicle suitability, and any safety or border exposure that affects the route.
 
 Keep route-shape labels, internal field names, evidence details, and full JSON-like structures out of the main response unless they help the user make a decision or the user asks for handoff-ready output. Use the schema reference as the stable handoff contract between agents.
 
@@ -160,6 +162,7 @@ The agent should decide:
 - default tags from the controlled vocabulary
 - routine validation notes that do not change the route choice
 - a recommended default route when the trade-offs are clear
+- ordinary base and stop choices within the recommended route
 
 The user should decide:
 
@@ -199,7 +202,9 @@ For mega-corridors, a gate in one phase should not stop planning or writing rese
 
 Example: home to Nordkapp.
 
-Compare corridors before selecting stops. Preserve plausible alternatives and recommend one default corridor.
+Start at `sketch` unless the user has already approved a corridor. Compare corridors before selecting detailed stops, preserve plausible alternatives, and recommend one default corridor. The recommended spine should contain one default base or phase at each position; resolve ordinary choices such as neighbouring overnight towns yourself and keep only material route variants in the alternatives section.
+
+The approval question should state the route-defining assumptions in plain travel terms. For example: "Should I develop the 12-15 day summer route through Sweden and Finland?" After approval, expand that corridor to `candidate-plan`.
 
 ### Official Scenic Route
 
