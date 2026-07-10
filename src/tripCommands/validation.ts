@@ -1,6 +1,16 @@
 import { normalizeResearchLinkUrl } from '../domain/researchLinks';
 import type { Coordinates } from '../domain/types';
-import type { ActivityDraft, ActivityPatch, PlaceInput, StopDraft, StopPatch } from './types';
+import type {
+  ActivityDraft,
+  ActivityManifestDraft,
+  ActivityPatch,
+  PlaceInput,
+  RouteLegDirectiveDraft,
+  StopDraft,
+  StopManifestDraft,
+  StopPatch,
+  TripManifestDraft,
+} from './types';
 
 export class TripCommandValidationError extends Error {
   constructor(
@@ -15,6 +25,14 @@ export class TripCommandValidationError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function rejectUnknownFields(value: Record<string, unknown>, allowed: readonly string[], path: string) {
+  const unknownField = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unknownField) {
+    const fieldPath = path ? `${path}.${unknownField}` : unknownField;
+    throw new TripCommandValidationError('FIELD_NOT_ALLOWED', `${fieldPath} is not allowed.`, fieldPath);
+  }
 }
 
 function optionalString(value: unknown, path: string): string | undefined {
@@ -64,6 +82,22 @@ function optionalStringArray(value: unknown, path: string): string[] | undefined
   return deduped;
 }
 
+function optionalUrlArray(value: unknown, path: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new TripCommandValidationError('INVALID_URL_ARRAY', `${path} must be an array of URLs.`, path);
+  }
+
+  const deduped: string[] = [];
+  value.forEach((item, index) => {
+    const normalized = validateUrlInput(item, `${path}[${index}]`);
+    if (!deduped.includes(normalized)) {
+      deduped.push(normalized);
+    }
+  });
+  return deduped;
+}
+
 function optionalPositiveInteger(value: unknown, path: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
@@ -78,6 +112,7 @@ function validateCoordinates(value: unknown, path: string): Coordinates | undefi
   if (!isRecord(value)) {
     throw new TripCommandValidationError('INVALID_COORDINATES', `${path} must include lat and lng.`, path);
   }
+  rejectUnknownFields(value, ['lat', 'lng'], path);
 
   const lat = Number(value.lat);
   const lng = Number(value.lng);
@@ -123,6 +158,173 @@ export function validatePlaceInput(
   }
 
   return place;
+}
+
+function validateManifestPlace(value: unknown, path: string, required: boolean) {
+  if (isRecord(value)) {
+    rejectUnknownFields(value, ['query', 'coordinates'], path);
+  }
+  return validatePlaceInput(value, path, { required });
+}
+
+function validateActivityManifest(input: unknown, path: string): ActivityManifestDraft {
+  if (!isRecord(input)) {
+    throw new TripCommandValidationError('INVALID_ACTIVITY', `${path} must be an object.`, path);
+  }
+  rejectUnknownFields(input, ['title', 'place', 'description', 'notes', 'tags', 'links'], path);
+
+  const place = validateManifestPlace(input.place, `${path}.place`, false);
+  const description = optionalString(input.description, `${path}.description`);
+  const notes = optionalString(input.notes, `${path}.notes`);
+
+  return {
+    title: requiredString(input.title, 'Activity title', `${path}.title`),
+    ...(place ? { place } : {}),
+    ...(description ? { description } : {}),
+    ...(notes ? { notes } : {}),
+    tags: optionalStringArray(input.tags, `${path}.tags`) ?? [],
+    links: optionalUrlArray(input.links, `${path}.links`) ?? [],
+  };
+}
+
+function validateStopManifest(input: unknown, path: string): StopManifestDraft {
+  if (!isRecord(input)) {
+    throw new TripCommandValidationError('INVALID_STOP', `${path} must be an object.`, path);
+  }
+  rejectUnknownFields(
+    input,
+    ['key', 'name', 'place', 'expectedStayDays', 'notes', 'tags', 'links', 'activities'],
+    path,
+  );
+
+  if (input.expectedStayDays === undefined) {
+    const stayPath = `${path}.expectedStayDays`;
+    throw new TripCommandValidationError('REQUIRED_POSITIVE_INTEGER', `${stayPath} is required.`, stayPath);
+  }
+  const expectedStayDays = optionalPositiveInteger(input.expectedStayDays, `${path}.expectedStayDays`);
+  const place = validateManifestPlace(input.place, `${path}.place`, true);
+  if (!place || expectedStayDays === undefined) {
+    throw new TripCommandValidationError('INVALID_STOP', `${path} is invalid.`, path);
+  }
+  if (input.activities !== undefined && !Array.isArray(input.activities)) {
+    throw new TripCommandValidationError(
+      'INVALID_ACTIVITY_ARRAY',
+      `${path}.activities must be an array.`,
+      `${path}.activities`,
+    );
+  }
+  const notes = optionalString(input.notes, `${path}.notes`);
+
+  return {
+    key: requiredString(input.key, 'Stop key', `${path}.key`),
+    name: requiredString(input.name, 'Stop name', `${path}.name`),
+    place,
+    expectedStayDays,
+    ...(notes ? { notes } : {}),
+    tags: optionalStringArray(input.tags, `${path}.tags`) ?? [],
+    links: optionalUrlArray(input.links, `${path}.links`) ?? [],
+    activities: (input.activities ?? []).map((activity, index) => (
+      validateActivityManifest(activity, `${path}.activities[${index}]`)
+    )),
+  };
+}
+
+function validateRouteLegDirective(input: unknown, path: string): RouteLegDirectiveDraft {
+  if (!isRecord(input)) {
+    throw new TripCommandValidationError('INVALID_ROUTE_LEG', `${path} must be an object.`, path);
+  }
+  rejectUnknownFields(input, ['fromStopKey', 'toStopKey', 'type', 'notes'], path);
+  if (input.type !== 'shipping-manual') {
+    throw new TripCommandValidationError(
+      'INVALID_ROUTE_LEG_TYPE',
+      `${path}.type must be 'shipping-manual'.`,
+      `${path}.type`,
+    );
+  }
+  const notes = optionalString(input.notes, `${path}.notes`);
+  return {
+    fromStopKey: requiredString(input.fromStopKey, 'Route start stop key', `${path}.fromStopKey`),
+    toStopKey: requiredString(input.toStopKey, 'Route end stop key', `${path}.toStopKey`),
+    type: 'shipping-manual',
+    ...(notes ? { notes } : {}),
+  };
+}
+
+export function validateTripManifest(input: unknown): TripManifestDraft {
+  if (!isRecord(input)) {
+    throw new TripCommandValidationError('INVALID_TRIP_MANIFEST', 'Trip manifest must be an object.');
+  }
+  rejectUnknownFields(input, ['manifestVersion', 'name', 'stops', 'routeLegs'], '');
+  if (input.manifestVersion !== 1) {
+    throw new TripCommandValidationError(
+      'UNSUPPORTED_MANIFEST_VERSION',
+      'manifestVersion must be 1.',
+      'manifestVersion',
+    );
+  }
+  if (!Array.isArray(input.stops)) {
+    throw new TripCommandValidationError('INVALID_STOP_ARRAY', 'stops must be an array.', 'stops');
+  }
+  if (input.routeLegs !== undefined && !Array.isArray(input.routeLegs)) {
+    throw new TripCommandValidationError('INVALID_ROUTE_LEG_ARRAY', 'routeLegs must be an array.', 'routeLegs');
+  }
+
+  const stops = input.stops.map((stop, index) => validateStopManifest(stop, `stops[${index}]`));
+  const stopIndexes = new Map<string, number>();
+  stops.forEach((stop, index) => {
+    if (stopIndexes.has(stop.key)) {
+      const path = `stops[${index}].key`;
+      throw new TripCommandValidationError('DUPLICATE_STOP_KEY', `${path} must be unique.`, path);
+    }
+    stopIndexes.set(stop.key, index);
+  });
+
+  const routeLegs = (input.routeLegs ?? []).map((leg, index) => (
+    validateRouteLegDirective(leg, `routeLegs[${index}]`)
+  ));
+  const directivePairs = new Set<string>();
+  routeLegs.forEach((leg, index) => {
+    const path = `routeLegs[${index}]`;
+    const fromIndex = stopIndexes.get(leg.fromStopKey);
+    const toIndex = stopIndexes.get(leg.toStopKey);
+    if (fromIndex === undefined) {
+      throw new TripCommandValidationError(
+        'UNKNOWN_ROUTE_STOP_KEY',
+        `${path}.fromStopKey must reference a stop key.`,
+        `${path}.fromStopKey`,
+      );
+    }
+    if (toIndex === undefined) {
+      throw new TripCommandValidationError(
+        'UNKNOWN_ROUTE_STOP_KEY',
+        `${path}.toStopKey must reference a stop key.`,
+        `${path}.toStopKey`,
+      );
+    }
+    if (toIndex !== fromIndex + 1) {
+      throw new TripCommandValidationError(
+        'NON_ADJACENT_ROUTE_STOPS',
+        `${path} must connect adjacent stops in order.`,
+        path,
+      );
+    }
+    const pair = `${leg.fromStopKey}\u0000${leg.toStopKey}`;
+    if (directivePairs.has(pair)) {
+      throw new TripCommandValidationError(
+        'DUPLICATE_ROUTE_DIRECTIVE',
+        `${path} duplicates an existing route directive.`,
+        path,
+      );
+    }
+    directivePairs.add(pair);
+  });
+
+  return {
+    manifestVersion: 1,
+    name: requiredString(input.name, 'Trip name', 'name'),
+    stops,
+    routeLegs,
+  };
 }
 
 export function validateStopDraft(input: unknown, path = 'stop'): StopDraft {

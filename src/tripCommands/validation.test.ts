@@ -5,6 +5,7 @@ import {
   validateActivityPatch,
   validateStopDraft,
   validateStopPatch,
+  validateTripManifest,
   validateUrlInput,
 } from './validation';
 
@@ -101,6 +102,214 @@ describe('trip command validation', () => {
 
   it('requires stop patches to include at least one field', () => {
     expect(() => validateStopPatch({})).toThrow('Stop patch must include at least one field.');
+  });
+
+  it('accepts and normalizes a complete trip manifest', () => {
+    const manifest = validateTripManifest({
+      manifestVersion: 1,
+      name: 'Nordkapp Summer Loop',
+      stops: [
+        {
+          key: 'larvik',
+          name: 'Larvik',
+          place: { query: 'Larvik, Norway' },
+          expectedStayDays: 1,
+          notes: 'Ferry staging stop.',
+          tags: ['practical-route', 'permit-or-booking'],
+          links: ['https://www.colorline.com/denmark-norway'],
+          activities: [],
+        },
+        {
+          key: 'hirtshals',
+          name: 'Hirtshals',
+          place: { query: 'Hirtshals, Denmark' },
+          expectedStayDays: 1,
+          notes: 'Post-ferry buffer.',
+          tags: ['practical-route', 'buffer-stop'],
+          links: [],
+          activities: [
+            {
+              title: 'Visit the harbour',
+              place: { query: 'Hirtshals Havn, Denmark' },
+              description: 'Short harbour walk.',
+              notes: 'Keep flexible around the sailing.',
+              tags: ['walk', 'coast'],
+              links: ['https://example.com/harbour'],
+            },
+          ],
+        },
+      ],
+      routeLegs: [
+        {
+          fromStopKey: 'larvik',
+          toStopKey: 'hirtshals',
+          type: 'shipping-manual',
+          notes: 'Larvik-Hirtshals vehicle ferry.',
+        },
+      ],
+    });
+
+    expect(manifest.stops[1].activities[0].tags).toEqual(['walk', 'coast']);
+    expect(manifest.routeLegs[0].type).toBe('shipping-manual');
+  });
+
+  it('defaults optional manifest collections to empty arrays', () => {
+    expect(validateTripManifest({
+      manifestVersion: 1,
+      name: 'Simple trip',
+      stops: [
+        {
+          key: 'home',
+          name: 'Home',
+          place: { query: 'Balcombe, UK' },
+          expectedStayDays: 1,
+        },
+      ],
+    })).toMatchObject({
+      routeLegs: [],
+      stops: [{ tags: [], links: [], activities: [] }],
+    });
+  });
+
+  it.each([
+    {
+      name: 'an unsupported manifest version',
+      input: { manifestVersion: 2, name: 'Broken', stops: [] },
+      message: 'manifestVersion must be 1.',
+    },
+    {
+      name: 'a missing expected stay',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [{ key: 'home', name: 'Home', place: { query: 'Home' } }],
+      },
+      message: 'stops[0].expectedStayDays is required.',
+    },
+    {
+      name: 'a non-positive expected stay',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [{ key: 'home', name: 'Home', place: { query: 'Home' }, expectedStayDays: 0 }],
+      },
+      message: 'stops[0].expectedStayDays must be a positive integer.',
+    },
+    {
+      name: 'duplicate stop keys',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [
+          { key: 'same', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
+          { key: 'same', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
+        ],
+      },
+      message: 'stops[1].key must be unique.',
+    },
+    {
+      name: 'malformed activity links',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [{
+          key: 'a',
+          name: 'A',
+          place: { query: 'A' },
+          expectedStayDays: 1,
+          activities: [{ title: 'Thing', links: ['ftp://example.com'] }],
+        }],
+      },
+      message: 'Links must use http or https.',
+    },
+    {
+      name: 'unknown route stop keys',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [{ key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 }],
+        routeLegs: [{ fromStopKey: 'a', toStopKey: 'missing', type: 'shipping-manual' }],
+      },
+      message: "routeLegs[0].toStopKey must reference a stop key.",
+    },
+    {
+      name: 'non-adjacent route stops',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [
+          { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
+          { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
+          { key: 'c', name: 'C', place: { query: 'C' }, expectedStayDays: 1 },
+        ],
+        routeLegs: [{ fromStopKey: 'a', toStopKey: 'c', type: 'shipping-manual' }],
+      },
+      message: 'routeLegs[0] must connect adjacent stops in order.',
+    },
+    {
+      name: 'duplicate route directives',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [
+          { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
+          { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
+        ],
+        routeLegs: [
+          { fromStopKey: 'a', toStopKey: 'b', type: 'shipping-manual' },
+          { fromStopKey: 'a', toStopKey: 'b', type: 'shipping-manual' },
+        ],
+      },
+      message: 'routeLegs[1] duplicates an existing route directive.',
+    },
+    {
+      name: 'unsupported route types',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [
+          { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
+          { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
+        ],
+        routeLegs: [{ fromStopKey: 'a', toStopKey: 'b', type: 'driving-auto' }],
+      },
+      message: "routeLegs[0].type must be 'shipping-manual'.",
+    },
+    {
+      name: 'app-derived stop fields',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [{
+          key: 'a',
+          id: 'authored-id',
+          name: 'A',
+          place: { query: 'A' },
+          expectedStayDays: 1,
+        }],
+      },
+      message: 'stops[0].id is not allowed.',
+    },
+    {
+      name: 'app-derived route fields',
+      input: {
+        manifestVersion: 1,
+        name: 'Broken',
+        stops: [
+          { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
+          { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
+        ],
+        routeLegs: [{
+          fromStopKey: 'a',
+          toStopKey: 'b',
+          type: 'shipping-manual',
+          distanceKm: 10,
+        }],
+      },
+      message: 'routeLegs[0].distanceKm is not allowed.',
+    },
+  ])('rejects $name', ({ input, message }) => {
+    expect(() => validateTripManifest(input)).toThrow(message);
   });
 
 });

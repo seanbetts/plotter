@@ -34,6 +34,40 @@ export type ActivityPatch = {
   place?: PlaceInput;
 };
 
+export type ActivityManifestDraft = {
+  title: string;
+  place?: PlaceInput;
+  description?: string;
+  notes?: string;
+  tags: string[];
+  links: string[];
+};
+
+export type StopManifestDraft = {
+  key: string;
+  name: string;
+  place: PlaceInput;
+  expectedStayDays: number;
+  notes?: string;
+  tags: string[];
+  links: string[];
+  activities: ActivityManifestDraft[];
+};
+
+export type RouteLegDirectiveDraft = {
+  fromStopKey: string;
+  toStopKey: string;
+  type: 'shipping-manual';
+  notes?: string;
+};
+
+export type TripManifestDraft = {
+  manifestVersion: 1;
+  name: string;
+  stops: StopManifestDraft[];
+  routeLegs: RouteLegDirectiveDraft[];
+};
+
 export type CommandError = {
   code: string;
   message: string;
