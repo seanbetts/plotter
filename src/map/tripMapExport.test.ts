@@ -5,6 +5,8 @@ import { buildExportStopFeatures, downloadTripMap, tripMapFilename } from './tri
 
 const maplibreMock = vi.hoisted(() => ({
   constructorOptions: [] as Array<Record<string, unknown>>,
+  constructorError: null as Error | null,
+  remove: vi.fn(),
   instances: [] as Array<{
     callbacks: Map<string, () => void>;
     sources: Array<[string, unknown]>;
@@ -22,12 +24,13 @@ vi.mock('maplibre-gl', () => {
     layers: Array<Record<string, unknown>> = [];
     fitBounds = vi.fn();
     jumpTo = vi.fn();
-    remove = vi.fn();
+    remove = maplibreMock.remove;
     setLayoutProperty = vi.fn();
     setPaintProperty = vi.fn();
 
     constructor(options: Record<string, unknown>) {
       maplibreMock.constructorOptions.push(options);
+      if (maplibreMock.constructorError) throw maplibreMock.constructorError;
       maplibreMock.instances.push(this);
     }
 
@@ -92,6 +95,8 @@ async function advanceExportToIdle(destinations?: Destination[]) {
 
 beforeEach(() => {
   maplibreMock.constructorOptions.length = 0;
+  maplibreMock.constructorError = null;
+  maplibreMock.remove.mockReset();
   maplibreMock.instances.length = 0;
   toBlobResult = new Blob(['png'], { type: 'image/png' });
   context = {
@@ -272,4 +277,12 @@ it('rejects a null PNG blob and cleans up', async () => {
 it('rejects empty destinations before constructing MapLibre', async () => {
   await expect(downloadTripMap(input([]))).rejects.toThrow('Trip map export requires at least one stop.');
   expect(maplibreMock.constructorOptions).toHaveLength(0);
+});
+
+it('removes the export container when MapLibre construction fails', async () => {
+  maplibreMock.constructorError = new Error('WebGL initialization failed.');
+
+  await expect(downloadTripMap(input())).rejects.toThrow('WebGL initialization failed.');
+  expect(document.querySelector('[data-trip-map-export]')).not.toBeInTheDocument();
+  expect(maplibreMock.remove).not.toHaveBeenCalled();
 });

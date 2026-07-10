@@ -269,11 +269,12 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
   }
 
   const container = createExportContainer();
-  const map = createExportMap(container);
+  let map: maplibregl.Map | null = null;
   let objectUrl: string | null = null;
   let anchor: HTMLAnchorElement | null = null;
 
   try {
+    map = createExportMap(container);
     await waitForMapEvent(map, 'load', exportTimeoutMs);
     addExportSourcesAndLayers(map, input.destinations, input.routeLegs);
     frameExportMap(map, input.destinations, input.routeLegs);
@@ -288,7 +289,7 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
   } finally {
     anchor?.remove();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
-    map.remove();
+    map?.remove();
     container.remove();
   }
 }
