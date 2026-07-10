@@ -238,19 +238,21 @@ Use `logisticsGates` as the canonical home for route blockers, pre-write checks,
 }
 ```
 
-Use `blocking-decision` only when the affected route, phase, or variant cannot be planned or implemented until the user chooses an option. Use `pre-implementation-check` when the agent can continue researching but the issue must be resolved before writing affected trip data. Use `travel-time-validation` for routine current checks such as road, weather, ferry, access, seasonal status, ambitious driving days, ferry-dependent days, remote access, or dense activity days that should be refreshed close to travel.
+Set severity by consequence. Use `blocking-decision` when an unresolved condition invalidates the affected route, phase, or variant until it is resolved or the user chooses a viable alternative. Use `pre-implementation-check` when research can continue and the unresolved issue does not invalidate the route, but it should normally be resolved before writing affected trip data. Use `travel-time-validation` for routine current checks such as road, weather, ferry, access, seasonal status, ambitious driving days, ferry-dependent days, remote access, or dense activity days that should be refreshed close to travel.
+
+A current closure, unavailable required authorization, confirmed restricted access, broken physical continuity, or safety condition that makes the affected route non-viable is blocking. A routinely obtainable permit, booking, timetable, or operational detail may be a pre-implementation check when failure would not invalidate the approved route.
 
 Gate scope matters. A conditional gate on an unchosen variant is not a blocker for the recommended route. A gate in one mega-corridor phase is not a blocker for unrelated researchable phases. Use `appliesToRecommendedRoute`, `appliesToVariantId`, `appliesToPhaseId`, and `conditionalOn` to show what the gate affects.
 
 Severity-specific handoff:
 
 - `blocking-decision`: do not write affected stops or activities yet.
-- `pre-implementation-check`: resolve before writing affected data, or preserve as a note only if the user explicitly approves.
+- `pre-implementation-check`: resolve before writing affected data, or preserve as a note only when the uncertainty does not invalidate the route and the user explicitly accepts it.
 - `travel-time-validation`: safe to write as a refresh reminder note.
 
 Scope `travel-time-validation` to the affected route, phase, variant, stop pair, or activity day. Do not use it as a blocker unless the uncertainty changes the route choice.
 
-For mega-corridors, every blocking or pre-implementation gate should identify the affected phase or variant and the required user decision. Preserve researchable phases separately from gated, blocked, or deferred phases.
+For mega-corridors, every blocking or pre-implementation gate should identify the affected phase or variant and what must be resolved or decided. Preserve researchable phases separately from blocked or deferred phases; attach scoped gates to researchable phases that still need checks.
 
 ## CandidateStop
 
@@ -390,7 +392,7 @@ If one of these details matters to the recommendation, describe the caveat in `n
 - Candidate and activity source IDs or inline `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
 - `blocking-decision` gates prevent writing affected content until resolved.
-- `pre-implementation-check` gates are resolved before writing affected content or preserved as notes if the user approves.
+- `pre-implementation-check` gates are resolved before writing affected content or preserved as notes only when they do not invalidate the route and the user explicitly accepts the uncertainty.
 - `travel-time-validation` gates are safe to write as refresh reminder notes.
 - Expedition viability details become route-level planning notes or stop notes on the nearest practical anchor.
 - Coordinates are passed only when sourced.

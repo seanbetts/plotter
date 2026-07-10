@@ -19,9 +19,10 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Keep source links with each candidate.
 - Keep source evidence internally even when the user-facing answer only shows compact citations.
 - Keep the rich schema as the agent handoff artifact. The default user-facing output should be decision-oriented, not a schema dump.
-- Use the smallest research depth that answers the request. For an ambiguous point-to-point route with no approved corridor, route-shape uncertainty takes precedence over generic wording such as "plan a route": start with a `sketch`, then expand the approved corridor to a `candidate-plan`.
+- Use the smallest research depth that answers the request. Explicit depth requests or clear itinerary wording set the target depth. An unresolved high-consequence corridor or hard feasibility decision may temporarily cap the response at `sketch`; ordinary agent-owned choices such as loop direction, base regions, and density do not. Route-shape defaults apply only when the prompt does not otherwise establish depth.
 - Ask the user only for high-consequence decisions. Make conservative agent-owned decisions explicit in assumptions.
 - In a recommended spine, choose a single default base or phase for each position. Keep meaningful route variants in the alternatives section instead of leaving ordinary stop choices as slash-separated or "A or B" options.
+- Keep the recommended spine to overnight bases or route phases. If the endpoint or sight is not an overnight location, nest it as an activity under the final base rather than promoting it to a stop.
 - Require user approval before handing the plan to the trip data CLI.
 
 ## Workflow
@@ -41,7 +42,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - `candidate-plan`: enough stops, activities, tags, sources, and logistics notes for the user to review the proposed trip.
 - `handoff-ready`: the approved research artifact with stable fields, source links, `placeQuery` or sourced coordinates, and notes ready for trip data review. This is not permission to write app data.
 
-Default to `sketch` for broad or uncertain requests, `candidate-plan` when the user asks to plan a trip whose route shape is already clear, and `handoff-ready` only after the route direction is approved or the user explicitly asks for handoff detail. For an ambiguous point-to-point route, use `sketch` until the user approves a corridor; this route-shape rule takes precedence over the generic `candidate-plan` default for requests such as "plan a route." Do not switch to the trip data guide or run the trip CLI until the user gives a separate final approval such as "implement this approved plan."
+Choose the target depth from an explicit depth request or clear itinerary wording first. Use route-shape defaults only when the request does not otherwise establish depth. An unresolved high-consequence corridor, hard feasibility question, or expedition viability decision may temporarily cap the current response at `sketch`, even when the target is deeper; explain what must be approved or resolved before expanding. Do not cap the target depth merely to make ordinary agent-owned choices such as loop direction, base regions, density, or practical overnight bases. Use `handoff-ready` only after the route direction is approved or the user explicitly asks for handoff detail. Do not switch to the trip data guide or run the trip CLI until the user gives a separate final approval such as "implement this approved plan."
 
 Older references to `implementation-ready` mean `handoff-ready`. Do not emit `implementation-ready` in new route research plans.
 
@@ -56,9 +57,11 @@ Route shape defaults:
 | Route Shape | Default Depth | Expected Output |
 | --- | --- | --- |
 | Ambiguous point-to-point | `sketch` until corridor approval | Compare corridors, recommend one default, and show a light single-choice spine; expand the approved corridor to `candidate-plan`. |
-| Simple scenic road trip | `sketch` | Short recommendation, light stop spine, routine validations only. |
+| Simple scenic road trip | `sketch` | Short recommendation, light stop spine, and routine validations unless the prompt asks for a reviewable itinerary. |
 | Official scenic route | `candidate-plan` | Scope, direction, phases if long, base stops, selective nested activities. |
 | Mega-corridor or blocked corridor | `sketch` | Phase or corridor viability, blockers, restart options; no stops for blocked phases. |
+| Region loop | `sketch` | When no depth is implied, choose loop direction, base regions, and density in a light sketch. For a requested itinerary, make those agent-owned choices inside the `candidate-plan`. |
+| Regional corridor | `sketch` | Compare practical alignments, borders or access constraints, and anchors before detailed stop selection. |
 | Open-ended route family | `sketch` | Route concepts and corridor viability before stop ranking. |
 | Remote expedition track | `sketch` | Expedition viability first; stops only after logistics are researchable. |
 
@@ -73,7 +76,7 @@ Depth requirements:
 Implicit depth consent:
 
 - "Give me options", "which route would you take", or "is this viable?" means `sketch`.
-- "Plan a route", "make me a 10-day trip", or "build a reviewable itinerary" means `candidate-plan` when the route shape is already clear. An unapproved ambiguous point-to-point corridor starts at `sketch`.
+- "Plan a route", "make me a 10-day trip", or "build a reviewable itinerary" sets a `candidate-plan` target. If a corridor or hard feasibility choice is unresolved, answer first at `sketch` and state what unlocks the target depth.
 - "Prepare this for handoff", "make this import-ready", or "turn the approved plan into trip data inputs" means `handoff-ready`, but still requires separate final approval before app writes.
 
 3. Decide the route shape before selecting stops:
@@ -133,7 +136,7 @@ Candidate future tags backlog: `city`, `scenic-drive`, `ferry`, `camping`, `lake
 - For official scenic routes, choose base stops first and attach discovery points as activities.
 - For mega-corridors, research each phase independently and do not produce one global ranked stop list.
 - For remote expedition tracks, complete the logistics viability pass before scoring stops. Treat camps, wells, fuel points, exit tracks, and recovery towns as practical anchors rather than attractions.
-- When adding logistics gates, set severity and scope: `blocking-decision` for choices that stop the affected route plan, `pre-implementation-check` for issues that must be resolved before writing affected data, and `travel-time-validation` for routine checks close to travel.
+- When adding logistics gates, set severity and scope by consequence: `blocking-decision` when an unresolved condition invalidates the affected route until it is resolved or avoided, `pre-implementation-check` for non-invalidating issues that must be resolved before writing affected data, and `travel-time-validation` for routine checks close to travel.
 - Add `travel-time-validation` notes or gates for ambitious days or phases that combine long driving, ferry dependency, seasonal roads, remote access, or several major activities. Scope the validation to the affected day, phase, stop pair, or variant; do not turn it into a blocker unless the travel-time uncertainty changes the route choice.
 
 9. Present the user-facing plan first. Do not include the handoff artifact unless the user asks for it or another agent needs the handoff contract.
@@ -147,8 +150,8 @@ Default output should be easy to scan:
 1. Recommended route or direction, with a short rationale.
 2. Material alternatives or variants, only if they change the trip.
 3. Hard blockers, unresolved decisions, or time-sensitive validation items.
-4. A compact stop and activity preview at the chosen research depth.
-5. The approval question or next decision, naming the material assumptions being approved, such as corridor or direction, season, duration or pace, vehicle suitability, and any safety or border exposure that affects the route.
+4. A compact stop and activity preview at the chosen research depth, with overnight bases or phases in the spine and non-overnight endpoints or sights nested as activities.
+5. One final approval question naming the material assumptions being approved, such as corridor or direction, season, duration or pace, vehicle suitability, and any safety or border exposure that affects the route. End with this question rather than a generic invitation or a menu of possible next details.
 
 Keep route-shape labels, internal field names, evidence details, and full JSON-like structures out of the main response unless they help the user make a decision or the user asks for handoff-ready output. Use the schema reference as the stable handoff contract between agents.
 
@@ -179,7 +182,7 @@ The agent may recommend a default route, but the user must approve choices that 
 Ask versus assume examples:
 
 - Assume mixed scenic/practical style if the user gives no preference.
-- Assume routine road, ferry, weather, and access checks can be preserved as validation notes.
+- Assume routine road, ferry, weather, and access checks can be preserved as validation notes only when current evidence does not invalidate the affected route.
 - Ask before choosing border exposure through Russia, Iran, the Sahel, active conflict areas, or other materially risky corridors.
 - Ask before committing to winter Arctic driving, remote high-clearance 4WD tracks, vehicle shipping, major ferry-dependent variants, or carnet/customs-heavy routes.
 - Ask before expanding from a light `sketch` into `handoff-ready` detail unless the user has already requested a writeable handoff artifact.
@@ -188,13 +191,15 @@ Ask versus assume examples:
 
 Gate severity controls implementation behavior for the route content the gate applies to:
 
-- `blocking-decision`: do not write affected stops or activities until the user chooses a route option, restart, skip, shipping, overfly, deferral, permit, or other required decision.
-- `pre-implementation-check`: research may continue, but resolve the issue before writing affected trip data unless the user explicitly approves preserving it as a note.
+- `blocking-decision`: do not write affected stops or activities while an unresolved condition invalidates the route. Resolve the condition or have the user choose a viable alternative such as a restart, skip, shipping, overfly, or deferral.
+- `pre-implementation-check`: research may continue, but resolve the issue before writing affected trip data. Preserve it as a note only when the uncertainty does not invalidate the route and the user explicitly accepts it.
 - `travel-time-validation`: safe to write approved trip data; preserve the check as a stop, activity, or implementation note to refresh close to travel.
+
+Classify by consequence, not by whether the wording happens to involve a user preference. A current closure, unavailable required authorization, confirmed restricted access, broken physical continuity, or safety condition that makes the affected route non-viable is blocking. A routinely obtainable permit, booking, timetable, or operational detail may remain a pre-implementation check when failure would not invalidate the approved route.
 
 A gate only blocks the route, phase, or variant it applies to. Do not present a conditional gate on an unchosen variant as a blocker for the recommended route.
 
-For mega-corridors, a gate in one phase should not stop planning or writing researchable phases. State which phases can be researched or implemented now, which phase is blocked or deferred, and what user decision is needed to unlock the gated phase.
+For mega-corridors, a gate in one phase should not stop planning or writing researchable phases. State which phases can be researched or implemented now, which phase is blocked or deferred, and what must be resolved or decided for the affected phase.
 
 ## Route Shapes
 
@@ -231,7 +236,7 @@ A mega-corridor `sketch` should include:
 
 - recommended strategy or spine
 - 2-3 material alternatives, such as scenic-practical, fastest-practical, sectional/restart, seasonal reversal, shipping/overfly, or skip/defer options
-- phase list with high-level status for each phase: researchable, gated, blocked, or deferred
+- phase list with high-level status for each phase: researchable, blocked, or deferred; attach scoped gates to researchable phases that still need checks
 - logistics gates with affected phase, severity, required decision, and source link or source ID
 - clear statement of which phases can be developed next without resolving unrelated gates
 - next user decision in plain travel terms
@@ -245,6 +250,8 @@ If a phase is blocked by current travel advice, active conflict, border closure,
 Example: Morocco or Iceland.
 
 Choose loop direction, major regions, and density first. Balance landscapes, towns, recovery stops, and logistics.
+
+Loop direction, base regions, and density are agent-owned unless they materially change safety, vehicle suitability, border exposure, budget, or trip character. Do not downgrade an explicitly requested itinerary to `sketch` merely to make these ordinary choices.
 
 ### Regional Corridor
 

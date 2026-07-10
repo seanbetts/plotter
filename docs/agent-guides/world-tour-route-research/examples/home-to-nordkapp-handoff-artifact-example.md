@@ -1,11 +1,12 @@
 # Example Handoff Artifact: Home To Nordkapp
 
-This example shows optional handoff-ready research detail. Produce this only when the user asks for handoff detail or another agent needs the implementation contract. It is not write approval.
+This example shows optional `handoff-ready` research detail after the user has approved the corridor and material assumptions. It is not write approval.
 
 ## Assumptions
 
 - Home means Balcombe, West Sussex, UK.
-- Default style is hybrid: efficient transit through southern Scandinavia, then scenic northern Norway.
+- The approved corridor is hybrid: efficient transit through Sweden and Finland, then a northern Norway finish.
+- The approved shape is northbound only, 12-15 days, summer travel, and a standard road vehicle.
 - Research depth is `handoff-ready`.
 - No app data is written by this plan.
 
@@ -17,27 +18,30 @@ This example shows optional handoff-ready research detail. Produce this only whe
 
 | ID | Name | Status | Strengths | Tradeoffs | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| efficient-sweden-finland | Efficient Sweden and Finland transit | researchable | Fewer ferries, reliable long-distance roads | Less Norwegian coast scenery | medium |
-| norway-heavy-coast | Norway-heavy scenic coast | researchable | Fjords, coastal towns, iconic Norwegian landscapes | More ferries and slower progress | medium |
-| hybrid-sweden-northern-norway | Hybrid Sweden northbound with scenic northern Norway | researchable | Efficient south, scenic Arctic finish | Misses some fjord-heavy highlights | medium |
+| efficient-sweden-finland | Efficient Sweden and Finland transit | researchable | Fewer ferries and simpler long-distance transit | Less Norwegian coast scenery | medium |
+| norway-heavy-coast | Norway-heavy scenic coast | researchable | Fjords, coastal towns, and iconic Norwegian landscapes | More ferries and slower progress | medium |
+| hybrid-sweden-northern-norway | Hybrid Sweden and Finland with northern Norway finish | researchable | Efficient south and a scenic Arctic finish | Misses some fjord-heavy highlights | medium |
 
 Recommended corridor: `hybrid-sweden-northern-norway`.
 
 ## Candidate Stops
 
-The order below is canonical for implementation.
+The order below is canonical for implementation. Every row is one resolvable overnight or base location; the app derives route geometry and route-leg timings.
 
 | Order | Stop | Priority | Score | Stay | Tags | Vehicle | Evidence | Sources | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Balcombe | practical | 2 | departure | `practical-route` | good | high | local-knowledge | Route anchor only. |
-| 2 | Hamburg or Lubeck | practical | 2 | 1 night | `practical-route`, `buffer-stop` | good | medium | map-routing | Breaks the long transit through northern Germany. |
-| 3 | Copenhagen / Malmo | strong | 3 | 1 night | `practical-route`, `culture` | good | medium | map-routing | Gateway into Sweden; choose exact base after parking/accommodation validation. |
-| 4 | High Coast, Sweden | strong | 4 | 1-2 nights | `coast`, `optional-detour`, `nature` | good | medium | high-coast | Distinct landscape break on the northbound transit. |
-| 5 | Lulea | practical | 2 | 1 night | `practical-route`, `resupply`, `buffer-stop` | good | medium | map-routing | Arctic Sweden resupply and buffer stop. |
-| 6 | Rovaniemi | strong | 3 | 1 night | `official-route`, `nature`, `buffer-stop` | good | medium | visit-rovaniemi | Finland Arctic base; useful before the final northern push. |
-| 7 | Inari / Saariselka | strong | 4 | 1-2 nights | `adventure-variant`, `nature`, `seasonal-access` | check | medium | inari-saariselka | Northern Finland nature base; validate season and road/weather conditions. |
-| 8 | Alta | strong | 4 | 1 night | `practical-route`, `resupply`, `buffer-stop` | good | medium | map-routing, vegvesen-traffic | Practical Arctic Norway base before Honningsvag and Nordkapp. |
-| 9 | Honningsvag | must-do | 4 | 1 night | `official-route`, `seasonal-access` | check | high | nordkapp-practical, vegvesen-traffic | Base for North Cape Plateau. Validate road/weather conditions near travel. |
+| 2 | Hamburg | practical | 2 | 1 night | `practical-route`, `buffer-stop` | good | low | - | Conservative transit base; validate the preceding leg with app-derived route time. |
+| 3 | Malmo | practical | 2 | 1 night | `practical-route` | good | low | - | Gateway base after entering Sweden. |
+| 4 | Uppsala | practical | 2 | 1 night | `buffer-stop` | good | low | - | Buffer before the longer northern Sweden stages. |
+| 5 | Ornskoldsvik | strong | 4 | 1-2 nights | `coast`, `nature` | good | medium | high-coast | Concrete High Coast base. |
+| 6 | Lulea | practical | 2 | 1 night | `resupply`, `buffer-stop` | good | low | - | Arctic Sweden resupply and buffer stop. |
+| 7 | Rovaniemi | strong | 3 | 1 night | `buffer-stop` | good | medium | visit-rovaniemi | Arctic Finland base before northern Lapland. |
+| 8 | Inari | strong | 4 | 1-2 nights | `nature` | good | medium | lapland-north | Northern Lapland nature base on the approved corridor. |
+| 9 | Alta | practical | 3 | 1 night | `resupply`, `buffer-stop` | good | low | - | Practical Arctic Norway base before Honningsvag. |
+| 10 | Honningsvag | must-do | 4 | 2 nights | `seasonal-access` | check | high | nordkapp-practical, vegvesen-traffic | Base for North Cape Plateau, with a weather buffer. |
+
+Practical bases with no external source are deliberate planning assumptions, not fake evidence. Their exact spacing remains subject to app-derived route-time validation.
 
 ## Candidate Activities
 
@@ -45,11 +49,11 @@ Flattened activity tables must include the parent stop.
 
 | Parent Stop | Activity | Priority | Score | Tags | Vehicle | Evidence | Sources | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Honningsvag | North Cape Plateau | must-do | 5 | `viewpoint`, `seasonal-access`, `road-status-check` | check | high | nordkapp-practical, vegvesen-traffic | Final destination activity. Winter access may require convoy travel. |
+| Honningsvag | North Cape Plateau | must-do | 5 | `viewpoint`, `seasonal-access`, `road-status-check` | check | high | nordkapp-practical, vegvesen-traffic | Final destination activity. Check current road and weather conditions before travel. |
 
 ## Schema-Native Handoff Excerpt
 
-For handoff-ready output, preserve schema-native fields even if the user-facing summary used compact tables. Repeat this shape for every approved stop and nested activity.
+For handoff-ready output, preserve schema-native fields even if the user-facing summary used compact tables. Use `placeQuery` when coordinates are not available from a traceable source and let the app resolve location details.
 
 ```json
 {
@@ -79,17 +83,16 @@ For handoff-ready output, preserve schema-native fields even if the user-facing 
       "countryRegion": "Finnmark, Norway",
       "stopType": ["town", "practical", "buffer"],
       "classification": ["practical", "buffer"],
-      "priority": "strong",
-      "score": 4,
+      "priority": "practical",
+      "score": 3,
       "suggestedStay": "1 night",
-      "tags": ["practical-route", "resupply", "buffer-stop"],
+      "tags": ["resupply", "buffer-stop"],
       "placeQuery": "Alta, Finnmark, Norway",
-      "coordinates": { "lat": 69.9689, "lng": 23.2716 },
-      "whyItMatters": "Practical Arctic Norway base before Honningsvag and Nordkapp.",
+      "whyItMatters": "Practical Arctic Norway base before Honningsvag.",
       "vehicleConfidence": "good",
-      "evidenceLevel": "medium",
-      "notes": "Validate current road and weather conditions close to travel.",
-      "sources": ["vegvesen-traffic"],
+      "evidenceLevel": "low",
+      "notes": "Planning assumption. Validate route timing from Inari and onward to Honningsvag using app-derived route legs.",
+      "sources": [],
       "activities": []
     },
     {
@@ -99,11 +102,10 @@ For handoff-ready output, preserve schema-native fields even if the user-facing 
       "classification": ["anchor", "practical"],
       "priority": "must-do",
       "score": 4,
-      "suggestedStay": "1 night",
-      "tags": ["official-route", "seasonal-access"],
+      "suggestedStay": "2 nights",
+      "tags": ["seasonal-access"],
       "placeQuery": "Honningsvag, Finnmark, Norway",
-      "coordinates": { "lat": 70.9821, "lng": 25.9704 },
-      "whyItMatters": "Overnight base for North Cape Plateau.",
+      "whyItMatters": "Overnight base for North Cape Plateau, with a weather buffer.",
       "vehicleConfidence": "check",
       "evidenceLevel": "high",
       "notes": "Validate E69 and weather conditions near travel.",
@@ -116,17 +118,32 @@ For handoff-ready output, preserve schema-native fields even if the user-facing 
           "score": 5,
           "tags": ["viewpoint", "seasonal-access", "road-status-check"],
           "placeQuery": "North Cape Plateau, Nordkapp, Norway",
-          "coordinates": { "lat": 71.1695, "lng": 25.783 },
           "whyItMatters": "Symbolic endpoint of the route.",
           "vehicleConfidence": "check",
           "evidenceLevel": "high",
-          "notes": "Winter access may require convoy travel.",
+          "notes": "Check current E69 access and weather before travel.",
           "sources": ["nordkapp-practical", "vegvesen-traffic"]
         }
       ]
     }
   ],
   "logisticsGates": [
+    {
+      "id": "southern-transit-duration",
+      "name": "Southern transit driving-day validation",
+      "type": "road-status-check",
+      "severity": "travel-time-validation",
+      "appliesToRecommendedRoute": true,
+      "appliesToVariantId": "hybrid-sweden-northern-norway",
+      "appliesToPhaseId": null,
+      "conditionalOn": "Validate after the app derives route-leg timings.",
+      "between": ["Balcombe", "Hamburg"],
+      "impact": "The Channel crossing and first continental leg may exceed the approved daily driving tolerance.",
+      "requiredDecision": "Add an intermediate overnight if the app-derived route time is too ambitious.",
+      "vehicleConfidence": "good",
+      "evidenceLevel": "low",
+      "sources": []
+    },
     {
       "id": "nordkapp-e69-seasonal-access",
       "name": "E69/North Cape Plateau seasonal access",
@@ -137,7 +154,7 @@ For handoff-ready output, preserve schema-native fields even if the user-facing 
       "appliesToPhaseId": null,
       "conditionalOn": "Always applies near travel.",
       "between": ["Honningsvag", "North Cape Plateau"],
-      "impact": "Access can depend on current road, weather, and convoy conditions.",
+      "impact": "Access can depend on current road and weather conditions.",
       "requiredDecision": "Refresh current road and weather status close to travel.",
       "vehicleConfidence": "check",
       "evidenceLevel": "high",
@@ -152,31 +169,28 @@ For handoff-ready output, preserve schema-native fields even if the user-facing 
 | ID | Source | Type | Used For | Confidence |
 | --- | --- | --- | --- | --- |
 | local-knowledge | User-provided home location | user-provided | Departure anchor | high |
-| map-routing | General map validation | map | Transit spacing and practical routing | medium |
-| high-coast | [High Coast official visitor information](https://www.hogakusten.com/en) | official | High Coast scenic stop rationale | medium |
+| high-coast | [High Coast official visitor information](https://www.hogakusten.com/en) | official | Ornskoldsvik and High Coast rationale | medium |
 | visit-rovaniemi | [Visit Rovaniemi](https://www.visitrovaniemi.fi/) | official | Rovaniemi Arctic base rationale | medium |
-| inari-saariselka | [Lapland North](https://laplandnorth.fi/en/) | official | Northern Finland nature base rationale | medium |
-| nordkapp-practical | [Visit Nordkapp practical information](https://www.nordkapp.no/practical-info/) | official | E69 winter convoy/access warning for the North Cape Plateau | high |
-| vegvesen-convoy | [Statens vegvesen convoy driving guidance](https://www.vegvesen.no/en/traffic-information/traffic-safety/how-to-drive-in-a-convoy/) | official | Convoy safety requirements and vehicle preparation | high |
-| vegvesen-traffic | [Statens vegvesen traffic information](https://www.vegvesen.no/trafikk) | official | Current road closures, traffic messages, and camera checks near travel | high |
-| helgelandskysten | [Norwegian Scenic Route Helgelandskysten](https://www.nasjonaleturistveger.no/en/routes/helgelandskysten/) | official | Optional Norway-heavy coast corridor ferry/scenic tradeoff | high |
-| hirtshals-kristiansand | [Fjord Line Hirtshals-Kristiansand](https://fjordline.com/en/p/our-ferry-routes/hirtshals-kristiansand) | operator | Denmark-Norway ferry option for Norway-heavy corridor | medium |
+| lapland-north | [Lapland North](https://laplandnorth.fi/en/) | official | Inari nature base rationale | medium |
+| nordkapp-practical | [Visit Nordkapp practical information](https://www.nordkapp.no/practical-info/) | official | North Cape Plateau access guidance | high |
+| vegvesen-traffic | [Statens vegvesen traffic information](https://www.vegvesen.no/trafikk) | official | Current road and traffic checks near travel | high |
+| helgelandskysten | [Norwegian Scenic Route Helgelandskysten](https://www.nasjonaleturistveger.no/en/routes/helgelandskysten/) | official | Optional Norway-heavy coast tradeoff | high |
+| hirtshals-kristiansand | [Fjord Line Hirtshals-Kristiansand](https://fjordline.com/en/p/our-ferry-routes/hirtshals-kristiansand) | operator | Denmark-Norway ferry option for the Norway-heavy corridor | medium |
 
 Retrieved: 2026-07-08.
 
 ## Logistics Gates
 
-| ID | Gate | Severity | Applies To Recommended Route | Variant | Conditional On | Required Decision | Vehicle | Evidence |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| nordkapp-e69-seasonal-access | E69/North Cape Plateau seasonal access | travel-time-validation | yes | hybrid-sweden-northern-norway | Always applies near travel. | Check current Statens vegvesen traffic status and Visit Nordkapp convoy guidance close to travel; add buffer if winter or severe weather is possible. | check | high |
-| denmark-norway-ferry-choice | Denmark-Norway ferry choice | blocking-decision | no | norway-heavy-coast | Only if Norway-heavy coast is selected. | Choose whether to cross directly to Norway by ferry or continue through Sweden before implementing that variant. | good | medium |
-| helgeland-ferry-chain | Helgelandskysten ferry chain | pre-implementation-check | no | norway-heavy-coast | Only if Norway-heavy coast is selected. | If this variant is chosen, validate current ferry timetables and decide whether the scenic delay is worth it. | check | high |
+| ID | Gate | Severity | Applies To Recommended Route | Variant | Conditional On | Required Decision | Evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| southern-transit-duration | Southern transit driving-day validation | travel-time-validation | yes | hybrid-sweden-northern-norway | After app-derived route timings are available. | Add an intermediate overnight if Balcombe to Hamburg is too ambitious. | low |
+| nordkapp-e69-seasonal-access | E69/North Cape Plateau seasonal access | travel-time-validation | yes | hybrid-sweden-northern-norway | Always applies near travel. | Refresh current road and weather status close to travel. | high |
+| denmark-norway-ferry-choice | Denmark-Norway ferry choice | blocking-decision | no | norway-heavy-coast | Only if the Norway-heavy coast is selected. | Choose whether to cross directly to Norway by ferry or continue through Sweden before implementing that variant. | medium |
+| helgeland-ferry-chain | Helgelandskysten ferry chain | pre-implementation-check | no | norway-heavy-coast | Only if the Norway-heavy coast is selected. | Validate current ferry timetables before implementing that variant. | high |
 
 ## Open Questions
 
-- Exact travel season.
-- Whether the trip should include Lofoten, Senja, or Tromso as a scenic northern Norway detour.
-- Whether Copenhagen/Malmo should be a city stop or a practical overnight only.
+No unresolved route-shaping questions remain. A separate final user approval is still required before writing trip data.
 
 ## Implementation Mapping
 
@@ -184,7 +198,8 @@ Retrieved: 2026-07-08.
 - North Cape Plateau becomes an activity under Honningsvag.
 - Approved tags become stop or activity tags in the trip CLI payloads.
 - Source evidence links become stop or activity links where relevant.
-- `travel-time-validation` gates become stop, activity, or implementation notes.
+- Practical bases without sources remain explicit planning assumptions rather than source evidence.
+- `travel-time-validation` gates become stop, activity, or implementation notes and can trigger later stop amendments after app-derived route timings are available.
 - Conditional gates for `norway-heavy-coast` are not blockers for the recommended hybrid route.
-- Route geometry is left to the app.
+- Route geometry and normalized location details are left to the app.
 - A separate final user approval is still required before using the trip data guide.
