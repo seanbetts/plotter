@@ -84,16 +84,6 @@ const emptyChanged = (): ChangedSummary => ({
   routesRecalculated: 0,
 });
 
-function unsupported<T>(summary: string): CommandResult<T> {
-  return {
-    ok: false,
-    error: {
-      code: 'COMMAND_NOT_IMPLEMENTED',
-      message: summary,
-    },
-  };
-}
-
 function commandError<T>(
   code: string,
   message: string,

@@ -22,6 +22,7 @@ All values in the JSON examples are synthetic structural fixtures. Reserved `exa
   "logisticsGates": [],
   "sourceEvidence": [],
   "stops": [],
+  "routeLegs": [],
   "openQuestions": [],
   "unsupportedData": [],
   "implementationNotes": []
@@ -262,6 +263,7 @@ Top-level `stops` array order is canonical for implementation. For phased routes
 
 ```json
 {
+  "key": "final-resupply-base",
   "name": "Final Resupply Base",
   "countryRegion": "Destination Region",
   "stopType": ["town", "practical", "buffer"],
@@ -280,6 +282,8 @@ Top-level `stops` array order is canonical for implementation. For phased routes
   "activities": []
 }
 ```
+
+Candidate stop `key` values are required in `handoff-ready` artifacts. They must be unique, stable, and suitable for adjacent route-leg references.
 
 ## CandidateActivity
 
@@ -301,6 +305,22 @@ Schema-native activities should stay nested under their parent `CandidateStop`. 
   "sources": ["current-access-authority", "current-road-authority"]
 }
 ```
+
+## RouteLegDirective
+
+Use an explicit directive for every approved ferry or vehicle-shipping leg. Do not rely on candidate notes or a logistics gate alone to tell the trip-data agent that the app must not calculate a continuous driving route.
+
+```json
+{
+  "fromStopKey": "larvik",
+  "toStopKey": "hirtshals",
+  "type": "shipping-manual",
+  "notes": "Approved vehicle ferry crossing.",
+  "sources": ["ferry-operator"]
+}
+```
+
+The stop keys must identify adjacent stops in canonical order. `sources` must resolve through `sourceEvidence`. Include a directive only after the crossing itself is approved; unresolved shipping remains a scoped logistics gate. During trip-data conversion, preserve the type and notes, map source URLs to relevant stop links when useful, and omit the research-only `sources` field from the app manifest.
 
 ## Tag Guidance
 
@@ -391,6 +411,7 @@ If one of these details matters to the recommendation, describe the caveat in `n
 - Approved `placeQuery` values become `place.query` for both stop and activity writes.
 - Approved `coordinates` values become `place.coordinates` for both stop and activity writes.
 - Approved candidate `tags` become stop or activity tags.
+- Approved route-leg directives become `shipping-manual` entries between adjacent full-manifest stop keys.
 - Candidate and activity source IDs or inline `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
 - `blocking-decision` gates prevent writing affected content until resolved.

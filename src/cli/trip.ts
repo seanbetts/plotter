@@ -131,12 +131,31 @@ function summarizeCommandResult(result: unknown) {
   if ('changed' in result) {
     summary.changed = result.changed;
   }
+  if (isRecord(result.audit)) {
+    summary.audit = result.audit;
+  }
+  if (Array.isArray(result.recalculatedRoutes)) {
+    summary.recalculatedRoutes = result.recalculatedRoutes;
+  }
+  if (isRecord(result.trip)) {
+    const tripSummary = isRecord(result.trip.trip) ? result.trip.trip : result.trip;
+    if (typeof tripSummary.id === 'string' && typeof tripSummary.name === 'string') {
+      summary.trip = { id: tripSummary.id, name: tripSummary.name };
+    }
+  }
 
   const counts: Record<string, number> = {};
   setCount(counts, 'trips', result.trips);
   setCount(counts, 'stops', result.stops);
   summarizeRouteLegs(counts, result.routeLegs);
   setCount(counts, 'activities', result.activities);
+  if (isRecord(result.changed)) {
+    setCount(counts, 'links', result.changed.linksAdded);
+  }
+  if (isRecord(result.audit)) {
+    if (typeof result.audit.errors === 'number') counts.auditErrors = result.audit.errors;
+    if (typeof result.audit.warnings === 'number') counts.auditWarnings = result.audit.warnings;
+  }
 
   if (isRecord(result.trip)) {
     setCount(counts, 'stops', result.trip.stops);
@@ -187,6 +206,11 @@ export async function runTripCli(input: RunTripCliInput) {
           tripId: stringFlag(flags, 'trip-id') ?? '',
           includeActivities: Boolean(flags['include-activities']),
           includeLinks: Boolean(flags['include-links']),
+        });
+        break;
+      case 'audit':
+        result = await input.service.auditTrip({
+          tripId: stringFlag(flags, 'trip-id') ?? '',
         });
         break;
       case 'recalculate-failed-routes':

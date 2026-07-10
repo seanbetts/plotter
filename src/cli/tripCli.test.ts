@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { Activity, Destination, RouteLeg } from '../domain/types';
+import type { TripRepository } from '../storage/tripRepository';
+import { createTripDataService } from '../tripCommands/tripDataService';
 import { parseTripCliArgs, runTripCli, runTripProgram } from './trip';
 
 type MockService = Record<string, ReturnType<typeof vi.fn>>;
@@ -305,6 +308,243 @@ describe('runTripCli', () => {
         failedRouteLegs: 0,
       },
     });
+  });
+
+  it('passes a full manifest through create and summarizes all persisted entity counts', async () => {
+    const manifest = {
+      manifestVersion: 1,
+      name: 'Nordkapp',
+      stops: [{
+        key: 'home',
+        name: 'Home',
+        place: { coordinates: { lat: 51.0576, lng: -0.1342 } },
+        expectedStayDays: 1,
+      }],
+    };
+    const { service, readFile, write, writeError } = createCliHarness({
+      createTrip: vi.fn(async () => ({
+        ok: true,
+        summary: 'Created trip Nordkapp.',
+        trip: { id: 'trip-nordkapp', name: 'Nordkapp' },
+        changed: { linksAdded: Array.from({ length: 18 }, (_, index) => `https://example.com/${index}`) },
+        stops: Array.from({ length: 26 }, (_, index) => ({ id: `stop-${index}` })),
+        activities: Array.from({ length: 15 }, (_, index) => ({ id: `activity-${index}` })),
+        routeLegs: [
+          ...Array.from({ length: 23 }, (_, index) => ({
+            id: `ready-${index}`,
+            status: 'ready',
+            geometry: { type: 'LineString', coordinates: [[index, index]] },
+          })),
+          { id: 'manual-1', status: 'manual' },
+          { id: 'manual-2', status: 'manual' },
+        ],
+        audit: { errors: 0, warnings: 0, issues: [] },
+      })),
+    });
+    readFile.mockResolvedValueOnce(JSON.stringify(manifest));
+
+    const exitCode = await runTripCli({
+      argv: ['create', '--input', '/tmp/trip-manifest.json', '--summary', '--pretty'],
+      service: service as never,
+      readFile,
+      write,
+      writeError,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(service.createTrip).toHaveBeenCalledWith(manifest, { dryRun: false, yes: false });
+    const payload = JSON.parse(write.mock.calls[0]?.[0] ?? '{}');
+    expect(payload.counts).toEqual({
+      stops: 26,
+      activities: 15,
+      links: 18,
+      routeLegs: 25,
+      readyRouteLegs: 23,
+      manualRouteLegs: 2,
+      failedRouteLegs: 0,
+      auditErrors: 0,
+      auditWarnings: 0,
+    });
+    expect(payload.audit).toEqual({ errors: 0, warnings: 0, issues: [] });
+    expect(payload.trip).toEqual({ id: 'trip-nordkapp', name: 'Nordkapp' });
+    expect(write.mock.calls[0]?.[0]).not.toContain('coordinates');
+  });
+
+  it('routes audit and preserves its issues in summary output', async () => {
+    const audit = {
+      errors: 0,
+      warnings: 1,
+      issues: [{
+        severity: 'warning',
+        code: 'DEFAULT_STAY_AT_HOME_ANCHOR',
+        message: 'Confirm the home stay.',
+      }],
+    };
+    const { service, readFile, write, writeError } = createCliHarness({
+      auditTrip: vi.fn(async () => ({ ok: true, summary: 'Audited trip.', audit })),
+    });
+
+    const exitCode = await runTripCli({
+      argv: ['audit', '--trip-id', 'trip-1', '--summary'],
+      service: service as never,
+      readFile,
+      write,
+      writeError,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(service.auditTrip).toHaveBeenCalledWith({ tripId: 'trip-1' });
+    expect(JSON.parse(write.mock.calls[0]?.[0] ?? '{}')).toEqual({
+      ok: true,
+      summary: 'Audited trip.',
+      audit,
+      counts: { auditErrors: 0, auditWarnings: 1 },
+    });
+  });
+
+  it('creates and audits a large manifest in two CLI calls with in-memory dependencies', async () => {
+    const trips: Array<{ id: string; name: string; description: string; createdAt: string; updatedAt: string }> = [];
+    const state = {
+      destinations: [] as Destination[],
+      activities: [] as Activity[],
+      routeLegs: [] as RouteLeg[],
+    };
+    const replaceTripData = vi.fn(async (snapshot: {
+      destinations: Destination[];
+      activities?: Activity[];
+      routeLegs: RouteLeg[];
+    }) => {
+      state.destinations = snapshot.destinations;
+      state.activities = snapshot.activities ?? [];
+      state.routeLegs = snapshot.routeLegs;
+    });
+    const granularCreateActivity = vi.fn(async () => {
+      throw new Error('Granular activity creation must not be used.');
+    });
+    const repository = {
+      replaceTripData,
+      createActivity: granularCreateActivity,
+      listDestinations: vi.fn(async () => state.destinations),
+      listActivities: vi.fn(async (destinationId: string) => (
+        state.activities.filter((activity) => activity.destinationId === destinationId)
+      )),
+      listRouteLegs: vi.fn(async () => state.routeLegs),
+    } as unknown as TripRepository;
+    const directoryCreateTrip = vi.fn(async ({ name }: { name: string }) => {
+      const trip = {
+        id: 'trip-in-memory',
+        name,
+        description: '',
+        createdAt: '2026-07-10T12:00:00.000Z',
+        updatedAt: '2026-07-10T12:00:00.000Z',
+      };
+      trips.push(trip);
+      return trip;
+    });
+    const service = createTripDataService({
+      directory: {
+        listTrips: vi.fn(async () => trips),
+        createTrip: directoryCreateTrip,
+        updateTrip: vi.fn(),
+        deleteTrip: vi.fn(),
+      },
+      createTripRepository: vi.fn(() => repository),
+      resolvePlace: vi.fn(async ({ place, fallbackName, profile }) => ({
+        coordinates: place.coordinates!,
+        ...(profile === 'stop'
+          ? {
+              location: {
+                placeName: fallbackName,
+                regionName: '',
+                countryName: 'Test country',
+                sourceLabel: fallbackName,
+                sourceProvider: 'legacy' as const,
+              },
+            }
+          : {
+              activityLocation: {
+                name: fallbackName,
+                address: `${fallbackName} address`,
+                coordinates: place.coordinates,
+                sourceProvider: 'manual' as const,
+              },
+            }),
+      })),
+      enrichLink: vi.fn(async (url, sortOrder) => ({
+        id: `${url}-${sortOrder}`,
+        url,
+        title: url,
+        domain: 'example.com',
+        sortOrder,
+      })),
+      calculateRoute: vi.fn(async ({ origin, target }) => ({
+        distanceKm: 20,
+        travelTimeHours: 0.5,
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]],
+        },
+        provider: 'in-memory',
+        profile: 'driving-car' as const,
+      })),
+    });
+    const stops = Array.from({ length: 26 }, (_, index) => ({
+      key: `stop-${index}`,
+      name: `Stop ${index}`,
+      place: { coordinates: { lat: 50 + index * 0.1, lng: index * 0.1 } },
+      expectedStayDays: 1,
+      ...(index < 3 ? { links: [`https://example.com/stop-${index}`] } : {}),
+      ...(index < 15
+        ? {
+            activities: [{
+              title: `Activity ${index}`,
+              place: { coordinates: { lat: 50 + index * 0.1, lng: index * 0.1 } },
+              links: [`https://example.com/activity-${index}`],
+            }],
+          }
+        : {}),
+    }));
+    const manifest = {
+      manifestVersion: 1,
+      name: 'In-memory route',
+      stops,
+      routeLegs: [
+        { fromStopKey: 'stop-4', toStopKey: 'stop-5', type: 'shipping-manual' },
+        { fromStopKey: 'stop-15', toStopKey: 'stop-16', type: 'shipping-manual' },
+      ],
+    };
+    const write = vi.fn();
+    const writeError = vi.fn();
+
+    const createExitCode = await runTripCli({
+      argv: ['create', '--input', '/tmp/manifest.json', '--summary'],
+      service,
+      readFile: vi.fn(async () => JSON.stringify(manifest)),
+      write,
+      writeError,
+    });
+    const auditExitCode = await runTripCli({
+      argv: ['audit', '--trip-id', 'trip-in-memory', '--summary'],
+      service,
+      readFile: vi.fn(),
+      write,
+      writeError,
+    });
+
+    expect(createExitCode).toBe(0);
+    expect(auditExitCode).toBe(0);
+    expect(directoryCreateTrip).toHaveBeenCalledTimes(1);
+    expect(replaceTripData).toHaveBeenCalledTimes(1);
+    expect(granularCreateActivity).not.toHaveBeenCalled();
+    expect(state.destinations).toHaveLength(26);
+    expect(state.activities).toHaveLength(15);
+    expect(state.routeLegs.filter((leg) => leg.status === 'manual')).toHaveLength(2);
+    expect(state.activities.every((activity) => activity.location?.coordinates)).toBe(true);
+    expect(JSON.parse(write.mock.calls[1]?.[0] ?? '{}')).toMatchObject({
+      audit: { errors: 0 },
+      counts: { auditErrors: 0 },
+    });
+    expect(writeError).not.toHaveBeenCalled();
   });
 
   it('accepts keyed id lists for reorder commands', async () => {

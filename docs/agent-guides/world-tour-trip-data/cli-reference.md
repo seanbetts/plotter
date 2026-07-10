@@ -7,7 +7,10 @@ Use from the repository root.
 ```bash
 npm run trip -- list --pretty
 npm run trip -- get --trip-id <id> --include-activities --include-links --summary --pretty
-npm run trip -- create --input ./trip.json --dry-run --pretty
+npm run trip -- create --input ./trip-manifest.json --summary --pretty
+npm run trip -- create --input ./trip-manifest.json --dry-run --summary --pretty
+npm run trip -- audit --trip-id <id> --pretty
+npm run trip -- recalculate-failed-routes --trip-id <id> --summary --pretty
 npm run trip -- rename --trip-id <id> --name "North Coast 500 Trip"
 npm run trip -- delete --trip-id <id> --dry-run
 npm run trip -- delete --trip-id <id> --yes
@@ -63,6 +66,70 @@ Trip draft:
   "stops": []
 }
 ```
+
+Full trip manifest for an agent-authored new trip:
+
+```json
+{
+  "manifestVersion": 1,
+  "name": "Nordkapp summer loop",
+  "stops": [
+    {
+      "key": "larvik",
+      "name": "Larvik",
+      "place": {
+        "query": "Larvik ferry terminal, Norway",
+        "coordinates": { "lat": 59.0533, "lng": 10.0352 }
+      },
+      "expectedStayDays": 1,
+      "notes": "Ferry staging stop.",
+      "tags": ["practical-route", "permit-or-booking"],
+      "links": ["https://www.colorline.com/denmark-norway"],
+      "activities": []
+    },
+    {
+      "key": "hirtshals",
+      "name": "Hirtshals",
+      "place": { "query": "Hirtshals, Denmark" },
+      "expectedStayDays": 1,
+      "notes": "Post-ferry buffer.",
+      "tags": ["buffer-stop", "coast"],
+      "links": [],
+      "activities": [
+        {
+          "title": "Visit Hirtshals harbour",
+          "place": {
+            "query": "Hirtshals Havn, Denmark",
+            "coordinates": { "lat": 57.5911, "lng": 9.9664 }
+          },
+          "description": "Short harbour walk after the crossing.",
+          "notes": "Keep flexible around the sailing.",
+          "tags": ["walk", "coast"],
+          "links": ["https://example.com/harbour"]
+        }
+      ]
+    }
+  ],
+  "routeLegs": [
+    {
+      "fromStopKey": "larvik",
+      "toStopKey": "hirtshals",
+      "type": "shipping-manual",
+      "notes": "Approved vehicle ferry crossing."
+    }
+  ]
+}
+```
+
+Requirements:
+
+- `manifestVersion` is `1`.
+- Stop `key` values are unique and route directives connect adjacent keys in canonical order.
+- Every stop has an explicit positive integer `expectedStayDays`; use `1` for departure and return anchors.
+- Omitted `tags`, `links`, `activities`, and `routeLegs` become empty arrays.
+- Use sourced coordinates for short or ambiguous names such as `A`, named viewpoints, trailheads, and ferry terminals. A specific query is otherwise sufficient.
+- Use `shipping-manual` only for an approved ferry or vehicle-shipping leg.
+- Do not author IDs, normalized `location` or address metadata, route geometry, distance, duration, provider fields, route keys, timestamps, or Supabase rows.
 
 Stop draft:
 
@@ -157,6 +224,8 @@ Failure envelope:
 ```
 
 `--summary` keeps `ok`, `summary`, `changed`, and `counts` while omitting full stop/activity/route payloads.
+
+For full creation and route recovery, counts include stops, activities, links, total route legs, ready/manual/failed route legs, and audit errors/warnings. Audit issues remain visible. A semantic error returns `TRIP_AUDIT_FAILED` with the complete report at `error.details.audit` and does not persist a trip.
 
 ## Verification Snippet
 
