@@ -1,6 +1,7 @@
 # Route Research Skill Design
 
 Date: 2026-07-08
+Updated: 2026-07-10
 
 ## Goal
 
@@ -12,6 +13,7 @@ The new route research skill turns a route idea, region, or corridor into a stru
 
 - Research first, write later.
 - Keep route judgement separate from app mutation.
+- Let route scope and worthwhile stays determine the recommended duration instead of forcing a stop list into an arbitrary number of days.
 - Produce inspectable artifacts with source links and explicit confidence.
 - Let the app calculate derived data such as routes, geometry, normalized locations, timestamps, link previews, and sort order.
 - Treat overnight or base locations as candidate stops.
@@ -28,18 +30,21 @@ The route research skill owns:
 - choosing or comparing broad route corridors
 - finding candidate stops and activities
 - scoring, classifying, pruning, and balancing candidates
+- deriving a naturally paced duration from relocation, activity, recovery, and buffer needs
+- allocating exact stay lengths once the user approves the trip shape and duration
+- deciding whether a leg is an ordinary automatic driving route or a genuine route discontinuity
 - citing sources and marking evidence quality
-- producing an implementation-ready route research plan
+- producing a handoff-ready route research plan
 
 The route research skill does not own:
 
 - creating, deleting, or updating trips in Supabase
 - writing route geometry
-- deciding final route alternatives for individual app route legs
+- calculating precise route distance or duration
 - uploading images or media
 - bypassing the trip CLI
 
-When the user approves an implementation-ready plan, the agent should switch to the existing `world-tour-trip-data` workflow and use `npm run trip -- ...` commands.
+When the user approves a handoff-ready plan, the agent should switch to the existing `world-tour-trip-data` workflow and use `npm run trip -- ...` commands. The trip-data skill translates and writes the approved handoff; it must not reconsider stop selection, pacing, stay allocation, or route semantics. The app and its audit remain responsible for technical calculation and data integrity, not itinerary quality.
 
 ## Workflow
 
@@ -50,11 +55,14 @@ Capture the minimum context needed to research the route:
 - start and end locations
 - intended season or timing, if known
 - desired trip style: efficient, scenic, expedition, family, recovery-heavy, city-light, nature-heavy, or mixed
-- approximate duration or desired stop count
 - vehicle constraints, especially large expedition truck suitability
 - whether the output should be compressed, immersive, or exhaustive
 
-If some context is missing, use conservative defaults and call them out in the plan.
+Do not ask for a duration merely to begin planning. Derive and recommend the route's natural duration after selecting and balancing its worthwhile content.
+
+If the user volunteers a duration, treat it as a preference unless they clearly describe it as a fixed limit or maximum. For a preference, still show the naturally paced recommendation and explain what changing to the requested duration would remove, add, or make more transit-heavy. For a hard limit, design the best route that genuinely fits by reducing scope or changing character rather than compressing every stay.
+
+If other context is missing, use conservative defaults and call them out in the plan.
 
 ### 2. Decide The Route Shape
 
@@ -165,7 +173,24 @@ The final route should usually include a deliberate mix of:
 - scenic transit sections
 - unusual but practical detours
 
-### 6. Produce The Route Research Plan
+### 6. Derive The Recommended Duration
+
+After balancing the route, calculate how long it should naturally take. Build the recommendation from:
+
+- realistic relocation days for the chosen route and vehicle
+- meaningful time at anchor bases and places with planned activities
+- recovery, resupply, weather, ferry, border, or remote-road buffers where material
+- the trip style and density already selected
+
+A one-day stop normally represents transit, arrival, departure, or a practical overnight. A place with meaningful activities normally needs enough time for those activities in addition to its arrival and departure burden. Do not attach a full activity programme to a heavily loaded transit day.
+
+Recommend one duration and, when honest uncertainty exists, a narrow useful range. The recommendation is the default itinerary, not a theoretical minimum. The user can then ask for a shorter or longer version.
+
+Shortening the trip must cause an explicit planning change: remove lower-priority stops, narrow the geographic scope, choose a faster corridor, reduce activities, or label the result as intentionally transit-heavy. Lengthening it should add meaningful stays, activities, recovery, or scope rather than padding every stop equally.
+
+At handoff-ready depth, choose an exact duration and assign each stop an exact positive `expectedStayDays` value whose total matches it. This is a research decision. The trip-data skill may verify the arithmetic but must not alter the allocation or judge its quality.
+
+### 7. Produce The Route Research Plan
 
 The skill outputs a structured route research plan for user review.
 
@@ -180,6 +205,7 @@ The plan should include:
 - phase structure for mega-corridors
 - logistics gates for route discontinuities, ferries, borders, vehicle import limits, permits, and seasonal access constraints
 - rejected or alternate corridors, sections, or scopes
+- recommended duration, optional narrow range, and duration rationale
 - ordered candidate stops
 - candidate activities grouped under stops
 - source evidence
@@ -188,7 +214,7 @@ The plan should include:
 
 The plan must be usable by an agent without rereading every source. It should include enough citations, notes, coordinates, and caveats to support review.
 
-### 7. Approval-Gated Handoff
+### 8. Approval-Gated Handoff
 
 The skill stops after presenting the route research plan.
 
@@ -201,8 +227,13 @@ If the user approves implementation, the agent should use the existing trip data
 5. Store source URLs as stop or activity links.
 6. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
 7. Use source coordinates when available.
-8. Let the app calculate routes and derived data.
-9. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
+8. Preserve the approved `expectedStayDays` allocation without replanning it.
+9. Omit route directives for ordinary driving legs, including normal road-routable ferries, tunnels, bridges, and vehicle shuttles, so the app calculates them automatically.
+10. Use `shipping-manual` only where research identified a genuine physical route discontinuity or vehicle-shipping transfer that the app cannot represent as a continuous driving route.
+11. Let the app calculate routes and derived data.
+12. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
+
+The trip-data skill may reject malformed handoff data, failed location resolution, failed route calculation, or inconsistent duration arithmetic. It should report those technical facts back to the research workflow rather than choosing different stops, changing stay lengths, or inventing manual route legs.
 
 ## Output Schema
 
@@ -216,6 +247,11 @@ The route research plan can be written in Markdown for human review, with embedd
   "start": "Balcombe, West Sussex, UK",
   "end": "Nordkapp, Norway",
   "routeShape": "ambiguous-point-to-point",
+  "recommendedDuration": {
+    "days": 35,
+    "rangeDays": { "min": 32, "max": 38 },
+    "rationale": "Allows efficient southern transit, meaningful Arctic bases, and weather buffers."
+  },
   "assumptions": [
     "Home means Balcombe.",
     "Default style is hybrid: efficient transit plus scenic northern Norway."
@@ -313,6 +349,7 @@ The route research plan can be written in Markdown for human review, with embedd
   "priority": "strong",
   "score": 4,
   "suggestedStay": "1 night",
+  "expectedStayDays": 1,
   "coordinates": { "lat": 69.9689, "lng": 23.2716 },
   "whyItMatters": "Useful Arctic base before Honningsvag and Nordkapp.",
   "vehicleConfidence": "good",
@@ -322,6 +359,14 @@ The route research plan can be written in Markdown for human review, with embedd
   "activities": []
 }
 ```
+
+`suggestedStay` is useful during candidate research. `expectedStayDays` becomes required for every stop at handoff-ready depth, after the user has approved the route and its duration.
+
+### Route Leg Semantics
+
+The ordered stop list implies automatic driving routes by default. Research should not emit a manual route directive merely because a normal route includes a ferry, tunnel, bridge, or vehicle shuttle. Those are route details for the app's routing provider to calculate; operator information may remain in notes or links.
+
+Emit `shipping-manual` only for a genuine discontinuity such as vehicle freight around the Darien Gap, where no continuous road route exists or the vehicle must be transported independently. The trip-data skill must preserve an approved directive but must not infer one from prose.
 
 ### CandidateActivity
 
@@ -379,6 +424,7 @@ Generated route research outputs should not be committed by default. They can li
 - If source quality is weak, mark the candidate low confidence.
 - If coordinates conflict, prefer official coordinates or map coordinates from the most specific source and record the conflict.
 - If a route depends on ferries, seasonal roads, borders, or convoys, mark that as a validation item.
+- Treat ordinary routable ferries as automatic driving legs. A ferry dependency may still require timetable or booking validation without becoming a manual route.
 - If a stop sounds good but lacks recent validation, do not promote it to must-do.
 - If a candidate is unsuitable for a large vehicle, keep it only if there is a realistic parking/base alternative.
 - If research sources disagree, do not smooth over the conflict; record it in notes.
@@ -386,6 +432,8 @@ Generated route research outputs should not be committed by default. They can li
 - If an official scenic route has many discovery points, choose base stops first and attach viewpoints, beaches, hikes, islands, food stops, and historic sites as activities.
 - If a mega-corridor spans multiple countries or months of travel, decompose it into phases and research each phase independently.
 - If the route has a discontinuity or hard logistical constraint, add a logistics gate rather than pretending it is a normal stop.
+- If the recommended itinerary has activities but almost every stop is a one-day transit stop, rebalance or reduce the route before presenting it.
+- If a requested duration cannot support the route's worthwhile scope at the selected trip style, explain the trade-off and revise scope rather than silently producing a transit schedule.
 
 ## Stress Test Expectations
 
@@ -428,7 +476,11 @@ Initial verification should be example-driven:
 5. Ask the skill for a Pan-American Highway route.
 6. Confirm it decomposes the route into phases and marks the Darien Gap as a logistics gate.
 7. Confirm it produces base stops, nested activities, scores, evidence, and links.
-8. Confirm it does not write app data.
-9. Approve a small subset and verify the existing trip data skill can implement it through the CLI.
+8. Confirm it recommends a naturally paced duration before asking the user to accept a compressed or extended version.
+9. Give it a preferred duration and confirm it explains the difference from its recommendation rather than blindly fitting the existing stop list.
+10. Give it a hard maximum duration and confirm it reduces scope or explicitly changes the trip character.
+11. Confirm ordinary ferry-inclusive driving remains automatic while genuine vehicle shipping receives `shipping-manual`.
+12. Confirm it does not write app data.
+13. Approve a small subset and verify the existing trip data skill can implement it through the CLI without replanning it.
 
 The first implementation should include at least one saved example output in the skill or guide documentation so future agents can see the expected standard.
