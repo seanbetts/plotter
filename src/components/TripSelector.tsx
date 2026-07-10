@@ -60,7 +60,7 @@ export function TripSelector({
   }, [dialogMode, isOpen]);
 
   useEffect(() => {
-    if (dialogMode !== 'create' && dialogMode !== 'rename') return;
+    if (!dialogMode) return;
 
     nameInputRef.current?.focus();
   }, [dialogMode]);
@@ -214,15 +214,39 @@ export function TripSelector({
 
       {dialogMode === 'delete' && targetTrip ? (
         <section className="trip-selector__dialog" role="dialog" aria-modal="true" aria-label="Delete trip">
-          <p>Delete {targetTrip.name}?</p>
-          <div className="trip-selector__dialog-actions">
-            <button type="button" onClick={closeDialog}>
-              Cancel
-            </button>
-            <button type="button" onClick={() => void confirmDelete()}>
-              Delete {targetTrip.name}
-            </button>
-          </div>
+          <form
+            className="trip-selector__dialog-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmDelete();
+            }}
+          >
+            <label htmlFor="trip-selector-delete-name">Delete trip?</label>
+            <div className="trip-selector__dialog-entry">
+              <input
+                id="trip-selector-delete-name"
+                ref={nameInputRef}
+                aria-label="Trip to delete"
+                value={targetTrip.name}
+                readOnly
+              />
+              <button
+                type="button"
+                className="trip-selector__dialog-icon-button"
+                aria-label="Cancel"
+                onClick={closeDialog}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+              <button
+                type="submit"
+                className="trip-selector__dialog-icon-button trip-selector__dialog-icon-button--danger"
+                aria-label={`Delete ${targetTrip.name}`}
+              >
+                <Trash2 size={16} aria-hidden="true" />
+              </button>
+            </div>
+          </form>
         </section>
       ) : null}
 

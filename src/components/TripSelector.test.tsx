@@ -142,13 +142,52 @@ describe('TripSelector', () => {
     expect(props.onRenameTrip).toHaveBeenCalledWith('trip-two', 'Renamed tour');
   });
 
-  it('requires delete confirmation that names the trip', async () => {
-    const props = renderSelector();
+  it('renders delete as the same compact icon-button row as the other modes', async () => {
+    renderSelector();
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete Japan winter' }));
 
-    expect(screen.getByRole('dialog', { name: 'Delete trip' })).toHaveTextContent('Japan winter');
+    const dialog = screen.getByRole('dialog', { name: 'Delete trip' });
+    const tripField = screen.getByLabelText('Trip to delete');
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    const deleteButton = screen.getByRole('button', { name: 'Delete Japan winter' });
+
+    expect(dialog.querySelector('.trip-selector__dialog-entry')).toContainElement(tripField);
+    expect(tripField).toHaveValue('Japan winter');
+    expect(tripField).toHaveAttribute('readonly');
+    expect(tripField).toHaveFocus();
+    expect(cancelButton).toHaveTextContent('');
+    expect(deleteButton).toHaveTextContent('');
+    expect(deleteButton).toHaveClass('trip-selector__dialog-icon-button--danger');
+  });
+
+  it('cancels delete from the compact icon button', async () => {
+    const props = renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete Japan winter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(props.onDeleteTrip).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Delete trip' })).not.toBeInTheDocument();
+  });
+
+  it('confirms delete with Enter from the focused trip field', async () => {
+    const props = renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete Japan winter' }));
+    await userEvent.keyboard('{Enter}');
+
+    expect(props.onDeleteTrip).toHaveBeenCalledWith('trip-two');
+  });
+
+  it('confirms delete from the compact Trash button', async () => {
+    const props = renderSelector();
+
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete Japan winter' }));
     await userEvent.click(screen.getByRole('button', { name: 'Delete Japan winter' }));
 
     expect(props.onDeleteTrip).toHaveBeenCalledWith('trip-two');

@@ -1970,14 +1970,12 @@ select {
   box-shadow: var(--shadow-panel);
 }
 
-.trip-selector__list,
-.trip-selector__dialog-actions {
+.trip-selector__list {
   display: grid;
   gap: 4px;
 }
 
-.trip-selector__list button,
-.trip-selector__dialog-actions button {
+.trip-selector__list button {
   display: flex;
   min-height: 36px;
   align-items: center;
@@ -2050,6 +2048,10 @@ select {
   border-radius: var(--radius-control);
   color: var(--color-text);
   background: transparent;
+}
+
+.trip-selector__dialog-icon-button--danger {
+  color: var(--color-danger);
 }
 
 .trip-selector__dialog-icon-button:hover,
