@@ -24,7 +24,8 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Treat this guide as the domain-specific brainstorming workflow for live route planning. Do not layer a generic brainstorming or one-question-at-a-time discovery workflow on top of it.
 - Give the user a useful route recommendation after at most one compact clarification round. Ask a second follow-up only when one unresolved answer would make every plausible route unsafe or non-viable.
 - When the user asks the agent to recommend a parameter such as duration, pace, direction, or density, recommend a default and continue instead of returning the decision as another prerequisite question.
-- Treat dimensions, booking details, tyre rules, timetables, and similar operational details as explicit assumptions or scoped validation items unless the missing fact invalidates every plausible route.
+- Treat dimensions, booking details, tyre rules, timetables, and similar operational details as explicit assumptions or scoped validation items unless the missing fact could invalidate the recommended corridor. Resolve a corridor-invalidating fact before presenting a detailed candidate plan; a light sketch may show what remains viable while asking one focused question.
+- Give an approximate driving-intensity summary for a candidate itinerary: estimated total distance or range when useful, the overall driving-day pattern, and the longest or most ambitious legs. Label estimates as provisional because the app calculates routes precisely at implementation time.
 - Do not inspect route-specific examples or prior route outputs while answering a live request. Files under `examples/` are synthetic validation fixtures for skill development, not planning context or research evidence.
 - Do not search memory, prior task transcripts, or previous route plans for destination-specific facts, assumptions, or recommendations unless the user explicitly asks to continue or review that work. If the host requires a memory pass, query only app and workflow conventions; do not include destination names, countries, route names, or prior itinerary terms in the memory query. Current route claims must come from the user's request and fresh research.
 - In a recommended spine, choose a single default base or phase for each position. Keep meaningful route variants in the alternatives section instead of leaving ordinary stop choices as slash-separated or "A or B" options.
@@ -42,7 +43,7 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - vehicle constraints, especially large expedition truck suitability
 - desired research depth, if the user has a preference
 
-Do not ask for every item in this list. Ask only for missing information that materially changes feasibility or the recommended corridor. If the user asks what duration, pace, direction, or density you recommend, choose a conservative default and proceed. Preserve non-blocking operational unknowns as assumptions or scoped validation items.
+Do not ask for every item in this list. Ask only for missing information that materially changes feasibility or the recommended corridor. If an unanswered fact could invalidate the recommended corridor, keep the response at a useful sketch and ask one focused question before producing a detailed candidate plan. If the user asks what duration, pace, direction, or density you recommend, choose a conservative default and proceed. Preserve non-blocking operational unknowns as assumptions or scoped validation items.
 
 2. Choose the smallest useful research depth:
 
@@ -146,6 +147,7 @@ Candidate future tags backlog: `city`, `scenic-drive`, `ferry`, `camping`, `lake
 - For remote expedition tracks, complete the logistics viability pass before scoring stops. Treat camps, wells, fuel points, exit tracks, and recovery towns as practical anchors rather than attractions.
 - When adding logistics gates, set severity and scope by consequence: `blocking-decision` when an unresolved condition invalidates the affected route until it is resolved or avoided, `pre-implementation-check` for non-invalidating issues that must be resolved before writing affected data, and `travel-time-validation` for routine checks close to travel.
 - Add `travel-time-validation` notes or gates for ambitious days or phases that combine long driving, ferry dependency, seasonal roads, remote access, or several major activities. Scope the validation to the affected day, phase, stop pair, or variant; do not turn it into a blocker unless the travel-time uncertainty changes the route choice.
+- Summarize the route's estimated driving burden at candidate-plan depth. Keep this decision-oriented rather than listing a calculated distance for every leg.
 
 9. Present the user-facing plan first. Do not include the handoff artifact unless the user asks for it or another agent needs the handoff contract.
 
@@ -159,7 +161,8 @@ Default output should be easy to scan:
 2. Material alternatives or variants, only if they change the trip.
 3. Hard blockers, unresolved decisions, or time-sensitive validation items.
 4. A compact stop and activity preview at the chosen research depth, with overnight bases or phases in the spine and non-overnight endpoints or sights nested as activities.
-5. One final approval question naming the material assumptions being approved, such as corridor or direction, season, duration or pace, vehicle suitability, and any safety or border exposure that affects the route. End with this question rather than a generic invitation or a menu of possible next details.
+5. A short provisional driving-intensity summary when presenting a candidate itinerary.
+6. One focused approval question about the remaining material route decision. State conservative defaults separately instead of bundling routine assumptions into the question. End with this question rather than a generic invitation or a menu of possible next details.
 
 Keep route-shape labels, internal field names, evidence details, and full JSON-like structures out of the main response unless they help the user make a decision or the user asks for handoff-ready output. Use the schema reference as the stable handoff contract between agents.
 
@@ -193,7 +196,7 @@ Interaction budget:
 
 - Before the first useful recommendation, ask at most one compact clarification round.
 - A second follow-up is permitted only when a single unresolved answer would make every plausible route unsafe or non-viable. State why it blocks planning.
-- Do not serially collect operational details. Dimensions, tyre specification, booking classification, ferry category, and similar facts normally become scoped checks attached to the affected route or phase.
+- Do not serially collect operational details. Dimensions, tyre specification, booking classification, ferry category, and similar facts normally become scoped checks attached to the affected route or phase. Ask before detailing a recommended corridor only when the missing fact could make that corridor unsuitable.
 - A request for the agent's recommendation is permission to choose a conservative default, explain it, and continue.
 - If the user signals impatience or asks for the route, stop discovery immediately, state assumptions, and provide the smallest useful plan.
 
@@ -227,7 +230,7 @@ Example: home to a remote endpoint with two materially different corridors.
 
 Start at `sketch` unless the user has already approved a corridor. Compare corridors before selecting detailed stops, preserve plausible alternatives, and recommend one default corridor. The recommended spine should contain one default base or phase at each position; resolve ordinary choices such as neighbouring overnight towns yourself and keep only material route variants in the alternatives section.
 
-The approval question should state the route-defining assumptions in plain travel terms. For example: "Should I develop the 12-15 day summer route using the efficient inland corridor?" After approval, expand that corridor to `candidate-plan`.
+State route-defining defaults in plain travel terms, then ask about only the unresolved material choice. For example: "I’ll assume a summer trip at a mixed pace. Should I develop the efficient inland corridor?" After approval, expand that corridor to `candidate-plan`.
 
 ### Official Scenic Route
 
