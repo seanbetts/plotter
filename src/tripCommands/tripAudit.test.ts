@@ -84,21 +84,52 @@ describe('trip semantic audit', () => {
       severity: 'error',
       code: 'ACTIVITY_DISTANCE_OUTLIER',
       activityId: 'drive-to-a',
+      destination: {
+        id: larvik.id,
+        name: 'Larvik',
+        coordinates: { lat: 59.0533, lng: 10.0352 },
+        resolvedLabel: 'Larvik',
+        sourceProvider: 'legacy',
+      },
+      activity: {
+        id: 'drive-to-a',
+        name: 'Drive to A in Lofoten',
+        coordinates: { lat: 67.8804, lng: 12.9826 },
+        resolvedLabel: 'A, Lofoten',
+        sourceProvider: 'manual',
+      },
     }));
     expect(report.issues).toContainEqual(expect.objectContaining({
       severity: 'error',
       code: 'FAILED_ROUTE_LEG',
       routeLegId: 'failed-leg',
+      origin: {
+        id: home.id,
+        name: 'Home',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+        resolvedLabel: 'Home',
+        sourceProvider: 'legacy',
+      },
+      target: {
+        id: larvik.id,
+        name: 'Larvik',
+        coordinates: { lat: 59.0533, lng: 10.0352 },
+        resolvedLabel: 'Larvik',
+        sourceProvider: 'legacy',
+      },
     }));
     expect(report.issues).toContainEqual(expect.objectContaining({
       severity: 'error',
       code: 'AUTO_ROUTE_DETOUR',
       routeLegId: 'larvik-hirtshals-auto',
+      origin: expect.objectContaining({ id: larvik.id, name: 'Larvik' }),
+      target: expect.objectContaining({ id: hirtshals.id, name: 'Hirtshals' }),
     }));
     expect(report.issues).toContainEqual(expect.objectContaining({
       severity: 'warning',
       code: 'DEFAULT_STAY_AT_HOME_ANCHOR',
       destinationId: home.id,
+      destination: expect.objectContaining({ id: home.id, name: 'Home' }),
     }));
     expect(report).toMatchObject({ errors: 3, warnings: 1 });
     expect(report.issues.every((issue) => issue.message.includes('undefined') === false)).toBe(true);

@@ -3,6 +3,14 @@ import type { Activity, Destination, RouteLeg } from '../domain/types';
 
 export type TripAuditSeverity = 'error' | 'warning';
 
+export type TripAuditLocationContext = {
+  id: string;
+  name: string;
+  coordinates: Destination['coordinates'];
+  resolvedLabel: string;
+  sourceProvider?: string;
+};
+
 export type TripAuditIssue = {
   severity: TripAuditSeverity;
   code:
@@ -16,6 +24,10 @@ export type TripAuditIssue = {
   routeLegId?: string;
   originDestinationId?: string;
   targetDestinationId?: string;
+  destination?: TripAuditLocationContext;
+  activity?: TripAuditLocationContext;
+  origin?: TripAuditLocationContext;
+  target?: TripAuditLocationContext;
 };
 
 export type TripAuditReport = {
@@ -23,6 +35,29 @@ export type TripAuditReport = {
   warnings: number;
   issues: TripAuditIssue[];
 };
+
+function destinationContext(destination: Destination): TripAuditLocationContext {
+  return {
+    id: destination.id,
+    name: destination.name,
+    coordinates: destination.coordinates,
+    resolvedLabel: destination.location.sourceLabel,
+    sourceProvider: destination.location.sourceProvider,
+  };
+}
+
+function activityContext(activity: Activity): TripAuditLocationContext | undefined {
+  const location = activity.location;
+  if (!location?.coordinates) return undefined;
+
+  return {
+    id: activity.id,
+    name: activity.title,
+    coordinates: location.coordinates,
+    resolvedLabel: location.address,
+    ...(location.sourceProvider ? { sourceProvider: location.sourceProvider } : {}),
+  };
+}
 
 export function auditTripSnapshot(input: {
   destinations: Destination[];
@@ -45,6 +80,8 @@ export function auditTripSnapshot(input: {
         message: `Activity ${activity.title} is ${Math.round(distance)} km from its parent stop ${destination.name}.`,
         destinationId: destination.id,
         activityId: activity.id,
+        destination: destinationContext(destination),
+        activity: activityContext(activity),
       });
     }
   }
@@ -62,6 +99,8 @@ export function auditTripSnapshot(input: {
         routeLegId: routeLeg.id,
         originDestinationId: routeLeg.originDestinationId,
         targetDestinationId: routeLeg.targetDestinationId,
+        ...(origin ? { origin: destinationContext(origin) } : {}),
+        ...(target ? { target: destinationContext(target) } : {}),
       });
     }
 
@@ -81,6 +120,8 @@ export function auditTripSnapshot(input: {
           routeLegId: routeLeg.id,
           originDestinationId: routeLeg.originDestinationId,
           targetDestinationId: routeLeg.targetDestinationId,
+          origin: destinationContext(origin),
+          target: destinationContext(target),
         });
       }
     }
@@ -97,6 +138,7 @@ export function auditTripSnapshot(input: {
             code: 'DEFAULT_STAY_AT_HOME_ANCHOR',
             message: `Home anchor ${destination.name} has the domain default stay of three days; confirm that duration is intentional.`,
             destinationId: destination.id,
+            destination: destinationContext(destination),
           });
         }
       }

@@ -105,7 +105,7 @@ Read [cli-reference.md](./cli-reference.md) for exact command forms, writable JS
 ## Failure Handling
 
 - If a write fails because a place cannot resolve, use source coordinates if available or ask for a more precise place query.
-- A full-manifest route or semantic error blocks persistence, so do not claim that a new trip exists. Report the structured audit issues, correct ambiguous source data, or wait before retrying a provider-limited create.
+- A full-manifest route or semantic error blocks persistence, so do not claim that a new trip exists. Inspect the issue's structured `destination`, `activity`, `origin`, and `target` location contexts first; they include the resolved labels, coordinates, and providers needed to spot bad geocoding. Correct the implicated manifest coordinates or query before inspecting service source or building custom diagnostics.
 - For a persisted trip with failed routes, run `recalculate-failed-routes`, then `audit`; preserve ready and manual legs.
 - If link preview is slow or unavailable, the CLI should still be able to store a fallback link.
 - If output is too large, rerun with `--summary`.

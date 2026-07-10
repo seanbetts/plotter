@@ -402,6 +402,20 @@ describe('TripDataService trips and stops', () => {
           issues: [expect.objectContaining({
             code: 'ACTIVITY_DISTANCE_OUTLIER',
             severity: 'error',
+            destination: {
+              id: expect.any(String),
+              name: 'Stop 0',
+              coordinates: { lat: 40, lng: -5 },
+              resolvedLabel: 'Stop 0',
+              sourceProvider: 'legacy',
+            },
+            activity: {
+              id: expect.any(String),
+              name: 'Activity 0',
+              coordinates: { lat: -34.6037, lng: -58.3816 },
+              resolvedLabel: 'Activity 0 address',
+              sourceProvider: 'manual',
+            },
           })],
         },
       },

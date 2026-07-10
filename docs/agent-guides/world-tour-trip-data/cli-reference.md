@@ -227,6 +227,8 @@ Failure envelope:
 
 For full creation and route recovery, counts include stops, activities, links, total route legs, ready/manual/failed route legs, and audit errors/warnings. Audit issues remain visible. A semantic error returns `TRIP_AUDIT_FAILED` with the complete report at `error.details.audit` and does not persist a trip.
 
+Audit issues include structured location context for implicated entities. Activity outliers include `destination` and `activity`; failed or implausible driving legs include `origin` and `target`. Each context contains the entity `id`, display `name`, resolved `coordinates`, `resolvedLabel`, and `sourceProvider` when available. Inspect these fields before reaching for source-code inspection or a custom route diagnostic.
+
 ## Verification Snippet
 
 For concise readback, save full JSON then summarize locally:
