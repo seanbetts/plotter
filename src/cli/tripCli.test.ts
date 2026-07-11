@@ -525,8 +525,9 @@ describe('runTripCli', () => {
         : {}),
     }));
     const manifest = {
-      manifestVersion: 1,
+      manifestVersion: 2,
       name: 'In-memory route',
+      vehiclePreset: 'standard',
       stops,
       routeLegs: [
         { fromStopKey: 'stop-4', toStopKey: 'stop-5', movement: 'vehicle-shipping', calculation: 'manual' },

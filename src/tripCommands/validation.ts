@@ -306,9 +306,6 @@ function validateRouteLegDirectiveV1(input: unknown, path: string): RouteLegDire
     throw new TripCommandValidationError('INVALID_ROUTE_LEG', `${path} must be an object.`, path);
   }
   const boundaryInput: RouteLegDirectiveInputV1 = input;
-  if (!(legacyManifestRouteTypeField in boundaryInput)) {
-    return validateRouteLegDirectiveV2(boundaryInput, path);
-  }
   rejectUnknownFields(
     boundaryInput,
     ['fromStopKey', 'toStopKey', legacyManifestRouteTypeField, 'notes'],

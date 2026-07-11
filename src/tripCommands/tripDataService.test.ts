@@ -334,8 +334,9 @@ describe('TripDataService trips and stops', () => {
         : {}),
     }));
     const manifest = {
-      manifestVersion: 1 as const,
+      manifestVersion: 2 as const,
       name: 'Large overland trip',
+      vehiclePreset: 'standard' as const,
       stops,
       routeLegs: [
         { fromStopKey: 'stop-4', toStopKey: 'stop-5', movement: 'vehicle-shipping', calculation: 'manual' },

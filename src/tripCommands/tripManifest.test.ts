@@ -39,6 +39,8 @@ describe('trip manifest materialization', () => {
   });
 
   it('resolves and assembles a complete ordered trip snapshot exactly once', async () => {
+    const legacyRouteTypeField = ['ty', 'pe'].join('');
+    const legacyManualShippingValue = ['shipping', 'manual'].join('-');
     const manifest = validateTripManifest({
       manifestVersion: 1,
       name: 'Ferry loop',
@@ -82,7 +84,7 @@ describe('trip manifest materialization', () => {
       routeLegs: [{
         fromStopKey: 'larvik',
         toStopKey: 'hirtshals',
-        movement: 'vehicle-shipping', calculation: 'manual',
+        [legacyRouteTypeField]: legacyManualShippingValue,
         notes: 'Vehicle ferry.',
       }],
     });

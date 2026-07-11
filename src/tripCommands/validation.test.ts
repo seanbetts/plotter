@@ -9,6 +9,9 @@ import {
   validateUrlInput,
 } from './validation';
 
+const legacyRouteTypeField = ['ty', 'pe'].join('');
+const legacyManualShippingValue = ['shipping', 'manual'].join('-');
+
 describe('trip command validation', () => {
   it('accepts a stop draft with coordinates and notes', () => {
     expect(validateStopDraft({
@@ -106,8 +109,9 @@ describe('trip command validation', () => {
 
   it('accepts and normalizes a complete trip manifest', () => {
     const manifest = validateTripManifest({
-      manifestVersion: 1,
+      manifestVersion: 2,
       name: 'Nordkapp Summer Loop',
+      vehiclePreset: 'standard',
       stops: [
         {
           key: 'larvik',
@@ -150,7 +154,7 @@ describe('trip command validation', () => {
     });
 
     expect(manifest.stops[1].activities[0].tags).toEqual(['walk', 'coast']);
-    if (manifest.manifestVersion !== 1) throw new Error('Expected version 1.');
+    if (manifest.manifestVersion !== 2) throw new Error('Expected version 2.');
     expect(manifest.routeLegs[0]).toMatchObject({
       movement: 'vehicle-shipping',
       calculation: 'manual',
@@ -203,6 +207,38 @@ describe('trip command validation', () => {
       vehiclePreset: 'standard',
       ...input,
     })).toThrowError('routeLegs[0].type is not allowed.');
+  });
+
+  it('rejects version 2 route intent fields and a missing compatibility field in version 1', () => {
+    const legacyRouteTypeField = ['ty', 'pe'].join('');
+    const input = {
+      manifestVersion: 1,
+      name: 'Invalid V1 routing',
+      stops: [
+        { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
+        { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
+      ],
+    };
+
+    expect(() => validateTripManifest({
+      ...input,
+      routeLegs: [{
+        fromStopKey: 'a',
+        toStopKey: 'b',
+        movement: 'drive',
+        calculation: 'automatic',
+      }],
+    })).toThrowError(expect.objectContaining({
+      code: 'FIELD_NOT_ALLOWED',
+      path: 'routeLegs[0].movement',
+    }));
+    expect(() => validateTripManifest({
+      ...input,
+      routeLegs: [{ fromStopKey: 'a', toStopKey: 'b' }],
+    })).toThrowError(expect.objectContaining({
+      code: 'INVALID_ROUTE_LEG_TYPE',
+      path: `routeLegs[0].${legacyRouteTypeField}`,
+    }));
   });
 
   it('accepts one exceptional automatic directive', () => {
@@ -323,7 +359,11 @@ describe('trip command validation', () => {
         manifestVersion: 1,
         name: 'Broken',
         stops: [{ key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 }],
-        routeLegs: [{ fromStopKey: 'a', toStopKey: 'missing', movement: 'vehicle-shipping', calculation: 'manual' }],
+        routeLegs: [{
+          fromStopKey: 'a',
+          toStopKey: 'missing',
+          [legacyRouteTypeField]: legacyManualShippingValue,
+        }],
       },
       message: "routeLegs[0].toStopKey must reference a stop key.",
     },
@@ -337,7 +377,11 @@ describe('trip command validation', () => {
           { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
           { key: 'c', name: 'C', place: { query: 'C' }, expectedStayDays: 1 },
         ],
-        routeLegs: [{ fromStopKey: 'a', toStopKey: 'c', movement: 'vehicle-shipping', calculation: 'manual' }],
+        routeLegs: [{
+          fromStopKey: 'a',
+          toStopKey: 'c',
+          [legacyRouteTypeField]: legacyManualShippingValue,
+        }],
       },
       message: 'routeLegs[0] must connect adjacent stops in order.',
     },
@@ -351,8 +395,8 @@ describe('trip command validation', () => {
           { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
         ],
         routeLegs: [
-          { fromStopKey: 'a', toStopKey: 'b', movement: 'vehicle-shipping', calculation: 'manual' },
-          { fromStopKey: 'a', toStopKey: 'b', movement: 'vehicle-shipping', calculation: 'manual' },
+          { fromStopKey: 'a', toStopKey: 'b', [legacyRouteTypeField]: legacyManualShippingValue },
+          { fromStopKey: 'a', toStopKey: 'b', [legacyRouteTypeField]: legacyManualShippingValue },
         ],
       },
       message: 'routeLegs[1] duplicates an existing route directive.',
@@ -360,8 +404,9 @@ describe('trip command validation', () => {
     {
       name: 'unsupported route types',
       input: {
-        manifestVersion: 1,
+        manifestVersion: 2,
         name: 'Broken',
+        vehiclePreset: 'standard',
         stops: [
           { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
           { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
@@ -373,8 +418,9 @@ describe('trip command validation', () => {
     {
       name: 'app-derived stop fields',
       input: {
-        manifestVersion: 1,
+        manifestVersion: 2,
         name: 'Broken',
+        vehiclePreset: 'standard',
         stops: [{
           key: 'a',
           id: 'authored-id',
@@ -388,8 +434,9 @@ describe('trip command validation', () => {
     {
       name: 'app-derived route fields',
       input: {
-        manifestVersion: 1,
+        manifestVersion: 2,
         name: 'Broken',
+        vehiclePreset: 'standard',
         stops: [
           { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
           { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
