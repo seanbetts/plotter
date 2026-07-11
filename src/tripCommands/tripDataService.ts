@@ -1,7 +1,7 @@
 import { createActivity as createDomainActivity, reorderActivities as reorderActivityModels, updateActivity as updateDomainActivity } from '../domain/activities';
 import { createDestination, updateDestination } from '../domain/destinations';
 import { createFallbackResearchLink, normalizeResearchLinkUrl, reorderResearchLinks, sortResearchLinks } from '../domain/researchLinks';
-import { reconcileRouteLegsForDestinations } from '../domain/routePlanner';
+import { planRouteLegReconciliation, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
 import type { Activity, Destination, ResearchLink, RouteLeg } from '../domain/types';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
@@ -380,12 +380,19 @@ async function updateDestinationFromPatch(
 async function planRouteLegs(input: {
   destinations: Destination[];
   currentRouteLegs: RouteLeg[];
+  routingVehicle?: TripSummary['routingVehicle'];
   calculateRoute?: CalculateRoute;
 }) {
+  const planned = planRouteLegReconciliation({
+    destinations: input.destinations,
+    currentRouteLegs: input.currentRouteLegs,
+    routingVehicle: input.routingVehicle ?? standardRoutingVehicle,
+  });
   const routeLegs: RouteLeg[] = [];
   await reconcileAndSaveRouteLegs({
     destinations: input.destinations,
-    currentRouteLegs: input.currentRouteLegs,
+    currentRouteLegs: planned.routeLegs,
+    routingVehicle: input.routingVehicle ?? standardRoutingVehicle,
     calculateRoute: input.calculateRoute,
     repository: {
       async saveRouteLeg(routeLeg) {
@@ -423,8 +430,15 @@ async function saveStopsAndRouteLegs(input: {
   currentRouteLegs: RouteLeg[];
   nextDestinations: Destination[];
   removedDestinationIds?: string[];
+  routingVehicle: TripSummary['routingVehicle'];
   calculateRoute?: CalculateRoute;
 }) {
+  const planned = planRouteLegReconciliation({
+    destinations: input.nextDestinations,
+    currentRouteLegs: input.currentRouteLegs,
+    routingVehicle: input.routingVehicle,
+  });
+
   for (const destination of input.nextDestinations) {
     await input.repository.saveDestination(destination);
   }
@@ -435,10 +449,12 @@ async function saveStopsAndRouteLegs(input: {
 
   const routeLegs = await reconcileAndSaveRouteLegs({
     destinations: input.nextDestinations,
-    currentRouteLegs: input.currentRouteLegs,
+    currentRouteLegs: planned.routeLegs,
     repository: input.repository,
+    routingVehicle: input.routingVehicle,
     calculateRoute: input.calculateRoute,
   });
+  await Promise.all(planned.removedRouteLegIds.map((routeLegId) => input.repository.deleteRouteLeg(routeLegId)));
 
   return {
     routeLegs,
@@ -808,7 +824,7 @@ export function createTripDataService(
     async replaceStops(input, options) {
       return withCommandHandling(async () => {
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
-        await findTripSummary(dependencies.directory, tripId);
+        const trip = await findTripSummary(dependencies.directory, tripId);
         const confirmation = ensureConfirmed(
           options,
           'Replacing stops requires --yes or --dry-run.',
@@ -873,6 +889,7 @@ export function createTripDataService(
           const nextRouteLegs = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
+            routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
@@ -888,6 +905,7 @@ export function createTripDataService(
           currentRouteLegs,
           nextDestinations: nextStops,
           removedDestinationIds: removedStops.map((stop) => stop.id),
+          routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         });
 
@@ -903,7 +921,7 @@ export function createTripDataService(
     async insertStop(input, options) {
       return withCommandHandling(async () => {
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
-        await findTripSummary(dependencies.directory, tripId);
+        const trip = await findTripSummary(dependencies.directory, tripId);
         const repository = dependencies.createTripRepository(tripId);
         const currentStops = normalizeOrderedDestinations(await repository.listDestinations());
         const currentRouteLegs = await repository.listRouteLegs();
@@ -946,6 +964,7 @@ export function createTripDataService(
           const nextRouteLegs = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
+            routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
@@ -961,6 +980,7 @@ export function createTripDataService(
           repository,
           currentRouteLegs,
           nextDestinations: nextStops,
+          routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         });
         changed.routesRecalculated = saved.routesRecalculated;
@@ -977,7 +997,7 @@ export function createTripDataService(
     async updateStop(input, options) {
       return withCommandHandling(async () => {
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
-        await findTripSummary(dependencies.directory, tripId);
+        const trip = await findTripSummary(dependencies.directory, tripId);
         const stopId = trimRequiredString(input.stopId, 'Stop id', 'stopId');
         const repository = dependencies.createTripRepository(tripId);
         const currentStops = normalizeOrderedDestinations(await repository.listDestinations());
@@ -995,6 +1015,7 @@ export function createTripDataService(
           const nextRouteLegs = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
+            routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
@@ -1005,18 +1026,18 @@ export function createTripDataService(
           });
         }
 
-        await repository.saveDestination(updatedStop);
-        const savedRouteLegs = await reconcileAndSaveRouteLegs({
-          destinations: nextStops,
-          currentRouteLegs,
+        const saved = await saveStopsAndRouteLegs({
           repository,
+          currentRouteLegs,
+          nextDestinations: nextStops,
+          routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         });
-        changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, savedRouteLegs);
+        changed.routesRecalculated = saved.routesRecalculated;
 
         return commandSuccess(`Updated ${updatedStop.name}.`, {
           stop: updatedStop,
-          routeLegs: savedRouteLegs,
+          routeLegs: saved.routeLegs,
           changed,
         });
       });
@@ -1025,7 +1046,7 @@ export function createTripDataService(
     async deleteStop(input, options) {
       return withCommandHandling(async () => {
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
-        await findTripSummary(dependencies.directory, tripId);
+        const trip = await findTripSummary(dependencies.directory, tripId);
         const stopId = trimRequiredString(input.stopId, 'Stop id', 'stopId');
         const repository = dependencies.createTripRepository(tripId);
         const currentStops = normalizeOrderedDestinations(await repository.listDestinations());
@@ -1049,6 +1070,7 @@ export function createTripDataService(
           const nextRouteLegs = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
+            routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
@@ -1060,6 +1082,7 @@ export function createTripDataService(
           currentRouteLegs,
           nextDestinations: nextStops,
           removedDestinationIds: [stopId],
+          routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         });
         changed.routesRecalculated = saved.routesRecalculated;
@@ -1071,7 +1094,7 @@ export function createTripDataService(
     async reorderStops(input, options) {
       return withCommandHandling(async () => {
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
-        await findTripSummary(dependencies.directory, tripId);
+        const trip = await findTripSummary(dependencies.directory, tripId);
         const orderedIds = ensureStopIdList(input.stopIds);
         const repository = dependencies.createTripRepository(tripId);
         const currentStops = normalizeOrderedDestinations(await repository.listDestinations());
@@ -1101,6 +1124,7 @@ export function createTripDataService(
           const nextRouteLegs = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
+            routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
@@ -1115,6 +1139,7 @@ export function createTripDataService(
           repository,
           currentRouteLegs,
           nextDestinations: nextStops,
+          routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         });
         changed.routesRecalculated = saved.routesRecalculated;

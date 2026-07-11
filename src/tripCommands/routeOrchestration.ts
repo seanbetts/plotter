@@ -312,12 +312,14 @@ export async function reconcileAndSaveRouteLegs(input: {
   destinations: Destination[];
   currentRouteLegs: RouteLeg[];
   repository: RouteLegPersistence;
+  routingVehicle?: TripRoutingVehicle;
   calculateRoute?: CalculateRoute;
 }): Promise<RouteLeg[]> {
   const reconciliation = reconcileRouteLegsForDestinations(input.destinations, input.currentRouteLegs);
-  const nextRouteLegs = await calculateDrivingRouteLegs({
+  const nextRouteLegs = await calculateAutomaticRouteLegs({
     destinations: input.destinations,
     routeLegs: reconciliation.routeLegs,
+    routingVehicle: input.routingVehicle ?? standardRoutingVehicle,
     calculateRoute: input.calculateRoute,
   });
 

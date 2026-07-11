@@ -1235,6 +1235,23 @@ describe('useTripData', () => {
     ]);
   });
 
+  it('rejects splitting manual vehicle shipping before saving', async () => {
+    const origin = createDestination({ name: 'Singapore', coordinates: { lat: 1, lng: 1 }, order: 0 });
+    const target = createDestination({ name: 'Perth', coordinates: { lat: 1, lng: 9 }, order: 1 });
+    const shipping = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id, type: 'shipping-manual' });
+    const saveDestination = vi.fn(async () => {});
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [shipping],
+      saveDestination,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await expect(result.current.addDestination({ name: 'Colombo', coordinates: { lat: 1, lng: 5 } }))
+      .rejects.toThrow('Resolve vehicle shipping before inserting a stop');
+    expect(saveDestination).not.toHaveBeenCalled();
+  });
+
   it('places Norway stops into the expected route order while keeping Oslo first', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));

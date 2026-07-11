@@ -775,6 +775,35 @@ describe('TripDataService trips and stops', () => {
     expect(calculateRoute).toHaveBeenCalledTimes(2);
   });
 
+  it('rejects splitting manual vehicle shipping before saving', async () => {
+    const { service, repositories } = createHarness();
+    const created = await service.createTrip({
+      name: 'Shipping',
+      stops: [
+        { name: 'Singapore', place: { coordinates: { lat: 1, lng: 1 } } },
+        { name: 'Perth', place: { coordinates: { lat: 1, lng: 9 } } },
+      ],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+    const data = repositories.get(created.trip.id)!;
+    data.routeLegs = [createRouteLeg({
+      originDestinationId: created.stops[0].id,
+      targetDestinationId: created.stops[1].id,
+      type: 'shipping-manual',
+    })];
+    const before = [...data.destinations];
+
+    const result = await service.insertStop({
+      tripId: created.trip.id,
+      afterStopId: created.stops[0].id,
+      beforeStopId: created.stops[1].id,
+      stop: { name: 'Colombo', place: { coordinates: { lat: 1, lng: 5 } } },
+    });
+
+    expect(result).toMatchObject({ ok: false, error: { message: 'Resolve vehicle shipping before inserting a stop' } });
+    expect(data.destinations).toEqual(before);
+  });
+
   it('updates one stop fields and adjacent routes when coordinates change', async () => {
     const { service, calculateRoute } = createHarness();
 

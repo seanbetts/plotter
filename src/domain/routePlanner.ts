@@ -1,9 +1,16 @@
 import { createRouteKey, createRouteLeg, createStraightLineGeometry } from './routeLegs';
-import type { Coordinates, Destination, RouteLeg } from './types';
+import type { LineString } from 'geojson';
+import type { Coordinates, Destination, RouteIntentSnapshot, RouteLeg, RouteWaypoint, TripRoutingVehicle } from './types';
 
 type ReconcileRouteLegsResult = {
   routeLegs: RouteLeg[];
   removedRouteLegIds: string[];
+};
+
+type PlanRouteLegReconciliationInput = {
+  destinations: Destination[];
+  currentRouteLegs: RouteLeg[];
+  routingVehicle: TripRoutingVehicle;
 };
 
 export type DestinationInsertionCandidate = {
@@ -83,8 +90,24 @@ function routeKeyMatchesCurrentDrivingEndpoints(routeLeg: RouteLeg, origin: Dest
     target: target.coordinates,
     profile: 'driving-car',
   });
+  const legacyRouteKey = `${routeLeg.profile ?? 'driving-car'}:${origin.coordinates.lng.toFixed(5)},${origin.coordinates.lat.toFixed(5)}:${target.coordinates.lng.toFixed(5)},${target.coordinates.lat.toFixed(5)}`;
 
-  return routeKey === currentRouteKey || routeKey.startsWith(`${currentRouteKey}:`);
+  return routeKey === currentRouteKey || routeKey.startsWith(`${currentRouteKey}:`) || routeKey.startsWith(legacyRouteKey);
+}
+
+function createLegacyDrivingRouteKey(origin: Coordinates, target: Coordinates, profile = 'driving-car') {
+  return `${profile}:${origin.lng.toFixed(5)},${origin.lat.toFixed(5)}:${target.lng.toFixed(5)},${target.lat.toFixed(5)}`;
+}
+
+function createRefreshedDrivingRouteKey(
+  routeLeg: RouteLeg,
+  origin: Coordinates,
+  target: Coordinates,
+  profile = routeLeg.profile ?? 'driving-car',
+) {
+  return routeLeg.routeKey?.startsWith('{')
+    ? createRouteKey({ origin, target, profile })
+    : createLegacyDrivingRouteKey(origin, target, profile);
 }
 
 function refreshRouteLegForDestinationCoordinates(
@@ -129,22 +152,14 @@ function refreshRouteLegForDestinationCoordinates(
       geometry: undefined,
       provider: undefined,
       profile: 'driving-car',
-      routeKey: createRouteKey({
-        origin: origin.coordinates,
-        target: target.coordinates,
-        profile: 'driving-car',
-      }),
+      routeKey: createRefreshedDrivingRouteKey(routeLeg, origin.coordinates, target.coordinates, 'driving-car'),
       calculatedAt: undefined,
       error: undefined,
       updatedAt: createTimestamp(),
     };
   }
 
-  const routeKey = createRouteKey({
-    origin: origin.coordinates,
-    target: target.coordinates,
-    profile: routeLeg.profile,
-  });
+  const routeKey = createRefreshedDrivingRouteKey(routeLeg, origin.coordinates, target.coordinates);
 
   if (routeLeg.routeKey === routeKey) {
     return routeLeg;
@@ -225,6 +240,181 @@ export function getDestinationInsertionCandidates(
   });
 
   return candidates;
+}
+
+function nearestGeometryIndex(geometry: LineString, coordinates: Coordinates) {
+  return geometry.coordinates.reduce(
+    (best, [lng, lat], index) => {
+      const distance = coordinateDistanceKm(coordinates, { lat, lng });
+      return distance < best.distance ? { index, distance } : best;
+    },
+    { index: 0, distance: Number.POSITIVE_INFINITY },
+  ).index;
+}
+
+function routeIntent(routeLeg: RouteLeg): RouteIntentSnapshot {
+  return {
+    movement: routeLeg.movement ?? (routeLeg.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
+    calculation: routeLeg.calculation ?? (routeLeg.type === 'shipping-manual' ? 'manual' : 'automatic'),
+    ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+    waypoints: routeLeg.waypoints ?? [],
+    notes: routeLeg.notes,
+  };
+}
+
+function isManualVehicleShipping(routeLeg: RouteLeg) {
+  const intent = routeIntent(routeLeg);
+  return routeLeg.type === 'shipping-manual' || intent.movement === 'vehicle-shipping' || intent.calculation === 'manual';
+}
+
+function hasConstrainedIntent(intent: RouteIntentSnapshot) {
+  return intent.ferryPolicy !== 'allow' || intent.waypoints.length > 0 || intent.notes.trim().length > 0;
+}
+
+function createReplacementLeg(input: {
+  origin: Destination;
+  target: Destination;
+  routingVehicle: TripRoutingVehicle;
+  ferryPolicy?: RouteLeg['ferryPolicy'];
+  waypoints?: RouteWaypoint[];
+  status?: RouteLeg['status'];
+  warnings?: RouteLeg['warnings'];
+}) {
+  return createRouteLeg({
+    originDestinationId: input.origin.id,
+    targetDestinationId: input.target.id,
+    type: 'driving-auto',
+    movement: 'drive',
+    calculation: 'automatic',
+    ferryPolicy: input.ferryPolicy ?? 'allow',
+    waypoints: (input.waypoints ?? []).map((waypoint, order) => ({ ...waypoint, order })),
+    status: input.status,
+    warnings: input.warnings,
+    profile: input.routingVehicle.profile,
+    routeKey: createRouteKey({
+      origin: input.origin.coordinates,
+      target: input.target.coordinates,
+      routingVehicle: input.routingVehicle,
+      waypoints: (input.waypoints ?? []).map((waypoint) => waypoint.coordinates),
+      ferryPolicy: input.ferryPolicy ?? 'allow',
+    }),
+  });
+}
+
+function splitRouteLeg(input: {
+  source: RouteLeg;
+  destinations: Destination[];
+  routingVehicle: TripRoutingVehicle;
+}): RouteLeg[] {
+  if (isManualVehicleShipping(input.source)) {
+    throw new Error('Resolve vehicle shipping before inserting a stop');
+  }
+
+  const intent = routeIntent(input.source);
+  const segmentCount = input.destinations.length - 1;
+  const defaultSegments = () => Array.from({ length: segmentCount }, (_, index) => createReplacementLeg({
+    origin: input.destinations[index],
+    target: input.destinations[index + 1],
+    routingVehicle: input.routingVehicle,
+  }));
+
+  if (!hasConstrainedIntent(intent)) return defaultSegments();
+
+  const geometry = input.source.status === 'ready' ? input.source.geometry : undefined;
+  const boundaryIndexes = geometry
+    ? input.destinations.map((destination) => nearestGeometryIndex(geometry, destination.coordinates))
+    : [];
+  const canProject = Boolean(
+    geometry &&
+    intent.notes.trim().length === 0 &&
+    boundaryIndexes.every((index, position) => position === 0 || index > boundaryIndexes[position - 1]),
+  );
+
+  if (!canProject) {
+    const warning = {
+      code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED' as const,
+      message: 'Route intent could not be assigned safely after the stop change.',
+      context: { sourceRouteLegId: input.source.id, unresolvedIntent: intent },
+    };
+    return defaultSegments().map((leg, index) => ({
+      ...leg,
+      status: 'review-required' as const,
+      warnings: index === 0 ? [warning] : [],
+    }));
+  }
+
+  const waypointIndexes = intent.waypoints.map((waypoint) => nearestGeometryIndex(geometry!, waypoint.coordinates));
+  const waypointSegments = Array.from({ length: segmentCount }, () => [] as RouteWaypoint[]);
+  intent.waypoints.forEach((waypoint, waypointPosition) => {
+    const geometryIndex = waypointIndexes[waypointPosition];
+    const segmentIndex = boundaryIndexes.findIndex((boundaryIndex, index) => (
+      index < segmentCount && geometryIndex <= boundaryIndexes[index + 1]
+    ));
+    waypointSegments[Math.max(0, segmentIndex)].push(waypoint);
+  });
+
+  let requiredFerrySegment = -1;
+  if (intent.ferryPolicy === 'require') {
+    const ferrySection = input.source.sections?.find((section) => section.kind === 'ferry');
+    if (!ferrySection) {
+      const warning = {
+        code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED' as const,
+        message: 'Required ferry intent could not be assigned safely after the stop change.',
+        context: { sourceRouteLegId: input.source.id, unresolvedIntent: intent },
+      };
+      return defaultSegments().map((leg, index) => ({ ...leg, status: 'review-required' as const, warnings: index === 0 ? [warning] : [] }));
+    }
+    const midpoint = (ferrySection.startGeometryIndex + ferrySection.endGeometryIndex) / 2;
+    requiredFerrySegment = boundaryIndexes.findIndex((boundaryIndex, index) => (
+      index < segmentCount && midpoint <= boundaryIndexes[index + 1]
+    ));
+  }
+
+  return Array.from({ length: segmentCount }, (_, index) => createReplacementLeg({
+    origin: input.destinations[index],
+    target: input.destinations[index + 1],
+    routingVehicle: input.routingVehicle,
+    waypoints: waypointSegments[index],
+    ferryPolicy: intent.ferryPolicy === 'avoid'
+      ? 'avoid'
+      : intent.ferryPolicy === 'require' && index === requiredFerrySegment
+        ? 'require'
+        : 'allow',
+  }));
+}
+
+export function planRouteLegReconciliation({
+  destinations,
+  currentRouteLegs,
+  routingVehicle,
+}: PlanRouteLegReconciliationInput): ReconcileRouteLegsResult {
+  const destinationIndexById = new Map(destinations.map((destination, index) => [destination.id, index]));
+  const splitSources = currentRouteLegs.filter((routeLeg) => {
+    const originIndex = destinationIndexById.get(routeLeg.originDestinationId);
+    const targetIndex = destinationIndexById.get(routeLeg.targetDestinationId);
+    return originIndex !== undefined && targetIndex !== undefined && targetIndex > originIndex + 1;
+  });
+  const base = reconcileRouteLegsForDestinations(destinations, currentRouteLegs);
+  if (splitSources.length === 0) return base;
+
+  const replacementsByPair = new Map<string, RouteLeg>();
+  for (const source of splitSources) {
+    const originIndex = destinationIndexById.get(source.originDestinationId)!;
+    const targetIndex = destinationIndexById.get(source.targetDestinationId)!;
+    const replacements = splitRouteLeg({
+      source,
+      destinations: destinations.slice(originIndex, targetIndex + 1),
+      routingVehicle,
+    });
+    for (const replacement of replacements) {
+      replacementsByPair.set(routePairKey(replacement.originDestinationId, replacement.targetDestinationId), replacement);
+    }
+  }
+
+  return {
+    routeLegs: base.routeLegs.map((routeLeg) => replacementsByPair.get(routePairKey(routeLeg.originDestinationId, routeLeg.targetDestinationId)) ?? routeLeg),
+    removedRouteLegIds: [...new Set([...base.removedRouteLegIds, ...splitSources.map((source) => source.id)])],
+  };
 }
 
 export function reconcileRouteLegsForDestinations(
