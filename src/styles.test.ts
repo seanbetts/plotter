@@ -15,6 +15,12 @@ describe('trip map export styles', () => {
     );
   });
 
+  it('owns the overlay backdrop treatment on the shared rail', () => {
+    expect(styles).toMatch(
+      /\.top-toolbar\s*{[^}]*-webkit-backdrop-filter:\s*blur\(var\(--blur-overlay\)\) saturate\(1\.25\);[^}]*backdrop-filter:\s*blur\(var\(--blur-overlay\)\) saturate\(1\.25\);/s,
+    );
+  });
+
   it('renders a compact integrated camera with complete interaction states', () => {
     expect(styles).toMatch(
       /\.trip-map-export-action\s*{[^}]*width:\s*42px;[^}]*height:\s*42px;[^}]*border-radius:\s*var\(--radius-control\);[^}]*background:\s*var\(--surface-action-subtle\);[^}]*box-shadow:\s*none;/s,
@@ -30,12 +36,39 @@ describe('trip map export styles', () => {
     );
   });
 
+  it('removes independent backdrop treatment from the integrated camera', () => {
+    expect(styles).toMatch(
+      /\.trip-map-export-action\s*{[^}]*-webkit-backdrop-filter:\s*none;[^}]*backdrop-filter:\s*none;/s,
+    );
+  });
+
+  it('uses camera-specific hover feedback only while enabled', () => {
+    expect(styles).toMatch(
+      /\.trip-map-export-action:hover:not\(:disabled\)\s*{[^}]*border-color:\s*var\(--border-hover\);[^}]*background:\s*var\(--surface-control-hover\);/s,
+    );
+  });
+
+  it('preserves compact geometry and subdued styling while disabled', () => {
+    expect(styles).toMatch(
+      /\.trip-map-export-action:disabled\s*{[^}]*width:\s*42px;[^}]*height:\s*42px;[^}]*color:\s*var\(--text-disabled\);[^}]*background:\s*var\(--surface-action-subtle\);[^}]*cursor:\s*not-allowed;[^}]*opacity:\s*0\.52;/s,
+    );
+  });
+
+  it('anchors export errors beneath the integrated camera edge', () => {
+    expect(styles).toMatch(
+      /\.trip-map-export-error\s*{[^}]*top:\s*calc\(100% \+ 8px\);[^}]*right:\s*8px;/s,
+    );
+  });
+
   it('keeps the integrated rail on one mobile row', () => {
     expect(styles).toMatch(
       /@media \(max-width:\s*760px\)\s*{[^}]*\.top-toolbar\s*{[^}]*right:\s*12px;[^}]*left:\s*12px;[^}]*flex-wrap:\s*nowrap;[^}]*}/s,
     );
     expect(styles).toMatch(
       /@media \(max-width:\s*760px\)\s*{[^}]*\.top-toolbar \.search-group\s*{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*0;/s,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width:\s*760px\)\s*{[^@]*\.top-toolbar \.search-results\s*{[^}]*width:\s*100%;/s,
     );
   });
 
