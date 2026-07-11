@@ -1437,6 +1437,44 @@ describe('App', () => {
     expect(screen.queryByText('Adjusted endpoint')).not.toBeInTheDocument();
   });
 
+  it('does not publish a stale route option error when route intent changes while options are loading', async () => {
+    const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const hamburg = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createRouteLeg({
+      originDestinationId: bremen.id,
+      targetDestinationId: hamburg.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 125,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'original-route',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+      notes: 'Original intent.',
+    });
+    const optionsLoad = createDeferred<RouteOption[]>();
+    vi.mocked(calculateOpenRouteServiceRouteOptions).mockReturnValueOnce(optionsLoad.promise);
+    repositoryMock.initialDestinations = Promise.resolve([bremen, hamburg]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit route from Bremen to Hamburg' }));
+    expect(screen.getByRole('status', { name: 'Calculating route options' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Set Bremen to Hamburg to Vehicle shipping' }));
+    await waitFor(() => expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      optionsLoad.reject(new Error('Provider unavailable for old route intent.'));
+      await optionsLoad.promise.catch(() => undefined);
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Route intent changed');
+    expect(screen.queryByText('Provider unavailable for old route intent.')).not.toBeInTheDocument();
+  });
+
   it.each([
     {
       name: 'fails when a required ferry is missing',

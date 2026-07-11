@@ -966,14 +966,23 @@ function TripWorkspace({
         );
       } catch (caught) {
         setRouteAlternativesState((current) =>
-          current?.routeLegId === routeLegId
-            ? {
-                ...current,
-                status: 'error',
-                options: [],
-                selectedOptionId: null,
-                error: caught instanceof Error ? caught.message : 'Unable to calculate route options',
-              }
+          current?.routeLegId === routeLegId &&
+          current.expectedFingerprint === expectedFingerprint
+            ? isRouteAlternativesFingerprintCurrent(routeLegId, expectedFingerprint)
+              ? {
+                  ...current,
+                  status: 'error',
+                  options: [],
+                  selectedOptionId: null,
+                  error: caught instanceof Error ? caught.message : 'Unable to calculate route options',
+                }
+              : {
+                  ...current,
+                  status: 'error',
+                  options: [],
+                  selectedOptionId: null,
+                  error: 'Route intent changed. Recalculate route options.',
+                }
             : current,
         );
       }

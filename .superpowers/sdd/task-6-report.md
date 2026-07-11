@@ -152,3 +152,63 @@ Result: passed, `62` files / `909` tests. Vitest emitted repeated Node `localSto
 - No functional concerns for the review fixes.
 - I did not implement itinerary-row warning behavior; Task 7 still owns that.
 - Pre-existing unrelated edits in `.superpowers/sdd/task-1-report.md` and `.superpowers/sdd/task-4-report.md` remain unstaged.
+
+## Final Catch-Path Fix Addendum
+
+### RED/GREEN
+
+RED:
+
+```bash
+npm test -- src/App.test.tsx
+```
+
+Expected failure confirmed: when route options were loading, changing the route intent, then rejecting the original options request surfaced `Provider unavailable for old route intent.` from the stale request instead of treating it as stale.
+
+GREEN:
+
+```bash
+npm test -- src/App.test.tsx
+```
+
+Result: passed, `1` file / `62` tests.
+
+Focused Task 6 verification:
+
+```bash
+npm test -- src/domain/routeOptions.test.ts src/adapters/openRouteService.test.ts src/components/RouteAlternativesPanel.test.tsx src/App.test.tsx src/hooks/useTripData.test.tsx
+```
+
+Result: passed, `5` files / `154` tests.
+
+### Stale Error Behavior
+
+- `openRouteAlternatives` now applies the same route-leg id, expected fingerprint, and current fingerprint guard in the catch path before publishing an error.
+- If an options request fails after the route intent has changed, the stale provider error is not shown; the panel is handled consistently with the stale success path and reports `Route intent changed. Recalculate route options.`
+- Current-intent failures still publish the real provider/application error.
+
+### Build and Full Suite
+
+```bash
+npm run build
+```
+
+Result: passed. Vite emitted the existing large chunk warning.
+
+```bash
+npm test
+```
+
+Result: passed, `62` files / `910` tests. Vitest emitted repeated Node `localStorage` experimental warnings; they did not affect the pass result.
+
+### Final Fix Files
+
+- `src/App.tsx`
+- `src/App.test.tsx`
+- `.superpowers/sdd/task-6-report.md`
+
+### Concerns
+
+- No functional concerns for the final catch-path fix.
+- I did not implement itinerary-row warning behavior; Task 7 still owns that.
+- Pre-existing unrelated edits in `.superpowers/sdd/task-1-report.md` and `.superpowers/sdd/task-4-report.md` remain unstaged.
