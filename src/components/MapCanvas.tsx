@@ -5,6 +5,11 @@ import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactP
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Activity, Coordinates, Destination, RouteLeg } from '../domain/types';
 import { calmBasemapStyle, mapLabelFontStack, mapStyleUrl, readMapLayerColors } from '../map/mapPresentation';
+import {
+  buildStopPillPresentations,
+  stopPillClassName,
+  type StopPillPresentation,
+} from '../map/stopPillPresentation';
 import { buildRenderableRouteFeatures } from '../map/tripRouteFeatures';
 import type { RouteFeatureProperties } from '../map/tripRouteFeatures';
 import { formatStopMarker } from './stopLabels';
@@ -49,15 +54,7 @@ type CityFeatureProperties = {
   name: string;
 };
 
-type ProjectedDestinationLabel = {
-  id: string;
-  name: string;
-  label: string;
-  selected: boolean;
-  position: LabelPosition;
-  x: number;
-  y: number;
-};
+type ProjectedDestinationLabel = StopPillPresentation;
 
 type ProjectedActivityLabel = {
   id: string;
@@ -669,15 +666,15 @@ function labelCandidateBounds(input: { title: string; x: number; y: number }, po
 
 function destinationLabelBounds(label: ProjectedDestinationLabel) {
   return labelCandidateBounds(
-    { title: `${label.label} - ${label.name}`, x: label.x, y: label.y },
+    { title: label.text, x: label.x, y: label.y },
     label.position,
   );
 }
 
-function positionDestinationLabels(labels: Array<Omit<ProjectedDestinationLabel, 'position'>>) {
+function positionDestinationLabels(labels: ProjectedDestinationLabel[]) {
   const belowBounds = labels.map((label) =>
     renderedLabelBounds(
-      { title: `${label.label} - ${label.name}`, x: label.x, y: label.y },
+      { title: label.text, x: label.x, y: label.y },
       'below',
     ),
   );
@@ -936,16 +933,10 @@ export function MapCanvas({
     if (!map) return [];
 
     return positionDestinationLabels(
-      latestDestinationsRef.current.map((destination, index) => {
-        const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
-        return {
-          id: destination.id,
-          name: destination.name,
-          label: formatStopMarker(index + 1),
-          selected: destination.id === latestSelectedDestinationIdRef.current,
-          x: point.x,
-          y: point.y,
-        };
+      buildStopPillPresentations({
+        destinations: latestDestinationsRef.current,
+        selectedDestinationId: latestSelectedDestinationIdRef.current,
+        project: (coordinates) => map.project(coordinates),
       }),
     );
   }, []);
@@ -1614,13 +1605,8 @@ export function MapCanvas({
             <button
               key={destinationLabel.id}
               type="button"
-              className={[
-                'map-destination-label',
-                destinationLabel.position === 'above' ? 'map-label-position-above' : '',
-                destinationLabel.selected ? 'is-selected' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
+              className={stopPillClassName(destinationLabel)}
+              data-stop-pill-id={destinationLabel.id}
               style={{
                 left: `${destinationLabel.x}px`,
                 top: `${destinationLabel.y}px`,
@@ -1628,7 +1614,7 @@ export function MapCanvas({
               aria-label={`Open ${destinationLabel.name} stop details`}
               onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
             >
-              {destinationLabel.label} - {destinationLabel.name}
+              {destinationLabel.text}
             </button>
           ))}
           {projectedActivityLabels.map((activityLabel) => (
