@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDestination } from './destinations';
+import { createDestination, updateDestination } from './destinations';
 import { createRouteKey, createRouteLeg } from './routeLegs';
 import { resolveVehiclePreset } from './vehiclePresets';
 import {
@@ -502,6 +502,206 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs).toEqual([selectedAlternativeLeg]);
     expect(result.removedRouteLegIds).toEqual([]);
+  });
+
+  it('preserves an adjusted-endpoint recovered route across destination rename and notes edits', () => {
+    const origin = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0573, lng: -0.1349 },
+      order: 0,
+    });
+    const targetCoordinates = { lat: 69.96887, lng: 23.27165 };
+    const targetAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: targetCoordinates,
+      snapDistanceKm: 1.61,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const target = {
+      ...createDestination({ name: 'Alta', coordinates: targetCoordinates, order: 1 }),
+      routingAnchors: { 'driving-car': targetAnchor },
+    };
+    const recoveredLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100,
+      travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [origin.coordinates.lng, origin.coordinates.lat],
+          [targetAnchor.coordinates.lng, targetAnchor.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({
+        origin: origin.coordinates,
+        target: target.coordinates,
+        variant: 'adjusted-endpoint',
+      }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{
+        code: 'ROUTING_ANCHOR_ADJUSTED',
+        message: 'Route target uses a routing point 1.6 km from the stop.',
+      }],
+    });
+    const renamedOrigin = updateDestination(origin, {
+      name: 'Home',
+      research: { ...origin.research, notes: 'Depart after breakfast.' },
+    });
+
+    const result = reconcileRouteLegsForDestinations([renamedOrigin, target], [recoveredLeg]);
+
+    expect(result.routeLegs[0]).toBe(recoveredLeg);
+  });
+
+  it('preserves a warned driving-car fallback route for the current HGV intent', () => {
+    const routingVehicle = resolveVehiclePreset('expedition-truck');
+    const origin = createDestination({ name: 'Balcombe', coordinates: { lat: 51.0573, lng: -0.1349 }, order: 0 });
+    const target = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 }, order: 1 });
+    const recoveredLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100,
+      travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [origin.coordinates.lng, origin.coordinates.lat],
+          [target.coordinates.lng, target.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({
+        origin: origin.coordinates,
+        target: target.coordinates,
+        routingVehicle,
+        profile: 'driving-car',
+        variant: 'profile-fallback',
+      }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated.',
+      }],
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, target], [recoveredLeg], routingVehicle);
+
+    expect(result.routeLegs[0]).toBe(recoveredLeg);
+  });
+
+  it('invalidates fallback provenance when the requested vehicle is no longer HGV', () => {
+    const origin = createDestination({ name: 'Balcombe', coordinates: { lat: 51.0573, lng: -0.1349 }, order: 0 });
+    const target = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 }, order: 1 });
+    const staleFallback = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100,
+      travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[origin.coordinates.lng, origin.coordinates.lat], [target.coordinates.lng, target.coordinates.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated.',
+      }],
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, target], [staleFallback]);
+
+    expect(result.routeLegs[0]).toMatchObject({ status: 'pending', profile: 'driving-car' });
+  });
+
+  it('invalidates an adjusted-endpoint recovered route after its stop coordinates change', () => {
+    const origin = createDestination({ name: 'Balcombe', coordinates: { lat: 51.0573, lng: -0.1349 }, order: 0 });
+    const targetCoordinates = { lat: 69.96887, lng: 23.27165 };
+    const targetAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: targetCoordinates,
+      snapDistanceKm: 1.61,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const target = {
+      ...createDestination({ name: 'Alta', coordinates: targetCoordinates, order: 1 }),
+      routingAnchors: { 'driving-car': targetAnchor },
+    };
+    const recoveredLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100,
+      travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [origin.coordinates.lng, origin.coordinates.lat],
+          [targetAnchor.coordinates.lng, targetAnchor.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{
+        code: 'ROUTING_ANCHOR_ADJUSTED',
+        message: 'Route target uses a routing point 1.6 km from the stop.',
+      }],
+    });
+    const movedTarget = updateDestination(target, {
+      coordinates: { lat: 69.97, lng: 23.28 },
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, movedTarget], [recoveredLeg]);
+
+    expect(movedTarget.routingAnchors).toEqual({});
+    expect(result.routeLegs[0]).toMatchObject({
+      id: recoveredLeg.id,
+      status: 'pending',
+      geometry: undefined,
+      provider: undefined,
+      profile: 'driving-car',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: movedTarget.coordinates }),
+    });
+  });
+
+  it('invalidates a driving-car route for HGV intent when fallback provenance is missing', () => {
+    const routingVehicle = resolveVehiclePreset('expedition-truck');
+    const origin = createDestination({ name: 'Balcombe', coordinates: { lat: 51.0573, lng: -0.1349 }, order: 0 });
+    const target = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 }, order: 1 });
+    const unqualifiedFallback = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100,
+      travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[origin.coordinates.lng, origin.coordinates.lat], [target.coordinates.lng, target.coordinates.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, routingVehicle }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, target], [unqualifiedFallback], routingVehicle);
+
+    expect(result.routeLegs[0]).toMatchObject({ status: 'pending', profile: 'driving-hgv' });
   });
 
   it('marks selected driving alternatives pending when endpoints no longer match', () => {

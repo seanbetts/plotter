@@ -178,7 +178,7 @@ describe('route orchestration', () => {
     expect(result.destinations[1].routingAnchors['driving-car']?.snapDistanceKm).toBeCloseTo(1.609, 3);
     expect(result.routeLegs).toMatchObject([
       { status: 'ready', warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED' }] },
-      { status: 'ready', warnings: [] },
+      { status: 'ready', warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED' }] },
     ]);
   });
 

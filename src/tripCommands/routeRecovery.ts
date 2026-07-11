@@ -97,6 +97,13 @@ function targetAnchorFor(input: RecoveryInput, profile: TripRoutingVehicle['prof
   return matchingAnchor({ anchor: input.targetAnchor, anchors: input.targetAnchors, profile });
 }
 
+function savedAnchorsFor(input: RecoveryInput, profile: TripRoutingVehicle['profile']) {
+  return {
+    origin: originAnchorFor(input, profile),
+    target: targetAnchorFor(input, profile),
+  };
+}
+
 function requestWithSavedAnchors(input: RecoveryInput, profile: TripRoutingVehicle['profile']): ProviderRouteRequest {
   const originAnchor = originAnchorFor(input, profile);
   const targetAnchor = targetAnchorFor(input, profile);
@@ -199,7 +206,7 @@ function anchorWarning(endpointAnchors: RecoveredRoute['endpointAnchors']): Rout
 function vehicleFallbackWarning(): RouteWarning {
   return {
     code: 'VEHICLE_PROFILE_FALLBACK',
-    message: 'OpenRouteService could not calculate this leg with the requested vehicle profile, so driving-car was used.',
+    message: 'OpenRouteService could not calculate this leg with the requested vehicle profile, so driving-car was used; truck dimensions were not validated.',
   };
 }
 
@@ -257,12 +264,18 @@ async function calculateWithEndpointRecovery(
         profile: route.profile,
       });
 
-  const endpointAnchors = {
+  const endpointAnchors: RecoveredRoute['endpointAnchors'] = {
     ...(coordinateIndex === 0 ? { origin: endpointAnchor } : {}),
     ...(coordinateIndex === targetIndex ? { target: endpointAnchor } : {}),
   };
+  const savedAnchors = savedAnchorsFor(input, profile);
+  const usedAnchors: RecoveredRoute['endpointAnchors'] = {
+    ...(coordinateIndex === 0 ? {} : { origin: savedAnchors.origin }),
+    ...(coordinateIndex === targetIndex ? {} : { target: savedAnchors.target }),
+    ...endpointAnchors,
+  };
 
-  return asRecoveredRoute(route, anchorWarning(endpointAnchors), endpointAnchors);
+  return asRecoveredRoute(route, anchorWarning(usedAnchors), endpointAnchors);
 }
 
 async function calculateDrivingCarFallback(
@@ -271,7 +284,7 @@ async function calculateDrivingCarFallback(
 ) {
   try {
     const route = await calculate(requestWithSavedAnchors(input, 'driving-car'));
-    return asRecoveredRoute(route, [vehicleFallbackWarning()]);
+    return asRecoveredRoute(route, [vehicleFallbackWarning(), ...anchorWarning(savedAnchorsFor(input, 'driving-car'))]);
   } catch (carError) {
     const carEndpointIndex = endpointRecoveryIndex(carError, input);
     if (carEndpointIndex === null) throw carError;
@@ -289,7 +302,11 @@ export async function calculateRouteWithRecovery(
 ): Promise<RecoveredRoute> {
   try {
     const route = await calculate(requestWithSavedAnchors(input, input.profile));
-    return asRecoveredRoute(route);
+    const recoveredRoute = asRecoveredRoute(route);
+    return asRecoveredRoute(recoveredRoute, [
+      ...recoveredRoute.warnings,
+      ...anchorWarning(savedAnchorsFor(input, input.profile)),
+    ]);
   } catch (initialError) {
     const initialEndpointIndex = endpointRecoveryIndex(initialError, input);
     if (initialEndpointIndex !== null) {

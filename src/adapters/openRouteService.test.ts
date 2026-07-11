@@ -713,17 +713,19 @@ describe('OpenRouteService adapter', () => {
   });
 
   it('keeps the current recovered route available when provider option requests fail', async () => {
+    const canonicalTarget = target;
+    const anchoredTarget = { lat: target.lat + 0.01, lng: target.lng };
     const geometry: LineString = {
       type: 'LineString',
       coordinates: [
         [origin.lng, origin.lat],
-        [target.lng, target.lat],
+        [anchoredTarget.lng, anchoredTarget.lat],
       ],
     };
     const targetAnchor: RoutingAnchor = {
       profile: 'driving-car',
-      coordinates: target,
-      originalCoordinates: { lat: target.lat - 0.01, lng: target.lng },
+      coordinates: anchoredTarget,
+      originalCoordinates: canonicalTarget,
       snapDistanceKm: 1.1,
       provider: 'openrouteservice',
       resolvedAt: '2026-07-11T00:00:00.000Z',
@@ -744,7 +746,10 @@ describe('OpenRouteService adapter', () => {
       calculatedAt: '2026-07-11T08:00:00.000Z',
       warnings: [{
         code: 'VEHICLE_PROFILE_FALLBACK',
-        message: 'OpenRouteService could not calculate this leg with the requested vehicle profile, so driving-car was used.',
+        message: 'OpenRouteService used driving-car; truck dimensions were not validated.',
+      }, {
+        code: 'ROUTING_ANCHOR_ADJUSTED',
+        message: 'Route target uses a routing point 1.1 km from the stop.',
       }],
     });
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('provider unavailable')));
@@ -752,7 +757,7 @@ describe('OpenRouteService adapter', () => {
     const options = await calculateOpenRouteServiceRouteOptions({
       apiKey: 'ors-key',
       origin,
-      target,
+      target: canonicalTarget,
       routingVehicle: resolveVehiclePreset('expedition-truck'),
       currentRouteLeg,
       targetAnchors: { 'driving-car': targetAnchor },
@@ -766,11 +771,118 @@ describe('OpenRouteService adapter', () => {
       travelTimeHours: 8.25,
       geometry,
       profile: 'driving-car',
-      warnings: [expect.objectContaining({ code: 'VEHICLE_PROFILE_FALLBACK' })],
+      warnings: [
+        expect.objectContaining({ code: 'VEHICLE_PROFILE_FALLBACK' }),
+        expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED' }),
+      ],
       endpointAnchors: { target: targetAnchor },
     });
     expect(options[0].routeKey).toBe('old-recovered-key');
     expect(options[0].id).toContain('old-recovered-key');
+  });
+
+  it('does not attach unrelated destination anchors to a normal current route option', async () => {
+    const unrelatedTargetAnchor: RoutingAnchor = {
+      profile: 'driving-car',
+      coordinates: { lat: target.lat + 0.01, lng: target.lng },
+      originalCoordinates: target,
+      snapDistanceKm: 1.1,
+      provider: 'openrouteservice',
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const currentRouteLeg = createRouteLeg({
+      originDestinationId: 'origin-id',
+      targetDestinationId: 'target-id',
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 615,
+      travelTimeHours: 8.25,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'normal-current-key',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
+      calculatedAt: '2026-07-11T08:00:00.000Z',
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('provider unavailable')));
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin,
+      target,
+      currentRouteLeg,
+      targetAnchors: { 'driving-car': unrelatedTargetAnchor },
+    });
+
+    expect(options).toHaveLength(1);
+    expect(options[0]).toMatchObject({
+      source: 'recommended',
+      endpointAnchors: {},
+      routeKey: 'normal-current-key',
+    });
+  });
+
+  it('excludes an adjusted current route when its anchor does not verify the geometry and canonical stop', async () => {
+    const unrelatedTargetAnchor: RoutingAnchor = {
+      profile: 'driving-car',
+      coordinates: { lat: target.lat + 0.02, lng: target.lng },
+      originalCoordinates: { lat: target.lat - 0.01, lng: target.lng },
+      snapDistanceKm: 1.1,
+      provider: 'openrouteservice',
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const currentRouteLeg = createRouteLeg({
+      originDestinationId: 'origin-id',
+      targetDestinationId: 'target-id',
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 615,
+      travelTimeHours: 8.25,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[origin.lng, origin.lat], [target.lng, target.lat + 0.01]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'unverifiable-adjusted-key',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
+      calculatedAt: '2026-07-11T08:00:00.000Z',
+      warnings: [{
+        code: 'ROUTING_ANCHOR_ADJUSTED',
+        message: 'Route target uses a routing point 1.1 km from the stop.',
+      }],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [0, 1, 2].map((index) => ({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [origin.lng, origin.lat],
+              [origin.lng + index * 0.01, origin.lat + index * 0.01],
+              [target.lng, target.lat],
+            ],
+          },
+          properties: { summary: { distance: 615_000 + index * 1_000, duration: 29_700 + index * 60 } },
+        })),
+      }),
+    }));
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin,
+      target,
+      currentRouteLeg,
+      targetAnchors: { 'driving-car': unrelatedTargetAnchor },
+    });
+
+    expect(options).toHaveLength(3);
+    expect(options).not.toContainEqual(expect.objectContaining({ routeKey: 'unverifiable-adjusted-key' }));
+    expect(options).not.toContainEqual(expect.objectContaining({ source: 'adjusted-endpoint' }));
   });
 
   it('rejects malformed current recovered routes from selectable options', async () => {

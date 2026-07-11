@@ -67,6 +67,19 @@ function routeGeometryMatchesCoordinates(
   );
 }
 
+function routeHasWarning(routeLeg: RouteLeg, code: NonNullable<RouteLeg['warnings']>[number]['code']) {
+  return (routeLeg.warnings ?? []).some((warning) => warning.code === code);
+}
+
+function routeProfileMatchesCurrentIntent(routeLeg: RouteLeg, routingVehicle: TripRoutingVehicle) {
+  const hasFallbackProvenance = routeHasWarning(routeLeg, 'VEHICLE_PROFILE_FALLBACK');
+  if (hasFallbackProvenance) {
+    return routingVehicle.profile === 'driving-hgv' && routeLeg.profile === 'driving-car';
+  }
+
+  return routeLeg.profile === routingVehicle.profile;
+}
+
 function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg, routingVehicle: TripRoutingVehicle) {
   return (
     routeLeg.movement === 'drive' &&
@@ -76,7 +89,7 @@ function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg, routing
     routeLeg.distanceKm !== undefined &&
     routeLeg.travelTimeHours !== undefined &&
     routeLeg.provider &&
-    routeLeg.profile === routingVehicle.profile &&
+    routeProfileMatchesCurrentIntent(routeLeg, routingVehicle) &&
     routeLeg.routeKey &&
     routeLeg.calculatedAt &&
     !routeLeg.error
@@ -93,7 +106,7 @@ function routeKeyMatchesCurrentIntent(
   if (!routeKey) return false;
   try {
     const parsed = JSON.parse(routeKey) as { variant?: string; providerOptions?: Record<string, unknown> };
-    return routeKey === createRouteKey({
+    const keyInput = {
       origin: origin.coordinates,
       target: target.coordinates,
       routingVehicle,
@@ -103,10 +116,52 @@ function routeKeyMatchesCurrentIntent(
       ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
       variant: parsed.variant ?? undefined,
       providerOptions: parsed.providerOptions ?? {},
-    });
+    };
+    const currentProfileKey = createRouteKey(keyInput);
+    const actualProfileKey = routeLeg.profile === 'driving-car' || routeLeg.profile === 'driving-hgv'
+      ? createRouteKey({ ...keyInput, profile: routeLeg.profile })
+      : currentProfileKey;
+
+    return routeKey === currentProfileKey || routeKey === actualProfileKey;
   } catch {
     return false;
   }
+}
+
+function routeGeometryMatchesCurrentEndpoints(
+  routeLeg: RouteLeg,
+  origin: Destination,
+  target: Destination,
+) {
+  const coordinates = routeLeg.geometry?.coordinates;
+  const firstCoordinate = coordinates?.[0];
+  const lastCoordinate = coordinates?.at(-1);
+  const hasAdjustedAnchorProvenance = routeHasWarning(routeLeg, 'ROUTING_ANCHOR_ADJUSTED');
+  const profile = routeLeg.profile === 'driving-car' || routeLeg.profile === 'driving-hgv'
+    ? routeLeg.profile
+    : undefined;
+
+  const endpointMatches = (coordinate: number[] | undefined, destination: Destination) => {
+    if (
+      coordinateMatches(coordinate?.[0], destination.coordinates.lng, drivingGeometryEndpointTolerance) &&
+      coordinateMatches(coordinate?.[1], destination.coordinates.lat, drivingGeometryEndpointTolerance)
+    ) {
+      return true;
+    }
+    if (!hasAdjustedAnchorProvenance || !profile) return false;
+
+    const anchor = destination.routingAnchors[profile];
+    return Boolean(
+      anchor &&
+      anchor.profile === profile &&
+      coordinateMatches(anchor.originalCoordinates.lng, destination.coordinates.lng) &&
+      coordinateMatches(anchor.originalCoordinates.lat, destination.coordinates.lat) &&
+      coordinateMatches(coordinate?.[0], anchor.coordinates.lng, drivingGeometryEndpointTolerance) &&
+      coordinateMatches(coordinate?.[1], anchor.coordinates.lat, drivingGeometryEndpointTolerance),
+    );
+  };
+
+  return endpointMatches(firstCoordinate, origin) && endpointMatches(lastCoordinate, target);
 }
 
 function refreshRouteLegForDestinationCoordinates(
@@ -139,7 +194,7 @@ function refreshRouteLegForDestinationCoordinates(
     if (
       hasCompleteAppImplementableDrivingRouteData(routeLeg, routingVehicle) &&
       routeKeyMatchesCurrentIntent(routeLeg, origin, target, routingVehicle) &&
-      routeGeometryMatchesCoordinates(routeLeg, origin, target, drivingGeometryEndpointTolerance)
+      routeGeometryMatchesCurrentEndpoints(routeLeg, origin, target)
     ) {
       return routeLeg;
     }

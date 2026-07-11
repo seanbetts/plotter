@@ -530,16 +530,11 @@ function isSupportedProfile(profile: string | undefined): profile is OpenRouteSe
 
 function routeOptionSourceFromWarnings(
   warnings: RouteWarning[],
-  endpointAnchors: RouteOptionEndpointAnchors,
 ): Extract<RouteOptionSource, 'recommended' | 'adjusted-endpoint' | 'profile-fallback'> {
   if (warnings.some((warning) => warning.code === 'VEHICLE_PROFILE_FALLBACK')) {
     return 'profile-fallback';
   }
-  if (
-    warnings.some((warning) => warning.code === 'ROUTING_ANCHOR_ADJUSTED') ||
-    endpointAnchors.origin ||
-    endpointAnchors.target
-  ) {
+  if (warnings.some((warning) => warning.code === 'ROUTING_ANCHOR_ADJUSTED')) {
     return 'adjusted-endpoint';
   }
   return 'recommended';
@@ -570,7 +565,7 @@ function routeOptionFromRecoveredRoute(input: {
   ferryPolicy: FerryPolicy;
   requestedProfile: OpenRouteServiceProfile;
 }) {
-  const source = routeOptionSourceFromWarnings(input.route.warnings, input.route.endpointAnchors);
+  const source = routeOptionSourceFromWarnings(input.route.warnings);
 
   const option = routeOptionFromCalculation({
     id: source,
@@ -601,6 +596,8 @@ function routeOptionFromRecoveredRoute(input: {
 
 function routeOptionFromCurrentRoute({
   currentRouteLeg,
+  origin,
+  target,
   originAnchors,
   targetAnchors,
 }: ResolvedCalculateRouteOptionsInput) {
@@ -622,12 +619,46 @@ function routeOptionFromCurrentRoute({
     return null;
   }
 
-  const endpointAnchors: RouteOptionEndpointAnchors = {
-    origin: originAnchors?.[currentRouteLeg.profile],
-    target: targetAnchors?.[currentRouteLeg.profile],
-  };
+  const currentProfile = currentRouteLeg.profile;
   const warnings = currentRouteLeg.warnings ?? [];
-  const source = routeOptionSourceFromWarnings(warnings, endpointAnchors);
+  const hasAdjustedAnchorProvenance = warnings.some((warning) => warning.code === 'ROUTING_ANCHOR_ADJUSTED');
+  const endpointAnchors: RouteOptionEndpointAnchors = {};
+  if (hasAdjustedAnchorProvenance) {
+    const firstCoordinate = currentRouteLeg.geometry.coordinates[0];
+    const lastCoordinate = currentRouteLeg.geometry.coordinates.at(-1)!;
+    const endpointMatches = (coordinate: number[], expected: Coordinates) => (
+      Math.abs(coordinate[0] - expected.lng) <= 0.000001 &&
+      Math.abs(coordinate[1] - expected.lat) <= 0.000001
+    );
+    const verifiedAnchor = (
+      coordinate: number[],
+      canonicalCoordinates: Coordinates,
+      anchors: RoutingAnchors | undefined,
+    ) => {
+      if (endpointMatches(coordinate, canonicalCoordinates)) return null;
+      const anchor = anchors?.[currentProfile];
+      if (
+        !anchor ||
+        anchor.profile !== currentProfile ||
+        !endpointMatches(
+          [anchor.originalCoordinates.lng, anchor.originalCoordinates.lat],
+          canonicalCoordinates,
+        ) ||
+        !endpointMatches(coordinate, anchor.coordinates)
+      ) {
+        return undefined;
+      }
+      return anchor;
+    };
+    const originAnchor = verifiedAnchor(firstCoordinate, origin, originAnchors);
+    const targetAnchor = verifiedAnchor(lastCoordinate, target, targetAnchors);
+    if (originAnchor === undefined || targetAnchor === undefined || (!originAnchor && !targetAnchor)) {
+      return null;
+    }
+    if (originAnchor) endpointAnchors.origin = originAnchor;
+    if (targetAnchor) endpointAnchors.target = targetAnchor;
+  }
+  const source = routeOptionSourceFromWarnings(warnings);
 
   return {
     id: stableRouteOptionId(source, currentRouteLeg.routeKey),

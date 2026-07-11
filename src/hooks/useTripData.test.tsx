@@ -1081,6 +1081,66 @@ describe('useTripData', () => {
     });
   });
 
+  it('preserves an adjusted recovered route without a provider call after destination rename and notes edits', async () => {
+    const repository = createTestRepository();
+    const origin = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0573, lng: -0.1349 },
+      order: 0,
+    });
+    const targetAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: { lat: 69.96887, lng: 23.27165 },
+      snapDistanceKm: 1.61,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const target = withRoutingAnchor(createDestination({
+      name: 'Alta',
+      coordinates: targetAnchor.originalCoordinates,
+      order: 1,
+    }), targetAnchor);
+    const recoveredLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100,
+      travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [origin.coordinates.lng, origin.coordinates.lat],
+          [targetAnchor.coordinates.lng, targetAnchor.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{
+        code: 'ROUTING_ANCHOR_ADJUSTED',
+        message: 'Route target uses a routing point 1.6 km from the stop.',
+      }],
+    });
+    await repository.saveDestination(origin);
+    await repository.saveDestination(target);
+    await repository.saveRouteLeg(recoveredLeg);
+    const calculateRoute = vi.fn();
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.updateDestination(origin.id, {
+        name: 'Home',
+        research: { ...origin.research, notes: 'Depart after breakfast.' },
+      });
+    });
+
+    expect(calculateRoute).not.toHaveBeenCalled();
+    expect(result.current.routeLegs[0]).toEqual(recoveredLeg);
+  });
+
   it('reorders destinations and recalculates adjacent route legs', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));

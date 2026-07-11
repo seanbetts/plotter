@@ -398,7 +398,7 @@ describe('route recovery', () => {
       return routeFor({ origin: request.origin, target: altaAnchorCoordinates, profile: request.profile });
     });
 
-    await calculateRouteWithRecovery({
+    const result = await calculateRouteWithRecovery({
       origin: balcombe,
       target: alta,
       profile: 'driving-car',
@@ -413,6 +413,13 @@ describe('route recovery', () => {
       target: alta,
       radiuses: [350, 350, 2000],
     }));
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('origin') }),
+      expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('target') }),
+    ]);
+    expect(result.endpointAnchors).toEqual({
+      target: expect.objectContaining({ profile: 'driving-car' }),
+    });
   });
 
   it('reuses an existing car anchor after HGV falls back to driving-car', async () => {
@@ -424,7 +431,7 @@ describe('route recovery', () => {
       return routeFor({ origin: request.origin, target: request.target, profile: request.profile });
     });
 
-    await calculateRouteWithRecovery({
+    const result = await calculateRouteWithRecovery({
       ...expeditionInput,
       targetAnchors: { 'driving-car': carTargetAnchor },
     }, calculate);
@@ -434,9 +441,52 @@ describe('route recovery', () => {
       target: carTargetAnchor.coordinates,
     }));
     expect(vi.mocked(calculate).mock.calls[1][0]).not.toHaveProperty('radiuses');
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: expect.stringContaining('truck dimensions were not validated'),
+      }),
+      expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('target') }),
+    ]);
+    expect(result.endpointAnchors).toEqual({});
   });
 
-  it('uses only saved anchors matching the requested profile and avoids rediscovery', async () => {
+  it.each([
+    { endpoints: 'origin', useOrigin: true, useTarget: false },
+    { endpoints: 'target', useOrigin: false, useTarget: true },
+    { endpoints: 'origin and target', useOrigin: true, useTarget: true },
+  ])('warns when a successful request reuses saved $endpoints anchors without returning them for persistence', async ({ useOrigin, useTarget }) => {
+    const originAnchor = savedAnchor('driving-car', balcombe, { lat: 51.06, lng: -0.13 });
+    const targetAnchor = savedAnchor('driving-car', alta, altaAnchorCoordinates);
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => (
+      routeFor({ origin: request.origin, target: request.target, profile: request.profile })
+    ));
+
+    const result = await calculateRouteWithRecovery({
+      origin: balcombe,
+      target: alta,
+      profile: 'driving-car',
+      routingVehicle: carVehicle,
+      waypoints: [],
+      ferryPolicy: 'allow',
+      originAnchors: useOrigin ? { 'driving-car': originAnchor } : undefined,
+      targetAnchors: useTarget ? { 'driving-car': targetAnchor } : undefined,
+    }, calculate);
+
+    expect(calculate).toHaveBeenCalledTimes(1);
+    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({
+      origin: useOrigin ? originAnchor.coordinates : balcombe,
+      target: useTarget ? targetAnchor.coordinates : alta,
+    }));
+    expect(vi.mocked(calculate).mock.calls[0][0]).not.toHaveProperty('radiuses');
+    expect(result.warnings).toEqual([
+      ...(useOrigin ? [expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('origin') })] : []),
+      ...(useTarget ? [expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('target') })] : []),
+    ]);
+    expect(result.endpointAnchors).toEqual({});
+  });
+
+  it('uses only saved anchors matching the requested profile', async () => {
     const carOriginAnchor = savedAnchor('driving-car', balcombe, { lat: 51.06, lng: -0.13 });
     const hgvTargetAnchor = savedAnchor('driving-hgv', alta, altaAnchorCoordinates);
     const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => (
@@ -449,13 +499,13 @@ describe('route recovery', () => {
       targetAnchors: { 'driving-hgv': hgvTargetAnchor },
     }, calculate);
 
-    expect(calculate).toHaveBeenCalledTimes(1);
     expect(calculate).toHaveBeenCalledWith(expect.objectContaining({
       origin: balcombe,
       target: hgvTargetAnchor.coordinates,
     }));
-    expect(vi.mocked(calculate).mock.calls[0][0]).not.toHaveProperty('radiuses');
-    expect(result.warnings).toEqual([]);
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('target') }),
+    ]);
     expect(result.endpointAnchors).toEqual({});
   });
 
