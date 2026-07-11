@@ -640,19 +640,30 @@ function estimateActivityLabelWidth(title: string) {
   );
 }
 
-function labelCandidateBounds(input: { title: string; x: number; y: number }, position: LabelPosition) {
+function renderedLabelBounds(input: { title: string; x: number; y: number }, position: LabelPosition) {
   const width = estimateActivityLabelWidth(input.title);
-  const left = input.x - width / 2 - activityLabelCollisionPaddingPx;
+  const left = input.x - width / 2;
   const top =
     position === 'above'
-      ? input.y - activityLabelVerticalOffsetPx - activityLabelHeightPx - activityLabelCollisionPaddingPx
-      : input.y + activityLabelVerticalOffsetPx - activityLabelCollisionPaddingPx;
+      ? input.y - activityLabelVerticalOffsetPx - activityLabelHeightPx
+      : input.y + activityLabelVerticalOffsetPx;
 
   return {
     left,
-    right: left + width + activityLabelCollisionPaddingPx * 2,
+    right: left + width,
     top,
-    bottom: top + activityLabelHeightPx + activityLabelCollisionPaddingPx * 2,
+    bottom: top + activityLabelHeightPx,
+  };
+}
+
+function labelCandidateBounds(input: { title: string; x: number; y: number }, position: LabelPosition) {
+  const renderedBounds = renderedLabelBounds(input, position);
+
+  return {
+    left: renderedBounds.left - activityLabelCollisionPaddingPx,
+    right: renderedBounds.right + activityLabelCollisionPaddingPx,
+    top: renderedBounds.top - activityLabelCollisionPaddingPx,
+    bottom: renderedBounds.bottom + activityLabelCollisionPaddingPx,
   };
 }
 
@@ -665,7 +676,7 @@ function destinationLabelBounds(label: ProjectedDestinationLabel) {
 
 function positionDestinationLabels(labels: Array<Omit<ProjectedDestinationLabel, 'position'>>) {
   const belowBounds = labels.map((label) =>
-    labelCandidateBounds(
+    renderedLabelBounds(
       { title: `${label.label} - ${label.name}`, x: label.x, y: label.y },
       'below',
     ),

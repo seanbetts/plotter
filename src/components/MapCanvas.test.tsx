@@ -1543,6 +1543,41 @@ describe('MapCanvas', () => {
     );
   });
 
+  it('keeps vertically separated stop pills below when their rendered bounds do not overlap', () => {
+    const verticallySeparatedDestination: Destination = {
+      ...targetDestination,
+      id: 'dest-vertical-gap',
+      name: 'Vertical return',
+      coordinates: {
+        lat: destination.coordinates.lat + 3,
+        lng: destination.coordinates.lng,
+      },
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination, verticallySeparatedDestination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+    act(() => { loadHandler(); });
+    maplibreMock.setZoom(4);
+    act(() => { zoomEndHandler(); });
+
+    expect(screen.getByRole('button', { name: 'Open Cappadocia stop details' })).not.toHaveClass(
+      'map-label-position-above',
+    );
+    expect(screen.getByRole('button', { name: 'Open Vertical return stop details' })).not.toHaveClass(
+      'map-label-position-above',
+    );
+  });
+
   it('hides destination stop labels until the map is zoomed into planning level', () => {
     render(
       <MapCanvas
