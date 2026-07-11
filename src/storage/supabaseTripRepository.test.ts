@@ -385,6 +385,33 @@ describe('supabase trip repository mappers', () => {
     expect(routeLegFromSupabaseRow(row)).toEqual(routeLeg);
   });
 
+  it('round-trips provider diagnostics and normalizes legacy nulls', () => {
+    const providerDiagnostic = {
+      provider: 'openrouteservice' as const,
+      httpStatus: 429,
+      code: 3099,
+      providerMessage: 'Rate limit exceeded.',
+      requestedProfile: 'driving-hgv' as const,
+      actualProfile: 'driving-car' as const,
+      retryAfterMs: 2_000,
+      attempts: 2,
+      retryAttempts: 1,
+    };
+    const routeLeg = createRouteLeg({
+      originDestinationId: 'origin-id',
+      targetDestinationId: 'target-id',
+      status: 'failed',
+      error: 'OpenRouteService route calculation failed.',
+      providerDiagnostic,
+    });
+
+    const row = routeLegToSupabaseRow(routeLeg, 'trip-1');
+
+    expect(row.provider_diagnostic).toEqual(providerDiagnostic);
+    expect(routeLegFromSupabaseRow(row)).toEqual(routeLeg);
+    expect(routeLegFromSupabaseRow({ ...row, provider_diagnostic: null }).providerDiagnostic).toBeUndefined();
+  });
+
   it('maps activities to and from Supabase rows', () => {
     const activity: Activity = {
       ...createActivityModel({

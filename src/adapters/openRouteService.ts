@@ -3,6 +3,7 @@ import type {
   Coordinates,
   FerryPolicy,
   RouteLeg,
+  RouteProviderDiagnostic,
   RouteSection,
   RouteWaypoint,
   RouteWarning,
@@ -83,6 +84,8 @@ export class OpenRouteServiceError extends Error {
   readonly coordinateIndex?: number;
   readonly profile: OpenRouteServiceProfile;
   readonly retryAfterMs?: number;
+  readonly attempts?: number;
+  readonly retryAttempts?: number;
 
   constructor(details: {
     status: number;
@@ -91,6 +94,8 @@ export class OpenRouteServiceError extends Error {
     coordinateIndex?: number;
     profile: OpenRouteServiceProfile;
     retryAfterMs?: number;
+    attempts?: number;
+    retryAttempts?: number;
   }) {
     super(`OpenRouteService route calculation failed (HTTP ${details.status}): ${details.providerMessage}`);
     this.status = details.status;
@@ -99,12 +104,32 @@ export class OpenRouteServiceError extends Error {
     this.coordinateIndex = details.coordinateIndex;
     this.profile = details.profile;
     this.retryAfterMs = details.retryAfterMs;
+    this.attempts = details.attempts;
+    this.retryAttempts = details.retryAttempts;
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 export function isOpenRouteServiceError(error: unknown): error is OpenRouteServiceError {
   return error instanceof OpenRouteServiceError;
+}
+
+export function routeProviderDiagnosticFromOpenRouteServiceError(
+  error: OpenRouteServiceError,
+  requestedProfile?: OpenRouteServiceProfile,
+): RouteProviderDiagnostic {
+  return {
+    provider: 'openrouteservice',
+    httpStatus: error.status,
+    ...(error.code !== undefined ? { code: error.code } : {}),
+    providerMessage: error.providerMessage,
+    ...(error.coordinateIndex !== undefined ? { coordinateIndex: error.coordinateIndex } : {}),
+    ...(requestedProfile ? { requestedProfile } : {}),
+    actualProfile: error.profile,
+    ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
+    ...(error.attempts !== undefined ? { attempts: error.attempts } : {}),
+    ...(error.retryAttempts !== undefined ? { retryAttempts: error.retryAttempts } : {}),
+  };
 }
 
 const provider = 'openrouteservice';

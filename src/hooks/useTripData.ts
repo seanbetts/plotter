@@ -633,6 +633,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
                 ...routeLegForFinalization,
                 status: 'pending' as const,
                 error: undefined,
+                providerDiagnostic: undefined,
               }
               : routeLegForFinalization;
 
@@ -719,6 +720,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               warnings: validatedRouteLeg.warnings,
               calculatedAt: validatedRouteLeg.calculatedAt,
               error: validatedRouteLeg.error,
+              providerDiagnostic: validatedRouteLeg.providerDiagnostic,
               updatedAt: createTimestamp(),
             };
             if (!hasFinalizedAutomaticRouteResult(updated)) {

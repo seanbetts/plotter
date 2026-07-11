@@ -1990,6 +1990,13 @@ describe('useTripData', () => {
       movement: 'drive', calculation: 'automatic',
       status: 'failed',
       error: 'Load failed',
+      providerDiagnostic: {
+        provider: 'openrouteservice',
+        httpStatus: 429,
+        providerMessage: 'Rate limit exceeded.',
+        requestedProfile: 'driving-car',
+        actualProfile: 'driving-car',
+      },
     });
     const routeCalculation = createDeferred({
       distanceKm: 610,
@@ -2023,6 +2030,7 @@ describe('useTripData', () => {
       id: failedLeg.id,
       status: 'pending',
       error: undefined,
+      providerDiagnostic: undefined,
     });
 
     await act(async () => {
@@ -2035,6 +2043,47 @@ describe('useTripData', () => {
       status: 'ready',
       distanceKm: 610,
     });
+  });
+
+  it('persists a provider diagnostic from a validated failed result', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    let storedRouteLeg = routeLeg;
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg: async (nextRouteLeg) => { storedRouteLeg = nextRouteLeg; },
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const providerDiagnostic = {
+      provider: 'openrouteservice' as const,
+      httpStatus: 503,
+      providerMessage: 'Provider unavailable.',
+      requestedProfile: 'driving-car' as const,
+      actualProfile: 'driving-car' as const,
+    };
+
+    let applied = false;
+    await act(async () => {
+      applied = await result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint: createRouteResultFingerprint(routeLeg, standardRoutingVehicle),
+        validatedRouteLeg: {
+          ...routeLeg,
+          status: 'failed',
+          distanceKm: undefined,
+          travelTimeHours: undefined,
+          geometry: undefined,
+          error: 'OpenRouteService route calculation failed (HTTP 503): Provider unavailable.',
+          providerDiagnostic,
+        },
+      });
+    });
+
+    expect(applied).toBe(true);
+    expect(storedRouteLeg.providerDiagnostic).toEqual(providerDiagnostic);
+    expect(result.current.routeLegs[0].providerDiagnostic).toEqual(providerDiagnostic);
   });
 
   it('rejects a validated result when intent changed before the action runs', async () => {

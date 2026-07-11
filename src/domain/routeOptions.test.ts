@@ -407,7 +407,8 @@ describe('route option helpers', () => {
       variant: 'avoid:highways',
     });
 
-    expect(routeLegPatchFromRouteOption(option, '2026-07-04T12:00:00.000Z')).toEqual({
+    const patch = routeLegPatchFromRouteOption(option, '2026-07-04T12:00:00.000Z');
+    expect(patch).toEqual({
       movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 520,
@@ -420,7 +421,9 @@ describe('route option helpers', () => {
       warnings: [],
       calculatedAt: '2026-07-04T12:00:00.000Z',
       error: undefined,
+      providerDiagnostic: undefined,
     });
+    expect(patch).toHaveProperty('providerDiagnostic', undefined);
     expect(routeLeg).not.toHaveProperty('type');
   });
 

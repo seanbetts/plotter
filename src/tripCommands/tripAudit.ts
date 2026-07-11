@@ -1,5 +1,5 @@
 import { coordinateDistanceKm } from '../domain/routePlanner';
-import type { Activity, Destination, RouteLeg } from '../domain/types';
+import type { Activity, Destination, RouteLeg, RouteProviderDiagnostic } from '../domain/types';
 
 export type TripAuditSeverity = 'error' | 'warning';
 
@@ -32,6 +32,7 @@ export type TripAuditIssue = {
   activity?: TripAuditLocationContext;
   origin?: TripAuditLocationContext;
   target?: TripAuditLocationContext;
+  providerDiagnostic?: RouteProviderDiagnostic;
 };
 
 export type TripAuditReport = {
@@ -113,6 +114,7 @@ export function auditTripSnapshot(input: {
         routeLegId: routeLeg.id,
         originDestinationId: routeLeg.originDestinationId,
         targetDestinationId: routeLeg.targetDestinationId,
+        ...(routeLeg.providerDiagnostic ? { providerDiagnostic: routeLeg.providerDiagnostic } : {}),
         ...(origin ? { origin: destinationContext(origin) } : {}),
         ...(target ? { target: destinationContext(target) } : {}),
       });

@@ -42,6 +42,16 @@ function createRepository(routeLegs: RouteLeg[] = []) {
 }
 
 describe('route orchestration', () => {
+  const staleProviderDiagnostic = {
+    provider: 'openrouteservice' as const,
+    httpStatus: 404,
+    code: 2010,
+    providerMessage: 'Stale provider failure.',
+    coordinateIndex: 1,
+    requestedProfile: 'driving-car' as const,
+    actualProfile: 'driving-car' as const,
+  };
+
   it('returns recovered route legs and destination anchor updates as one batch', async () => {
     const origin = createDestination({ name: 'Olderdalen', coordinates: { lat: 69.6041, lng: 20.5326 } });
     const alta = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 } });
@@ -228,6 +238,7 @@ describe('route orchestration', () => {
       status: 'review-required',
       ferryPolicy,
       warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'stale warning' }],
+      providerDiagnostic: staleProviderDiagnostic,
       notes: 'Preserve these notes.',
     });
 
@@ -257,6 +268,7 @@ describe('route orchestration', () => {
       ferryPolicy,
       waypoints: routeLeg.waypoints,
       notes: 'Preserve these notes.',
+      providerDiagnostic: undefined,
     });
   });
 
@@ -269,6 +281,7 @@ describe('route orchestration', () => {
       movement: 'drive', calculation: 'automatic',
       status: 'review-required',
       warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'stale warning' }],
+      providerDiagnostic: staleProviderDiagnostic,
     });
     const geometry = { type: 'LineString' as const, coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] };
 
@@ -294,6 +307,7 @@ describe('route orchestration', () => {
       geometry,
       warnings: [],
       error: undefined,
+      providerDiagnostic: undefined,
     });
   });
 
@@ -403,6 +417,7 @@ describe('route orchestration', () => {
       movement: 'drive', calculation: 'automatic',
       status: 'failed',
       error: 'Load failed',
+      providerDiagnostic: staleProviderDiagnostic,
       routeKey: createRouteKey({ origin: origin.coordinates, target: middle.coordinates }),
     });
     const repository = createRepository([failedLeg]);
@@ -438,7 +453,11 @@ describe('route orchestration', () => {
       ferryPolicy: 'allow',
     });
     expect(routeLegs[0]).toBe(failedLeg);
-    expect(routeLegs[0]).toMatchObject({ status: 'failed', error: 'Load failed' });
+    expect(routeLegs[0]).toMatchObject({
+      status: 'failed',
+      error: 'Load failed',
+      providerDiagnostic: staleProviderDiagnostic,
+    });
     expect(routeLegs[1]).toMatchObject({ status: 'ready' });
   });
 
@@ -663,6 +682,7 @@ describe('route orchestration', () => {
       warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'stale' }],
       calculatedAt: new Date().toISOString(),
       error: 'stale failure',
+      providerDiagnostic: staleProviderDiagnostic,
     });
 
     const calculation = await calculateAutomaticRouteLegs({
@@ -685,6 +705,143 @@ describe('route orchestration', () => {
       calculatedAt: undefined,
       error: 'retry failed',
     });
+    expect(result.providerDiagnostic).toBeUndefined();
+  });
+
+  it.each([
+    { code: 2009, requestedProfile: 'driving-hgv' as const, actualProfile: 'driving-car' as const },
+    { code: 2010, requestedProfile: 'driving-car' as const, actualProfile: 'driving-car' as const },
+  ])('persists ORS $code diagnostics after recovery exhaustion', async ({ code, requestedProfile, actualProfile }) => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 51, lng: 0 } });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 52, lng: 1 } });
+    const routingVehicle = requestedProfile === 'driving-hgv'
+      ? resolveVehiclePreset('expedition-truck')
+      : resolveVehiclePreset('standard');
+    const calculateRoute: CalculateRoute = async (request) => {
+      throw new OpenRouteServiceError({
+        status: 404,
+        code,
+        providerMessage: `ORS ${code} remained stable.`,
+        coordinateIndex: code === 2010 ? 1 : undefined,
+        profile: code === 2009 && request.profile === 'driving-hgv' ? 'driving-hgv' : actualProfile,
+      });
+    };
+
+    const result = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id })],
+      routingVehicle,
+      calculateRoute,
+    });
+
+    expect(result.routeLegs[0]).toMatchObject({
+      status: 'failed',
+      providerDiagnostic: {
+        provider: 'openrouteservice',
+        httpStatus: 404,
+        code,
+        providerMessage: `ORS ${code} remained stable.`,
+        requestedProfile,
+        actualProfile,
+      },
+    });
+  });
+
+  it.each([401, 503])('persists stable ORS HTTP %i diagnostics without fabricating absent fields', async (status) => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 51, lng: 0 } });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 52, lng: 1 } });
+    const providerMessage = status === 401 ? 'Invalid API key.' : 'Provider unavailable.';
+
+    const result = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id })],
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute: async () => {
+        throw new OpenRouteServiceError({ status, providerMessage, profile: 'driving-car' });
+      },
+    });
+
+    expect(result.routeLegs[0].providerDiagnostic).toEqual({
+      provider: 'openrouteservice',
+      httpStatus: status,
+      providerMessage,
+      requestedProfile: 'driving-car',
+      actualProfile: 'driving-car',
+    });
+  });
+
+  it('persists retry metadata from an exhausted ORS rate-limit failure', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 51, lng: 0 } });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 52, lng: 1 } });
+
+    const result = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id })],
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute: async () => {
+        throw new OpenRouteServiceError({
+          status: 429,
+          code: 3099,
+          providerMessage: 'Rate limit exceeded.',
+          profile: 'driving-car',
+          retryAfterMs: 2_000,
+          attempts: 2,
+          retryAttempts: 1,
+        });
+      },
+    });
+
+    expect(result.routeLegs[0].providerDiagnostic).toMatchObject({
+      httpStatus: 429,
+      retryAfterMs: 2_000,
+      attempts: 2,
+      retryAttempts: 1,
+    });
+  });
+
+  it('does not fabricate a provider diagnostic for a generic calculation error', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 51, lng: 0 } });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 52, lng: 1 } });
+
+    const result = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id })],
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute: async () => { throw new Error('Network bridge failed.'); },
+    });
+
+    expect(result.routeLegs[0]).toMatchObject({ status: 'failed', error: 'Network bridge failed.' });
+    expect(result.routeLegs[0].providerDiagnostic).toBeUndefined();
+  });
+
+  it('clears a stale diagnostic when recalculation succeeds', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 51, lng: 0 } });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 52, lng: 1 } });
+    const failedLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      status: 'failed',
+      error: 'Old failure.',
+      providerDiagnostic: staleProviderDiagnostic,
+    });
+
+    const result = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [failedLeg],
+      routingVehicle: resolveVehiclePreset('standard'),
+      retryFailed: true,
+      calculateRoute: async () => ({
+        distanceKm: 100,
+        travelTimeHours: 2,
+        geometry: { type: 'LineString', coordinates: [[0, 51], [1, 52]] },
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 100 }],
+      }),
+    });
+
+    expect(result.routeLegs[0].status).toBe('ready');
+    expect(result.routeLegs[0].providerDiagnostic).toBeUndefined();
   });
 
   it('invalidates every automatic leg for a vehicle change and preserves manual shipping', () => {
@@ -702,6 +859,7 @@ describe('route orchestration', () => {
       sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 600 }],
       routeKey: 'old-key',
       calculatedAt: new Date().toISOString(),
+      providerDiagnostic: staleProviderDiagnostic,
     });
     const manual = createRouteLeg({
       originDestinationId: target.id,
@@ -729,6 +887,7 @@ describe('route orchestration', () => {
       warnings: [],
       calculatedAt: undefined,
       error: undefined,
+      providerDiagnostic: undefined,
       routeKey: createRouteKey({
         origin: origin.coordinates,
         target: target.coordinates,
@@ -736,6 +895,29 @@ describe('route orchestration', () => {
       }),
     });
     expect(preserved).toBe(manual);
+  });
+
+  it('clears a stale diagnostic when a route becomes manual', async () => {
+    const origin = createDestination({ name: 'Panama City', coordinates: { lat: 9, lng: -79.5 } });
+    const target = createDestination({ name: 'Cartagena', coordinates: { lat: 10.4, lng: -75.5 } });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
+      status: 'failed',
+      error: 'Old provider failure.',
+      providerDiagnostic: staleProviderDiagnostic,
+    });
+
+    const finalized = await finalizeRouteLeg({
+      routeLeg,
+      destinations: [origin, target],
+      routingVehicle: resolveVehiclePreset('standard'),
+    });
+
+    expect(finalized.status).toBe('manual');
+    expect(finalized.providerDiagnostic).toBeUndefined();
   });
 
   it('finalizes a manual-to-automatic toggle with the expedition truck snapshot', async () => {

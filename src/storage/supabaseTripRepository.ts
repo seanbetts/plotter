@@ -85,6 +85,7 @@ type SupabaseRouteLegRow = {
   route_key: string | null;
   calculated_at: string | null;
   error: string | null;
+  provider_diagnostic?: RouteLeg['providerDiagnostic'] | null;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -387,6 +388,7 @@ export function routeLegToSupabaseRow(routeLeg: RouteLeg, tripId: string): Supab
     route_key: routeLeg.routeKey ?? null,
     calculated_at: routeLeg.calculatedAt ?? null,
     error: routeLeg.error ?? null,
+    provider_diagnostic: routeLeg.providerDiagnostic ?? null,
     notes: routeLeg.notes,
     created_at: routeLeg.createdAt,
     updated_at: routeLeg.updatedAt,
@@ -413,6 +415,7 @@ export function routeLegFromSupabaseRow(row: SupabaseRouteLegRow): RouteLeg {
     routeKey: row.route_key ?? undefined,
     calculatedAt: row.calculated_at ?? undefined,
     error: row.error ?? undefined,
+    providerDiagnostic: row.provider_diagnostic ?? undefined,
     notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

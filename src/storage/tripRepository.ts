@@ -159,6 +159,7 @@ function normalizeRouteLeg(routeLeg: RouteLeg): RouteLeg {
     waypoints: routeLeg.waypoints ?? [],
     sections: routeLeg.sections ?? [],
     warnings: routeLeg.warnings ?? [],
+    providerDiagnostic: routeLeg.providerDiagnostic ?? undefined,
   };
 }
 

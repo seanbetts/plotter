@@ -186,6 +186,7 @@ function refreshRouteLegForDestinationCoordinates(
       routeKey: undefined,
       calculatedAt: undefined,
       error: undefined,
+      providerDiagnostic: undefined,
       updatedAt: createTimestamp(),
     };
   }
@@ -214,6 +215,7 @@ function refreshRouteLegForDestinationCoordinates(
       }),
       calculatedAt: undefined,
       error: undefined,
+      providerDiagnostic: undefined,
       updatedAt: createTimestamp(),
     };
   }
@@ -239,6 +241,7 @@ function refreshRouteLegForDestinationCoordinates(
     routeKey,
     calculatedAt: undefined,
     error: undefined,
+    providerDiagnostic: undefined,
     updatedAt: createTimestamp(),
   };
 }

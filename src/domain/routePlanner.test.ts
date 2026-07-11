@@ -931,6 +931,13 @@ describe('route planner helpers', () => {
       profile: 'cycling-regular',
       routeKey: 'cycling-regular:19.03420,43.13060:18.77120,42.42470:alternative-1',
       calculatedAt: '2026-07-04T12:00:00.000Z',
+      providerDiagnostic: {
+        provider: 'openrouteservice',
+        httpStatus: 404,
+        providerMessage: 'Stale failure.',
+        requestedProfile: 'driving-car',
+        actualProfile: 'driving-car',
+      },
     });
 
     const result = reconcileRouteLegsForDestinations([origin, target], [cyclingLeg]);
@@ -947,6 +954,7 @@ describe('route planner helpers', () => {
       routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
       calculatedAt: undefined,
       error: undefined,
+      providerDiagnostic: undefined,
     });
   });
 

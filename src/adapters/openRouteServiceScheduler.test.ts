@@ -164,6 +164,29 @@ describe('OpenRouteService scheduler', () => {
     expect(attempts).toBe(2);
   });
 
+  it('annotates a persistent rate-limit error with retry attempt metadata', async () => {
+    const scheduler = createOpenRouteServiceScheduler({
+      maxRequests: Number.MAX_SAFE_INTEGER,
+      sleep: async () => {},
+    });
+    let attempts = 0;
+
+    await expect(scheduler.schedule(async () => {
+      attempts += 1;
+      throw new OpenRouteServiceError({
+        status: 429,
+        providerMessage: 'Rate limit exceeded.',
+        profile: 'driving-car',
+        retryAfterMs: 0,
+      });
+    })).rejects.toMatchObject({
+      attempts: 2,
+      retryAttempts: 1,
+    });
+
+    expect(attempts).toBe(2);
+  });
+
   it('admits a later operation after an earlier scheduled operation rejects', async () => {
     const clock = createFakeClock();
     const scheduler = createOpenRouteServiceScheduler({

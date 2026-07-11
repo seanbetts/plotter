@@ -6,6 +6,8 @@ import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import {
   calculateOpenRouteServiceRoute,
   calculateOpenRouteServiceRouteOptions,
+  OpenRouteServiceError,
+  routeProviderDiagnosticFromOpenRouteServiceError,
 } from './openRouteService';
 
 vi.mock('./openRouteServiceScheduler', async (importOriginal) => {
@@ -364,6 +366,32 @@ describe('OpenRouteService adapter', () => {
     });
   });
 
+  it('converts an ORS error into the stable route-leg diagnostic shape', () => {
+    const error = new OpenRouteServiceError({
+      status: 404,
+      code: 2009,
+      providerMessage: 'Route could not be found.',
+      coordinateIndex: 1,
+      profile: 'driving-car',
+      retryAfterMs: 2_000,
+      attempts: 2,
+      retryAttempts: 1,
+    });
+
+    expect(routeProviderDiagnosticFromOpenRouteServiceError(error, 'driving-hgv')).toEqual({
+      provider: 'openrouteservice',
+      httpStatus: 404,
+      code: 2009,
+      providerMessage: 'Route could not be found.',
+      coordinateIndex: 1,
+      requestedProfile: 'driving-hgv',
+      actualProfile: 'driving-car',
+      retryAfterMs: 2_000,
+      attempts: 2,
+      retryAttempts: 1,
+    });
+  });
+
   it('preserves retry-after details for rate-limited responses', async () => {
     const rateLimitedResponse = new Response(JSON.stringify({
       error: {
@@ -389,6 +417,8 @@ describe('OpenRouteService adapter', () => {
       code: 3099,
       retryAfterMs: 2_000,
       profile: 'driving-car',
+      attempts: 2,
+      retryAttempts: 1,
     });
   });
 

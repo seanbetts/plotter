@@ -362,6 +362,15 @@ describe('trip repository', () => {
       originDestinationId: 'replacement-origin',
       targetDestinationId: 'replacement-target',
       movement: 'drive', calculation: 'automatic',
+      status: 'failed',
+      error: 'OpenRouteService route calculation failed.',
+      providerDiagnostic: {
+        provider: 'openrouteservice',
+        httpStatus: 503,
+        providerMessage: 'Provider unavailable.',
+        requestedProfile: 'driving-car',
+        actualProfile: 'driving-car',
+      },
     });
     await repository.saveRouteLeg(savedRouteLeg);
     const savedRow = await db.routeLegs.get(`trip-one:${savedRouteLeg.id}`);
@@ -386,7 +395,33 @@ describe('trip repository', () => {
       waypoints: [],
       sections: [],
       warnings: [],
+      providerDiagnostic: replacementRouteLeg.providerDiagnostic,
     }));
+    await expect(repository.listRouteLegs()).resolves.toEqual([replacementRouteLeg]);
+  });
+
+  it('normalizes a legacy null route provider diagnostic to undefined', async () => {
+    const name = `plotter-test-${crypto.randomUUID()}`;
+    const db = createTripDb(name);
+    testDatabases.push({ db, name });
+    const repository = createTripRepository(db, 'trip-one');
+    const routeLeg = createRouteLeg({
+      originDestinationId: 'origin-id',
+      targetDestinationId: 'target-id',
+      status: 'failed',
+      error: 'Legacy provider failure.',
+    });
+
+    await db.routeLegs.put({
+      ...routeLeg,
+      id: `trip-one:${routeLeg.id}`,
+      entityId: routeLeg.id,
+      tripId: 'trip-one',
+      providerDiagnostic: null,
+    } as never);
+
+    const [loaded] = await repository.listRouteLegs();
+    expect(loaded).toHaveProperty('providerDiagnostic', undefined);
   });
 
   it('creates, lists, updates, and deletes destinations', async () => {

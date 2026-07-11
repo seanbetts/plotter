@@ -38,6 +38,19 @@ export type TripRoutingVehicle = {
 
 export type RoutingAnchorProfile = TripRoutingVehicle['profile'];
 
+export type RouteProviderDiagnostic = {
+  provider: 'openrouteservice';
+  httpStatus: number;
+  code?: number;
+  providerMessage: string;
+  coordinateIndex?: number;
+  requestedProfile?: RoutingAnchorProfile;
+  actualProfile?: RoutingAnchorProfile;
+  retryAfterMs?: number;
+  attempts?: number;
+  retryAttempts?: number;
+};
+
 export type RoutingAnchor = {
   profile: RoutingAnchorProfile;
   coordinates: Coordinates;
@@ -246,6 +259,7 @@ export type RouteLeg = {
   routeKey?: string;
   calculatedAt?: string;
   error?: string;
+  providerDiagnostic?: RouteProviderDiagnostic;
   notes: string;
   createdAt: string;
   updatedAt: string;

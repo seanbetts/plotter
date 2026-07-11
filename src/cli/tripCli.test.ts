@@ -389,10 +389,30 @@ describe('runTripCli', () => {
   });
 
   it('routes audit and preserves its issues in summary output', async () => {
+    const providerDiagnostic = {
+      provider: 'openrouteservice',
+      httpStatus: 429,
+      code: 3099,
+      providerMessage: 'Rate limit exceeded.',
+      requestedProfile: 'driving-hgv',
+      actualProfile: 'driving-car',
+      retryAfterMs: 2_000,
+      attempts: 2,
+      retryAttempts: 1,
+    };
     const audit = {
-      errors: 0,
+      errors: 1,
       warnings: 2,
       issues: [
+        {
+          severity: 'error',
+          code: 'FAILED_ROUTE_LEG',
+          message: 'Driving route Lillehammer to Oslo failed.',
+          routeLegId: 'failed-leg',
+          providerDiagnostic,
+          origin: { id: 'lillehammer', name: 'Lillehammer' },
+          target: { id: 'oslo', name: 'Oslo' },
+        },
         {
           severity: 'warning',
           code: 'VEHICLE_PROFILE_FALLBACK',
@@ -429,8 +449,10 @@ describe('runTripCli', () => {
       ok: true,
       summary: 'Audited trip.',
       audit,
-      counts: { auditErrors: 0, auditWarnings: 2 },
+      counts: { auditErrors: 1, auditWarnings: 2 },
     });
+    expect(JSON.parse(write.mock.calls[0]?.[0] ?? '{}').audit.issues[0].providerDiagnostic)
+      .toEqual(providerDiagnostic);
   });
 
   it('creates and audits a large manifest in two CLI calls with in-memory dependencies', async () => {

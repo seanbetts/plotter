@@ -60,6 +60,15 @@ describe('trip semantic audit', () => {
         movement: 'drive', calculation: 'automatic',
         status: 'failed',
         error: 'OpenRouteService route calculation failed.',
+        providerDiagnostic: {
+          provider: 'openrouteservice',
+          httpStatus: 404,
+          code: 2010,
+          providerMessage: 'Could not find routable point at specified coordinate 1.',
+          coordinateIndex: 1,
+          requestedProfile: 'driving-car',
+          actualProfile: 'driving-car',
+        },
       }),
       id: 'failed-leg',
     };
@@ -103,6 +112,7 @@ describe('trip semantic audit', () => {
       severity: 'error',
       code: 'FAILED_ROUTE_LEG',
       routeLegId: 'failed-leg',
+      providerDiagnostic: failedLeg.providerDiagnostic,
       origin: {
         id: home.id,
         name: 'Home',

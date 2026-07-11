@@ -759,7 +759,40 @@ describe('TripDataService trips and stops', () => {
     expect(repositories.get(created.trip.id)?.routeLegs[0].ferryPolicy).toBe('allow');
   });
 
-  it.each(['geometry', 'distanceKm', 'travelTimeHours', 'provider', 'profile', 'routeKey', 'calculatedAt', 'status', 'sections', 'warnings', 'error', 'type']) (
+  it('clears a stale provider diagnostic when route intent becomes manual', async () => {
+    const harness = createHarness();
+    const created = await harness.service.createTrip({
+      name: 'Manual intent',
+      stops: [
+        { name: 'A', place: { coordinates: { lat: 50, lng: 0 } } },
+        { name: 'B', place: { coordinates: { lat: 51, lng: 1 } } },
+      ],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+    const storedLeg = harness.repositories.get(created.trip.id)!.routeLegs[0];
+    storedLeg.status = 'failed';
+    storedLeg.error = 'Old provider failure.';
+    storedLeg.providerDiagnostic = {
+      provider: 'openrouteservice',
+      httpStatus: 503,
+      providerMessage: 'Provider unavailable.',
+      requestedProfile: 'driving-car',
+      actualProfile: 'driving-car',
+    };
+
+    const result = await harness.service.updateRouteLeg({
+      tripId: created.trip.id,
+      routeLegId: storedLeg.id,
+      patch: { movement: 'vehicle-shipping', calculation: 'manual' },
+    }, { dryRun: true });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.routeLeg.status).toBe('manual');
+    expect(result.routeLeg.providerDiagnostic).toBeUndefined();
+  });
+
+  it.each(['geometry', 'distanceKm', 'travelTimeHours', 'provider', 'profile', 'routeKey', 'calculatedAt', 'status', 'sections', 'warnings', 'error', 'providerDiagnostic', 'type']) (
     'rejects the derived route field %s',
     async (field) => {
       const { service } = createHarness();

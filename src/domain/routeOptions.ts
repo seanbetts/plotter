@@ -262,5 +262,6 @@ export function routeLegPatchFromRouteOption(
     warnings: option.warnings,
     calculatedAt,
     error: undefined,
+    providerDiagnostic: undefined,
   };
 }

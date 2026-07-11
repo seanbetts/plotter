@@ -6,6 +6,7 @@ import type {
   RouteLeg,
   RouteLegStatus,
   RouteMovement,
+  RouteProviderDiagnostic,
   RouteSection,
   RouteWarning,
   RouteWaypoint,
@@ -31,6 +32,7 @@ type CreateRouteLegInput = {
   routeKey?: string;
   calculatedAt?: string;
   error?: string;
+  providerDiagnostic?: RouteProviderDiagnostic;
   notes?: string;
 };
 
@@ -158,6 +160,7 @@ export function createRouteLeg(input: CreateRouteLegInput): RouteLeg {
     routeKey: input.routeKey,
     calculatedAt: input.calculatedAt,
     error: input.error,
+    providerDiagnostic: input.providerDiagnostic,
     notes: input.notes ?? '',
     createdAt: timestamp,
     updatedAt: timestamp,

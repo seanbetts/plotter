@@ -11,6 +11,8 @@ type RateLimitedOpenRouteServiceError = {
   name: string;
   status: number;
   retryAfterMs?: number;
+  attempts?: number;
+  retryAttempts?: number;
 };
 
 function defaultSleep(milliseconds: number) {
@@ -93,6 +95,11 @@ export function createOpenRouteServiceScheduler(options: OpenRouteServiceSchedul
         }
 
         return schedule(operation, true);
+      }
+
+      if (didRetry && isRateLimitedOpenRouteServiceError(error)) {
+        error.attempts = 2;
+        error.retryAttempts = 1;
       }
 
       throw error;

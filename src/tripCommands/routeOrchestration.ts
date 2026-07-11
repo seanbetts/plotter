@@ -1,3 +1,7 @@
+import {
+  isOpenRouteServiceError,
+  routeProviderDiagnosticFromOpenRouteServiceError,
+} from '../adapters/openRouteService';
 import { withRoutingAnchor } from '../domain/destinations';
 import { createRouteKey, createStraightLineGeometry } from '../domain/routeLegs';
 import { coordinateDistanceKm, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
@@ -135,6 +139,7 @@ function clearCalculatedRouteData(routeLeg: RouteLeg, profile: TripRoutingVehicl
     ),
     calculatedAt: undefined,
     error: undefined,
+    providerDiagnostic: undefined,
   };
 }
 
@@ -367,6 +372,9 @@ export async function calculateAutomaticRouteLegs(input: {
         status: 'failed',
         routeKey,
         error: caught instanceof Error ? caught.message : 'Route calculation failed',
+        providerDiagnostic: isOpenRouteServiceError(caught)
+          ? routeProviderDiagnosticFromOpenRouteServiceError(caught, input.routingVehicle.profile)
+          : undefined,
         updatedAt: createTimestamp(),
       });
     }
@@ -435,12 +443,18 @@ export async function finalizeRouteLeg(input: {
       routeKey: undefined,
       calculatedAt: undefined,
       error: undefined,
+      providerDiagnostic: undefined,
       updatedAt: createTimestamp(),
     };
   }
 
   if (hasPreservableAutomaticRouteData(input.routeLeg)) {
-    return { ...input.routeLeg, error: undefined, updatedAt: createTimestamp() };
+    return {
+      ...input.routeLeg,
+      error: undefined,
+      providerDiagnostic: undefined,
+      updatedAt: createTimestamp(),
+    };
   }
 
   const calculation = await calculateAutomaticRouteLegs({
@@ -452,6 +466,7 @@ export async function finalizeRouteLeg(input: {
       status: 'pending',
       profile: input.routingVehicle.profile,
       error: undefined,
+      providerDiagnostic: undefined,
       updatedAt: createTimestamp(),
     }],
   });

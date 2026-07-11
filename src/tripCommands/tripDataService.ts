@@ -995,6 +995,7 @@ export function createTripDataService(
           sections: [],
           warnings: [],
           error: undefined,
+          providerDiagnostic: undefined,
           updatedAt: new Date().toISOString(),
         };
         let destinationsToSave: Destination[] = [];
