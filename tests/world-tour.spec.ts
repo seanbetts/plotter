@@ -1,5 +1,28 @@
 import { readFile } from 'node:fs/promises';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
+
+async function stableCanvasPixels(canvas: Locator) {
+  let previousHash: string | null = null;
+  let matchingSamples = 0;
+  let stablePixelHash = '';
+
+  await expect.poll(async () => {
+    stablePixelHash = await canvas.evaluate(async (element: HTMLCanvasElement) => {
+      const bytes = new TextEncoder().encode(element.toDataURL('image/png'));
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    });
+    matchingSamples = stablePixelHash === previousHash ? matchingSamples + 1 : 1;
+    previousHash = stablePixelHash;
+    return matchingSamples;
+  }, {
+    message: 'live map canvas pixels should settle for five consecutive samples',
+    timeout: 15_000,
+    intervals: [250, 500],
+  }).toBeGreaterThanOrEqual(5);
+
+  return stablePixelHash;
+}
 
 const savedTags = ['gateway', 'asia'];
 const istanbulResult = [
@@ -111,11 +134,7 @@ test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
   await expect(page.getByText('130 mi')).toBeVisible();
 
   const liveCanvas = page.locator('.maplibregl-canvas').first();
-  const liveMapBefore = await liveCanvas.evaluate((canvas: HTMLCanvasElement) => ({
-    width: canvas.width,
-    height: canvas.height,
-    transform: getComputedStyle(canvas).transform,
-  }));
+  const liveMapBefore = await stableCanvasPixels(liveCanvas);
 
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download trip map' }).click();
@@ -127,12 +146,8 @@ test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
   expect(bytes.readUInt32BE(16)).toBe(1600);
   expect(bytes.readUInt32BE(20)).toBe(1000);
 
-  const liveMapAfter = await liveCanvas.evaluate((canvas: HTMLCanvasElement) => ({
-    width: canvas.width,
-    height: canvas.height,
-    transform: getComputedStyle(canvas).transform,
-  }));
-  expect(liveMapAfter).toEqual(liveMapBefore);
+  const liveMapAfter = await stableCanvasPixels(liveCanvas);
+  expect(liveMapAfter).toBe(liveMapBefore);
 });
 
 test('keeps the itinerary title row visible while scrolling the stop list', async ({ baseURL, context, page }) => {

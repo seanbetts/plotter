@@ -1,8 +1,13 @@
 import maplibregl from 'maplibre-gl';
-import type { FeatureCollection, Point } from 'geojson';
+import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Destination, RouteLeg } from '../domain/types';
 import { calmBasemapStyle, mapLabelFontStack, mapStyleUrl, readMapLayerColors } from './mapPresentation';
-import { buildRenderableRouteFeatures, tripMapBounds } from './tripRouteFeatures';
+import {
+  buildRenderableRouteFeatures,
+  tripMapBounds,
+  unwrapLongitudeForBounds,
+} from './tripRouteFeatures';
+import type { RouteFeatureProperties, TripMapBounds } from './tripRouteFeatures';
 
 export type TripMapExportInput = {
   tripName: string;
@@ -31,17 +36,20 @@ const stopNumbersLayerId = 'trip-map-export-stop-numbers';
 const stopNamesLayerId = 'trip-map-export-stop-names';
 
 export function tripMapFilename(name: string) {
-  const stem = name
+  let stem = name
     .normalize('NFKD')
     // eslint-disable-next-line no-control-regex -- Portable filenames exclude ASCII control characters.
     .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
     .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '');
+  stem = Array.from(stem).slice(0, 100).join('').replace(/-+$/g, '');
+  if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `trip-${stem}`;
   return `${stem || 'world-tour'}.png`;
 }
 
 export function buildExportStopFeatures(
   destinations: Destination[],
+  bounds?: TripMapBounds,
 ): FeatureCollection<Point, ExportStopProperties> {
   return {
     type: 'FeatureCollection' as const,
@@ -50,7 +58,10 @@ export function buildExportStopFeatures(
       id: destination.id,
       geometry: {
         type: 'Point' as const,
-        coordinates: [destination.coordinates.lng, destination.coordinates.lat],
+        coordinates: [
+          bounds ? unwrapLongitudeForBounds(destination.coordinates.lng, bounds) : destination.coordinates.lng,
+          destination.coordinates.lat,
+        ],
       },
       properties: {
         id: destination.id,
@@ -89,30 +100,120 @@ function createExportMap(container: HTMLDivElement) {
   });
 }
 
-function waitForMapEvent(map: maplibregl.Map, event: 'load' | 'idle', timeoutMs: number) {
+type MapErrorMonitor = ReturnType<typeof observeMapErrors>;
+
+function observeMapErrors(map: maplibregl.Map) {
+  let resourceError: Error | null = null;
+  const subscribers = new Set<(error: Error) => void>();
+  const handleError = (event: maplibregl.ErrorEvent) => {
+    resourceError = event.error instanceof Error ? event.error : new Error(event.error.message);
+    for (const subscriber of subscribers) subscriber(resourceError);
+  };
+
+  map.on('error', handleError);
+
+  return {
+    subscribe(subscriber: (error: Error) => void) {
+      if (resourceError) {
+        subscriber(resourceError);
+        return () => undefined;
+      }
+      subscribers.add(subscriber);
+      return () => {
+        subscribers.delete(subscriber);
+      };
+    },
+    rejectIfFailed() {
+      if (resourceError) throw resourceError;
+    },
+    remove() {
+      subscribers.clear();
+      map.off('error', handleError);
+    },
+  };
+}
+
+function waitForMapEvent(
+  map: maplibregl.Map,
+  event: 'load' | 'idle',
+  timeoutMs: number,
+  errorMonitor: MapErrorMonitor,
+) {
   return new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      reject(new Error(`Timed out waiting for map ${event}.`));
+    let settled = false;
+    let timeout = 0;
+    let unsubscribeFromErrors: () => void = () => undefined;
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      unsubscribeFromErrors();
+      callback();
+    };
+    timeout = window.setTimeout(() => {
+      settle(() => reject(new Error(`Timed out waiting for map ${event}.`)));
     }, timeoutMs);
+    unsubscribeFromErrors = errorMonitor.subscribe((error) => {
+      settle(() => reject(error));
+    });
 
     map.once(event, () => {
-      window.clearTimeout(timeout);
-      resolve();
+      settle(resolve);
     });
   });
 }
 
-function addExportSourcesAndLayers(map: maplibregl.Map, destinations: Destination[], routeLegs: RouteLeg[]) {
+function rejectOnMapError<T>(promise: Promise<T>, errorMonitor: MapErrorMonitor) {
+  return new Promise<T>((resolve, reject) => {
+    const unsubscribeFromErrors = errorMonitor.subscribe(reject);
+    promise.then(
+      (value) => {
+        unsubscribeFromErrors();
+        resolve(value);
+      },
+      (error: unknown) => {
+        unsubscribeFromErrors();
+        reject(error);
+      },
+    );
+  });
+}
+
+function unwrapRouteFeatures(
+  features: FeatureCollection<LineString, RouteFeatureProperties>,
+  bounds: TripMapBounds,
+): FeatureCollection<LineString, RouteFeatureProperties> {
+  return {
+    ...features,
+    features: features.features.map((feature) => ({
+      ...feature,
+      geometry: {
+        ...feature.geometry,
+        coordinates: feature.geometry.coordinates.map(([longitude, latitude]) => [
+          unwrapLongitudeForBounds(longitude, bounds),
+          latitude,
+        ]),
+      },
+    })),
+  };
+}
+
+function addExportSourcesAndLayers(
+  map: maplibregl.Map,
+  destinations: Destination[],
+  routeLegs: RouteLeg[],
+  bounds: TripMapBounds,
+) {
   const mapColors = readMapLayerColors();
 
   calmBasemapStyle(map);
   map.addSource(routesSourceId, {
     type: 'geojson',
-    data: buildRenderableRouteFeatures(destinations, routeLegs),
+    data: unwrapRouteFeatures(buildRenderableRouteFeatures(destinations, routeLegs), bounds),
   });
   map.addSource(stopsSourceId, {
     type: 'geojson',
-    data: buildExportStopFeatures(destinations),
+    data: buildExportStopFeatures(destinations, bounds),
   });
 
   map.addLayer({
@@ -195,10 +296,7 @@ function addExportSourcesAndLayers(map: maplibregl.Map, destinations: Destinatio
   });
 }
 
-function frameExportMap(map: maplibregl.Map, destinations: Destination[], routeLegs: RouteLeg[]) {
-  const bounds = tripMapBounds(destinations, routeLegs);
-  if (!bounds) return;
-
+function frameExportMap(map: maplibregl.Map, bounds: TripMapBounds) {
   if (bounds[0][0] === bounds[1][0] && bounds[0][1] === bounds[1][1]) {
     map.jumpTo({ center: bounds[0], zoom: exportMaxZoom });
     return;
@@ -269,17 +367,22 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
   }
 
   const container = createExportContainer();
+  const bounds = tripMapBounds(input.destinations, input.routeLegs)!;
   let map: maplibregl.Map | null = null;
   let objectUrl: string | null = null;
   let anchor: HTMLAnchorElement | null = null;
+  let errorMonitor: MapErrorMonitor | null = null;
 
   try {
     map = createExportMap(container);
-    await waitForMapEvent(map, 'load', exportTimeoutMs);
-    addExportSourcesAndLayers(map, input.destinations, input.routeLegs);
-    frameExportMap(map, input.destinations, input.routeLegs);
-    await waitForMapEvent(map, 'idle', exportTimeoutMs);
-    const blob = await exportBlob(map);
+    errorMonitor = observeMapErrors(map);
+    await waitForMapEvent(map, 'load', exportTimeoutMs, errorMonitor);
+    addExportSourcesAndLayers(map, input.destinations, input.routeLegs, bounds);
+    frameExportMap(map, bounds);
+    errorMonitor.rejectIfFailed();
+    await waitForMapEvent(map, 'idle', exportTimeoutMs, errorMonitor);
+    const blob = await rejectOnMapError(exportBlob(map), errorMonitor);
+    errorMonitor.rejectIfFailed();
     objectUrl = URL.createObjectURL(blob);
     anchor = document.createElement('a');
     anchor.href = objectUrl;
@@ -289,6 +392,7 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
   } finally {
     anchor?.remove();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
+    errorMonitor?.remove();
     map?.remove();
     container.remove();
   }

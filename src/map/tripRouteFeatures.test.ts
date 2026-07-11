@@ -53,4 +53,46 @@ describe('tripRouteFeatures', () => {
     expect(tripMapBounds([origin], [])).toEqual([[20, 10], [20, 10]]);
     expect(tripMapBounds([], [])).toBeNull();
   });
+
+  it('uses the smallest wrapped longitude interval for a dateline-crossing trip', () => {
+    const fiji = createDestination({
+      name: 'Fiji',
+      countryRegion: 'Fiji',
+      coordinates: { lat: -17.7, lng: 179 },
+    });
+    const samoa = createDestination({
+      name: 'Samoa',
+      countryRegion: 'Samoa',
+      coordinates: { lat: -13.8, lng: -172 },
+    });
+    const leg = {
+      ...createRouteLeg({
+        originDestinationId: fiji.id,
+        targetDestinationId: samoa.id,
+        type: 'driving-auto',
+      }),
+      status: 'ready' as const,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [[179, -17.7], [-179, -16], [-172, -13.8]],
+      },
+    };
+
+    expect(tripMapBounds([fiji, samoa], [leg])).toEqual([[179, -17.7], [188, -13.8]]);
+  });
+
+  it('keeps an ordinary European trip in its familiar longitude range', () => {
+    const galway = createDestination({
+      name: 'Galway',
+      countryRegion: 'Ireland',
+      coordinates: { lat: 53.27, lng: -9.06 },
+    });
+    const paris = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.86, lng: 2.35 },
+    });
+
+    expect(tripMapBounds([galway, paris], [])).toEqual([[-9.06, 48.86], [2.35, 53.27]]);
+  });
 });

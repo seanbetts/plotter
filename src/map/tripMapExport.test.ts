@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
-import type { Destination } from '../domain/types';
+import { createRouteLeg } from '../domain/routeLegs';
+import type { Destination, RouteLeg } from '../domain/types';
 import { buildExportStopFeatures, downloadTripMap, tripMapFilename } from './tripMapExport';
 
 const maplibreMock = vi.hoisted(() => ({
@@ -9,10 +10,12 @@ const maplibreMock = vi.hoisted(() => ({
   remove: vi.fn(),
   instances: [] as Array<{
     callbacks: Map<string, () => void>;
+    errorListeners: Set<(event: { error: Error }) => void>;
     sources: Array<[string, unknown]>;
     layers: Array<Record<string, unknown>>;
     fitBounds: ReturnType<typeof vi.fn>;
     jumpTo: ReturnType<typeof vi.fn>;
+    off: ReturnType<typeof vi.fn>;
     remove: ReturnType<typeof vi.fn>;
   }>,
 }));
@@ -20,6 +23,7 @@ const maplibreMock = vi.hoisted(() => ({
 vi.mock('maplibre-gl', () => {
   class MapMock {
     callbacks = new Map<string, () => void>();
+    errorListeners = new Set<(event: { error: Error }) => void>();
     sources: Array<[string, unknown]> = [];
     layers: Array<Record<string, unknown>> = [];
     fitBounds = vi.fn();
@@ -38,6 +42,16 @@ vi.mock('maplibre-gl', () => {
       this.callbacks.set(event, callback);
       return this;
     }
+
+    on(event: string, callback: (event: { error: Error }) => void) {
+      if (event === 'error') this.errorListeners.add(callback);
+      return this;
+    }
+
+    off = vi.fn((event: string, callback: (event: { error: Error }) => void) => {
+      if (event === 'error') this.errorListeners.delete(callback);
+      return this;
+    });
 
     addSource(id: string, source: unknown) {
       this.sources.push([id, source]);
@@ -78,16 +92,16 @@ let anchorClick: ReturnType<typeof vi.spyOn>;
 let createObjectURL: ReturnType<typeof vi.fn>;
 let revokeObjectURL: ReturnType<typeof vi.fn>;
 
-function input(destinations: Destination[] = [first(), second()]) {
-  return { tripName: 'Wild Atlantic Way', destinations, routeLegs: [] };
+function input(destinations: Destination[] = [first(), second()], routeLegs: RouteLeg[] = []) {
+  return { tripName: 'Wild Atlantic Way', destinations, routeLegs };
 }
 
 function latestMap() {
   return maplibreMock.instances.at(-1)!;
 }
 
-async function advanceExportToIdle(destinations?: Destination[]) {
-  const promise = downloadTripMap(input(destinations));
+async function advanceExportToIdle(destinations?: Destination[], routeLegs?: RouteLeg[]) {
+  const promise = downloadTripMap(input(destinations, routeLegs));
   latestMap().callbacks.get('load')?.();
   await Promise.resolve();
   return { promise, map: latestMap() };
@@ -127,6 +141,21 @@ describe('tripMapFilename', () => {
     ['***', 'world-tour.png'],
   ])('turns %j into %j', (inputName, expected) => {
     expect(tripMapFilename(inputName)).toBe(expected);
+  });
+
+  it.each(['CON', 'prn', 'AUX', 'nul', 'COM1', 'com9', 'LPT1', 'lpt9'])(
+    'prefixes the Windows reserved device stem %j',
+    (reservedName) => {
+      expect(tripMapFilename(reservedName)).toBe(`trip-${reservedName}.png`);
+    },
+  );
+
+  it('does not treat non-device stems as reserved', () => {
+    expect(tripMapFilename('COM10')).toBe('COM10.png');
+  });
+
+  it('caps the sanitized stem at 100 characters before the extension', () => {
+    expect(tripMapFilename('a'.repeat(180))).toBe(`${'a'.repeat(100)}.png`);
   });
 });
 
@@ -203,6 +232,78 @@ it('fits multi-point bounds with deterministic padding and zoom', async () => {
   await promise;
 });
 
+it('unwraps dateline route and stop source coordinates into the fitted interval', async () => {
+  const alaska = createDestination({
+    name: 'Alaska',
+    countryRegion: 'USA',
+    coordinates: { lat: 52, lng: 179 },
+  });
+  const russia = createDestination({
+    name: 'Russia',
+    countryRegion: 'Russia',
+    coordinates: { lat: 54, lng: -179 },
+  });
+  const leg = {
+    ...createRouteLeg({
+      originDestinationId: alaska.id,
+      targetDestinationId: russia.id,
+      type: 'driving-auto',
+    }),
+    status: 'ready' as const,
+    geometry: {
+      type: 'LineString' as const,
+      coordinates: [[179, 52], [-180, 53], [-179, 54]],
+    },
+  };
+  const { promise, map } = await advanceExportToIdle([alaska, russia], [leg]);
+  const routeSource = map.sources.find(([id]) => id === 'trip-map-export-routes')?.[1] as {
+    data: { features: Array<{ geometry: { coordinates: number[][] } }> };
+  };
+  const stopSource = map.sources.find(([id]) => id === 'trip-map-export-stops')?.[1] as {
+    data: { features: Array<{ geometry: { coordinates: number[] } }> };
+  };
+
+  expect(map.fitBounds).toHaveBeenCalledWith(
+    [[179, 52], [181, 54]],
+    { padding: 120, maxZoom: 6, duration: 0 },
+  );
+  expect(routeSource.data.features[0].geometry.coordinates).toEqual([[179, 52], [180, 53], [181, 54]]);
+  expect(stopSource.data.features.map(({ geometry }) => geometry.coordinates)).toEqual([[179, 52], [181, 54]]);
+
+  map.callbacks.get('idle')?.();
+  await promise;
+});
+
+it('keeps ordinary European route and stop source coordinates unchanged', async () => {
+  const balcombe = first();
+  const paris = second();
+  const leg = {
+    ...createRouteLeg({
+      originDestinationId: balcombe.id,
+      targetDestinationId: paris.id,
+      type: 'driving-auto',
+    }),
+    status: 'ready' as const,
+    geometry: {
+      type: 'LineString' as const,
+      coordinates: [[0, 51], [1, 50], [2, 49]],
+    },
+  };
+  const { promise, map } = await advanceExportToIdle([balcombe, paris], [leg]);
+  const routeSource = map.sources.find(([id]) => id === 'trip-map-export-routes')?.[1] as {
+    data: { features: Array<{ geometry: { coordinates: number[][] } }> };
+  };
+  const stopSource = map.sources.find(([id]) => id === 'trip-map-export-stops')?.[1] as {
+    data: { features: Array<{ geometry: { coordinates: number[] } }> };
+  };
+
+  expect(routeSource.data.features[0].geometry.coordinates).toEqual([[0, 51], [1, 50], [2, 49]]);
+  expect(stopSource.data.features.map(({ geometry }) => geometry.coordinates)).toEqual([[0, 51], [2, 49]]);
+
+  map.callbacks.get('idle')?.();
+  await promise;
+});
+
 it('centers a one-stop trip at zoom 6', async () => {
   const destination = first();
   const { promise, map } = await advanceExportToIdle([destination]);
@@ -219,6 +320,43 @@ it('waits for idle before converting to PNG', async () => {
   map.callbacks.get('idle')?.();
   await promise;
   expect(HTMLCanvasElement.prototype.toBlob).toHaveBeenCalledOnce();
+});
+
+it('rejects a map resource error before capture and removes the lifecycle listener', async () => {
+  const { promise, map } = await advanceExportToIdle();
+  const container = document.querySelector('[data-trip-map-export]');
+
+  for (const listener of map.errorListeners) {
+    listener({ error: new Error('Tile request failed.') });
+  }
+  map.callbacks.get('idle')?.();
+
+  await expect(promise).rejects.toThrow('Tile request failed.');
+  expect(HTMLCanvasElement.prototype.toBlob).not.toHaveBeenCalled();
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(map.off).toHaveBeenCalledWith('error', expect.any(Function));
+  expect(map.errorListeners).toHaveLength(0);
+  expect(map.remove).toHaveBeenCalledOnce();
+  expect(container).not.toBeInTheDocument();
+});
+
+it('rejects a map resource error while waiting for load', async () => {
+  const promise = downloadTripMap(input());
+  const map = latestMap();
+  const rejection = expect(promise).rejects.toThrow('Style request failed.');
+
+  for (const listener of map.errorListeners) {
+    listener({ error: new Error('Style request failed.') });
+  }
+  map.callbacks.get('load')?.();
+  await Promise.resolve();
+  map.callbacks.get('idle')?.();
+
+  await rejection;
+  expect(HTMLCanvasElement.prototype.toBlob).not.toHaveBeenCalled();
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(map.off).toHaveBeenCalledWith('error', expect.any(Function));
+  expect(map.errorListeners).toHaveLength(0);
 });
 
 it('draws source attribution before converting the output canvas', async () => {

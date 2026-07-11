@@ -7,6 +7,8 @@ export type RouteFeatureProperties = {
   status: RouteLeg['status'];
 };
 
+export type TripMapBounds = [[number, number], [number, number]];
+
 function findDestination(destinations: Destination[], destinationId: string) {
   return destinations.find((destination) => destination.id === destinationId);
 }
@@ -23,6 +25,22 @@ function straightLineGeometry(origin: Destination, target: Destination): LineStr
 
 function hasUsableLineString(geometry: RouteLeg['geometry']): geometry is LineString {
   return geometry?.type === 'LineString' && geometry.coordinates.length >= 2;
+}
+
+function normalizeLongitude(longitude: number) {
+  if (longitude >= -180 && longitude <= 180) return longitude;
+  return ((longitude + 180) % 360 + 360) % 360 - 180;
+}
+
+export function unwrapLongitudeForBounds(longitude: number, bounds: TripMapBounds) {
+  const [west] = bounds[0];
+  const [east] = bounds[1];
+  let unwrapped = normalizeLongitude(longitude);
+
+  while (unwrapped < west) unwrapped += 360;
+  while (unwrapped > east) unwrapped -= 360;
+
+  return unwrapped;
 }
 
 export function routeGeometryForLeg(destinations: Destination[], leg: RouteLeg): LineString | null {
@@ -78,7 +96,7 @@ export function buildRenderableRouteFeatures(
 export function tripMapBounds(
   destinations: Destination[],
   routeLegs: RouteLeg[],
-): [[number, number], [number, number]] | null {
+): TripMapBounds | null {
   const coordinates = [
     ...destinations.map((destination) => [destination.coordinates.lng, destination.coordinates.lat]),
     ...routeLegs.flatMap((leg) => routeGeometryForLeg(destinations, leg)?.coordinates ?? []),
@@ -86,16 +104,30 @@ export function tripMapBounds(
 
   if (coordinates.length === 0) return null;
 
-  const [firstLng, firstLat] = coordinates[0];
-  let minLng = firstLng;
+  const normalizedLongitudes = coordinates
+    .map(([lng]) => normalizeLongitude(lng))
+    .sort((left, right) => left - right);
+  let largestGap = normalizedLongitudes[0] + 360 - normalizedLongitudes.at(-1)!;
+  let largestGapStartIndex = normalizedLongitudes.length - 1;
+
+  for (let index = 0; index < normalizedLongitudes.length - 1; index += 1) {
+    const gap = normalizedLongitudes[index + 1] - normalizedLongitudes[index];
+    if (gap > largestGap) {
+      largestGap = gap;
+      largestGapStartIndex = index;
+    }
+  }
+
+  const minLng = normalizedLongitudes[(largestGapStartIndex + 1) % normalizedLongitudes.length];
+  let maxLng = normalizedLongitudes[largestGapStartIndex];
+  if (maxLng < minLng) maxLng += 360;
+
+  const [, firstLat] = coordinates[0];
   let minLat = firstLat;
-  let maxLng = firstLng;
   let maxLat = firstLat;
 
-  for (const [lng, lat] of coordinates.slice(1)) {
-    minLng = Math.min(minLng, lng);
+  for (const [, lat] of coordinates.slice(1)) {
     minLat = Math.min(minLat, lat);
-    maxLng = Math.max(maxLng, lng);
     maxLat = Math.max(maxLat, lat);
   }
 
