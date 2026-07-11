@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createBoundingBoxAroundCoordinates,
   resolveMapTilerCoordinates,
@@ -214,9 +214,10 @@ function getAvailableOverlayHeight(position: OverlayPosition) {
 }
 
 export default function App({ webImageSearchClient: injectedWebImageSearchClient }: AppProps = {}) {
-  const [linkPreviewClient, setLinkPreviewClient] = useState<LinkPreviewClient | null>(null);
-  const [webImageSearchClient, setWebImageSearchClient] = useState<WebImageSearchClient | null>(
-    injectedWebImageSearchClient ?? null,
+  const linkPreviewClient = useMemo(() => createAppLinkPreviewClient(), []);
+  const webImageSearchClient = useMemo(
+    () => injectedWebImageSearchClient ?? createAppWebImageSearchClient(),
+    [injectedWebImageSearchClient],
   );
   const {
     trips,
@@ -232,19 +233,6 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     refreshTrips,
     realtime,
   } = useTripWorkspace();
-
-  useEffect(() => {
-    setLinkPreviewClient(createAppLinkPreviewClient());
-  }, []);
-
-  useEffect(() => {
-    if (injectedWebImageSearchClient) {
-      setWebImageSearchClient(injectedWebImageSearchClient);
-      return;
-    }
-
-    setWebImageSearchClient(createAppWebImageSearchClient());
-  }, [injectedWebImageSearchClient]);
 
   useEffect(() => {
     if (!realtime) return undefined;

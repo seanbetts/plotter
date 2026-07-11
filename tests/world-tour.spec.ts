@@ -208,7 +208,6 @@ test('keeps the itinerary title row visible while scrolling the stop list', asyn
   }
 
   const itinerary = page.getByRole('complementary', { name: 'Itinerary' });
-  const stopList = itinerary.locator('.stop-list');
   const header = itinerary.locator('.itinerary-panel-header');
   await expect(header).toBeVisible();
 
