@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
-import { standardRoutingVehicle } from '../domain/vehiclePresets';
+import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
 import { useTripData } from './useTripData';
@@ -1416,6 +1416,96 @@ describe('useTripData', () => {
         ],
       },
     });
+  });
+
+  it('recalculates automatic route legs once for an explicitly saved vehicle', async () => {
+    const origin = createDestination({
+      name: 'Origin',
+      coordinates: { lat: 50, lng: 1 },
+      order: 0,
+    });
+    const target = createDestination({
+      name: 'Target',
+      coordinates: { lat: 51, lng: 2 },
+      order: 1,
+    });
+    const readyLeg = {
+      ...createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        type: 'driving-auto',
+      }),
+      status: 'ready' as const,
+      distanceKm: 150,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString' as const, coordinates: [[1, 50], [2, 51]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      routeKey: 'old-car-key',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+    };
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [readyLeg],
+      saveRouteLeg,
+    });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 170,
+      travelTimeHours: 2.5,
+      geometry: { type: 'LineString' as const, coordinates: [[1, 50], [2, 51]] },
+      provider: 'openrouteservice',
+      profile: 'driving-hgv' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 170 }],
+    }));
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: standardRoutingVehicle,
+    }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.recalculateForVehicle(resolveVehiclePreset('expedition-truck'));
+    });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving-hgv',
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+    }));
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(result.current.routeLegs[0]).toMatchObject({
+      status: 'ready',
+      profile: 'driving-hgv',
+      distanceKm: 170,
+    });
+  });
+
+  it('uses the active trip vehicle for ordinary destination reconciliation', async () => {
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 10,
+      travelTimeHours: 1,
+      geometry: { type: 'LineString' as const, coordinates: [[1, 1], [2, 2]] },
+      provider: 'openrouteservice',
+      profile: 'driving-hgv' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 10 }],
+    }));
+    const vehicle = resolveVehiclePreset('large-camper');
+    const repository = createTestRepository();
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: vehicle,
+    }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({ name: 'One', coordinates: { lat: 1, lng: 1 } });
+      await result.current.addDestination({ name: 'Two', coordinates: { lat: 2, lng: 2 } });
+    });
+
+    expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving-hgv',
+      routingVehicle: vehicle,
+    }));
   });
 
   it('shows a failed route leg as pending while an explicit retry is in flight', async () => {

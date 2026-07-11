@@ -3,12 +3,14 @@ import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
 import { findBestDestinationInsertionIndex, planRouteLegReconciliation } from '../domain/routePlanner';
 import { createRouteLeg } from '../domain/routeLegs';
-import type { Activity, Coordinates, Destination, DestinationLocation, RouteLeg, RouteLegType } from '../domain/types';
+import type { Activity, Coordinates, Destination, DestinationLocation, RouteLeg, RouteLegType, TripRoutingVehicle } from '../domain/types';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripRepository } from '../storage/tripRepository';
 import {
+  calculateAutomaticRouteLegs,
   finalizeRouteLeg,
   hasPreservableDrivingRouteData,
+  recalculateAutomaticRouteLegsForVehicle,
   reconcileAndSaveRouteLegs,
   type CalculateRoute,
   type RouteLegPatch,
@@ -23,6 +25,7 @@ type AddDestinationInput = {
 
 type UseTripDataOptions = {
   calculateRoute?: CalculateRoute;
+  routingVehicle?: TripRoutingVehicle;
 };
 
 const createTimestamp = () => new Date().toISOString();
@@ -41,6 +44,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const reloadSequenceRef = useRef(0);
   const routeReconciliationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const calculateRoute = options.calculateRoute;
+  const routingVehicle = options.routingVehicle ?? standardRoutingVehicle;
   const repositoryToken = useMemo(() => ({ repository }), [repository]);
 
   const replaceDestinations = useCallback((nextDestinations: Destination[]) => {
@@ -158,7 +162,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     (nextDestinations: Destination[], planned = planRouteLegReconciliation({
       destinations: nextDestinations,
       currentRouteLegs: routeLegsRef.current,
-      routingVehicle: standardRoutingVehicle,
+      routingVehicle,
     })) => {
       const generation = repositoryToken;
       const reconcile = async () => {
@@ -171,7 +175,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           destinations: nextDestinations,
           currentRouteLegs: planned.routeLegs,
           repository,
-          routingVehicle: standardRoutingVehicle,
+          routingVehicle,
           calculateRoute,
         });
         const plannedIds = new Set(planned.routeLegs.map((routeLeg) => routeLeg.id));
@@ -189,7 +193,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       );
       return queuedReconciliation;
     },
-    [calculateRoute, isActiveGeneration, repository, repositoryToken],
+    [calculateRoute, isActiveGeneration, repository, repositoryToken, routingVehicle],
   );
 
   useEffect(() => {
@@ -234,7 +238,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           const planned = planRouteLegReconciliation({
             destinations: orderedDestinations,
             currentRouteLegs: routeLegsRef.current,
-            routingVehicle: standardRoutingVehicle,
+            routingVehicle,
           });
 
           await Promise.all(
@@ -273,7 +277,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           const planned = planRouteLegReconciliation({
             destinations: nextDestinations,
             currentRouteLegs: routeLegsRef.current,
-            routingVehicle: standardRoutingVehicle,
+            routingVehicle,
           });
 
           await repository.saveDestination(updated);
@@ -293,7 +297,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           const planned = planRouteLegReconciliation({
             destinations: nextDestinations,
             currentRouteLegs: routeLegsRef.current,
-            routingVehicle: standardRoutingVehicle,
+            routingVehicle,
           });
 
           await repository.deleteDestination(destinationId);
@@ -337,7 +341,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           const reconciliation = planRouteLegReconciliation({
             destinations: orderedDestinations,
             currentRouteLegs: previousRouteLegs,
-            routingVehicle: standardRoutingVehicle,
+            routingVehicle,
           });
           replaceDestinations(orderedDestinations);
           replaceRouteLegs(reconciliation.routeLegs);
@@ -523,6 +527,29 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           return orderedActivities;
         },
 
+        async recalculateForVehicle(nextRoutingVehicle: TripRoutingVehicle) {
+          if (!isActiveAction()) return;
+
+          const invalidatedRouteLegs = recalculateAutomaticRouteLegsForVehicle({
+            destinations: destinationsRef.current,
+            routeLegs: routeLegsRef.current,
+            routingVehicle: nextRoutingVehicle,
+          });
+          const recalculatedRouteLegs = await calculateAutomaticRouteLegs({
+            destinations: destinationsRef.current,
+            routeLegs: invalidatedRouteLegs,
+            routingVehicle: nextRoutingVehicle,
+            calculateRoute,
+            retryFailed: true,
+          });
+          if (!isActiveAction()) return;
+
+          await Promise.all(recalculatedRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)));
+          if (!isActiveAction()) return;
+
+          replaceRouteLegs(recalculatedRouteLegs);
+        },
+
         reload,
       };
     },
@@ -535,6 +562,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       replaceRouteLegs,
       repository,
       repositoryToken,
+      routingVehicle,
       updateActivitiesByDestinationId,
       updateRouteLegs,
     ],

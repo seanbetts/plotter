@@ -16,6 +16,7 @@ import { standardRoutingVehicle } from './domain/vehiclePresets';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { downloadTripMap } from './map/tripMapExport';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
+import { createAppWebImageSearchClient } from './services/webImageSearchClient';
 import type { WebImageSearchClient, WebImageSearchResult } from './services/webImageSearchClient';
 import type { TripRepository } from './storage/tripRepository';
 
@@ -182,6 +183,10 @@ const linkPreviewClientMock = vi.hoisted(() => ({
   })),
 }));
 
+const defaultWebImageSearchClientMock = vi.hoisted(() => ({
+  searchImages: vi.fn(async () => []),
+}));
+
 const tripsMock = [
   {
     id: 'trip-one',
@@ -211,7 +216,7 @@ function mockTripWorkspace(overrides: Partial<ReturnType<typeof useTripWorkspace
     actionError: null,
     selectTrip: vi.fn(),
     createTrip: vi.fn(),
-    renameTrip: vi.fn(),
+    updateTrip: vi.fn(),
     deleteTrip: vi.fn(),
     refreshTrips: vi.fn(),
     realtime: null,
@@ -227,6 +232,10 @@ vi.mock('./map/tripMapExport', () => ({ downloadTripMap: vi.fn() }));
 
 vi.mock('./services/linkPreviewClient', () => ({
   createAppLinkPreviewClient: vi.fn(() => linkPreviewClientMock),
+}));
+
+vi.mock('./services/webImageSearchClient', () => ({
+  createAppWebImageSearchClient: vi.fn(() => defaultWebImageSearchClientMock),
 }));
 
 vi.mock('./adapters/geocoding', () => ({
@@ -248,6 +257,7 @@ vi.mock('./adapters/openRouteService', () => ({
     },
     provider: 'openrouteservice',
     profile: 'driving-car',
+    sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 160 }],
   })),
   calculateOpenRouteServiceRouteOptions: vi.fn(async () => [
     {
@@ -266,6 +276,7 @@ vi.mock('./adapters/openRouteService', () => ({
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'recommended-route-key',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 160 }],
     },
     {
       id: 'avoid-highways',
@@ -284,6 +295,7 @@ vi.mock('./adapters/openRouteService', () => ({
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'avoid-highways-route-key',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 220 }],
     },
   ]),
 }));
@@ -355,6 +367,9 @@ describe('App', () => {
     });
     vi.mocked(createAppLinkPreviewClient).mockReset();
     vi.mocked(createAppLinkPreviewClient).mockReturnValue(linkPreviewClientMock);
+    vi.mocked(createAppWebImageSearchClient).mockReset();
+    vi.mocked(createAppWebImageSearchClient).mockReturnValue(defaultWebImageSearchClientMock);
+    defaultWebImageSearchClientMock.searchImages.mockReset().mockResolvedValue([]);
     vi.mocked(searchMapTilerPlaces).mockReset();
     vi.mocked(resolveMapTilerCoordinates).mockReset();
     vi.mocked(calculateOpenRouteServiceRoute).mockClear();
@@ -523,6 +538,7 @@ describe('App', () => {
 
     tripsChanges[0]();
     expect(refreshTrips).toHaveBeenCalledTimes(1);
+    expect(calculateOpenRouteServiceRoute).not.toHaveBeenCalled();
 
     repositoryMock.listDestinations.mockClear();
     tripDataChanges[0]();
@@ -531,6 +547,52 @@ describe('App', () => {
     unmount();
     expect(unsubscribeTrips).toHaveBeenCalledTimes(1);
     expect(unsubscribeTripData).toHaveBeenCalledTimes(1);
+  });
+
+  it('recalculates routes exactly once when the active trip vehicle is saved', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    const readyLeg = {
+      ...createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        type: 'driving-auto',
+      }),
+      status: 'ready' as const,
+      distanceKm: 150,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString' as const, coordinates: [[1, 50], [2, 51]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      routeKey: 'old-car-key',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+    };
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([readyLeg]);
+    const updatedTrip = {
+      ...tripsMock[0],
+      routingVehicle: {
+        preset: 'expedition-truck' as const,
+        profile: 'driving-hgv' as const,
+        vehicleType: 'hgv' as const,
+        restrictions: { length: 9, width: 2.55, height: 3.8, weight: 15, axleLoad: 7.5 },
+      },
+    };
+    const updateTrip = vi.fn(async () => updatedTrip);
+    mockTripWorkspace({ updateTrip } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Expedition truck' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
+
+    await waitFor(() => expect(calculateOpenRouteServiceRoute).toHaveBeenCalledTimes(1));
+    expect(updateTrip).toHaveBeenCalledWith('trip-one', {
+      name: 'World tour',
+      vehiclePreset: 'expedition-truck',
+    });
   });
 
   it('shows one centered loading panel while app clients and trip data load', async () => {
@@ -770,7 +832,7 @@ describe('App', () => {
       actionError: null,
       selectTrip: vi.fn(),
       createTrip: vi.fn(),
-      renameTrip: vi.fn(),
+      updateTrip: vi.fn(),
       deleteTrip: vi.fn(),
     });
     rerender(<App />);
@@ -816,37 +878,37 @@ describe('App', () => {
 
   it('opens route alternatives from the route row and saves the selected option', async () => {
     const user = userEvent.setup();
-    vi.mocked(searchMapTilerPlaces)
-      .mockResolvedValueOnce([
-        createPlaceSearchResult({
-          id: 'place-istanbul',
-          label: 'Istanbul, Turkey',
-          placeName: 'Istanbul',
-          regionName: '',
-          countryName: 'Turkey',
-          coordinates: { lat: 41.0082, lng: 28.9784 },
-        }),
-      ])
-      .mockResolvedValueOnce([
-        createPlaceSearchResult({
-          id: 'place-tbilisi',
-          label: 'Tbilisi, Georgia',
-          placeName: 'Tbilisi',
-          regionName: '',
-          countryName: 'Georgia',
-          coordinates: { lat: 41.7151, lng: 44.8271 },
-        }),
-      ]);
+    const istanbul = createDestination({
+      name: 'Istanbul',
+      coordinates: { lat: 41.0082, lng: 28.9784 },
+      order: 0,
+    });
+    const tbilisi = createDestination({
+      name: 'Tbilisi',
+      coordinates: { lat: 41.7151, lng: 44.8271 },
+      order: 1,
+    });
+    const routeLeg = {
+      ...createRouteLeg({
+        originDestinationId: istanbul.id,
+        targetDestinationId: tbilisi.id,
+        type: 'driving-auto',
+      }),
+      status: 'ready' as const,
+      distanceKm: 160,
+      travelTimeHours: 2.25,
+      geometry: { type: 'LineString' as const, coordinates: [[28.9784, 41.0082], [44.8271, 41.7151]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      routeKey: 'recommended-route-key',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+    };
+    repositoryMock.initialDestinations = Promise.resolve([istanbul, tbilisi]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
 
     render(<App />);
 
     await waitForTripReady();
-
-    await user.type(screen.getByLabelText('Search for a destination'), 'Istanbul');
-    await user.click(await screen.findByRole('option', { name: 'Istanbul, Turkey' }));
-    await user.clear(screen.getByLabelText('Search for a destination'));
-    await user.type(screen.getByLabelText('Search for a destination'), 'Tbilisi');
-    await user.click(await screen.findByRole('option', { name: 'Tbilisi, Georgia' }));
 
     const editRouteButton = await screen.findByRole('button', {
       name: 'Edit route from Istanbul to Tbilisi',
@@ -860,7 +922,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Use selected route' }));
 
     await waitFor(() =>
-      expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
+      expect(repositoryMock.saveRouteLeg).toHaveBeenCalledWith(
         expect.objectContaining({
           routeKey: 'avoid-highways-route-key',
           distanceKm: 220,

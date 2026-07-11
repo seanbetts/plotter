@@ -228,7 +228,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     actionError,
     selectTrip,
     createTrip,
-    renameTrip,
+    updateTrip,
     deleteTrip,
     refreshTrips,
     realtime,
@@ -274,7 +274,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
       tripActionError={actionError}
       onSelectTrip={selectTrip}
       onCreateTrip={createTrip}
-      onRenameTrip={renameTrip}
+      onUpdateTrip={updateTrip}
       onDeleteTrip={deleteTrip}
       isTripWorkspaceLoading={isLoading}
       realtime={realtime}
@@ -291,7 +291,7 @@ function TripWorkspace({
   tripActionError,
   onSelectTrip,
   onCreateTrip,
-  onRenameTrip,
+  onUpdateTrip,
   onDeleteTrip,
   isTripWorkspaceLoading,
   realtime,
@@ -304,7 +304,10 @@ function TripWorkspace({
   tripActionError: string | null;
   onSelectTrip: (tripId: string) => void;
   onCreateTrip: (name: string) => Promise<boolean | void> | boolean | void;
-  onRenameTrip: (tripId: string, name: string) => Promise<boolean | void> | boolean | void;
+  onUpdateTrip: (
+    tripId: string,
+    patch: { name: string; vehiclePreset: TripSummary['routingVehicle']['preset'] },
+  ) => Promise<TripSummary | false> | TripSummary | false;
   onDeleteTrip: (tripId: string) => Promise<boolean | void> | boolean | void;
   isTripWorkspaceLoading: boolean;
   realtime: TripRealtimeSubscriptions | null;
@@ -332,8 +335,12 @@ function TripWorkspace({
     updateActivity,
     deleteActivity,
     reorderActivities,
+    recalculateForVehicle,
     reload,
-  } = useTripData(repository, { calculateRoute });
+  } = useTripData(repository, {
+    calculateRoute,
+    routingVehicle: activeTrip?.routingVehicle,
+  });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [isStopsPanelCollapsed, setIsStopsPanelCollapsed] = useState(readStopsPanelCollapsedPreference);
@@ -381,6 +388,24 @@ function TripWorkspace({
       routeLegs,
     });
   }, [activeTrip, destinations, routeLegs]);
+
+  const handleUpdateTrip = useCallback(async (
+    tripId: string,
+    patch: { name: string; vehiclePreset: TripSummary['routingVehicle']['preset'] },
+  ) => {
+    const previousTrip = trips.find((trip) => trip.id === tripId);
+    const updatedTrip = await onUpdateTrip(tripId, patch);
+    if (updatedTrip === false) return false;
+
+    if (
+      activeTrip?.id === tripId &&
+      previousTrip?.routingVehicle.preset !== updatedTrip.routingVehicle.preset
+    ) {
+      await recalculateForVehicle(updatedTrip.routingVehicle);
+    }
+
+    return updatedTrip;
+  }, [activeTrip?.id, onUpdateTrip, recalculateForVehicle, trips]);
 
   useEffect(() => {
     if (!realtime || !activeTrip) return undefined;
@@ -1123,7 +1148,7 @@ function TripWorkspace({
                 actionError={tripActionError}
                 onSelectTrip={onSelectTrip}
                 onCreateTrip={onCreateTrip}
-                onRenameTrip={onRenameTrip}
+                onUpdateTrip={handleUpdateTrip}
                 onDeleteTrip={onDeleteTrip}
               />
             </div>

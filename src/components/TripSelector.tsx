@@ -1,5 +1,6 @@
-import { Check, ChevronDown, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Car, Caravan, Check, ChevronDown, Pencil, Plus, Trash2, Truck, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import type { VehiclePreset } from '../domain/types';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 
 type TripSelectorProps = {
@@ -8,11 +9,20 @@ type TripSelectorProps = {
   actionError: string | null;
   onSelectTrip: (tripId: string) => void;
   onCreateTrip: (name: string) => Promise<boolean | void> | boolean | void;
-  onRenameTrip: (tripId: string, name: string) => Promise<boolean | void> | boolean | void;
+  onUpdateTrip: (
+    tripId: string,
+    patch: { name: string; vehiclePreset: VehiclePreset },
+  ) => Promise<TripSummary | false> | TripSummary | false;
   onDeleteTrip: (tripId: string) => Promise<boolean | void> | boolean | void;
 };
 
-type DialogMode = 'create' | 'rename' | 'delete' | null;
+type DialogMode = 'create' | 'edit' | 'delete' | null;
+
+const vehicleOptions = [
+  { preset: 'standard', label: 'Car', Icon: Car },
+  { preset: 'large-camper', label: 'Large camper', Icon: Caravan },
+  { preset: 'expedition-truck', label: 'Expedition truck', Icon: Truck },
+] satisfies Array<{ preset: VehiclePreset; label: string; Icon: typeof Car }>;
 
 export function TripSelector({
   trips,
@@ -20,12 +30,13 @@ export function TripSelector({
   actionError,
   onSelectTrip,
   onCreateTrip,
-  onRenameTrip,
+  onUpdateTrip,
   onDeleteTrip,
 }: TripSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [tripName, setTripName] = useState('');
+  const [vehiclePreset, setVehiclePreset] = useState<VehiclePreset>('standard');
   const [targetTrip, setTargetTrip] = useState<TripSummary | null>(null);
   const selectorRef = useRef<HTMLDivElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -79,7 +90,8 @@ export function TripSelector({
   const openDialog = (mode: DialogMode, trip: TripSummary | null = null) => {
     setDialogMode(mode);
     setTargetTrip(trip);
-    setTripName(mode === 'rename' ? trip?.name ?? '' : '');
+    setTripName(mode === 'edit' ? trip?.name ?? '' : '');
+    setVehiclePreset(mode === 'edit' ? trip?.routingVehicle.preset ?? 'standard' : 'standard');
     setIsOpen(false);
   };
 
@@ -90,7 +102,7 @@ export function TripSelector({
     const succeeded = dialogMode === 'create'
       ? await onCreateTrip(trimmedName)
       : targetTrip
-        ? await onRenameTrip(targetTrip.id, trimmedName)
+        ? await onUpdateTrip(targetTrip.id, { name: trimmedName, vehiclePreset })
         : false;
 
     if (succeeded === false) return;
@@ -156,8 +168,8 @@ export function TripSelector({
                   type="button"
                   role="menuitem"
                   className="trip-selector__row-action"
-                  aria-label={`Rename ${trip.name}`}
-                  onClick={() => openDialog('rename', trip)}
+                  aria-label={`Edit ${trip.name}`}
+                  onClick={() => openDialog('edit', trip)}
                 >
                   <Pencil size={15} aria-hidden="true" />
                 </button>
@@ -176,12 +188,12 @@ export function TripSelector({
         </div>
       ) : null}
 
-      {dialogMode === 'create' || dialogMode === 'rename' ? (
+      {dialogMode === 'create' || dialogMode === 'edit' ? (
         <section
           className="trip-selector__dialog"
           role="dialog"
           aria-modal="true"
-          aria-label={dialogMode === 'create' ? 'New trip' : 'Rename trip'}
+          aria-label={dialogMode === 'create' ? 'New trip' : 'Edit trip'}
         >
           <form
             className="trip-selector__dialog-form"
@@ -191,6 +203,27 @@ export function TripSelector({
             }}
           >
             <label htmlFor="trip-selector-name">Trip name</label>
+            {dialogMode === 'edit' ? (
+              <div
+                role="group"
+                aria-label="Vehicle for this trip"
+                className="trip-selector__vehicle-options"
+              >
+                {vehicleOptions.map(({ preset, label, Icon }) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className="trip-selector__vehicle-option"
+                    aria-label={label}
+                    aria-pressed={vehiclePreset === preset}
+                    title={label}
+                    onClick={() => setVehiclePreset(preset)}
+                  >
+                    <Icon size={17} aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="trip-selector__dialog-entry">
               <input
                 id="trip-selector-name"
@@ -209,7 +242,7 @@ export function TripSelector({
               <button
                 type="submit"
                 className="trip-selector__dialog-icon-button"
-                aria-label={dialogMode === 'create' ? 'Create trip' : 'Save name'}
+                aria-label={dialogMode === 'create' ? 'Create trip' : 'Save trip'}
               >
                 <Check size={16} aria-hidden="true" />
               </button>

@@ -2128,6 +2128,34 @@ select {
   align-items: stretch;
 }
 
+.trip-selector__vehicle-options {
+  display: grid;
+  grid-template-columns: repeat(3, 38px);
+  gap: 6px;
+}
+
+.trip-selector__vehicle-option {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: transparent;
+}
+
+.trip-selector__vehicle-option:hover,
+.trip-selector__vehicle-option:focus-visible,
+.trip-selector__vehicle-option[aria-pressed='true'] {
+  background: var(--surface-action-subtle);
+}
+
+.trip-selector__vehicle-option[aria-pressed='true'] {
+  border-color: var(--color-text);
+}
+
 .trip-selector__delete-confirmation {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 38px 38px;
