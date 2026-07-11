@@ -1069,14 +1069,20 @@ function TripWorkspace({
     try {
       let validatedOrigin = origin;
       let validatedTarget = target;
-      const destinationUpdates: Destination[] = [];
+      const destinationAnchorUpdates = [];
       if (selectedOption.endpointAnchors.origin) {
         validatedOrigin = withRoutingAnchor(origin, selectedOption.endpointAnchors.origin);
-        if (validatedOrigin !== origin) destinationUpdates.push(validatedOrigin);
+        destinationAnchorUpdates.push({
+          destinationId: origin.id,
+          anchor: selectedOption.endpointAnchors.origin,
+        });
       }
       if (selectedOption.endpointAnchors.target) {
         validatedTarget = withRoutingAnchor(target, selectedOption.endpointAnchors.target);
-        if (validatedTarget !== target) destinationUpdates.push(validatedTarget);
+        destinationAnchorUpdates.push({
+          destinationId: target.id,
+          anchor: selectedOption.endpointAnchors.target,
+        });
       }
       const validatedRouteLeg = applyCalculatedRouteResult({
         routeLeg,
@@ -1098,7 +1104,7 @@ function TripWorkspace({
         routeLegId,
         expectedFingerprint,
         validatedRouteLeg,
-        destinationUpdates,
+        destinationAnchorUpdates,
       });
       if (!applied) {
         setRouteAlternativesState((current) =>

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createActivity as createActivityModel } from '../domain/activities';
-import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
+import { createDestination, updateDestination as patchDestination, withRoutingAnchor } from '../domain/destinations';
 import {
   findBestDestinationInsertionIndex,
   planRouteLegReconciliation,
   reconcileReadyAutomaticRouteLegForCurrentIntent,
 } from '../domain/routePlanner';
 import { createRouteLeg } from '../domain/routeLegs';
-import type { Activity, Coordinates, Destination, DestinationLocation, RouteCalculationMode, RouteLeg, RouteMovement, TripRoutingVehicle } from '../domain/types';
+import type { Activity, Coordinates, Destination, DestinationLocation, RouteCalculationMode, RouteLeg, RouteMovement, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripRepository } from '../storage/tripRepository';
 import {
@@ -37,7 +37,10 @@ type ApplyValidatedRouteLegResultInput = {
   routeLegId: string;
   expectedFingerprint: string;
   validatedRouteLeg: RouteLeg;
-  destinationUpdates?: Destination[];
+  destinationAnchorUpdates?: Array<{
+    destinationId: string;
+    anchor: RoutingAnchor;
+  }>;
 };
 
 const createTimestamp = () => new Date().toISOString();
@@ -700,7 +703,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           routeLegId,
           expectedFingerprint,
           validatedRouteLeg,
-          destinationUpdates = [],
+          destinationAnchorUpdates = [],
         }: ApplyValidatedRouteLegResultInput) {
           return enqueueRouteLegMutation(routeLegId, async () => {
             const currentRouteLeg = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
@@ -736,9 +739,17 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
             const currentDestinations = destinationsRef.current;
             const currentRouteLegs = routeLegsRef.current;
-            const destinationUpdatesById = new Map(destinationUpdates.map((destination) => [destination.id, destination]));
-            const nextDestinations = destinationUpdatesById.size > 0
-              ? currentDestinations.map((destination) => destinationUpdatesById.get(destination.id) ?? destination)
+            const destinationAnchorsById = new Map<string, RoutingAnchor[]>();
+            for (const { destinationId, anchor } of destinationAnchorUpdates) {
+              const anchors = destinationAnchorsById.get(destinationId) ?? [];
+              anchors.push(anchor);
+              destinationAnchorsById.set(destinationId, anchors);
+            }
+            const nextDestinations = destinationAnchorsById.size > 0
+              ? currentDestinations.map((destination) => {
+                  const anchors = destinationAnchorsById.get(destination.id) ?? [];
+                  return anchors.reduce(withRoutingAnchor, destination);
+                })
               : currentDestinations;
             const destinationsToSave = changedDestinationsByReference(currentDestinations, nextDestinations);
             const latestRouteLeg = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
