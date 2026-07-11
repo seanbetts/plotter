@@ -100,6 +100,11 @@ let createObjectURL: ReturnType<typeof vi.fn>;
 let revokeObjectURL: ReturnType<typeof vi.fn>;
 let exportOverlaySnapshot: Array<{ className: string; text: string; selected: boolean }>;
 let imageLoadShouldFail: boolean;
+let imageInstances: Array<{
+  onload: null | (() => void);
+  onerror: null | (() => void);
+}>;
+let overlayRemove: ReturnType<typeof vi.spyOn> | null;
 
 function input(destinations: Destination[] = [first(), second()], routeLegs: RouteLeg[] = []) {
   return { tripName: 'Wild Atlantic Way', destinations, routeLegs };
@@ -134,12 +139,20 @@ beforeEach(() => {
   revokeObjectURL = vi.fn();
   exportOverlaySnapshot = [];
   imageLoadShouldFail = false;
+  imageInstances = [];
+  overlayRemove = null;
   vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
   vi.stubGlobal('Image', class {
     onload: null | (() => void) = null;
     onerror: null | (() => void) = null;
 
+    constructor() {
+      imageInstances.push(this);
+    }
+
     set src(_value: string) {
+      const overlay = document.querySelector<HTMLDivElement>('[data-trip-map-export-labels]');
+      if (overlay) overlayRemove = vi.spyOn(overlay, 'remove');
       exportOverlaySnapshot = Array.from(
         document.querySelectorAll<HTMLButtonElement>(
           '[data-trip-map-export-labels] .map-destination-label',
@@ -253,7 +266,7 @@ it('fits multi-point bounds with deterministic padding and zoom', async () => {
   await promise;
 });
 
-it('unwraps dateline route and stop source coordinates into the fitted interval', async () => {
+it('unwraps dateline route, stop source, and overlay coordinates into the fitted interval', async () => {
   const alaska = createDestination({
     name: 'Alaska',
     countryRegion: 'USA',
@@ -293,6 +306,10 @@ it('unwraps dateline route and stop source coordinates into the fitted interval'
 
   map.callbacks.get('idle')?.();
   await promise;
+  expect(map.project.mock.calls).toEqual([
+    [[179, 52]],
+    [[181, 54]],
+  ]);
 });
 
 it('keeps ordinary European route and stop source coordinates unchanged', async () => {
@@ -399,6 +416,7 @@ it('composites stop pills after the map canvas and before attribution and PNG co
   const drawCalls = (context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
   expect(drawCalls).toHaveLength(2);
   expect(drawCalls[0][0]).toBe(map.canvas);
+  expect(drawCalls[1][0]).toBe(imageInstances[0]);
   expect((context.drawImage as ReturnType<typeof vi.fn>).mock.invocationCallOrder[1]).toBeLessThan(
     (context.fillText as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
   );
@@ -413,7 +431,11 @@ it('rejects label rasterization failure and removes the overlay', async () => {
   map.callbacks.get('idle')?.();
 
   await expect(promise).rejects.toThrow('Unable to render trip map stop labels.');
+  expect(imageInstances[0].onload).toBeNull();
+  expect(imageInstances[0].onerror).toBeNull();
   expect(anchorClick).not.toHaveBeenCalled();
+  expect(revokeObjectURL).toHaveBeenCalledWith('blob:labels');
+  expect(overlayRemove).toHaveBeenCalledOnce();
   expect(document.querySelector('[data-trip-map-export-labels]')).not.toBeInTheDocument();
   expect(document.querySelector('[data-trip-map-export]')).not.toBeInTheDocument();
   expect(map.remove).toHaveBeenCalledOnce();
@@ -425,11 +447,14 @@ it('downloads with the sanitized trip name and cleans up all temporary resources
   map.callbacks.get('idle')?.();
   await promise;
 
+  expect(imageInstances[0].onload).toBeNull();
+  expect(imageInstances[0].onerror).toBeNull();
   expect(anchorClick).toHaveBeenCalledOnce();
   expect(anchorClick.mock.instances[0].download).toBe('Wild-Atlantic-Way.png');
   expect(map.remove).toHaveBeenCalledOnce();
   expect(container).not.toBeInTheDocument();
   expect(document.querySelector('a[download]')).not.toBeInTheDocument();
+  expect(overlayRemove).toHaveBeenCalledOnce();
   expect(createObjectURL).toHaveBeenCalledTimes(2);
   expect(revokeObjectURL).toHaveBeenCalledWith('blob:labels');
   expect(revokeObjectURL).toHaveBeenCalledWith('blob:trip-map');

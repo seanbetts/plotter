@@ -272,6 +272,7 @@ function createStopPillOverlay(
   container: HTMLDivElement,
   map: maplibregl.Map,
   destinations: Destination[],
+  bounds: TripMapBounds,
 ) {
   const overlay = document.createElement('div');
   overlay.dataset.tripMapExportLabels = '';
@@ -282,7 +283,10 @@ function createStopPillOverlay(
   for (const pill of buildStopPillPresentations({
     destinations,
     selectedDestinationId: null,
-    project: (coordinates) => map.project(coordinates),
+    project: ([longitude, latitude]) => map.project([
+      unwrapLongitudeForBounds(longitude, bounds),
+      latitude,
+    ]),
   })) {
     overlay.append(createStopPillElement(pill));
   }
@@ -312,8 +316,16 @@ function inlineComputedStyles(source: Element, target: Element) {
 function loadImage(url: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Unable to render trip map stop labels.'));
+    let settled = false;
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      image.onload = null;
+      image.onerror = null;
+      callback();
+    };
+    image.onload = () => settle(() => resolve(image));
+    image.onerror = () => settle(() => reject(new Error('Unable to render trip map stop labels.')));
     image.src = url;
   });
 }
@@ -425,7 +437,7 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
     frameExportMap(map, bounds);
     errorMonitor.rejectIfFailed();
     await waitForMapEvent(map, 'idle', exportTimeoutMs, errorMonitor);
-    overlay = createStopPillOverlay(container, map, input.destinations);
+    overlay = createStopPillOverlay(container, map, input.destinations, bounds);
     const stopPillImage = await rejectOnMapError(rasterizeStopPillOverlay(overlay), errorMonitor);
     const blob = await rejectOnMapError(exportBlob(map, stopPillImage), errorMonitor);
     errorMonitor.rejectIfFailed();

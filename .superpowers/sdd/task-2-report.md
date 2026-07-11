@@ -77,3 +77,49 @@ The unrelated pre-existing modification to `.superpowers/sdd/task-1-report.md` w
 ## Concerns
 
 None blocking. Browser support for SVG `foreignObject` and computed-style inlining is the approach mandated by the task brief; failure is surfaced through the existing export error path rather than silently producing a label-free PNG.
+
+## Review follow-up
+
+### Fixes
+
+- Passed the fitted `TripMapBounds` into the overlay helper and unwrapped every destination longitude with `unwrapLongitudeForBounds` before calling `map.project`. A dateline trip fitted to `[179, 181]` now projects the `-179` destination at `181`, matching its route and stop-source geometry.
+- Changed `loadImage` to use one guarded settle path that clears both `onload` and `onerror` before resolving or rejecting.
+- Captured the rasterized image in the test harness and proved that it is the second `drawImage` source after the MapLibre canvas.
+- Made overlay and SVG resource cleanup independently observable: both success and failure assert the captured overlay's own `remove` spy, and the failure path explicitly asserts revocation of `blob:labels`.
+
+### Follow-up TDD evidence
+
+RED command:
+
+```text
+npm test -- src/map/tripMapExport.test.ts
+```
+
+RED result: exit 1; 1 test file failed, 3 tests failed and 30 passed.
+
+The corrected regressions failed for the intended reasons:
+
+1. The dateline overlay projected `-179` instead of the fitted-world longitude `181`.
+2. The image `onload` handler remained attached after a rasterization failure.
+3. The image `onload` handler remained attached after successful export rasterization.
+
+GREEN command:
+
+```text
+npm test -- src/map/tripMapExport.test.ts
+```
+
+GREEN result: exit 0; 1 test file passed, 33 tests passed.
+
+### Follow-up verification
+
+- `npm test -- src/map/tripMapExport.test.ts` — exit 0; 1 file passed, 33 tests passed.
+- `npm test` — exit 0; 57 files passed, 708 tests passed.
+- `npm run lint` — exit 0; no ESLint errors.
+- `npm run build` — exit 0; TypeScript and Vite production build succeeded.
+
+The full suite again emitted Node's existing `localStorage` experimental warnings. The build again emitted Vite's existing large-chunk advisory; neither command failed.
+
+### Follow-up concerns
+
+None.
