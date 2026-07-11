@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { resolveVehiclePreset, standardRoutingVehicle } from './vehiclePresets';
 
 describe('vehicle presets', () => {
+  it('routes a car and caravan as ordinary motor traffic while retaining descriptive dimensions', () => {
+    expect(resolveVehiclePreset('large-camper')).toEqual({
+      preset: 'large-camper',
+      profile: 'driving-car',
+      restrictions: { length: 7.5, width: 2.5, height: 3.2, weight: 5, axleLoad: 3 },
+    });
+  });
+
   it('resolves the approved expedition truck snapshot', () => {
     expect(resolveVehiclePreset('expedition-truck')).toEqual({
       preset: 'expedition-truck',

@@ -3,7 +3,7 @@ import type { TripRoutingVehicle, VehiclePreset } from './types';
 const presets: Record<VehiclePreset, TripRoutingVehicle> = {
   standard: { preset: 'standard', profile: 'driving-car', restrictions: {} },
   'large-camper': {
-    preset: 'large-camper', profile: 'driving-hgv', vehicleType: 'hgv',
+    preset: 'large-camper', profile: 'driving-car',
     restrictions: { length: 7.5, width: 2.5, height: 3.2, weight: 5, axleLoad: 3 },
   },
   'expedition-truck': {

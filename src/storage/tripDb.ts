@@ -38,6 +38,14 @@ export type StoredActivityMediaRecord = ActivityMediaRecord & {
   entityId?: string;
 };
 
+const currentStores = {
+  trips: 'id, name, updatedAt, createdAt',
+  destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
+  routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, movement, calculation, status, routeKey, updatedAt',
+  activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
+  activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
+} as const;
+
 // Keep the original database name so the rename does not orphan existing browser data.
 export function createTripDb(name = 'world-tour-planner'): TripDb {
   const db = new Dexie(name) as TripDb;
@@ -97,13 +105,7 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
     ]);
   });
 
-  db.version(6).stores({
-    trips: 'id, name, updatedAt, createdAt',
-    destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
-    routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, movement, calculation, status, routeKey, updatedAt',
-    activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
-    activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
-  }).upgrade(async (transaction) => {
+  db.version(6).stores(currentStores).upgrade(async (transaction) => {
     await Promise.all([
       transaction.table('trips').toCollection().modify((trip) => {
         trip.routingVehicle ??= resolveVehiclePreset('standard');
@@ -127,6 +129,14 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
         delete routeLeg[legacyRouteTypeField];
       }),
     ]);
+  });
+
+  db.version(7).stores(currentStores).upgrade(async (transaction) => {
+    await transaction.table('trips').toCollection().modify((trip) => {
+      if (trip.routingVehicle?.preset === 'large-camper') {
+        trip.routingVehicle = resolveVehiclePreset('large-camper');
+      }
+    });
   });
 
   return db;

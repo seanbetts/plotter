@@ -260,6 +260,50 @@ describe('trip repository', () => {
     await expect(upgradedDb.routeLegs.where('movement').equals('vehicle-shipping').count()).resolves.toBe(1);
   });
 
+  it('normalizes legacy large-camper trips during the v7 upgrade', async () => {
+    const name = `plotter-test-${crypto.randomUUID()}`;
+    const legacyDb = new Dexie(name);
+    const timestamp = '2026-07-10T12:00:00.000Z';
+    const legacyRestrictions = resolveVehiclePreset('large-camper').restrictions;
+
+    legacyDb.version(6).stores({
+      trips: 'id, name, updatedAt, createdAt',
+      destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
+      routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, movement, calculation, status, routeKey, updatedAt',
+      activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
+      activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
+    });
+    await legacyDb.table('trips').put({
+      id: 'legacy-trip',
+      name: 'Legacy trip',
+      description: '',
+      routingVehicle: {
+        preset: 'large-camper',
+        profile: 'driving-hgv',
+        vehicleType: 'hgv',
+        restrictions: legacyRestrictions,
+      },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    legacyDb.close();
+
+    const upgradedDb = createTripDb(name);
+    testDatabases.push({ db: upgradedDb, name });
+
+    await expect(upgradedDb.trips.get('legacy-trip')).resolves.toEqual(
+      expect.objectContaining({
+        id: 'legacy-trip',
+        routingVehicle: resolveVehiclePreset('large-camper'),
+      }),
+    );
+    await expect(upgradedDb.trips.get('legacy-trip')).resolves.toEqual(
+      expect.objectContaining({
+        routingVehicle: expect.objectContaining({ restrictions: legacyRestrictions }),
+      }),
+    );
+  });
+
   it('physically persists route intent for local saves and snapshot replacements', async () => {
     const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
