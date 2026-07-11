@@ -40,6 +40,67 @@ function createRepository(routeLegs: RouteLeg[] = []) {
 }
 
 describe('route orchestration', () => {
+  it('returns recovered route legs and destination anchor updates as one batch', async () => {
+    const origin = createDestination({ name: 'Olderdalen', coordinates: { lat: 69.6041, lng: 20.5326 } });
+    const alta = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 } });
+    const altaAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: alta.coordinates,
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: alta.id,
+      movement: 'drive',
+      calculation: 'automatic',
+    });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [
+          [origin.coordinates.lng, origin.coordinates.lat],
+          [altaAnchor.coordinates.lng, altaAnchor.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+      warnings: [{
+        code: 'ROUTING_ANCHOR_ADJUSTED' as const,
+        message: 'Alta uses a routing point 1.6 km from the stop.',
+      }],
+      endpointAnchors: { target: altaAnchor },
+    }));
+
+    const result = await calculateAutomaticRouteLegs({
+      destinations: [origin, alta],
+      routeLegs: [routeLeg],
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute,
+    });
+
+    expect(result.routeLegs[0]).toMatchObject({
+      status: 'ready',
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      warnings: [expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED' })],
+    });
+    expect(result.destinations[0]).toBe(origin);
+    expect(result.destinations[1].routingAnchors['driving-car']).toEqual(altaAnchor);
+    expect(result.destinations[1]).toMatchObject({
+      id: alta.id,
+      name: alta.name,
+      coordinates: alta.coordinates,
+      routingAnchors: { 'driving-car': altaAnchor },
+    });
+    expect(result.destinations[1].updatedAt >= alta.updatedAt).toBe(true);
+  });
+
   it.each([
     {
       name: 'required ferry missing',
@@ -351,7 +412,7 @@ describe('route orchestration', () => {
   ])('fails %s when returned ferry sections contradict intent', async (ferryPolicy, sections, warningCode) => {
     const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 } });
     const target = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.5881, lng: 9.9598 } });
-    const [result] = await calculateAutomaticRouteLegs({
+    const calculation = await calculateAutomaticRouteLegs({
       destinations: [origin, target],
       routeLegs: [createRouteLeg({
         originDestinationId: origin.id,
@@ -369,6 +430,7 @@ describe('route orchestration', () => {
         sections,
       }),
     });
+    const [result] = calculation.routeLegs;
 
     expect(result).toMatchObject({
       status: 'failed',
@@ -389,7 +451,7 @@ describe('route orchestration', () => {
       type: 'LineString' as const,
       coordinates: [[bremen.coordinates.lng, bremen.coordinates.lat], [hirtshals.coordinates.lng, hirtshals.coordinates.lat]],
     };
-    const [result] = await calculateAutomaticRouteLegs({
+    const calculation = await calculateAutomaticRouteLegs({
       destinations: [bremen, hirtshals],
       routeLegs: [createRouteLeg({
         originDestinationId: bremen.id,
@@ -406,6 +468,7 @@ describe('route orchestration', () => {
         sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1372.6 }],
       }),
     });
+    const [result] = calculation.routeLegs;
 
     expect(result).toMatchObject({
       status: 'review-required',
@@ -460,16 +523,16 @@ describe('route orchestration', () => {
       calculateRoute,
     });
 
-    expect(calculated.map((leg) => leg.status)).toEqual(['review-required', 'review-required']);
-    expect(calculated.flatMap((leg) => leg.warnings ?? [])).toEqual([warning]);
+    expect(calculated.routeLegs.map((leg) => leg.status)).toEqual(['review-required', 'review-required']);
+    expect(calculated.routeLegs.flatMap((leg) => leg.warnings ?? [])).toEqual([warning]);
 
     const resolved = await calculateAutomaticRouteLegs({
       destinations: [origin, middle, target],
-      routeLegs: calculated.map((leg) => ({ ...leg, status: 'pending' as const, warnings: [] })),
+      routeLegs: calculated.routeLegs.map((leg) => ({ ...leg, status: 'pending' as const, warnings: [] })),
       routingVehicle: resolveVehiclePreset('standard'),
       calculateRoute,
     });
-    expect(resolved.map((leg) => leg.status)).toEqual(['ready', 'ready']);
+    expect(resolved.routeLegs.map((leg) => leg.status)).toEqual(['ready', 'ready']);
   });
 
   it('fails incomplete provider output instead of silently accepting missing sections', async () => {
@@ -483,7 +546,7 @@ describe('route orchestration', () => {
       profile: 'driving-car' as const,
     })) as unknown as CalculateRoute;
 
-    const [result] = await calculateAutomaticRouteLegs({
+    const calculation = await calculateAutomaticRouteLegs({
       destinations: [origin, target],
       routeLegs: [createRouteLeg({
         originDestinationId: origin.id,
@@ -493,6 +556,7 @@ describe('route orchestration', () => {
       routingVehicle: resolveVehiclePreset('standard'),
       calculateRoute: calculateWithoutSections,
     });
+    const [result] = calculation.routeLegs;
 
     expect(result).toMatchObject({
       status: 'failed',
@@ -520,13 +584,14 @@ describe('route orchestration', () => {
       error: 'stale failure',
     });
 
-    const [result] = await calculateAutomaticRouteLegs({
+    const calculation = await calculateAutomaticRouteLegs({
       destinations: [origin, target],
       routeLegs: [staleLeg],
       routingVehicle: resolveVehiclePreset('standard'),
       retryFailed: true,
       calculateRoute: async () => { throw new Error('retry failed'); },
     });
+    const [result] = calculation.routeLegs;
 
     expect(result).toMatchObject({
       status: 'failed',

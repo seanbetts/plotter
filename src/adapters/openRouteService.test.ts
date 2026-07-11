@@ -139,6 +139,45 @@ describe('OpenRouteService adapter', () => {
     );
   });
 
+  it('includes endpoint radiuses only when requested', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [[-0.1276, 51.5072], [9.9796, 57.5948]],
+          },
+          properties: { summary: { distance: 1_200_000, duration: 72_000 } },
+        }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await calculateOpenRouteServiceRoute({
+      apiKey: 'key',
+      origin,
+      target,
+      radiuses: [2000, 2000],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openrouteservice.org/v2/directions/driving-car/geojson',
+      expect.objectContaining({
+        body: JSON.stringify({
+          coordinates: [
+            [-0.1276, 51.5072],
+            [9.9796, 57.5948],
+          ],
+          radiuses: [2000, 2000],
+          extra_info: ['waycategory'],
+        }),
+      }),
+    );
+  });
+
   it('maps waycategory 8 to a ferry section and fills road ranges', async () => {
     const geometry: LineString = {
       type: 'LineString',

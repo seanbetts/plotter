@@ -217,13 +217,15 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           currentRouteLegs: persistedRouteLegs,
           routingVehicle: currentVehicle,
         });
-        const nextRouteLegs = await calculateAutomaticRouteLegs({
+        const calculation = await calculateAutomaticRouteLegs({
           destinations: nextDestinations,
           routeLegs: planned.routeLegs,
           routingVehicle: currentVehicle,
           calculateRoute,
         });
-        const nextDestinationIds = new Set(nextDestinations.map(({ id }) => id));
+        const calculatedDestinations = calculation.destinations;
+        const nextRouteLegs = calculation.routeLegs;
+        const nextDestinationIds = new Set(calculatedDestinations.map(({ id }) => id));
         const nextRouteLegIds = new Set(nextRouteLegs.map(({ id }) => id));
         const removedDestinationIds = priorDestinations
           .filter(({ id }) => !nextDestinationIds.has(id))
@@ -236,7 +238,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             };
 
         try {
-          for (const destination of nextDestinations) await repository.saveDestination(destination);
+          for (const destination of calculatedDestinations) await repository.saveDestination(destination);
           for (const routeLeg of persistedRouteLegs) {
             if (!nextRouteLegIds.has(routeLeg.id)) await repository.deleteRouteLeg(routeLeg.id);
           }
@@ -271,7 +273,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             : 'Previous destination and route snapshots were restored.';
           throw new Error(`Unable to persist trip snapshot: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
         }
-        return { destinations: nextDestinations, routeLegs: nextRouteLegs };
+        return { destinations: calculatedDestinations, routeLegs: nextRouteLegs };
       });
     },
     [calculateRoute, enqueueRouteLegMutations, isActiveGeneration, repository, repositoryToken],
@@ -474,17 +476,42 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               );
             }
 
-            const updated = await finalizeRouteLeg({
-              routeLeg: pendingRouteLeg,
-              destinations: destinationsRef.current,
-              routingVehicle: routingVehicleRef.current,
-              calculateRoute,
-            });
+            let calculatedDestinations = destinationsRef.current;
+            let updated: RouteLeg;
+            if (
+              pendingRouteLeg.movement === 'drive' &&
+              pendingRouteLeg.calculation === 'automatic' &&
+              !hasPreservableDrivingRouteData(pendingRouteLeg)
+            ) {
+              const calculation = await calculateAutomaticRouteLegs({
+                destinations: destinationsRef.current,
+                routeLegs: [pendingRouteLeg],
+                routingVehicle: routingVehicleRef.current,
+                calculateRoute,
+                retryFailed: true,
+              });
+              [updated] = calculation.routeLegs;
+              calculatedDestinations = calculation.destinations;
+            } else {
+              updated = await finalizeRouteLeg({
+                routeLeg: pendingRouteLeg,
+                destinations: destinationsRef.current,
+                routingVehicle: routingVehicleRef.current,
+                calculateRoute,
+              });
+            }
             if (!isActiveAction()) return;
 
-            await repository.saveRouteLeg(updated);
+            const destinationsToSave = calculatedDestinations.filter((destination, index) => destination !== destinationsRef.current[index]);
+            await Promise.all([
+              ...destinationsToSave.map((destination) => repository.saveDestination(destination)),
+              repository.saveRouteLeg(updated),
+            ]);
             if (!isActiveAction()) return;
 
+            if (destinationsToSave.length > 0) {
+              replaceDestinations(calculatedDestinations);
+            }
             updateRouteLegs((current) =>
               current.map((routeLeg) => (routeLeg.id === routeLegId ? updated : routeLeg)),
             );
@@ -646,31 +673,43 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             routeLegs: priorRouteLegs,
             routingVehicle: nextRoutingVehicle,
           });
-          const recalculatedRouteLegs = await calculateAutomaticRouteLegs({
+          const calculation = await calculateAutomaticRouteLegs({
             destinations: destinationsRef.current,
             routeLegs: invalidatedRouteLegs,
             routingVehicle: nextRoutingVehicle,
             calculateRoute,
             retryFailed: true,
           });
+          const recalculatedRouteLegs = calculation.routeLegs;
+          const calculatedDestinations = calculation.destinations;
           if (!isActiveAction()) return;
 
           await enqueueRouteLegMutations([
             ...priorRouteLegs.map((routeLeg) => routeLeg.id),
             ...recalculatedRouteLegs.map((routeLeg) => routeLeg.id),
           ], async () => {
+            const priorDestinations = structuredClone(destinationsRef.current);
+            const destinationsToSave = calculatedDestinations.filter((destination, index) => destination !== destinationsRef.current[index]);
             try {
+              for (const destination of destinationsToSave) {
+                await repository.saveDestination(destination);
+              }
               for (const routeLeg of recalculatedRouteLegs) {
                 await repository.saveRouteLeg(routeLeg);
               }
             } catch (caught) {
               const primaryMessage = caught instanceof Error ? caught.message : 'Unknown route storage error';
-              const rollbackResults = await Promise.allSettled(
-                priorRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)),
-              );
+              const rollbackResults = await Promise.allSettled([
+                ...priorDestinations.map((destination) => repository.saveDestination(destination)),
+                ...priorRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)),
+              ]);
+              const rollbackLabels = [
+                ...priorDestinations.map((destination) => `destination ${destination.id}`),
+                ...priorRouteLegs.map((routeLeg) => `route ${routeLeg.id}`),
+              ];
               const rollbackMessages = rollbackResults.flatMap((result, index) =>
                 result.status === 'rejected'
-                  ? [`${priorRouteLegs[index].id}: ${result.reason instanceof Error ? result.reason.message : 'Unknown rollback error'}`]
+                  ? [`${rollbackLabels[index]}: ${result.reason instanceof Error ? result.reason.message : 'Unknown rollback error'}`]
                   : [],
               );
 
@@ -682,12 +721,15 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               }
 
               throw new Error(
-                `Unable to save recalculated routes: ${primaryMessage}. Previous route legs were restored.`,
+                `Unable to save recalculated routes: ${primaryMessage}. Previous destinations and route legs were restored.`,
                 { cause: caught },
               );
             }
             if (!isActiveAction()) return;
 
+            if (destinationsToSave.length > 0) {
+              replaceDestinations(calculatedDestinations);
+            }
             replaceRouteLegs(recalculatedRouteLegs);
           });
         },

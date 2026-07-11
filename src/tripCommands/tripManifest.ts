@@ -249,7 +249,7 @@ export async function calculatePreparedTripManifestRoutes(
   prepared: PreparedTripManifest,
   calculateRoute: RouteCalculator | undefined,
 ): Promise<MaterializedTripManifest> {
-  const routeLegs = await calculateAutomaticRouteLegs({
+  const calculation = await calculateAutomaticRouteLegs({
     destinations: prepared.destinations,
     routeLegs: prepared.pendingRouteLegs,
     routingVehicle: prepared.routingVehicle,
@@ -257,9 +257,9 @@ export async function calculatePreparedTripManifestRoutes(
   });
 
   return {
-    destinations: prepared.destinations,
+    destinations: calculation.destinations,
     activities: prepared.activities,
-    routeLegs,
+    routeLegs: calculation.routeLegs,
     routingVehicle: prepared.routingVehicle,
     changed: prepared.changed,
   };

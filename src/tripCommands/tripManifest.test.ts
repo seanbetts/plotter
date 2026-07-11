@@ -307,6 +307,48 @@ describe('trip manifest materialization', () => {
     ]);
   });
 
+  it('materializes recovered route anchors into the destination snapshot', async () => {
+    const manifest = validateTripManifest({
+      manifestVersion: 2,
+      name: 'Alta recovery',
+      vehiclePreset: 'standard',
+      stops: [
+        { key: 'olderdalen', name: 'Olderdalen', place: { coordinates: { lat: 69.6041, lng: 20.5326 } }, expectedStayDays: 1 },
+        { key: 'alta', name: 'Alta', place: { coordinates: { lat: 69.96887, lng: 23.27165 } }, expectedStayDays: 1 },
+      ],
+      routeLegs: [],
+    });
+    const altaAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: { lat: 69.96887, lng: 23.27165 },
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const calculateRoute = vi.fn(async ({ origin }) => ({
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [[origin.lng, origin.lat], [altaAnchor.coordinates.lng, altaAnchor.coordinates.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+      warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED' as const, message: 'Alta uses a routing point 1.6 km from the stop.' }],
+      endpointAnchors: { target: altaAnchor },
+    }));
+
+    const materialized = await materializeTripManifest(manifest, { calculateRoute });
+
+    expect(materialized.destinations[1].routingAnchors['driving-car']).toEqual(altaAnchor);
+    expect(materialized.routeLegs[0]).toMatchObject({
+      status: 'ready',
+      warnings: [expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED' })],
+    });
+  });
+
   it('materializes version 2 defaults and exceptional automatic route intent with its vehicle', async () => {
     const manifest = validateTripManifest({
       manifestVersion: 2,

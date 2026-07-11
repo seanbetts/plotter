@@ -26,7 +26,10 @@ type CalculateRouteInput = {
   routingVehicle?: TripRoutingVehicle;
   waypoints?: Array<Pick<RouteWaypoint, 'coordinates'>>;
   ferryPolicy?: FerryPolicy;
+  radiuses?: [number, number];
 };
+
+type ResolvedCalculateRouteInput = Omit<Required<CalculateRouteInput>, 'radiuses'> & Pick<CalculateRouteInput, 'radiuses'>;
 
 type CalculatedRoute = {
   distanceKm: number;
@@ -400,21 +403,33 @@ export async function calculateOpenRouteServiceRoute({
   apiKey,
   origin,
   target,
+  profile,
   routingVehicle = standardRoutingVehicle,
   waypoints = [],
   ferryPolicy = 'allow',
+  radiuses,
 }: CalculateRouteInput): Promise<CalculatedRoute> {
   const trimmedApiKey = requireApiKey(apiKey);
-  const resolvedVehicle = routingVehicle;
+  const resolvedProfile = profile ?? routingVehicle.profile;
+  const resolvedVehicle = resolvedProfile === routingVehicle.profile
+    ? routingVehicle
+    : {
+        ...routingVehicle,
+        profile: resolvedProfile,
+        vehicleType: resolvedProfile === 'driving-hgv' ? routingVehicle.vehicleType : undefined,
+        restrictions: resolvedProfile === 'driving-hgv' ? routingVehicle.restrictions : {},
+      };
+  const routingOptions = buildRoutingOptions(resolvedVehicle, ferryPolicy);
   const parsedRoute = parseRouteResponse(
     await postDirections({
       apiKey: trimmedApiKey,
-      profile: resolvedVehicle.profile,
+      profile: resolvedProfile,
       body: {
         coordinates: buildCoordinates(origin, waypoints, target),
+        ...(radiuses ? { radiuses } : {}),
         extra_info: ['waycategory'],
-        ...(buildRoutingOptions(resolvedVehicle, ferryPolicy)
-          ? { options: buildRoutingOptions(resolvedVehicle, ferryPolicy) }
+        ...(routingOptions
+          ? { options: routingOptions }
           : {}),
       },
     }),
@@ -423,7 +438,7 @@ export async function calculateOpenRouteServiceRoute({
   return {
     ...parsedRoute,
     provider,
-    profile: resolvedVehicle.profile,
+    profile: resolvedProfile,
   };
 }
 
@@ -435,7 +450,7 @@ async function calculateProviderAlternativeOptions({
   routingVehicle,
   waypoints,
   ferryPolicy,
-}: Required<CalculateRouteInput>): Promise<RouteOption[]> {
+}: ResolvedCalculateRouteInput): Promise<RouteOption[]> {
   const data = await postDirections({
     apiKey,
     profile,
@@ -490,7 +505,7 @@ async function calculateAvoidFeatureOption({
   ferryPolicy,
   feature,
   label,
-}: Required<CalculateRouteInput> & { feature: RouteAvoidFeature; label: string }) {
+}: ResolvedCalculateRouteInput & { feature: RouteAvoidFeature; label: string }) {
   const data = await postDirections({
     apiKey,
     profile,

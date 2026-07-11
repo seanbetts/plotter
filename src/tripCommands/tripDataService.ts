@@ -10,7 +10,6 @@ import type { TripRepository } from '../storage/tripRepository';
 import {
   calculateAutomaticRouteLegs,
   recalculateAutomaticRouteLegsForVehicle,
-  reconcileAndSaveRouteLegs,
   type CalculateRoute,
 } from './routeOrchestration';
 import { auditTripSnapshot, type TripAuditReport } from './tripAudit';
@@ -439,29 +438,20 @@ async function planRouteLegs(input: {
   currentRouteLegs: RouteLeg[];
   routingVehicle?: TripSummary['routingVehicle'];
   calculateRoute?: CalculateRoute;
-}) {
+}): Promise<{ destinations: Destination[]; routeLegs: RouteLeg[] }> {
   const planned = planRouteLegReconciliation({
     destinations: input.destinations,
     currentRouteLegs: input.currentRouteLegs,
     routingVehicle: input.routingVehicle ?? standardRoutingVehicle,
   });
-  const routeLegs: RouteLeg[] = [];
-  await reconcileAndSaveRouteLegs({
+  const calculation = await calculateAutomaticRouteLegs({
     destinations: input.destinations,
-    currentRouteLegs: planned.routeLegs,
+    routeLegs: planned.routeLegs,
     routingVehicle: input.routingVehicle ?? standardRoutingVehicle,
     calculateRoute: input.calculateRoute,
-    repository: {
-      async saveRouteLeg(routeLeg) {
-        routeLegs.push(routeLeg);
-      },
-      async deleteRouteLeg() {
-        return undefined;
-      },
-    },
   });
 
-  return routeLegs;
+  return calculation;
 }
 
 function countRouteLegChanges(currentRouteLegs: RouteLeg[], nextRouteLegs: RouteLeg[]) {
@@ -501,13 +491,15 @@ async function saveStopsAndRouteLegs(input: {
     currentRouteLegs,
     routingVehicle,
   });
-  const routeLegs = await calculateAutomaticRouteLegs({
+  const calculation = await calculateAutomaticRouteLegs({
     destinations: nextDestinations,
     routeLegs: planned.routeLegs,
     routingVehicle,
     calculateRoute: input.calculateRoute,
   });
-  const nextDestinationIds = new Set(nextDestinations.map(({ id }) => id));
+  const calculatedDestinations = calculation.destinations;
+  const routeLegs = calculation.routeLegs;
+  const nextDestinationIds = new Set(calculatedDestinations.map(({ id }) => id));
   const nextRouteIds = new Set(routeLegs.map(({ id }) => id));
   const removedDestinationIds = priorDestinations
     .filter(({ id }) => !nextDestinationIds.has(id))
@@ -520,7 +512,7 @@ async function saveStopsAndRouteLegs(input: {
       };
 
   try {
-    for (const destination of nextDestinations) await input.repository.saveDestination(destination);
+    for (const destination of calculatedDestinations) await input.repository.saveDestination(destination);
     for (const routeLeg of currentRouteLegs) {
       if (!nextRouteIds.has(routeLeg.id)) await input.repository.deleteRouteLeg(routeLeg.id);
     }
@@ -556,7 +548,7 @@ async function saveStopsAndRouteLegs(input: {
     throw new Error(`Unable to persist trip snapshot: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
   }
   return {
-    destinations: nextDestinations,
+    destinations: calculatedDestinations,
     routeLegs,
     routesRecalculated: countRouteLegChanges(currentRouteLegs, routeLegs),
   };
@@ -734,19 +726,22 @@ export function createTripDataService(
           routeLeg.calculation === 'automatic' &&
           (routeLeg.status === 'failed' || routeLeg.status === 'pending')
         ));
-        const recalculatedRouteLegs = await calculateAutomaticRouteLegs({
+        const calculation = await calculateAutomaticRouteLegs({
           destinations,
           routeLegs: routeLegsToCalculate,
           routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
           retryFailed: true,
         });
+        const recalculatedRouteLegs = calculation.routeLegs;
         const recalculatedById = new Map(recalculatedRouteLegs.map((routeLeg) => [routeLeg.id, routeLeg]));
         const changedRouteLegs = recalculatedRouteLegs.filter((routeLeg, index) => (
           routeLeg !== routeLegsToCalculate[index]
         ));
+        const destinationsToSave = calculation.destinations.filter((destination, index) => destination !== destinations[index]);
         await Promise.all([
           ...reconciliation.removedRouteLegIds.map((routeLegId) => repository.deleteRouteLeg(routeLegId)),
+          ...destinationsToSave.map((destination) => repository.saveDestination(destination)),
           ...changedRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)),
         ]);
 
@@ -800,13 +795,14 @@ export function createTripDataService(
           routeLegs: currentRouteLegs,
           routingVehicle,
         });
-        const routeLegs = await calculateAutomaticRouteLegs({
+        const calculation = await calculateAutomaticRouteLegs({
           destinations,
           routeLegs: invalidatedRouteLegs,
           routingVehicle,
           calculateRoute: dependencies.calculateRoute,
           retryFailed: true,
         });
+        const routeLegs = calculation.routeLegs;
         const changed = emptyChanged();
         changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, routeLegs);
         const nextTrip = { ...trip, routingVehicle };
@@ -820,9 +816,14 @@ export function createTripDataService(
         }
 
         const priorTrip = structuredClone(trip);
+        const priorDestinations = structuredClone(destinations);
         const priorRouteLegs = structuredClone(currentRouteLegs);
+        const destinationsToSave = calculation.destinations.filter((destination, index) => destination !== destinations[index]);
         let metadataUpdateAttempted = false;
         try {
+          for (const destination of destinationsToSave) {
+            await repository.saveDestination(destination);
+          }
           for (const routeLeg of routeLegs) {
             await repository.saveRouteLeg(routeLeg);
           }
@@ -835,6 +836,15 @@ export function createTripDataService(
           });
         } catch (storageError) {
           const rollbackErrors: string[] = [];
+          for (const priorDestination of priorDestinations) {
+            try {
+              await repository.saveDestination(priorDestination);
+            } catch (rollbackError) {
+              rollbackErrors.push(
+                `destination ${priorDestination.id}: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback failure'}`,
+              );
+            }
+          }
           for (const priorRouteLeg of priorRouteLegs) {
             try {
               await repository.saveRouteLeg(priorRouteLeg);
@@ -919,19 +929,25 @@ export function createTripDataService(
           error: undefined,
           updatedAt: new Date().toISOString(),
         };
+        let destinationsToSave: Destination[] = [];
         if (!isManualVehicleShipping) {
-          [nextRouteLeg] = await calculateAutomaticRouteLegs({
+          const calculation = await calculateAutomaticRouteLegs({
             destinations,
             routeLegs: [nextRouteLeg],
             routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
             retryFailed: true,
           });
+          [nextRouteLeg] = calculation.routeLegs;
+          destinationsToSave = calculation.destinations.filter((destination, index) => destination !== destinations[index]);
         }
         const changed = emptyChanged();
         changed.routesRecalculated = 1;
         if (!options?.dryRun) {
-          await repository.saveRouteLeg(nextRouteLeg);
+          await Promise.all([
+            ...destinationsToSave.map((destination) => repository.saveDestination(destination)),
+            repository.saveRouteLeg(nextRouteLeg),
+          ]);
         }
         return commandSuccess(
           `${options?.dryRun ? 'Would update' : 'Updated'} route leg ${routeLegId}.`,
@@ -1027,14 +1043,16 @@ export function createTripDataService(
         const stops = await Promise.all(
           stopDrafts.map((stopDraft, index) => destinationFromDraft(stopDraft, index, dependencies)),
         );
-        const routeLegs = await planRouteLegs({
+        const plannedRoutes = await planRouteLegs({
           destinations: stops,
           currentRouteLegs: [],
           calculateRoute: dependencies.calculateRoute,
         });
+        const calculatedStops = plannedRoutes.destinations;
+        const routeLegs = plannedRoutes.routeLegs;
         const changed = emptyChanged();
         changed.tripsCreated.push(name);
-        changed.stopsAdded.push(...stops.map((stop) => stop.name));
+        changed.stopsAdded.push(...calculatedStops.map((stop) => stop.name));
         changed.routesRecalculated = countRouteLegChanges([], routeLegs);
 
         if (options?.dryRun) {
@@ -1047,7 +1065,7 @@ export function createTripDataService(
               createdAt: '',
               updatedAt: '',
             },
-            stops,
+            stops: calculatedStops,
             activities: [],
             routeLegs,
             changed,
@@ -1056,16 +1074,15 @@ export function createTripDataService(
 
         const trip = await dependencies.directory.createTrip({ name });
         const repository = dependencies.createTripRepository(trip.id);
-        for (const stop of stops) {
-          await repository.saveDestination(stop);
-        }
-        for (const routeLeg of routeLegs) {
-          await repository.saveRouteLeg(routeLeg);
-        }
+        await repository.replaceTripData({
+          destinations: calculatedStops,
+          activities: [],
+          routeLegs,
+        });
 
         return commandSuccess(`Created trip ${trip.name}.`, {
           trip,
-          stops,
+          stops: calculatedStops,
           activities: [],
           routeLegs,
           changed,
@@ -1182,15 +1199,16 @@ export function createTripDataService(
         changed.stopsDeleted.push(...removedStops.map((stop) => stop.name));
 
         if (options?.dryRun) {
-          const nextRouteLegs = await planRouteLegs({
+          const plannedRoutes = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
             routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
+          const nextRouteLegs = plannedRoutes.routeLegs;
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
           return commandSuccess(`Would replace ${currentStops.length} stop${currentStops.length === 1 ? '' : 's'}.`, {
-            stops: nextStops,
+            stops: plannedRoutes.destinations,
             routeLegs: nextRouteLegs,
             changed,
           });
@@ -1255,16 +1273,17 @@ export function createTripDataService(
         changed.stopsAdded.push(insertedStop.name);
 
         if (options?.dryRun) {
-          const nextRouteLegs = await planRouteLegs({
+          const plannedRoutes = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
             routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
+          const nextRouteLegs = plannedRoutes.routeLegs;
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
           return commandSuccess(`Would insert ${insertedStop.name}.`, {
             stop: insertedStop,
-            stops: nextStops,
+            stops: plannedRoutes.destinations,
             routeLegs: nextRouteLegs,
             changed,
           });
@@ -1319,15 +1338,16 @@ export function createTripDataService(
         changed.stopsUpdated.push(updatedStop.name);
 
         if (options?.dryRun) {
-          const nextRouteLegs = await planRouteLegs({
+          const plannedRoutes = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
             routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
+          const nextRouteLegs = plannedRoutes.routeLegs;
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
           return commandSuccess(`Would update ${updatedStop.name}.`, {
-            stop: updatedStop,
+            stop: plannedRoutes.destinations.find(({ id }) => id === stopId) ?? updatedStop,
             routeLegs: nextRouteLegs,
             changed,
           });
@@ -1379,12 +1399,13 @@ export function createTripDataService(
         changed.stopsDeleted.push(stop.name);
 
         if (options?.dryRun) {
-          const nextRouteLegs = await planRouteLegs({
+          const plannedRoutes = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
             routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
+          const nextRouteLegs = plannedRoutes.routeLegs;
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
           return commandSuccess(`Would delete ${stop.name}.`, { changed });
         }
@@ -1433,15 +1454,16 @@ export function createTripDataService(
         changed.stopsUpdated.push(...nextStops.map((stop) => stop.name));
 
         if (options?.dryRun) {
-          const nextRouteLegs = await planRouteLegs({
+          const plannedRoutes = await planRouteLegs({
             destinations: nextStops,
             currentRouteLegs,
             routingVehicle: trip.routingVehicle,
             calculateRoute: dependencies.calculateRoute,
           });
+          const nextRouteLegs = plannedRoutes.routeLegs;
           changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, nextRouteLegs);
           return commandSuccess('Would reorder stops.', {
-            stops: nextStops,
+            stops: plannedRoutes.destinations,
             routeLegs: nextRouteLegs,
             changed,
           });

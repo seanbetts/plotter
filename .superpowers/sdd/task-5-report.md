@@ -1,171 +1,114 @@
-# Task 5 Report: Link And Activity Commands
+# Task 5 Report: Recover Routes and Return Anchor Updates as One Batch
 
-## Implementation summary
+## RED
 
-- Implemented stop link commands in `src/tripCommands/tripDataService.ts`:
-  - `addStopLink`
-  - `deleteStopLink`
-- Implemented activity commands in `src/tripCommands/tripDataService.ts`:
-  - `listActivities`
-  - `createActivity`
-  - `updateActivity`
-  - `deleteActivity`
-  - `reorderActivities`
-- Implemented activity link commands in `src/tripCommands/tripDataService.ts`:
-  - `addActivityLink`
-  - `deleteActivityLink`
-- Wired the service to existing validation and helper layers:
-  - `validateActivityDraft`
-  - `validateActivityPatch`
-  - `validateUrlInput`
-  - `dependencies.enrichLink ?? createFallbackResearchLink`
-  - `reorderResearchLinks`
-- Added a shared `findActivity()` helper that scans repository destinations and activity lists, matching the task brief.
-- Kept route stops and child activities separate:
-  - overnight places remain stops
-  - non-overnight places are managed as activities under a stop
-
-## Test changes
-
-- Replaced the Task 4 placeholder activity repository methods in the service test harness with in-memory implementations for:
-  - `createActivity`
-  - `updateActivity`
-  - `deleteActivity`
-  - `reorderActivities`
-- Extended `src/tripCommands/tripDataService.test.ts` with coverage for:
-  - adding stop links
-  - deleting stop links and re-densifying sort order
-  - creating/updating activities with app-visible fields
-  - listing/reordering/deleting activities
-  - adding/deleting activity links
-
-## TDD evidence
-
-### RED
+- Added `src/tripCommands/routeRecovery.test.ts` before implementation.
+- Added orchestration batch coverage in `src/tripCommands/routeOrchestration.test.ts`.
+- Added ORS radius payload coverage in `src/adapters/openRouteService.test.ts`.
+- Initial focused run failed as expected:
+  - `routeRecovery` module did not exist.
+  - `calculateAutomaticRouteLegs` still returned `RouteLeg[]`.
+  - ORS adapter did not include `radiuses`.
 
 Command:
 
 ```bash
-npm test -- src/tripCommands/tripDataService.test.ts
+npm test -- src/tripCommands/routeRecovery.test.ts src/tripCommands/routeOrchestration.test.ts src/adapters/openRouteService.test.ts
 ```
 
-Observed failure after adding the Task 5 tests:
+Expected RED result: failed.
 
-- `adds stop links using the link enricher`
-- `deletes stop links and re-densifies the remaining sort order`
-- `creates and updates an activity with visible details`
-- `lists, reorders, and deletes activities under one stop`
-- `adds and deletes activity links with stable ordering`
+## GREEN
 
-Failure cause matched the brief: the service still returned unsupported results and the harness still had placeholder activity behavior.
+- Added `src/tripCommands/routeRecovery.ts`.
+- `calculateAutomaticRouteLegs` now returns:
 
-### GREEN
+```ts
+{
+  routeLegs: RouteLeg[];
+  destinations: Destination[];
+}
+```
+
+- Recovered endpoint anchors are applied to destinations with `withRoutingAnchor`.
+- Recovery warnings are merged into route legs.
+- `ROUTING_ANCHOR_ADJUSTED` and `VEHICLE_PROFILE_FALLBACK` are informational and keep ready metrics.
+- Existing review-required behavior is retained for non-informational warnings.
+
+Focused integration command:
+
+```bash
+npm test -- src/tripCommands/routeRecovery.test.ts src/tripCommands/routeOrchestration.test.ts src/tripCommands/tripManifest.test.ts src/tripCommands/tripDataService.test.ts src/hooks/useTripData.test.tsx src/adapters/openRouteService.test.ts
+```
+
+Result: 6 files / 160 tests passed.
+
+## Policy Coverage
+
+- No fallback for 401, 403, 500.
+- Car ORS 2010 retries with `radiuses: [2000, 2000]`, derives endpoint anchors, and adds `ROUTING_ANCHOR_ADJUSTED`.
+- Endpoint snaps beyond 2 km are rejected.
+- HGV ORS 2009 falls back to `driving-car`, preserving waypoints and ferry policy, and adds `VEHICLE_PROFILE_FALLBACK`.
+- HGV ORS 2010 tries HGV endpoint recovery first, then car fallback, then car endpoint recovery.
+- Saved anchors are used only when their profile matches the requested profile.
+- Saved anchors avoid rediscovery when the first request succeeds.
+- Car errors do not fall back to HGV.
+- Auth, quota, 5xx, and unrelated errors are propagated without fallback.
+
+## Migrated Production Callers
+
+- `tripManifest.calculatePreparedTripManifestRoutes`
+  - Uses batch `destinations` and `routeLegs` for manifest materialization.
+  - Manifest bulk creation persists the combined snapshot through `replaceTripData`.
+
+- `tripDataService.planRouteLegs`
+  - Returns calculated destinations plus route legs for simple create and dry-run paths.
+
+- `tripDataService.saveStopsAndRouteLegs`
+  - Persists calculated destinations and route legs in the existing snapshot write/rollback flow.
+  - Covers replace, insert, update, delete, and reorder stop commands.
+
+- `tripDataService.recalculateFailedRoutes`
+  - Saves destination anchor updates and recalculated route legs from one calculation batch.
+
+- `tripDataService.setVehicle`
+  - Saves recovered destinations and recalculated route legs, with destination and route rollback on failure.
+
+- `tripDataService.updateRouteLeg`
+  - Saves recovered destination anchors and the recalculated route leg from one batch.
+
+- `useTripData.reconcilePersistedRouteLegs`
+  - Uses calculated destinations and route legs for add/update/delete/reorder destination flows.
+
+- `useTripData.updateRouteLeg`
+  - Recalculates automatic route edits through the batch path and saves anchor updates with the route leg.
+
+- `useTripData.recalculateForVehicle`
+  - Saves recovered destinations and recalculated route legs, with destination and route rollback on failure.
+
+## Atomicity Evidence
+
+- Manifest creation uses one `replaceTripData` snapshot containing recovered destinations and route legs.
+- Stop mutations continue through the existing save/rollback snapshot path, now using calculated destinations.
+- Failed-route recalculation saves changed destinations and changed route legs from the same returned calculation batch.
+- Vehicle recalculation rolls back both destination and route snapshots if persistence fails.
+- Hook route-edit and vehicle recalculation queue route mutations and persist destination anchor updates with the route-leg writes.
+- Added tests prove recovered anchors flow through:
+  - orchestration batch result,
+  - manifest materialization,
+  - command failed-route recalculation,
+  - hook route-edit recalculation.
+
+## Full Suite
 
 Command:
-
-```bash
-npm test -- src/tripCommands/tripDataService.test.ts
-```
-
-Result:
-
-- `1` file passed
-- `15` tests passed
-- exit code `0`
-
-## Verification commands and results
-
-### Focused service suite
-
-```bash
-npm test -- src/tripCommands/tripDataService.test.ts
-```
-
-Result: passed (`15/15`).
-
-### Full suite
 
 ```bash
 npm test
 ```
 
-Result:
-
-- `46` files passed
-- `1` file failed
-- `563` tests passed
-- `1` test failed
-
-Failing test:
-
-- `src/App.test.tsx > App > reverse geocodes coordinates entered for a manual activity location`
-- failure mode: timeout
-
-### Follow-up isolation run
-
-```bash
-npm test -- src/App.test.tsx -t "reverse geocodes coordinates entered for a manual activity location"
-```
-
-Result:
-
-- `1` file passed
-- `1` matching test passed
-- `39` tests skipped
-- exit code `0`
-
-## Files changed
-
-- `src/tripCommands/tripDataService.ts`
-- `src/tripCommands/tripDataService.test.ts`
-- `.superpowers/sdd/task-5-report.md`
-
-## Self-review findings
-
-- The service implementation follows the brief closely and stays inside the two requested production/test files.
-- Link commands share the same enrichment/fallback behavior for both stops and activities.
-- Activity updates are intentionally limited to app-surfaced fields (`title`, `description`, `notes`, `tags`, `place` -> `location`).
-- Not-found handling now includes activities as a structured command error path.
+Result: 62 files / 883 tests passed.
 
 ## Concerns
 
-- The full `npm test` run did not complete cleanly because of a timeout in `src/App.test.tsx`.
-- I re-ran that exact failing test in isolation and it passed quickly, which suggests an unrelated suite-level flake or timing issue rather than a regression from this Task 5 service work.
-
-## Fix follow-up
-
-- Addressed reviewer feedback on duplicate activity reorders by validating `activityIds` for duplicates before any repository write occurs.
-- Updated the stop-link test harness to inject a fake `enrichLink` implementation and assert that the service actually used it.
-
-## Verification update
-
-```bash
-npm test -- src/tripCommands/tripDataService.test.ts
-```
-
-Result: passed (`16/16`).
-
-```bash
-npm test
-```
-
-Result: passed (`47` files, `565` tests).
-
-## Reviewer follow-up
-
-- Added a regression test for malformed `activityIds` input (`activityIds: 'abc'`), asserting the service returns a structured validation error and does not call the repository reorder write.
-- Hardened `ensureActivityIdList()` in `src/tripCommands/tripDataService.ts` so non-array input fails with `ACTIVITY_IDS_REQUIRED` instead of falling through to a generic command failure.
-
-## Verification update
-
-```bash
-npm test -- src/tripCommands/tripDataService.test.ts
-```
-
-Result: passed (`17/17`).
-
-```bash
-npm test
-```
-
-Result: passed (`47` files, `566` tests).
+- `npm run build` was attempted. Task 5 type errors were fixed, but the build still stops on an unrelated existing fixture in `src/components/MapCanvas.test.tsx` that constructs a `Destination` without `routingAnchors`. I did not edit that file because it is outside the Task 5 ownership set.

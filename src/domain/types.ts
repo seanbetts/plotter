@@ -217,6 +217,8 @@ export type RouteWarning = {
     | 'SUSPICIOUS_DETOUR'
     | 'FERRY_REQUIRED_NOT_FOUND'
     | 'FERRY_AVOIDED_BUT_FOUND'
+    | 'ROUTING_ANCHOR_ADJUSTED'
+    | 'VEHICLE_PROFILE_FALLBACK'
     | 'ROUTE_INTENT_REASSIGNMENT_REQUIRED';
   message: string;
   context?: {

@@ -1,3 +1,4 @@
+import { withRoutingAnchor } from '../domain/destinations';
 import { createRouteKey, createStraightLineGeometry } from '../domain/routeLegs';
 import { coordinateDistanceKm, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
@@ -11,6 +12,11 @@ import type {
   RouteWaypoint,
   TripRoutingVehicle,
 } from '../domain/types';
+import {
+  calculateRouteWithRecovery,
+  type CalculateProviderRoute,
+  type RecoveredRoute,
+} from './routeRecovery';
 
 export type RouteLegPatch = Partial<Omit<RouteLeg, 'id' | 'createdAt' | 'updatedAt'>>;
 
@@ -32,7 +38,12 @@ export type CalculateRouteInput = {
   ferryPolicy: FerryPolicy;
 };
 
-export type CalculateRoute = (input: CalculateRouteInput) => Promise<CalculatedRoute>;
+export type CalculateRoute = CalculateProviderRoute;
+
+export type AutomaticRouteCalculationBatch = {
+  routeLegs: RouteLeg[];
+  destinations: Destination[];
+};
 
 export type RouteLegPersistence = {
   saveRouteLeg(routeLeg: RouteLeg): Promise<void>;
@@ -169,10 +180,15 @@ type ApplyCalculatedRouteResultInput = {
   routeLeg: RouteLeg;
   origin: Destination;
   target: Destination;
-  route: CalculatedRoute;
+  route: CalculatedRoute | RecoveredRoute;
   routeKey: string;
   preserveUnresolvedReview?: boolean;
 };
+
+const informationalWarningCodes = new Set<RouteWarning['code']>([
+  'ROUTING_ANCHOR_ADJUSTED',
+  'VEHICLE_PROFILE_FALLBACK',
+]);
 
 export function applyCalculatedRouteResult({
   routeLeg,
@@ -223,8 +239,11 @@ export function applyCalculatedRouteResult({
     target,
     routeDistanceKm: route.distanceKm,
   });
-  const warnings = [...retainedWarnings, ...(detourWarning ? [detourWarning] : [])];
-  const reviewRequired = preserveUnresolvedReview || warnings.length > 0;
+  const routeWarnings = 'warnings' in route ? route.warnings : [];
+  const warnings = [...retainedWarnings, ...routeWarnings, ...(detourWarning ? [detourWarning] : [])];
+  const reviewRequired = preserveUnresolvedReview || warnings.some(
+    (warning) => !informationalWarningCodes.has(warning.code),
+  );
 
   return {
     ...clearedLeg,
@@ -272,11 +291,26 @@ export async function calculateAutomaticRouteLegs(input: {
   routingVehicle: TripRoutingVehicle;
   calculateRoute?: CalculateRoute;
   retryFailed?: boolean;
-}): Promise<RouteLeg[]> {
-  if (!input.calculateRoute) return input.routeLegs;
+}): Promise<AutomaticRouteCalculationBatch> {
+  if (!input.calculateRoute) {
+    return {
+      routeLegs: input.routeLegs,
+      destinations: input.destinations,
+    };
+  }
 
-  const destinationsById = new Map(input.destinations.map((destination) => [destination.id, destination]));
+  let calculatedDestinations = input.destinations;
+  const destinationsById = new Map(calculatedDestinations.map((destination) => [destination.id, destination]));
   const calculatedRouteLegs: RouteLeg[] = [];
+  const applyEndpointAnchor = (destination: Destination, anchor: RecoveredRoute['endpointAnchors']['origin']) => {
+    if (!anchor) return destination;
+    const updatedDestination = withRoutingAnchor(destination, anchor);
+    if (updatedDestination === destination) return destination;
+    calculatedDestinations = calculatedDestinations.map((candidate) =>
+      candidate.id === updatedDestination.id ? updatedDestination : candidate);
+    destinationsById.set(updatedDestination.id, updatedDestination);
+    return updatedDestination;
+  };
 
   for (const leg of input.routeLegs) {
     const origin = destinationsById.get(leg.originDestinationId);
@@ -301,18 +335,22 @@ export async function calculateAutomaticRouteLegs(input: {
     const clearedLeg = clearCalculatedRouteData(leg, input.routingVehicle.profile);
 
     try {
-      const route = await input.calculateRoute({
+      const route = await calculateRouteWithRecovery({
         origin: origin.coordinates,
         target: target.coordinates,
         profile: input.routingVehicle.profile,
         routingVehicle: input.routingVehicle,
         waypoints,
         ferryPolicy,
-      });
+        originAnchor: origin.routingAnchors[input.routingVehicle.profile],
+        targetAnchor: target.routingAnchors[input.routingVehicle.profile],
+      }, input.calculateRoute);
+      const anchoredOrigin = applyEndpointAnchor(origin, route.endpointAnchors.origin);
+      const anchoredTarget = applyEndpointAnchor(target, route.endpointAnchors.target);
       calculatedRouteLegs.push(applyCalculatedRouteResult({
         routeLeg: leg,
-        origin,
-        target,
+        origin: anchoredOrigin,
+        target: anchoredTarget,
         routeKey,
         route,
         preserveUnresolvedReview: preservesUnresolvedReview,
@@ -328,7 +366,10 @@ export async function calculateAutomaticRouteLegs(input: {
     }
   }
 
-  return calculatedRouteLegs;
+  return {
+    routeLegs: calculatedRouteLegs,
+    destinations: calculatedDestinations,
+  };
 }
 
 export async function calculateDrivingRouteLegs(input: {
@@ -337,7 +378,7 @@ export async function calculateDrivingRouteLegs(input: {
   calculateRoute?: CalculateRoute;
   retryFailed?: boolean;
 }): Promise<RouteLeg[]> {
-  return calculateAutomaticRouteLegs({ ...input, routingVehicle: standardRoutingVehicle });
+  return (await calculateAutomaticRouteLegs({ ...input, routingVehicle: standardRoutingVehicle })).routeLegs;
 }
 
 export function recalculateAutomaticRouteLegsForVehicle(input: {
@@ -396,7 +437,7 @@ export async function finalizeRouteLeg(input: {
     return { ...input.routeLeg, error: undefined, updatedAt: createTimestamp() };
   }
 
-  const [calculatedRouteLeg] = await calculateAutomaticRouteLegs({
+  const calculation = await calculateAutomaticRouteLegs({
     destinations: input.destinations,
     calculateRoute: input.calculateRoute,
     routingVehicle: input.routingVehicle,
@@ -409,7 +450,7 @@ export async function finalizeRouteLeg(input: {
     }],
   });
 
-  return calculatedRouteLeg;
+  return calculation.routeLegs[0];
 }
 
 export async function reconcileAndSaveRouteLegs(input: {
@@ -425,12 +466,13 @@ export async function reconcileAndSaveRouteLegs(input: {
     input.currentRouteLegs,
     routingVehicle,
   );
-  const nextRouteLegs = await calculateAutomaticRouteLegs({
+  const calculation = await calculateAutomaticRouteLegs({
     destinations: input.destinations,
     routeLegs: reconciliation.routeLegs,
     routingVehicle,
     calculateRoute: input.calculateRoute,
   });
+  const nextRouteLegs = calculation.routeLegs;
 
   await Promise.all([
     ...reconciliation.removedRouteLegIds.map((routeLegId) => input.repository.deleteRouteLeg(routeLegId)),
