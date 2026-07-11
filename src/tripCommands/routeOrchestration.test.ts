@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDestination } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { RouteLeg } from '../domain/types';
-import { reconcileAndSaveRouteLegs } from './routeOrchestration';
+import {
+  calculateAutomaticRouteLegs,
+  recalculateAutomaticRouteLegsForVehicle,
+  reconcileAndSaveRouteLegs,
+} from './routeOrchestration';
 
 function createRepository(routeLegs: RouteLeg[] = []) {
   return {
@@ -41,6 +46,7 @@ describe('route orchestration', () => {
       },
       provider: 'test',
       profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 170 }],
     }));
 
     const routeLegs = await reconcileAndSaveRouteLegs({
@@ -139,6 +145,7 @@ describe('route orchestration', () => {
       },
       provider: 'test',
       profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 330 }],
     }));
 
     const routeLegs = await reconcileAndSaveRouteLegs({
@@ -153,9 +160,220 @@ describe('route orchestration', () => {
       origin: middle.coordinates,
       target: target.coordinates,
       profile: 'driving-car',
+      routingVehicle: resolveVehiclePreset('standard'),
+      waypoints: [],
+      ferryPolicy: 'allow',
     });
     expect(routeLegs[0]).toBe(failedLeg);
     expect(routeLegs[0]).toMatchObject({ status: 'failed', error: 'Load failed' });
     expect(routeLegs[1]).toMatchObject({ status: 'ready' });
+  });
+
+  it('passes ordered waypoints, ferry intent, and the trip vehicle to the provider', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 } });
+    const target = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.5881, lng: 9.9598 } });
+    const waypoint = {
+      id: 'waypoint-1',
+      order: 0,
+      name: 'Hamburg',
+      coordinates: { lat: 53.5502, lng: 10.0013 },
+      location: origin.location,
+      notes: '',
+      links: [],
+    };
+    const routingVehicle = resolveVehiclePreset('large-camper');
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 700,
+      travelTimeHours: 9,
+      geometry: { type: 'LineString' as const, coordinates: [[8.8017, 53.0793], [9.9598, 57.5881]] },
+      provider: 'test',
+      profile: 'driving-hgv' as const,
+      sections: [{ kind: 'ferry' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 200 }],
+    }));
+
+    await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        type: 'driving-auto',
+        ferryPolicy: 'require',
+        waypoints: [waypoint],
+      })],
+      routingVehicle,
+      calculateRoute,
+    });
+
+    expect(calculateRoute).toHaveBeenCalledWith({
+      origin: origin.coordinates,
+      target: target.coordinates,
+      profile: 'driving-hgv',
+      routingVehicle,
+      waypoints: [waypoint],
+      ferryPolicy: 'require',
+    });
+  });
+
+  it.each([
+    ['require' as const, [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 500 }], 'FERRY_REQUIRED_NOT_FOUND'],
+    ['avoid' as const, [{ kind: 'ferry' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 200 }], 'FERRY_AVOIDED_BUT_FOUND'],
+  ])('fails %s when returned ferry sections contradict intent', async (ferryPolicy, sections, warningCode) => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 } });
+    const target = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.5881, lng: 9.9598 } });
+    const [result] = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        type: 'driving-auto',
+        ferryPolicy,
+      })],
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute: async () => ({
+        distanceKm: 800,
+        travelTimeHours: 10,
+        geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [9.9598, 57.5881]] },
+        provider: 'test',
+        profile: 'driving-car',
+        sections,
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: undefined,
+      provider: undefined,
+      calculatedAt: undefined,
+      sections: [],
+      warnings: [expect.objectContaining({ code: warningCode })],
+    });
+  });
+
+  it('marks the Bremen to Hirtshals defect for review while excluding its metrics', async () => {
+    const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 } });
+    const hirtshals = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.5881, lng: 9.9598 } });
+    const candidateGeometry = {
+      type: 'LineString' as const,
+      coordinates: [[bremen.coordinates.lng, bremen.coordinates.lat], [hirtshals.coordinates.lng, hirtshals.coordinates.lat]],
+    };
+    const [result] = await calculateAutomaticRouteLegs({
+      destinations: [bremen, hirtshals],
+      routeLegs: [createRouteLeg({
+        originDestinationId: bremen.id,
+        targetDestinationId: hirtshals.id,
+        type: 'driving-auto',
+      })],
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute: async () => ({
+        distanceKm: 1372.6,
+        travelTimeHours: 18,
+        geometry: candidateGeometry,
+        provider: 'test',
+        profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1372.6 }],
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: 'review-required',
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: candidateGeometry,
+      provider: 'test',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1372.6 }],
+      warnings: [expect.objectContaining({ code: 'SUSPICIOUS_DETOUR' })],
+    });
+  });
+
+  it('clears stale calculated data when a failed leg is retried', async () => {
+    const origin = createDestination({ name: 'Ghent', coordinates: { lat: 51.0538, lng: 3.725 } });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 } });
+    const staleLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'failed',
+      distanceKm: 999,
+      travelTimeHours: 99,
+      geometry: { type: 'LineString', coordinates: [[3.725, 51.0538], [10.0013, 53.5502]] },
+      provider: 'stale',
+      sections: [{ kind: 'ferry', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 999 }],
+      warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'stale' }],
+      calculatedAt: new Date().toISOString(),
+      error: 'stale failure',
+    });
+
+    const [result] = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [staleLeg],
+      routingVehicle: resolveVehiclePreset('standard'),
+      retryFailed: true,
+      calculateRoute: async () => { throw new Error('retry failed'); },
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: undefined,
+      provider: undefined,
+      sections: [],
+      warnings: [],
+      calculatedAt: undefined,
+      error: 'retry failed',
+    });
+  });
+
+  it('invalidates every automatic leg for a vehicle change and preserves manual shipping', () => {
+    const origin = createDestination({ name: 'Cartagena', coordinates: { lat: 10.391, lng: -75.4794 } });
+    const target = createDestination({ name: 'Colón', coordinates: { lat: 9.3592, lng: -79.9014 } });
+    const automatic = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 600,
+      travelTimeHours: 8,
+      geometry: { type: 'LineString', coordinates: [[-75.4794, 10.391], [-79.9014, 9.3592]] },
+      provider: 'test',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 600 }],
+      routeKey: 'old-key',
+      calculatedAt: new Date().toISOString(),
+    });
+    const manual = createRouteLeg({
+      originDestinationId: target.id,
+      targetDestinationId: origin.id,
+      type: 'shipping-manual',
+      status: 'manual',
+      geometry: { type: 'LineString', coordinates: [[-79.9014, 9.3592], [-75.4794, 10.391]] },
+    });
+    const vehicle = resolveVehiclePreset('expedition-truck');
+
+    const [recalculated, preserved] = recalculateAutomaticRouteLegsForVehicle({
+      destinations: [origin, target],
+      routeLegs: [automatic, manual],
+      routingVehicle: vehicle,
+    });
+
+    expect(recalculated).toMatchObject({
+      status: 'pending',
+      profile: 'driving-hgv',
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: undefined,
+      provider: undefined,
+      sections: [],
+      warnings: [],
+      calculatedAt: undefined,
+      error: undefined,
+      routeKey: createRouteKey({
+        origin: origin.coordinates,
+        target: target.coordinates,
+        routingVehicle: vehicle,
+      }),
+    });
+    expect(preserved).toBe(manual);
   });
 });

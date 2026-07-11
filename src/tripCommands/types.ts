@@ -1,5 +1,13 @@
 import type { LineString } from 'geojson';
-import type { ResearchLink, Coordinates, ActivityLocation } from '../domain/types';
+import type {
+  ActivityLocation,
+  Coordinates,
+  FerryPolicy,
+  ResearchLink,
+  RouteSection,
+  RouteWaypoint,
+  TripRoutingVehicle,
+} from '../domain/types';
 import type { TripRepository } from '../storage/tripRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripAuditReport } from './tripAudit';
@@ -96,17 +104,23 @@ export type ChangedSummary = {
   routesRecalculated: number;
 };
 
-export type RouteCalculator = (input: {
-  origin: Coordinates;
-  target: Coordinates;
-  profile: 'driving-car';
-}) => Promise<{
-  distanceKm: number;
-  travelTimeHours: number;
-  geometry: LineString;
-  provider: string;
-  profile: 'driving-car';
-}>;
+export type RouteCalculator = {
+  bivarianceHack(input: {
+    origin: Coordinates;
+    target: Coordinates;
+    profile: TripRoutingVehicle['profile'];
+    routingVehicle?: TripRoutingVehicle;
+    waypoints?: RouteWaypoint[];
+    ferryPolicy?: FerryPolicy;
+  }): Promise<{
+    distanceKm: number;
+    travelTimeHours: number;
+    geometry: LineString;
+    provider: string;
+    profile: TripRoutingVehicle['profile'];
+    sections?: RouteSection[];
+  }>;
+}['bivarianceHack'];
 
 export type PlaceResolver = (input: {
   place: PlaceInput;

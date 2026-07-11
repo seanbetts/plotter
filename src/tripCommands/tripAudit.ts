@@ -16,7 +16,9 @@ export type TripAuditIssue = {
   code:
     | 'ACTIVITY_DISTANCE_OUTLIER'
     | 'FAILED_ROUTE_LEG'
-    | 'AUTO_ROUTE_DETOUR'
+    | 'FERRY_REQUIRED_NOT_FOUND'
+    | 'FERRY_AVOIDED_BUT_FOUND'
+    | 'SUSPICIOUS_DETOUR'
     | 'DEFAULT_STAY_AT_HOME_ANCHOR';
   message: string;
   destinationId?: string;
@@ -91,11 +93,34 @@ export function auditTripSnapshot(input: {
     const target = destinationsById.get(routeLeg.targetDestinationId);
     const endpointNames = `${origin?.name ?? routeLeg.originDestinationId} to ${target?.name ?? routeLeg.targetDestinationId}`;
 
+    const ferryContradiction = routeLeg.warnings?.find((warning) => (
+      warning.code === 'FERRY_REQUIRED_NOT_FOUND' || warning.code === 'FERRY_AVOIDED_BUT_FOUND'
+    ));
+    const ferryContradictionCode = ferryContradiction?.code === 'FERRY_REQUIRED_NOT_FOUND'
+      || ferryContradiction?.code === 'FERRY_AVOIDED_BUT_FOUND'
+      ? ferryContradiction.code
+      : undefined;
+    const suspiciousDetour = routeLeg.warnings?.find((warning) => warning.code === 'SUSPICIOUS_DETOUR');
+
     if (routeLeg.type === 'driving-auto' && routeLeg.status === 'failed') {
       issues.push({
         severity: 'error',
-        code: 'FAILED_ROUTE_LEG',
-        message: `Driving route ${endpointNames} failed${routeLeg.error ? `: ${routeLeg.error}` : '.'}`,
+        code: ferryContradictionCode ?? 'FAILED_ROUTE_LEG',
+        message: ferryContradiction?.message
+          ?? `Driving route ${endpointNames} failed${routeLeg.error ? `: ${routeLeg.error}` : '.'}`,
+        routeLegId: routeLeg.id,
+        originDestinationId: routeLeg.originDestinationId,
+        targetDestinationId: routeLeg.targetDestinationId,
+        ...(origin ? { origin: destinationContext(origin) } : {}),
+        ...(target ? { target: destinationContext(target) } : {}),
+      });
+    }
+
+    if (routeLeg.type === 'driving-auto' && routeLeg.status === 'review-required' && suspiciousDetour) {
+      issues.push({
+        severity: 'warning',
+        code: 'SUSPICIOUS_DETOUR',
+        message: suspiciousDetour.message,
         routeLegId: routeLeg.id,
         originDestinationId: routeLeg.originDestinationId,
         targetDestinationId: routeLeg.targetDestinationId,
@@ -112,11 +137,11 @@ export function auditTripSnapshot(input: {
       && target
     ) {
       const directDistance = coordinateDistanceKm(origin.coordinates, target.coordinates);
-      if (routeLeg.distanceKm > directDistance * 4) {
+      if (routeLeg.distanceKm > directDistance * 2 && routeLeg.distanceKm - directDistance >= 500) {
         issues.push({
-          severity: 'error',
-          code: 'AUTO_ROUTE_DETOUR',
-          message: `Automatic driving route ${endpointNames} is ${Math.round(routeLeg.distanceKm)} km, more than four times the ${Math.round(directDistance)} km direct distance.`,
+          severity: 'warning',
+          code: 'SUSPICIOUS_DETOUR',
+          message: `Automatic driving route ${endpointNames} is ${Math.round(routeLeg.distanceKm)} km versus ${Math.round(directDistance)} km direct and requires review.`,
           routeLegId: routeLeg.id,
           originDestinationId: routeLeg.originDestinationId,
           targetDestinationId: routeLeg.targetDestinationId,

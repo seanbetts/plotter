@@ -119,8 +119,8 @@ describe('trip semantic audit', () => {
       },
     }));
     expect(report.issues).toContainEqual(expect.objectContaining({
-      severity: 'error',
-      code: 'AUTO_ROUTE_DETOUR',
+      severity: 'warning',
+      code: 'SUSPICIOUS_DETOUR',
       routeLegId: 'larvik-hirtshals-auto',
       origin: expect.objectContaining({ id: larvik.id, name: 'Larvik' }),
       target: expect.objectContaining({ id: hirtshals.id, name: 'Hirtshals' }),
@@ -131,8 +131,62 @@ describe('trip semantic audit', () => {
       destinationId: home.id,
       destination: expect.objectContaining({ id: home.id, name: 'Home' }),
     }));
-    expect(report).toMatchObject({ errors: 3, warnings: 1 });
+    expect(report).toMatchObject({ errors: 2, warnings: 2 });
     expect(report.issues.every((issue) => issue.message.includes('undefined') === false)).toBe(true);
+  });
+
+  it('reports exact ferry contradiction and suspicious-detour codes with endpoint context', () => {
+    const bremen = createDestination({
+      name: 'Bremen',
+      coordinates: { lat: 53.0793, lng: 8.8017 },
+    });
+    const hirtshals = createDestination({
+      name: 'Hirtshals',
+      coordinates: { lat: 57.5881, lng: 9.9598 },
+    });
+    const ferryFailure = {
+      ...createRouteLeg({
+        originDestinationId: bremen.id,
+        targetDestinationId: hirtshals.id,
+        type: 'driving-auto',
+        status: 'failed',
+        warnings: [{ code: 'FERRY_REQUIRED_NOT_FOUND', message: 'Required ferry section was not returned.' }],
+        error: 'Required ferry section was not returned.',
+      }),
+      id: 'ferry-failure',
+    };
+    const suspiciousDetour = {
+      ...createRouteLeg({
+        originDestinationId: bremen.id,
+        targetDestinationId: hirtshals.id,
+        type: 'driving-auto',
+        status: 'review-required',
+        geometry: { type: 'LineString' as const, coordinates: [[8.8017, 53.0793], [9.9598, 57.5881]] },
+        warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Candidate route requires review.' }],
+      }),
+      id: 'suspicious-detour',
+    };
+
+    const report = auditTripSnapshot({
+      destinations: [bremen, hirtshals],
+      activities: [],
+      routeLegs: [ferryFailure, suspiciousDetour],
+    });
+
+    expect(report.issues).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'FERRY_REQUIRED_NOT_FOUND',
+      routeLegId: 'ferry-failure',
+      origin: expect.objectContaining({ id: bremen.id, name: 'Bremen' }),
+      target: expect.objectContaining({ id: hirtshals.id, name: 'Hirtshals' }),
+    }));
+    expect(report.issues).toContainEqual(expect.objectContaining({
+      severity: 'warning',
+      code: 'SUSPICIOUS_DETOUR',
+      routeLegId: 'suspicious-detour',
+      origin: expect.objectContaining({ id: bremen.id, name: 'Bremen' }),
+      target: expect.objectContaining({ id: hirtshals.id, name: 'Hirtshals' }),
+    }));
   });
 
   it('does not report a detour for an approved manual shipping leg', () => {
@@ -158,6 +212,6 @@ describe('trip semantic audit', () => {
       routeLegs: [ferry],
     });
 
-    expect(report.issues.some((issue) => issue.code === 'AUTO_ROUTE_DETOUR')).toBe(false);
+    expect(report.issues.some((issue) => issue.code === 'SUSPICIOUS_DETOUR')).toBe(false);
   });
 });
