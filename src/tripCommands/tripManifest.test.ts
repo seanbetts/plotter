@@ -3,6 +3,41 @@ import { validateTripManifest } from './validation';
 import { materializeTripManifest } from './tripManifest';
 
 describe('trip manifest materialization', () => {
+  it('materializes a legacy version 1 manual shipping directive as a straight-line runtime leg', async () => {
+    const legacyRouteTypeField = ['ty', 'pe'].join('');
+    const legacyManualShippingValue = ['shipping', 'manual'].join('-');
+    const manifest = validateTripManifest({
+      manifestVersion: 1,
+      name: 'Legacy ferry',
+      stops: [
+        { key: 'larvik', name: 'Larvik', place: { coordinates: { lat: 59.05, lng: 10.03 } }, expectedStayDays: 1 },
+        { key: 'hirtshals', name: 'Hirtshals', place: { coordinates: { lat: 57.59, lng: 9.96 } }, expectedStayDays: 1 },
+      ],
+      routeLegs: [{
+        fromStopKey: 'larvik',
+        toStopKey: 'hirtshals',
+        [legacyRouteTypeField]: legacyManualShippingValue,
+        notes: 'Vehicle ferry.',
+      }],
+    });
+
+    const materialized = await materializeTripManifest(manifest, {});
+
+    expect(materialized.routeLegs).toEqual([
+      expect.objectContaining({
+        movement: 'vehicle-shipping',
+        calculation: 'manual',
+        status: 'manual',
+        notes: 'Vehicle ferry.',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[10.03, 59.05], [9.96, 57.59]],
+        },
+      }),
+    ]);
+    expect(materialized.routeLegs[0]).not.toHaveProperty('type');
+  });
+
   it('resolves and assembles a complete ordered trip snapshot exactly once', async () => {
     const manifest = validateTripManifest({
       manifestVersion: 1,

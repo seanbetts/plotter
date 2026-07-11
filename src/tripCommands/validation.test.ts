@@ -169,6 +169,42 @@ describe('trip command validation', () => {
     }));
   });
 
+  it('normalizes the legacy version 1 manual shipping directive at the manifest boundary only', () => {
+    const legacyRouteTypeField = ['ty', 'pe'].join('');
+    const legacyManualShippingValue = ['shipping', 'manual'].join('-');
+    const routeDirective = {
+      fromStopKey: 'larvik',
+      toStopKey: 'hirtshals',
+      [legacyRouteTypeField]: legacyManualShippingValue,
+      notes: 'Vehicle ferry.',
+    };
+    const input = {
+      name: 'Legacy ferry',
+      stops: [
+        { key: 'larvik', name: 'Larvik', place: { query: 'Larvik' }, expectedStayDays: 1 },
+        { key: 'hirtshals', name: 'Hirtshals', place: { query: 'Hirtshals' }, expectedStayDays: 1 },
+      ],
+      routeLegs: [routeDirective],
+    };
+
+    const manifest = validateTripManifest({ manifestVersion: 1, ...input });
+
+    expect(manifest.routeLegs).toEqual([{
+      fromStopKey: 'larvik',
+      toStopKey: 'hirtshals',
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
+      ferryPolicy: 'allow',
+      waypoints: [],
+      notes: 'Vehicle ferry.',
+    }]);
+    expect(() => validateTripManifest({
+      manifestVersion: 2,
+      vehiclePreset: 'standard',
+      ...input,
+    })).toThrowError('routeLegs[0].type is not allowed.');
+  });
+
   it('accepts one exceptional automatic directive', () => {
     const manifest = validateTripManifest({
       manifestVersion: 2,

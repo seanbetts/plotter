@@ -349,6 +349,7 @@ test('preserves Nordkapp routing intent and calculates both legs around an ordin
       new Promise<Array<{
         originDestinationId: string;
         targetDestinationId: string;
+        movement: string;
         calculation?: string;
         status: string;
         provider?: string;
@@ -360,16 +361,35 @@ test('preserves Nordkapp routing intent and calculates both legs around an ordin
     db.close();
     const aalborg = destinations.find((destination) => destination.name === 'Aalborg');
     if (!aalborg?.entityId) throw new Error('Expected persisted Aalborg stop.');
+    const namesById = new Map(destinations.map((destination) => [destination.entityId, destination.name]));
     return routeLegs.filter((leg) =>
       leg.originDestinationId === aalborg.entityId || leg.targetDestinationId === aalborg.entityId,
-    );
+    ).map((leg) => ({
+      ...leg,
+      originName: namesById.get(leg.originDestinationId),
+      targetName: namesById.get(leg.targetDestinationId),
+    })).sort((left) => left.originName === 'Hamburg' ? -1 : 1);
   });
   await expect.poll(async () => (await readInsertedStopLegs()).length).toBe(2);
   const insertedStopLegs = await readInsertedStopLegs();
   expect(insertedStopLegs).toHaveLength(2);
   expect(insertedStopLegs).toEqual([
-    expect.objectContaining({ calculation: 'automatic', status: 'ready', provider: 'openrouteservice' }),
-    expect.objectContaining({ calculation: 'automatic', status: 'ready', provider: 'openrouteservice' }),
+    expect.objectContaining({
+      originName: 'Hamburg',
+      targetName: 'Aalborg',
+      movement: 'drive',
+      calculation: 'automatic',
+      status: 'ready',
+      provider: 'openrouteservice',
+    }),
+    expect.objectContaining({
+      originName: 'Aalborg',
+      targetName: 'Hirtshals',
+      movement: 'drive',
+      calculation: 'automatic',
+      status: 'ready',
+      provider: 'openrouteservice',
+    }),
   ]);
   await expect(page.getByRole('dialog', { name: /route settings/i })).toHaveCount(0);
   await expect(page.getByLabel('Route includes a ferry')).toBeVisible();

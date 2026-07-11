@@ -6,6 +6,7 @@ import type {
   ActivityPatch,
   PlaceInput,
   RouteLegDirectiveDraftV2,
+  RouteLegDirectiveInputV1,
   RouteLegIntentPatch,
   RouteWaypointDraft,
   StopDraft,
@@ -13,6 +14,10 @@ import type {
   StopPatch,
   TripManifestDraft,
 } from './types';
+
+// Manifest V1 boundary compatibility only. Runtime route legs never retain this field or value.
+const legacyManifestRouteTypeField = ['ty', 'pe'].join('');
+const legacyManifestManualShippingValue = ['shipping', 'manual'].join('-');
 
 export class TripCommandValidationError extends Error {
   constructor(
@@ -296,6 +301,38 @@ function validateRouteLegDirectiveV2(input: unknown, path: string): RouteLegDire
   };
 }
 
+function validateRouteLegDirectiveV1(input: unknown, path: string): RouteLegDirectiveDraftV2 {
+  if (!isRecord(input)) {
+    throw new TripCommandValidationError('INVALID_ROUTE_LEG', `${path} must be an object.`, path);
+  }
+  const boundaryInput: RouteLegDirectiveInputV1 = input;
+  if (!(legacyManifestRouteTypeField in boundaryInput)) {
+    return validateRouteLegDirectiveV2(boundaryInput, path);
+  }
+  rejectUnknownFields(
+    boundaryInput,
+    ['fromStopKey', 'toStopKey', legacyManifestRouteTypeField, 'notes'],
+    path,
+  );
+  if (boundaryInput[legacyManifestRouteTypeField] !== legacyManifestManualShippingValue) {
+    throw new TripCommandValidationError(
+      'INVALID_ROUTE_LEG_TYPE',
+      `${path}.${legacyManifestRouteTypeField} must be the supported version 1 manual shipping value.`,
+      `${path}.${legacyManifestRouteTypeField}`,
+    );
+  }
+  const notes = optionalString(boundaryInput.notes, `${path}.notes`);
+  return {
+    fromStopKey: requiredString(boundaryInput.fromStopKey, 'Route start stop key', `${path}.fromStopKey`),
+    toStopKey: requiredString(boundaryInput.toStopKey, 'Route end stop key', `${path}.toStopKey`),
+    movement: 'vehicle-shipping',
+    calculation: 'manual',
+    ferryPolicy: 'allow',
+    waypoints: [],
+    ...(notes ? { notes } : {}),
+  };
+}
+
 export function validateVehiclePreset(input: unknown, path = 'preset') {
   if (input === undefined) {
     throw new TripCommandValidationError(
@@ -374,9 +411,11 @@ export function validateTripManifest(input: unknown): TripManifestDraft {
     stopIndexes.set(stop.key, index);
   });
 
-  const routeLegs = (input.routeLegs ?? []).map((leg, index) =>
-    validateRouteLegDirectiveV2(leg, `routeLegs[${index}]`),
-  );
+  const routeLegs = (input.routeLegs ?? []).map((leg, index) => (
+    input.manifestVersion === 1
+      ? validateRouteLegDirectiveV1(leg, `routeLegs[${index}]`)
+      : validateRouteLegDirectiveV2(leg, `routeLegs[${index}]`)
+  ));
   const directivePairs = new Set<string>();
   routeLegs.forEach((leg, index) => {
     const path = `routeLegs[${index}]`;

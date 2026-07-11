@@ -1,7 +1,7 @@
 import { createActivity, updateActivity } from '../domain/activities';
 import { createDestination, updateDestination } from '../domain/destinations';
 import { createFallbackResearchLink } from '../domain/researchLinks';
-import { createRouteLeg } from '../domain/routeLegs';
+import { createManualRouteLeg, createRouteLeg } from '../domain/routeLegs';
 import type { Activity, ActivityLocation, Destination, ResearchLink, RouteLeg, RouteWaypoint } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import { calculateAutomaticRouteLegs } from './routeOrchestration';
@@ -198,15 +198,28 @@ export async function materializeTripManifest(
     const fromKey = manifest.stops[index].key;
     const toKey = manifest.stops[index + 1].key;
     const directive = directiveByPair.get(`${fromKey}\u0000${toKey}`);
-    const v2Directive = directive as RouteLegDirectiveDraftV2 | undefined;
+    const normalizedDirective = directive as RouteLegDirectiveDraftV2 | undefined;
+    if (
+      manifest.manifestVersion === 1 &&
+      normalizedDirective?.movement === 'vehicle-shipping' &&
+      normalizedDirective.calculation === 'manual'
+    ) {
+      return createManualRouteLeg({
+        origin: origin.coordinates,
+        target: target.coordinates,
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        notes: normalizedDirective.notes,
+      });
+    }
     return createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      movement: v2Directive?.movement,
-      calculation: v2Directive?.calculation,
-      ferryPolicy: v2Directive?.ferryPolicy,
-      waypoints: v2Directive ? resolvedWaypoints.get(`${fromKey}\u0000${toKey}`) : undefined,
-      notes: v2Directive?.notes,
+      movement: normalizedDirective?.movement,
+      calculation: normalizedDirective?.calculation,
+      ferryPolicy: normalizedDirective?.ferryPolicy,
+      waypoints: normalizedDirective ? resolvedWaypoints.get(`${fromKey}\u0000${toKey}`) : undefined,
+      notes: normalizedDirective?.notes,
     });
   });
   const routingVehicle = resolveVehiclePreset(manifest.manifestVersion === 2 ? manifest.vehiclePreset : 'standard');

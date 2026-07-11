@@ -85,6 +85,12 @@ export type RouteLegDirectiveDraftV2 = {
 
 export type RouteLegDirectiveDraft = RouteLegDirectiveDraftV2;
 
+export type RouteLegDirectiveInputV1 = Record<string, unknown> & {
+  fromStopKey?: unknown;
+  toStopKey?: unknown;
+  notes?: unknown;
+};
+
 export type TripManifestDraftV1 = {
   manifestVersion: 1;
   name: string;
