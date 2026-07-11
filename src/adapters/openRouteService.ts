@@ -356,6 +356,10 @@ function isAuthFailure(error: unknown) {
   return isOpenRouteServiceError(error) && (error.status === 401 || error.status === 403);
 }
 
+function isQuotaFailure(error: unknown) {
+  return isOpenRouteServiceError(error) && error.status === 429;
+}
+
 async function postDirections({
   apiKey,
   profile,
@@ -543,7 +547,7 @@ export async function calculateOpenRouteServiceRouteOptions({
       })),
     );
   } catch (error) {
-    if (isAuthFailure(error)) {
+    if (isAuthFailure(error) || isQuotaFailure(error)) {
       throw error;
     }
 
@@ -568,7 +572,7 @@ export async function calculateOpenRouteServiceRouteOptions({
         }),
       );
     } catch (error) {
-      if (isAuthFailure(error)) {
+      if (isAuthFailure(error) || isQuotaFailure(error)) {
         throw error;
       }
 

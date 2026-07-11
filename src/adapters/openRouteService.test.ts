@@ -528,6 +528,40 @@ describe('OpenRouteService adapter', () => {
     expect(options.map((option) => option.label)).toEqual(['Recommended', 'Avoid highways']);
   });
 
+  it('rethrows persistent quota failures from provider alternatives without attempting supplementals', async () => {
+    const rateLimitedResponse = new Response(JSON.stringify({
+      error: {
+        code: 3099,
+        message: 'Rate limit exceeded.',
+      },
+    }), {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        'Retry-After': '0',
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(rateLimitedResponse.clone())
+      .mockResolvedValueOnce(rateLimitedResponse.clone());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      calculateOpenRouteServiceRouteOptions({
+        apiKey: 'ors-key',
+        origin: { lat: 51.5072, lng: -0.1276 },
+        target: { lat: 48.8566, lng: 2.3522 },
+      }),
+    ).rejects.toMatchObject({
+      name: 'OpenRouteServiceError',
+      status: 429,
+      code: 3099,
+      retryAfterMs: 0,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects auth failures from route options requests', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

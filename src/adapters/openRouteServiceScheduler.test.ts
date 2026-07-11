@@ -129,6 +129,30 @@ describe('OpenRouteService scheduler', () => {
     expect(attempts).toBe(2);
   });
 
+  it('admits a later operation after an earlier scheduled operation rejects', async () => {
+    const clock = createFakeClock();
+    const scheduler = createOpenRouteServiceScheduler({
+      maxRequests: 1,
+      windowMs: 1_000,
+      now: clock.now,
+      sleep: async (milliseconds) => {
+        clock.sleeps.push(milliseconds);
+        await clock.sleep(milliseconds);
+      },
+    });
+
+    await expect(
+      scheduler.schedule(async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+
+    await clock.advance(1_000);
+    await expect(
+      scheduler.schedule(async () => 'next'),
+    ).resolves.toBe('next');
+  });
+
   it.each([404, 401, 403])('does not retry non-recoverable provider failures (%i)', async (status) => {
     const clock = createFakeClock();
     const scheduler = createOpenRouteServiceScheduler({
