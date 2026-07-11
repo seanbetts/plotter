@@ -245,11 +245,11 @@ export function applyCalculatedRouteResult({
   const reviewRequired = preserveUnresolvedReview || warnings.some(
     (warning) => !informationalWarningCodes.has(warning.code),
   );
-  const {
-    warnings: _recoveryWarnings,
-    endpointAnchors: _endpointAnchors,
-    ...calculatedRoute
-  } = route as CalculatedRoute & Partial<Pick<RecoveredRoute, 'warnings' | 'endpointAnchors'>>;
+  const calculatedRoute = {
+    ...route,
+  } as CalculatedRoute & Partial<Pick<RecoveredRoute, 'warnings' | 'endpointAnchors'>>;
+  delete calculatedRoute.warnings;
+  delete calculatedRoute.endpointAnchors;
 
   return {
     ...clearedLeg,
