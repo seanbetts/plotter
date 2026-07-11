@@ -485,7 +485,7 @@ test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
 
   const liveStopPills = page.locator('.map-destination-label-layer .map-destination-label');
   await expect(liveStopPills).toHaveCount(2);
-  await expect(liveStopPills).toHaveText(['ST - Galway', '02 - Cork']);
+  await expect(liveStopPills).toHaveText(['ST - Galway', 'ED - Cork']);
   await expect(liveStopPills.filter({ hasText: 'ST - Galway' })).not.toHaveClass(/is-selected/);
 
   const liveCanvas = page.locator('.maplibregl-canvas').first();

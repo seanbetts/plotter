@@ -570,7 +570,7 @@ function buildDestinationFeatures(
         id: destination.id,
         name: destination.name,
         order: index + 1,
-        label: formatStopMarker(index + 1),
+        label: formatStopMarker(index + 1, destinations.length),
         selected: destination.id === selectedDestinationId,
       },
     })),

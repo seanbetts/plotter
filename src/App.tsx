@@ -1327,6 +1327,7 @@ function TripWorkspace({
               activities={selectedDestinationActivities}
               selectedActivityId={selectedActivityId}
               stopNumber={selectedDestinationNumber}
+              stopCount={destinations.length}
               mediaItems={destinationMedia.mediaItems}
               mediaRollupItems={destinationMediaRollupItems}
               isMediaLoading={destinationMedia.isLoading || isDestinationMediaRollupLoading}

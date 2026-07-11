@@ -219,7 +219,7 @@ it('numbers stop labels in canonical array order', () => {
   const target = second();
   expect(buildExportStopFeatures([origin, target]).features.map(({ properties }) => properties)).toEqual([
     { id: origin.id, name: 'Balcombe', number: 1, label: 'ST - Balcombe' },
-    { id: target.id, name: 'Paris', number: 2, label: '02 - Paris' },
+    { id: target.id, name: 'Paris', number: 2, label: 'ED - Paris' },
   ]);
 });
 
@@ -261,7 +261,7 @@ it('renders normal unselected app pills in an export overlay', async () => {
 
   expect(exportOverlaySnapshot).toEqual([
     { className: 'map-destination-label map-label-position-above', text: 'ST - Balcombe', selected: false },
-    { className: 'map-destination-label', text: '02 - Paris', selected: false },
+    { className: 'map-destination-label', text: 'ED - Paris', selected: false },
   ]);
 });
 
@@ -278,7 +278,7 @@ it('places an earlier overlapping export pill above and the later pill below', a
 
   expect(exportOverlaySnapshot).toEqual([
     { className: 'map-destination-label map-label-position-above', text: 'ST - Balcombe', selected: false },
-    { className: 'map-destination-label', text: '02 - Balcombe return', selected: false },
+    { className: 'map-destination-label', text: 'ED - Balcombe return', selected: false },
   ]);
 });
 

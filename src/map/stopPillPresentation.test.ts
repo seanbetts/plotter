@@ -21,9 +21,9 @@ const ghent = createDestination({
 
 describe('stopPillPresentation', () => {
   it('uses the live app numbering and text contract', () => {
-    expect(stopPillText('Balcombe', 0)).toBe('ST - Balcombe');
-    expect(stopPillText('Ghent', 1)).toBe('02 - Ghent');
-    expect(stopPillText('Honningsvåg', 14)).toBe('15 - Honningsvåg');
+    expect(stopPillText('Balcombe', 0, 3)).toBe('ST - Balcombe');
+    expect(stopPillText('Ghent', 1, 3)).toBe('02 - Ghent');
+    expect(stopPillText('Honningsvåg', 2, 3)).toBe('ED - Honningsvåg');
   });
 
   it('builds projected pills in canonical destination order', () => {
@@ -46,7 +46,7 @@ describe('stopPillPresentation', () => {
       expect.objectContaining({
         id: ghent.id,
         name: 'Ghent',
-        text: '02 - Ghent',
+        text: 'ED - Ghent',
         selected: true,
         position: 'below',
         x: 37.17,

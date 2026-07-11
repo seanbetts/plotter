@@ -85,8 +85,8 @@ export function positionStopPillPresentations(
   }));
 }
 
-export function stopPillText(name: string, stopIndex: number) {
-  return `${formatStopMarker(stopIndex + 1)} - ${name}`;
+export function stopPillText(name: string, stopIndex: number, totalStops?: number) {
+  return `${formatStopMarker(stopIndex + 1, totalStops)} - ${name}`;
 }
 
 export function stopPillClassName(input: Pick<StopPillPresentation, 'selected' | 'position'>) {
@@ -108,7 +108,7 @@ export function buildStopPillPresentations({
     return {
       id: destination.id,
       name: destination.name,
-      text: stopPillText(destination.name, index),
+      text: stopPillText(destination.name, index, destinations.length),
       selected: destination.id === selectedDestinationId,
       position: positions?.get(destination.id) ?? 'below',
       x: point.x,

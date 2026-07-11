@@ -532,8 +532,8 @@ export function ItineraryPanel({
                   >
                     <GripVertical size={16} aria-hidden="true" />
                   </button>
-                  <span className="stop-number" aria-label={formatStopAccessibleLabel(stopNumber)}>
-                    {formatStopMarker(stopNumber)}
+                  <span className="stop-number" aria-label={formatStopAccessibleLabel(stopNumber, destinations.length)}>
+                    {formatStopMarker(stopNumber, destinations.length)}
                   </span>
                   <button
                     type="button"

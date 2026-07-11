@@ -704,6 +704,27 @@ describe('DestinationProfile', () => {
     expect(screen.getByText('Start')).toBeInTheDocument();
   });
 
+  it('labels the last stop as the end', () => {
+    const destination = createDestination({
+      name: 'Honningsvåg',
+      countryRegion: 'Norway',
+      coordinates: { lat: 70.9821, lng: 25.9704 },
+    });
+
+    render(
+      <DestinationProfile
+        {...defaultMediaProps}
+        destination={destination}
+        stopNumber={3}
+        stopCount={3}
+        onUpdate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('End')).toBeInTheDocument();
+  });
+
   it('shows the compact editable stop fields until the stop name is clicked', () => {
     const destination = createDestination({
       name: 'Samarkand',

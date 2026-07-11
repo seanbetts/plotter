@@ -40,6 +40,7 @@ type DestinationProfileProps = {
   selectedActivityId: string | null;
   tagSuggestions?: TagSuggestion[];
   stopNumber?: number;
+  stopCount?: number;
   mediaItems: MediaItem[];
   mediaRollupItems?: MediaRollupItem[];
   isMediaLoading: boolean;
@@ -212,6 +213,7 @@ function DestinationProfileForm({
   selectedActivityId,
   tagSuggestions = [],
   stopNumber,
+  stopCount,
   mediaItems,
   mediaRollupItems,
   isMediaLoading,
@@ -523,7 +525,7 @@ function DestinationProfileForm({
     <aside className="destination-profile" aria-label={`${destination.name} profile`}>
       <header className="profile-header" aria-label="Stop detail header">
         <div className="profile-header-main">
-          {stopNumber ? <span className="profile-stop-number">{formatStopHeaderLabel(stopNumber)}</span> : null}
+          {stopNumber ? <span className="profile-stop-number">{formatStopHeaderLabel(stopNumber, stopCount)}</span> : null}
           {isEditingName ? (
             <label className="profile-title-editor profile-title-control" style={profileTitleControlStyle}>
               <span className="sr-only">Stop name</span>

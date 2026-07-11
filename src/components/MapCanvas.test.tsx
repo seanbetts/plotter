@@ -1511,7 +1511,7 @@ describe('MapCanvas', () => {
       .map(([layer]) => layer)
       .find((layer) => layer.id === 'plotter-destination-labels');
     const startLabel = screen.getByText('ST - Cappadocia');
-    const nextStopLabel = screen.getByText('02 - Tbilisi');
+    const nextStopLabel = screen.getByText('ED - Tbilisi');
 
     expect(destinationLabelLayer).toBeUndefined();
     expect(startLabel).toHaveClass('map-destination-label');
