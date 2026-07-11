@@ -17,6 +17,7 @@ import { RouteAlternativesPanel } from './components/RouteAlternativesPanel';
 import { TopToolbar } from './components/TopToolbar';
 import { TripSelector } from './components/TripSelector';
 import { buildTagSuggestions } from './components/tagEditorModel';
+import { withRoutingAnchor } from './domain/destinations';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
 import type { RouteOption } from './domain/routeOptions';
 import type {
@@ -912,6 +913,9 @@ function TripWorkspace({
           routingVehicle: activeTrip?.routingVehicle,
           waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order),
           ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+          currentRouteLeg: routeLeg,
+          originAnchors: origin.routingAnchors,
+          targetAnchors: target.routingAnchors,
         });
 
         setRouteAlternativesState((current) =>
@@ -972,10 +976,21 @@ function TripWorkspace({
     setRouteAlternativesState((current) => (current ? { ...current, status: 'saving' } : current));
 
     try {
+      let validatedOrigin = origin;
+      let validatedTarget = target;
+      const destinationUpdates: Destination[] = [];
+      if (selectedOption.endpointAnchors.origin) {
+        validatedOrigin = withRoutingAnchor(origin, selectedOption.endpointAnchors.origin);
+        if (validatedOrigin !== origin) destinationUpdates.push(validatedOrigin);
+      }
+      if (selectedOption.endpointAnchors.target) {
+        validatedTarget = withRoutingAnchor(target, selectedOption.endpointAnchors.target);
+        if (validatedTarget !== target) destinationUpdates.push(validatedTarget);
+      }
       const validatedRouteLeg = applyCalculatedRouteResult({
         routeLeg,
-        origin,
-        target,
+        origin: validatedOrigin,
+        target: validatedTarget,
         routeKey: selectedOption.routeKey,
         route: {
           distanceKm: selectedOption.distanceKm,
@@ -984,12 +999,15 @@ function TripWorkspace({
           sections: selectedOption.sections,
           provider: selectedOption.provider,
           profile: selectedOption.profile,
+          warnings: selectedOption.warnings,
+          endpointAnchors: selectedOption.endpointAnchors,
         },
       });
       const applied = await applyValidatedRouteLegResult({
         routeLegId: routeAlternativesState.routeLegId,
         expectedFingerprint: routeAlternativesState.expectedFingerprint,
         validatedRouteLeg,
+        destinationUpdates,
       });
       if (!applied) {
         setRouteAlternativesState((current) =>

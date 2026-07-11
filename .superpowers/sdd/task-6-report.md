@@ -1,213 +1,82 @@
-# Task 6 Report: Node CLI Runtime
+# Task 6 Report: Extend Route Alternatives With Recovery Provenance
 
-## Implementation summary
+## RED/GREEN
 
-- Added a Node-only Supabase bootstrap in `src/cli/nodeSupabase.ts`:
-  - loads `.env` through `dotenv/config`
-  - creates a non-persistent Supabase client from `process.env`
-  - ensures an anonymous session exists before running commands
-- Added the full v1 CLI runtime in `src/cli/trip.ts`:
-  - exported `parseTripCliArgs()` and `runTripCli()` for tests
-  - wired the CLI to `createTripDataService()`
-  - exposed the full command surface from the patched plan:
-    - trip commands: `list`, `get`, `create`, `delete`, `rename`
-    - stop commands: `replace-stops`, `insert-stop`, `update-stop`, `delete-stop`, `reorder-stops`
-    - stop link commands: `add-stop-link`, `delete-stop-link`
-    - activity commands: `list-activities`, `create-activity`, `update-activity`, `delete-activity`, `reorder-activities`
-    - activity link commands: `add-activity-link`, `delete-activity-link`
-  - defaulted output to compact JSON and supported `--pretty`
-  - returned exit code `1` for structured service failures and thrown errors
-  - supported `--dry-run` and `--yes` for commands whose service methods accept options
-  - accepted reorder inputs as either raw string arrays or keyed objects (`{ stopIds: [...] }`, `{ activityIds: [...] }`)
-- Added Node-safe env fallback in `src/storage/supabaseClient.ts` so shared repository code can be imported under `tsx` without crashing on browser-only `import.meta.env` access.
-- Added the npm entrypoint in `package.json`:
-  - `npm run trip -- <command>`
-- Added/updated tests:
-  - `src/cli/tripCli.test.ts` covers parser behavior, compact/pretty JSON output, full command dispatch, reorder input parsing, failed service exit codes, and thrown-error handling
-  - `src/cli/nodeSupabase.test.ts` covers the no-session bootstrap regression found during smoke verification
-- Made one incidental compile-only test typing fix in `src/tripCommands/tripDataService.test.ts` so the full `npm run build` verification can complete cleanly.
-
-## TDD evidence
-
-### RED 1: CLI runtime does not exist yet
-
-Command:
+RED 1:
 
 ```bash
-npm test -- src/cli/tripCli.test.ts
+npm test -- src/domain/routeOptions.test.ts src/components/RouteAlternativesPanel.test.tsx src/App.test.tsx
 ```
 
-Observed failure:
+Expected failure confirmed: route options did not yet expose `warnings` or `endpointAnchors`, dedupe kept the less-informative normal geometry, the panel did not render recovery copy, App did not pass current route/anchors into option calculation, and selected fallback warnings/anchors were not saved.
 
-- Vitest failed to resolve `./trip` from `src/cli/tripCli.test.ts`
-- Failure matched the expected starting state: the CLI runtime files had not been created yet
-
-### GREEN 1: CLI runtime satisfies focused tests
-
-Command:
+RED 2:
 
 ```bash
-npm test -- src/cli/tripCli.test.ts
+npm test -- src/adapters/openRouteService.test.ts src/hooks/useTripData.test.tsx
 ```
 
-Result:
+Expected failure confirmed: current recovered routes were dropped when provider options failed, recoverable 2009/2010 option failures did not enter recovery, and `applyValidatedRouteLegResult` saved only the route leg instead of endpoint anchors plus route result.
 
-- `1` file passed
-- `7` tests passed
-- exit code `0`
-
-### RED 2: anonymous session bootstrap fails in Node smoke path
-
-Smoke command that revealed the bug:
+GREEN:
 
 ```bash
-npm run trip -- list --pretty
+npm test -- src/domain/routeOptions.test.ts src/adapters/openRouteService.test.ts src/components/RouteAlternativesPanel.test.tsx src/App.test.tsx src/hooks/useTripData.test.tsx
 ```
 
-Observed failure:
+Result: passed, `5` files / `149` tests.
 
-- `Error: Auth session missing!`
-- root cause: `ensureNodeAnonymousSession()` treated an empty unauthenticated state from `getUser()` as fatal before attempting `signInAnonymously()`
+## Option and Dedupe Behavior
 
-Regression test added:
+- `RouteOptionSource` now includes `adjusted-endpoint` and `profile-fallback`.
+- `RouteOption` now carries `warnings` and `endpointAnchors`.
+- Route option keys include recovery variant, warning codes, actual profile, and endpoint anchor coordinate snapshots so recovered options do not collide with strict-profile options.
+- Dedupe keeps recovery provenance over identical less-informative geometry:
+  - `profile-fallback` outranks `adjusted-endpoint`.
+  - `adjusted-endpoint` outranks `recommended`.
+  - Existing normal-option order is preserved when neither option carries recovery provenance.
+- `calculateOpenRouteServiceRouteOptions` includes a supplied current ready provider route as the first option, including recovery warnings and saved endpoint anchors.
+- If provider alternatives fail with recoverable ORS `2009`/`2010`, the adapter replays that initial error through the existing recovery policy and returns only provider-returned route geometry.
+- If provider alternatives fail for another recoverable-hidden reason while a current route is available, the current route remains available rather than being dropped.
 
-```bash
-npm test -- src/cli/nodeSupabase.test.ts
-```
+## Stale and Atomic Persistence Evidence
 
-Observed failure:
+- App passes `currentRouteLeg`, `originAnchors`, and `targetAnchors` into option calculation.
+- Selecting a recovery option builds a validated ready route with selected metrics, warnings, actual profile, and endpoint anchors.
+- `applyValidatedRouteLegResult` now accepts `destinationUpdates` and saves endpoint anchors plus the selected route through the existing rollback-safe batch.
+- The existing fingerprint guard still runs before persistence; if the route intent changes while the picker is open, neither the route nor endpoint anchors are saved and the existing `Route intent changed. Recalculate route options.` error remains.
+- Hook coverage verifies destination anchor save order with the selected route result and rollback of endpoint anchors when route persistence fails.
 
-- `ensureNodeAnonymousSession` rejected with `Auth session missing!` instead of creating an anonymous session
+## Files Changed
 
-### GREEN 2: anonymous session bootstrap repaired
-
-Commands:
-
-```bash
-npm test -- src/cli/nodeSupabase.test.ts
-npm test -- src/cli/tripCli.test.ts
-```
-
-Result:
-
-- `src/cli/nodeSupabase.test.ts`: `1/1` passed
-- `src/cli/tripCli.test.ts`: `7/7` passed
-
-## Verification commands and results
-
-### Focused CLI suite
-
-```bash
-npm test -- src/cli/tripCli.test.ts
-```
-
-Result: passed (`7/7`).
-
-### Focused Node Supabase regression
-
-```bash
-npm test -- src/cli/nodeSupabase.test.ts
-```
-
-Result: passed (`1/1`).
-
-### Safe smoke command
-
-```bash
-npm run trip -- list --pretty
-```
-
-Result:
-
-- exit code `0`
-- returned valid pretty JSON from the real CLI path
-- loaded `2` trips from Supabase in this workspace environment
-
-### Full suite
-
-```bash
-npm test
-```
-
-Result:
-
-- `49` files passed
-- `574` tests passed
-- exit code `0`
-
-### Build verification
-
-```bash
-npm run build
-```
-
-Result:
-
-- TypeScript build passed
-- Vite production build passed
-- Vite emitted the existing large-chunk warning for the main app bundle, but the build completed successfully
-
-### Final refresh after the last task-local cleanup
-
-Commands:
-
-```bash
-npm test
-npm run build
-```
-
-Result:
-
-- `npm test`: passed again (`49` files, `574` tests)
-- `npm run build`: passed again
-
-## Files changed
-
-- `package.json`
-- `package-lock.json`
-- `src/cli/nodeSupabase.ts`
-- `src/cli/nodeSupabase.test.ts`
-- `src/cli/trip.ts`
-- `src/cli/tripCli.test.ts`
-- `src/storage/supabaseClient.ts`
-- `src/tripCommands/tripDataService.test.ts`
+- `src/domain/routeOptions.ts`
+- `src/domain/routeOptions.test.ts`
+- `src/adapters/openRouteService.ts`
+- `src/adapters/openRouteService.test.ts`
+- `src/components/RouteAlternativesPanel.tsx`
+- `src/components/RouteAlternativesPanel.test.tsx`
+- `src/App.tsx`
+- `src/App.test.tsx`
+- `src/hooks/useTripData.ts`
+- `src/hooks/useTripData.test.tsx`
 - `.superpowers/sdd/task-6-report.md`
 
-## Self-review findings
+## Build and Full Suite
 
-- The CLI surface matches the patched Task 6 brief rather than the older narrower stop-only version.
-- The runtime stays thin: parsing, JSON/file handling, exit codes, and service wiring live in the CLI; domain behavior remains in `createTripDataService()`.
-- The Node path no longer depends on browser-only env helpers for Supabase configuration.
-- The anonymous-session regression is now covered directly by a focused test, not only by manual smoke verification.
-- The incidental `tripDataService.test.ts` change is type-only and does not alter runtime behavior.
+```bash
+npm run build
+```
+
+Result: passed. Vite emitted the existing large chunk warning.
+
+```bash
+npm test
+```
+
+Result: passed, `62` files / `905` tests. Vitest emitted repeated Node `localStorage` experimental warnings; they did not affect the pass result.
 
 ## Concerns
 
-- No functional concerns about the Task 6 CLI runtime at handoff.
-- Verification emitted repeated Node `localStorage` experimental warnings during Vitest runs; those warnings did not affect pass/fail outcomes.
-- I also ran `npm run lint` as an extra check. It still reports unrelated pre-existing lint failures in `src/App.tsx`, `src/storage/tripRepository.ts`, `src/tripCommands/tripDataService.ts`, and `tests/world-tour.spec.ts`. I fixed the one new CLI-test lint nit that came from this task, but I did not broaden scope into those older files.
-
-## Review Fix Addendum
-
-I tightened the CLI error path so every thrown failure now emits a structured JSON envelope with `ok: false` and `error.code: 'COMMAND_FAILED'`.
-
-### Verification for this fix
-
-```bash
-npm test -- src/cli/tripCli.test.ts
-npm test -- src/cli/nodeSupabase.test.ts
-npm test
-npm run build
-```
-
-Results:
-
-- `npm test -- src/cli/tripCli.test.ts`: passed (`8/8`)
-- `npm test -- src/cli/nodeSupabase.test.ts`: passed (`1/1`)
-- `npm test`: passed (`49` files, `575` tests)
-- `npm run build`: passed
-
-### Notes
-
-- `src/cli/trip.ts` now wraps both command execution and startup/bootstrap failures in the same JSON error schema.
-- `src/cli/tripCli.test.ts` now covers both a thrown command failure and a startup failure from CLI bootstrap.
+- No functional concerns for Task 6.
+- I did not implement itinerary-row warning behavior; Task 7 owns that.
+- The working tree had pre-existing unrelated edits in `.superpowers/sdd/task-1-report.md` and `.superpowers/sdd/task-4-report.md`; I left them unstaged.

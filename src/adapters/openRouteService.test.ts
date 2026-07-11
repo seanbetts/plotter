@@ -1,6 +1,7 @@
 import type { LineString } from 'geojson';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RouteWaypoint } from '../domain/types';
+import { createRouteLeg } from '../domain/routeLegs';
+import type { RouteWaypoint, RoutingAnchor } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import {
   calculateOpenRouteServiceRoute,
@@ -709,6 +710,186 @@ describe('OpenRouteService adapter', () => {
       'Alternative 1',
       'Avoid highways',
     ]);
+  });
+
+  it('keeps the current recovered route available when provider option requests fail', async () => {
+    const geometry: LineString = {
+      type: 'LineString',
+      coordinates: [
+        [origin.lng, origin.lat],
+        [target.lng, target.lat],
+      ],
+    };
+    const targetAnchor: RoutingAnchor = {
+      profile: 'driving-car',
+      coordinates: target,
+      originalCoordinates: { lat: target.lat - 0.01, lng: target.lng },
+      snapDistanceKm: 1.1,
+      provider: 'openrouteservice',
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const currentRouteLeg = createRouteLeg({
+      originDestinationId: 'origin-id',
+      targetDestinationId: 'target-id',
+      movement: 'drive',
+      calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 615,
+      travelTimeHours: 8.25,
+      geometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'old-recovered-key',
+      calculatedAt: '2026-07-11T08:00:00.000Z',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'OpenRouteService could not calculate this leg with the requested vehicle profile, so driving-car was used.',
+      }],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 3001, message: 'Provider unavailable.' },
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin,
+      target,
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+      currentRouteLeg,
+      targetAnchors: { 'driving-car': targetAnchor },
+    });
+
+    expect(options).toHaveLength(1);
+    expect(options[0]).toMatchObject({
+      label: 'Car-profile fallback',
+      source: 'profile-fallback',
+      distanceKm: 615,
+      travelTimeHours: 8.25,
+      geometry,
+      profile: 'driving-car',
+      warnings: [expect.objectContaining({ code: 'VEHICLE_PROFILE_FALLBACK' })],
+      endpointAnchors: { target: targetAnchor },
+    });
+  });
+
+  it('uses endpoint recovery when the primary alternatives request cannot snap an endpoint', async () => {
+    const recoveryGeometry: LineString = {
+      type: 'LineString',
+      coordinates: [
+        [origin.lng, origin.lat],
+        [target.lng, target.lat + 0.01],
+      ],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: 2010,
+          message: 'Could not find routable point within a radius of 350.0 meters of specified coordinate 1: 9.9 57.5.',
+        },
+      }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: recoveryGeometry,
+            properties: { summary: { distance: 610_000, duration: 28_800 } },
+          }],
+        }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ type: 'FeatureCollection', features: [] }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin,
+      target,
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+    });
+
+    const recoveryRequest = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.openrouteservice.org/v2/directions/driving-hgv/geojson');
+    expect(recoveryRequest.radiuses).toEqual([350, 2000]);
+    expect(options[0]).toMatchObject({
+      label: 'Adjusted endpoint',
+      source: 'adjusted-endpoint',
+      distanceKm: 610,
+      travelTimeHours: 8,
+      geometry: recoveryGeometry,
+      profile: 'driving-hgv',
+      warnings: [expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED' })],
+      endpointAnchors: {
+        target: expect.objectContaining({
+          profile: 'driving-hgv',
+          coordinates: { lat: target.lat + 0.01, lng: target.lng },
+          originalCoordinates: target,
+        }),
+      },
+    });
+  });
+
+  it('uses car-profile fallback recovery when HGV alternatives are disconnected', async () => {
+    const fallbackGeometry: LineString = {
+      type: 'LineString',
+      coordinates: [
+        [origin.lng, origin.lat],
+        [target.lng, target.lat],
+      ],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: 2009,
+          message: 'Route could not be found between locations.',
+        },
+      }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: fallbackGeometry,
+            properties: { summary: { distance: 620_000, duration: 30_600 } },
+          }],
+        }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ type: 'FeatureCollection', features: [] }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin,
+      target,
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+    });
+
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.openrouteservice.org/v2/directions/driving-car/geojson');
+    expect(options[0]).toMatchObject({
+      label: 'Car-profile fallback',
+      source: 'profile-fallback',
+      distanceKm: 620,
+      travelTimeHours: 8.5,
+      geometry: fallbackGeometry,
+      profile: 'driving-car',
+      warnings: [expect.objectContaining({ code: 'VEHICLE_PROFILE_FALLBACK' })],
+    });
   });
 
   it('requires an API key before route options requests', async () => {

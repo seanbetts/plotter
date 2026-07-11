@@ -1,7 +1,7 @@
 import type { LineString } from 'geojson';
 import { describe, expect, it } from 'vitest';
 import { createRouteLeg } from './routeLegs';
-import type { RouteSection } from './types';
+import type { RouteSection, RoutingAnchor } from './types';
 import { resolveVehiclePreset } from './vehiclePresets';
 import {
   createRouteOptionKey,
@@ -32,14 +32,14 @@ describe('route option helpers', () => {
     { kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 220 },
     { kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 2, distanceKm: 238.25 },
   ];
+  const expeditionTruck = resolveVehiclePreset('expedition-truck');
 
   it('creates canonical route option keys from the complete calculation contract', () => {
-    const routingVehicle = resolveVehiclePreset('expedition-truck');
     expect(
       createRouteOptionKey({
         origin,
         target,
-        routingVehicle,
+        routingVehicle: expeditionTruck,
         waypoints: [{ lat: 50, lng: 1 }],
         ferryPolicy: 'require',
         providerOptions: { alternativeRoutes: { targetCount: 3, shareFactor: 0.6, weightFactor: 2 } },
@@ -57,9 +57,9 @@ describe('route option helpers', () => {
       providerOptions: { alternativeRoutes: { weightFactor: 2, shareFactor: 0.6, targetCount: 3 } },
       variant: 'avoid:highways',
     }));
-    expect(createRouteOptionKey({ origin, target, routingVehicle, variant: 'recommended' }))
+    expect(createRouteOptionKey({ origin, target, routingVehicle: expeditionTruck, variant: 'recommended' }))
       .not.toBe(createRouteOptionKey({
-        origin, target, routingVehicle, variant: 'recommended', ferryPolicy: 'avoid',
+        origin, target, routingVehicle: expeditionTruck, variant: 'recommended', ferryPolicy: 'avoid',
       }));
   });
 
@@ -90,7 +90,71 @@ describe('route option helpers', () => {
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: createRouteOptionKey({ origin, target, profile: 'driving-car', variant: 'recommended' }),
+      warnings: [],
+      endpointAnchors: {},
     });
+  });
+
+  it('preserves recovery warnings, actual profile, and endpoint anchors in selected route patches', () => {
+    const targetAnchor: RoutingAnchor = {
+      profile: 'driving-car',
+      coordinates: { lat: 48.858, lng: 2.35 },
+      originalCoordinates: target,
+      snapDistanceKm: 1.2,
+      provider: 'openrouteservice',
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const fallback = routeOptionFromCalculation({
+      id: 'profile-fallback',
+      label: 'Car-profile fallback',
+      source: 'profile-fallback',
+      origin,
+      target,
+      distanceKm: 187,
+      travelTimeHours: 3.27,
+      geometry: directGeometry,
+      sections: [{
+        kind: 'road',
+        startGeometryIndex: 0,
+        endGeometryIndex: directGeometry.coordinates.length - 1,
+        distanceKm: 187,
+      }],
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routingVehicle: expeditionTruck,
+      waypoints: [],
+      ferryPolicy: 'allow',
+      providerOptions: { fallbackFromProfile: 'driving-hgv' },
+      variant: 'profile-fallback',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated for this route.',
+      }],
+      endpointAnchors: { target: targetAnchor },
+    });
+
+    expect(fallback).toMatchObject({
+      source: 'profile-fallback',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated for this route.',
+      }],
+      endpointAnchors: { target: targetAnchor },
+      profile: 'driving-car',
+    });
+    expect(routeLegPatchFromRouteOption(fallback)).toMatchObject({
+      status: 'ready',
+      warnings: fallback.warnings,
+      profile: 'driving-car',
+      distanceKm: fallback.distanceKm,
+    });
+    expect(fallback.routeKey).not.toBe(createRouteOptionKey({
+      origin,
+      target,
+      profile: 'driving-hgv',
+      routingVehicle: expeditionTruck,
+      variant: 'recommended',
+    }));
   });
 
   it('deduplicates options with the same geometry while preserving order', () => {
@@ -141,6 +205,67 @@ describe('route option helpers', () => {
       recommended,
       avoidHighways,
     ]);
+  });
+
+  it('deduplicates identical geometry without discarding recovery provenance for normal options', () => {
+    const recommended = routeOptionFromCalculation({
+      id: 'recommended',
+      label: 'Recommended',
+      source: 'recommended',
+      origin,
+      target,
+      distanceKm: 458.25,
+      travelTimeHours: 5,
+      geometry: directGeometry,
+      sections,
+      provider: 'openrouteservice',
+      profile: 'driving-hgv',
+      routingVehicle: expeditionTruck,
+      variant: 'recommended',
+    });
+    const adjustedEndpoint = routeOptionFromCalculation({
+      id: 'adjusted-endpoint',
+      label: 'Adjusted endpoint',
+      source: 'adjusted-endpoint',
+      origin,
+      target,
+      distanceKm: 458.25,
+      travelTimeHours: 5,
+      geometry: directGeometry,
+      sections,
+      provider: 'openrouteservice',
+      profile: 'driving-hgv',
+      routingVehicle: expeditionTruck,
+      variant: 'adjusted-endpoint',
+      warnings: [{
+        code: 'ROUTING_ANCHOR_ADJUSTED',
+        message: 'Route target uses a routing point 1.2 km from the stop.',
+      }],
+    });
+    const profileFallback = routeOptionFromCalculation({
+      id: 'profile-fallback',
+      label: 'Car-profile fallback',
+      source: 'profile-fallback',
+      origin,
+      target,
+      distanceKm: 458.25,
+      travelTimeHours: 5,
+      geometry: directGeometry,
+      sections,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routingVehicle: expeditionTruck,
+      providerOptions: { fallbackFromProfile: 'driving-hgv' },
+      variant: 'profile-fallback',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated for this route.',
+      }],
+    });
+
+    expect(dedupeRouteOptions([recommended, adjustedEndpoint])).toEqual([adjustedEndpoint]);
+    expect(dedupeRouteOptions([recommended, profileFallback])).toEqual([profileFallback]);
+    expect(dedupeRouteOptions([recommended, adjustedEndpoint, profileFallback])).toEqual([profileFallback]);
   });
 
   it('deduplicates options with the same route key while preserving the first option', () => {
@@ -217,6 +342,7 @@ describe('route option helpers', () => {
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: option.routeKey,
+      warnings: [],
       calculatedAt: '2026-07-04T12:00:00.000Z',
       error: undefined,
     });

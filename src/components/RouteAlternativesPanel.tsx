@@ -25,6 +25,35 @@ function formatDurationHours(travelTimeHours: number) {
   return `${travelTimeHours.toFixed(1)} hr`;
 }
 
+function formatAdjustedEndpointMessage(option: RouteOption, originName: string, targetName: string) {
+  const adjustedNames = [
+    option.endpointAnchors.origin ? originName : null,
+    option.endpointAnchors.target ? targetName : null,
+  ].filter((name): name is string => Boolean(name));
+
+  if (adjustedNames.length === 0) return null;
+  if (adjustedNames.length === 1) {
+    return `Uses a nearby routable road point for ${adjustedNames[0]}.`;
+  }
+
+  return `Uses nearby routable road points for ${adjustedNames.join(' and ')}.`;
+}
+
+function recoveryQualificationMessages(option: RouteOption, originName: string, targetName: string) {
+  const messages: string[] = [];
+
+  if (option.source === 'profile-fallback') {
+    messages.push('Truck dimensions were not validated.');
+  }
+
+  const adjustedEndpointMessage = formatAdjustedEndpointMessage(option, originName, targetName);
+  if (adjustedEndpointMessage) {
+    messages.push(adjustedEndpointMessage);
+  }
+
+  return messages;
+}
+
 export function RouteAlternativesPanel({
   originName,
   targetName,
@@ -77,6 +106,7 @@ export function RouteAlternativesPanel({
           {options.map((option) => {
             const distance = formatDistanceMiles(option.distanceKm);
             const duration = formatDurationHours(option.travelTimeHours);
+            const recoveryMessages = recoveryQualificationMessages(option, originName, targetName);
 
             return (
               <label key={option.id} className="route-alternative-option">
@@ -93,6 +123,11 @@ export function RouteAlternativesPanel({
                     <span>{distance}</span>
                     <span>{duration}</span>
                   </small>
+                  {recoveryMessages.map((message) => (
+                    <small key={message} className="route-alternative-option-recovery">
+                      {message}
+                    </small>
+                  ))}
                 </span>
               </label>
             );

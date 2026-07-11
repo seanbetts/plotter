@@ -33,6 +33,7 @@ type ApplyValidatedRouteLegResultInput = {
   routeLegId: string;
   expectedFingerprint: string;
   validatedRouteLeg: RouteLeg;
+  destinationUpdates?: Destination[];
 };
 
 const createTimestamp = () => new Date().toISOString();
@@ -587,6 +588,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           routeLegId,
           expectedFingerprint,
           validatedRouteLeg,
+          destinationUpdates = [],
         }: ApplyValidatedRouteLegResultInput) {
           return enqueueRouteLegMutation(routeLegId, async () => {
             const currentRouteLeg = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
@@ -619,6 +621,13 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               throw new Error('Validated route result does not match current route intent');
             }
 
+            const currentDestinations = destinationsRef.current;
+            const currentRouteLegs = routeLegsRef.current;
+            const destinationUpdatesById = new Map(destinationUpdates.map((destination) => [destination.id, destination]));
+            const nextDestinations = destinationUpdatesById.size > 0
+              ? currentDestinations.map((destination) => destinationUpdatesById.get(destination.id) ?? destination)
+              : currentDestinations;
+            const destinationsToSave = changedDestinationsByReference(currentDestinations, nextDestinations);
             const latestRouteLeg = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
             if (
               latestRouteLeg !== currentRouteLeg ||
@@ -627,9 +636,19 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               return false;
             }
 
-            await repository.saveRouteLeg(updated);
+            await persistRouteCalculationBatch({
+              repository,
+              priorDestinations: currentDestinations,
+              priorRouteLegs: currentRouteLegs,
+              destinationsToSave,
+              routeLegsToSave: [updated],
+              failurePrefix: 'Unable to save selected route',
+            });
             if (!isActiveAction()) return false;
 
+            if (destinationsToSave.length > 0) {
+              replaceDestinations(nextDestinations);
+            }
             updateRouteLegs((current) =>
               current.map((routeLeg) => (routeLeg.id === routeLegId ? updated : routeLeg)),
             );

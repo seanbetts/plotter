@@ -2,7 +2,7 @@ import Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { createActivity as createActivityModel } from '../domain/activities';
-import { createDestination } from '../domain/destinations';
+import { createDestination, withRoutingAnchor } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
 import type { Destination, RouteLeg } from '../domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
@@ -1828,6 +1828,116 @@ describe('useTripData', () => {
     expect(applied).toBe(false);
     expect(saveRouteLeg).not.toHaveBeenCalled();
     expect(result.current.routeLegs[0].notes).toBe('Newer intent notes.');
+  });
+
+  it('persists validated endpoint anchors with the selected route result', async () => {
+    const origin = createDestination({ name: 'Olderdalen', coordinates: { lat: 69.6041, lng: 20.5326 }, order: 0 });
+    const target = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    const targetAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: target.coordinates,
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const anchoredTarget = withRoutingAnchor(target, targetAnchor);
+    let storedDestinations = [origin, target];
+    let storedRouteLeg = routeLeg;
+    const savedOperations: string[] = [];
+    const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
+      listDestinations: async () => storedDestinations,
+      listRouteLegs: async () => [storedRouteLeg],
+      saveDestination: async (destination) => {
+        savedOperations.push(`destination:${destination.id}`);
+        storedDestinations = storedDestinations.map((candidate) =>
+          candidate.id === destination.id ? destination : candidate);
+      },
+      saveRouteLeg: async (nextRouteLeg) => {
+        savedOperations.push(`route:${nextRouteLeg.id}`);
+        storedRouteLeg = nextRouteLeg;
+      },
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let applied = false;
+    await act(async () => {
+      applied = await result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint: createRouteResultFingerprint(routeLeg, standardRoutingVehicle),
+        validatedRouteLeg: {
+          ...createSelectedRouteResult(routeLeg),
+          warnings: [{
+            code: 'ROUTING_ANCHOR_ADJUSTED',
+            message: 'Route target uses a routing point 1.6 km from the stop.',
+          }],
+        },
+        destinationUpdates: [anchoredTarget],
+      });
+    });
+
+    expect(applied).toBe(true);
+    expect(savedOperations).toEqual([`destination:${target.id}`, `route:${routeLeg.id}`]);
+    expect(storedDestinations[1].routingAnchors['driving-car']).toEqual(targetAnchor);
+    expect(storedRouteLeg.warnings).toEqual([
+      expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED' }),
+    ]);
+    expect(result.current.destinations[1].routingAnchors['driving-car']).toEqual(targetAnchor);
+    expect(result.current.routeLegs[0].warnings).toEqual([
+      expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED' }),
+    ]);
+  });
+
+  it('rolls back validated endpoint anchors when the selected route result cannot be saved', async () => {
+    const origin = createDestination({ name: 'Olderdalen', coordinates: { lat: 69.6041, lng: 20.5326 }, order: 0 });
+    const target = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    const targetAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: target.coordinates,
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const anchoredTarget = withRoutingAnchor(target, targetAnchor);
+    let storedDestinations = [origin, target];
+    let storedRouteLeg = routeLeg;
+    let failRouteWrite = true;
+    const saveDestination = vi.fn(async (destination) => {
+      storedDestinations = storedDestinations.map((candidate) =>
+        candidate.id === destination.id ? destination : candidate);
+    });
+    const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
+      listDestinations: async () => storedDestinations,
+      listRouteLegs: async () => [storedRouteLeg],
+      saveDestination,
+      saveRouteLeg: async (nextRouteLeg) => {
+        if (failRouteWrite) {
+          failRouteWrite = false;
+          throw new Error('route write failed');
+        }
+        storedRouteLeg = nextRouteLeg;
+      },
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await expect(act(async () => {
+      await result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint: createRouteResultFingerprint(routeLeg, standardRoutingVehicle),
+        validatedRouteLeg: createSelectedRouteResult(routeLeg),
+        destinationUpdates: [anchoredTarget],
+      });
+    })).rejects.toThrow(/route write failed/);
+
+    expect(saveDestination).toHaveBeenCalledWith(anchoredTarget);
+    expect(saveDestination).toHaveBeenCalledWith(target);
+    expect(storedDestinations).toEqual([origin, target]);
+    expect(storedRouteLeg).toBe(routeLeg);
   });
 
   it('serializes an intent edit queued during an async validated-result save so the edit wins', async () => {

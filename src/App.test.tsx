@@ -13,7 +13,15 @@ import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import { createRouteLeg } from './domain/routeLegs';
 import type { RouteOption } from './domain/routeOptions';
-import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
+import type {
+  Activity,
+  ActivityLocation,
+  Destination,
+  MediaItem,
+  MediaRollupItem,
+  RouteLeg,
+  RoutingAnchor,
+} from './domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from './domain/vehiclePresets';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { downloadTripMap } from './map/tripMapExport';
@@ -295,6 +303,8 @@ vi.mock('./adapters/openRouteService', () => ({
       profile: 'driving-car',
       routeKey: 'recommended-route-key',
       sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 160 }],
+      warnings: [],
+      endpointAnchors: {},
     },
     {
       id: 'avoid-highways',
@@ -314,6 +324,8 @@ vi.mock('./adapters/openRouteService', () => ({
       profile: 'driving-car',
       routeKey: 'avoid-highways-route-key',
       sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 220 }],
+      warnings: [],
+      endpointAnchors: {},
     },
   ]),
 }));
@@ -1107,6 +1119,9 @@ describe('App', () => {
       routingVehicle,
       waypoints: [earlierWaypoint, waypoint],
       ferryPolicy: 'allow',
+      currentRouteLeg: expect.objectContaining({ id: routeLeg.id, routeKey: 'recommended-route-key' }),
+      originAnchors: istanbul.routingAnchors,
+      targetAnchors: tbilisi.routingAnchors,
     });
 
     expect(await screen.findByRole('dialog', { name: 'Edit route from Istanbul to Tbilisi' })).toBeInTheDocument();
@@ -1134,6 +1149,103 @@ describe('App', () => {
     );
   });
 
+  it('saves fallback route warnings and endpoint anchors when selecting a recovered alternative', async () => {
+    const user = userEvent.setup();
+    const olderdalen = createDestination({
+      name: 'Olderdalen',
+      coordinates: { lat: 69.6041, lng: 20.5326 },
+      order: 0,
+    });
+    const alta = createDestination({
+      name: 'Alta',
+      coordinates: { lat: 69.96887, lng: 23.27165 },
+      order: 1,
+    });
+    const altaAnchor: RoutingAnchor = {
+      profile: 'driving-car',
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: alta.coordinates,
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice',
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const routeLeg = createRouteLeg({
+      originDestinationId: olderdalen.id,
+      targetDestinationId: alta.id,
+      movement: 'drive',
+      calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 390,
+      travelTimeHours: 6,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[20.5326, 69.6041], [23.27165, 69.96887]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-hgv',
+      routeKey: 'strict-hgv-key',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+    });
+    const fallbackOption: RouteOption = {
+      id: 'profile-fallback',
+      label: 'Car-profile fallback',
+      source: 'profile-fallback',
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[20.5326, 69.6041], [23.27165, 69.98334]],
+      },
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'profile-fallback-key',
+      warnings: [
+        {
+          code: 'VEHICLE_PROFILE_FALLBACK',
+          message: 'Truck dimensions were not validated.',
+        },
+        {
+          code: 'ROUTING_ANCHOR_ADJUSTED',
+          message: 'Route target uses a routing point 1.6 km from the stop.',
+        },
+      ],
+      endpointAnchors: { target: altaAnchor },
+    };
+    vi.mocked(calculateOpenRouteServiceRouteOptions).mockResolvedValueOnce([fallbackOption]);
+    repositoryMock.initialDestinations = Promise.resolve([olderdalen, alta]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+    mockTripWorkspace({
+      activeTrip: { ...tripsMock[0], routingVehicle: resolveVehiclePreset('expedition-truck') },
+    } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+    await waitForTripReady();
+    await user.click(await screen.findByRole('button', { name: 'Edit route from Olderdalen to Alta' }));
+    await user.click(await screen.findByRole('button', { name: 'Use selected route' }));
+
+    await waitFor(() =>
+      expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          routeKey: 'profile-fallback-key',
+          status: 'ready',
+          distanceKm: 361,
+          travelTimeHours: 5.4,
+          profile: 'driving-car',
+          warnings: fallbackOption.warnings,
+        }),
+      ),
+    );
+    expect(repositoryMock.saveDestination).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: alta.id,
+        routingAnchors: {
+          'driving-car': altaAnchor,
+        },
+      }),
+    );
+  });
+
   it('does not save a stale alternative after route intent changes while the picker is open', async () => {
     const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
     const hamburg = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
@@ -1151,6 +1263,33 @@ describe('App', () => {
       calculatedAt: '2026-07-01T10:00:00.000Z',
       notes: 'Original intent.',
     });
+    const hamburgAnchor: RoutingAnchor = {
+      profile: 'driving-car',
+      coordinates: { lat: 53.56, lng: 10.01 },
+      originalCoordinates: hamburg.coordinates,
+      snapDistanceKm: 1.2,
+      provider: 'openrouteservice',
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    vi.mocked(calculateOpenRouteServiceRouteOptions).mockResolvedValueOnce([
+      {
+        id: 'adjusted-endpoint',
+        label: 'Adjusted endpoint',
+        source: 'adjusted-endpoint',
+        distanceKm: 126,
+        travelTimeHours: 2.1,
+        geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.01, 53.56]] },
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 126 }],
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+        routeKey: 'adjusted-route',
+        warnings: [{
+          code: 'ROUTING_ANCHOR_ADJUSTED',
+          message: 'Route target uses a routing point 1.2 km from the stop.',
+        }],
+        endpointAnchors: { target: hamburgAnchor },
+      },
+    ]);
     repositoryMock.initialDestinations = Promise.resolve([bremen, hamburg]);
     repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
 
@@ -1162,6 +1301,7 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Use selected route' }));
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Route intent changed'));
+    expect(repositoryMock.saveDestination).not.toHaveBeenCalled();
     expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(1);
     expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
       expect.objectContaining({ movement: 'vehicle-shipping', calculation: 'manual', status: 'manual', notes: 'Original intent.' }),
@@ -1237,6 +1377,8 @@ describe('App', () => {
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'selected-route-key',
+      warnings: [],
+      endpointAnchors: {},
     };
     vi.mocked(calculateOpenRouteServiceRouteOptions).mockResolvedValueOnce([option]);
     repositoryMock.initialDestinations = Promise.resolve([bremen, hirtshals]);

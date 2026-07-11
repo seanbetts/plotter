@@ -2,8 +2,11 @@ import type { FeatureCollection, LineString } from 'geojson';
 import type {
   Coordinates,
   FerryPolicy,
+  RouteLeg,
   RouteSection,
   RouteWaypoint,
+  RouteWarning,
+  RoutingAnchors,
   TripRoutingVehicle,
   VehicleRestrictions,
 } from '../domain/types';
@@ -12,8 +15,14 @@ import {
   routeOptionFromCalculation,
   type RouteAvoidFeature,
   type RouteOption,
+  type RouteOptionEndpointAnchors,
+  type RouteOptionSource,
 } from '../domain/routeOptions';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
+import {
+  calculateRouteWithRecovery,
+  type RecoveredRoute,
+} from '../tripCommands/routeRecovery';
 import { openRouteServiceDirectionsScheduler } from './openRouteServiceScheduler';
 
 export type OpenRouteServiceProfile = TripRoutingVehicle['profile'];
@@ -24,12 +33,21 @@ type CalculateRouteInput = {
   target: Coordinates;
   profile?: OpenRouteServiceProfile;
   routingVehicle?: TripRoutingVehicle;
-  waypoints?: Array<Pick<RouteWaypoint, 'coordinates'>>;
+  waypoints?: RouteWaypoint[];
   ferryPolicy?: FerryPolicy;
   radiuses?: number[];
 };
 
 type ResolvedCalculateRouteInput = Omit<Required<CalculateRouteInput>, 'radiuses'> & Pick<CalculateRouteInput, 'radiuses'>;
+type CalculateRouteOptionsInput = CalculateRouteInput & {
+  currentRouteLeg?: RouteLeg;
+  originAnchors?: RoutingAnchors;
+  targetAnchors?: RoutingAnchors;
+};
+type ResolvedCalculateRouteOptionsInput = ResolvedCalculateRouteInput & Pick<
+  CalculateRouteOptionsInput,
+  'currentRouteLeg' | 'originAnchors' | 'targetAnchors'
+>;
 
 type CalculatedRoute = {
   distanceKm: number;
@@ -363,6 +381,10 @@ function isQuotaFailure(error: unknown) {
   return isOpenRouteServiceError(error) && error.status === 429;
 }
 
+function isRouteOptionsRecoveryFailure(error: unknown) {
+  return isOpenRouteServiceError(error) && error.status === 404 && (error.code === 2009 || error.code === 2010);
+}
+
 async function postDirections({
   apiKey,
   profile,
@@ -495,6 +517,173 @@ async function calculateProviderAlternativeOptions({
   });
 }
 
+function isSupportedProfile(profile: string | undefined): profile is OpenRouteServiceProfile {
+  return profile === 'driving-car' || profile === 'driving-hgv';
+}
+
+function routeOptionSourceFromWarnings(
+  warnings: RouteWarning[],
+  endpointAnchors: RouteOptionEndpointAnchors,
+): Extract<RouteOptionSource, 'recommended' | 'adjusted-endpoint' | 'profile-fallback'> {
+  if (warnings.some((warning) => warning.code === 'VEHICLE_PROFILE_FALLBACK')) {
+    return 'profile-fallback';
+  }
+  if (
+    warnings.some((warning) => warning.code === 'ROUTING_ANCHOR_ADJUSTED') ||
+    endpointAnchors.origin ||
+    endpointAnchors.target
+  ) {
+    return 'adjusted-endpoint';
+  }
+  return 'recommended';
+}
+
+function labelForRecoverySource(source: ReturnType<typeof routeOptionSourceFromWarnings>) {
+  if (source === 'profile-fallback') return 'Car-profile fallback';
+  if (source === 'adjusted-endpoint') return 'Adjusted endpoint';
+  return 'Recommended';
+}
+
+function providerOptionsForRecoverySource(
+  source: ReturnType<typeof routeOptionSourceFromWarnings>,
+  routeProfile: OpenRouteServiceProfile,
+  requestedProfile: OpenRouteServiceProfile,
+) {
+  return source === 'profile-fallback' && routeProfile !== requestedProfile
+    ? { fallbackFromProfile: requestedProfile }
+    : {};
+}
+
+function routeOptionFromRecoveredRoute(input: {
+  route: RecoveredRoute;
+  origin: Coordinates;
+  target: Coordinates;
+  routingVehicle: TripRoutingVehicle;
+  waypoints: RouteWaypoint[];
+  ferryPolicy: FerryPolicy;
+  requestedProfile: OpenRouteServiceProfile;
+}) {
+  const source = routeOptionSourceFromWarnings(input.route.warnings, input.route.endpointAnchors);
+
+  return routeOptionFromCalculation({
+    id: source,
+    label: labelForRecoverySource(source),
+    source,
+    origin: input.origin,
+    target: input.target,
+    distanceKm: input.route.distanceKm,
+    travelTimeHours: input.route.travelTimeHours,
+    geometry: input.route.geometry,
+    sections: input.route.sections,
+    provider,
+    profile: input.route.profile,
+    routingVehicle: input.routingVehicle,
+    waypoints: input.waypoints.map((waypoint) => waypoint.coordinates),
+    ferryPolicy: input.ferryPolicy,
+    providerOptions: providerOptionsForRecoverySource(source, input.route.profile, input.requestedProfile),
+    variant: source,
+    warnings: input.route.warnings,
+    endpointAnchors: input.route.endpointAnchors,
+  });
+}
+
+function routeOptionFromCurrentRoute({
+  currentRouteLeg,
+  origin,
+  target,
+  routingVehicle,
+  waypoints,
+  ferryPolicy,
+  originAnchors,
+  targetAnchors,
+}: ResolvedCalculateRouteOptionsInput) {
+  if (
+    !currentRouteLeg ||
+    currentRouteLeg.status !== 'ready' ||
+    !currentRouteLeg.geometry ||
+    currentRouteLeg.distanceKm === undefined ||
+    currentRouteLeg.travelTimeHours === undefined ||
+    !currentRouteLeg.provider ||
+    !isSupportedProfile(currentRouteLeg.profile) ||
+    !Array.isArray(currentRouteLeg.sections)
+  ) {
+    return null;
+  }
+
+  const endpointAnchors: RouteOptionEndpointAnchors = {
+    origin: originAnchors?.[currentRouteLeg.profile],
+    target: targetAnchors?.[currentRouteLeg.profile],
+  };
+  const warnings = currentRouteLeg.warnings ?? [];
+  const source = routeOptionSourceFromWarnings(warnings, endpointAnchors);
+
+  return routeOptionFromCalculation({
+    id: source,
+    label: labelForRecoverySource(source),
+    source,
+    origin,
+    target,
+    distanceKm: currentRouteLeg.distanceKm,
+    travelTimeHours: currentRouteLeg.travelTimeHours,
+    geometry: currentRouteLeg.geometry,
+    sections: currentRouteLeg.sections,
+    provider: currentRouteLeg.provider,
+    profile: currentRouteLeg.profile,
+    routingVehicle,
+    waypoints: waypoints.map((waypoint) => waypoint.coordinates),
+    ferryPolicy,
+    providerOptions: providerOptionsForRecoverySource(source, currentRouteLeg.profile, routingVehicle.profile),
+    variant: source,
+    warnings,
+    endpointAnchors,
+  });
+}
+
+async function calculateRecoveredRouteOption(
+  input: ResolvedCalculateRouteOptionsInput,
+  initialError: unknown,
+) {
+  const {
+    apiKey,
+    origin,
+    target,
+    profile,
+    routingVehicle,
+    waypoints,
+    ferryPolicy,
+    originAnchors,
+    targetAnchors,
+  } = input;
+  let replayInitialError = true;
+  const route = await calculateRouteWithRecovery({
+    origin,
+    target,
+    profile,
+    routingVehicle,
+    waypoints,
+    ferryPolicy,
+    originAnchors,
+    targetAnchors,
+  }, async (request) => {
+    if (replayInitialError) {
+      replayInitialError = false;
+      throw initialError;
+    }
+
+    return calculateOpenRouteServiceRoute({ ...request, apiKey });
+  });
+
+  return routeOptionFromRecoveredRoute({
+    route,
+    origin,
+    target,
+    routingVehicle,
+    waypoints,
+    ferryPolicy,
+    requestedProfile: profile,
+  });
+}
+
 async function calculateAvoidFeatureOption({
   apiKey,
   origin,
@@ -544,26 +733,50 @@ export async function calculateOpenRouteServiceRouteOptions({
   routingVehicle = standardRoutingVehicle,
   waypoints = [],
   ferryPolicy = 'allow',
-}: CalculateRouteInput): Promise<RouteOption[]> {
+  currentRouteLeg,
+  originAnchors,
+  targetAnchors,
+}: CalculateRouteOptionsInput): Promise<RouteOption[]> {
   const trimmedApiKey = requireApiKey(apiKey);
   const resolvedVehicle = routingVehicle;
+  const resolvedInput: ResolvedCalculateRouteOptionsInput = {
+    apiKey: trimmedApiKey,
+    origin,
+    target,
+    profile: resolvedVehicle.profile,
+    routingVehicle: resolvedVehicle,
+    waypoints,
+    ferryPolicy,
+    currentRouteLeg,
+    originAnchors,
+    targetAnchors,
+  };
   const options: RouteOption[] = [];
+  const currentOption = routeOptionFromCurrentRoute(resolvedInput);
+  if (currentOption) options.push(currentOption);
 
   try {
     options.push(
-      ...(await calculateProviderAlternativeOptions({
-        apiKey: trimmedApiKey,
-        origin,
-        target,
-        profile: resolvedVehicle.profile,
-        routingVehicle: resolvedVehicle,
-        waypoints,
-        ferryPolicy,
-      })),
+      ...(await calculateProviderAlternativeOptions(resolvedInput)),
     );
   } catch (error) {
     if (isAuthFailure(error) || isQuotaFailure(error)) {
       throw error;
+    }
+
+    if (isRouteOptionsRecoveryFailure(error)) {
+      try {
+        options.push(await calculateRecoveredRouteOption(resolvedInput, error));
+      } catch (recoveryError) {
+        if (isAuthFailure(recoveryError) || isQuotaFailure(recoveryError)) {
+          throw recoveryError;
+        }
+      }
+      return dedupeRouteOptions(options).slice(0, maxRouteOptions);
+    }
+
+    if (currentOption) {
+      return dedupeRouteOptions(options).slice(0, maxRouteOptions);
     }
 
     // The alternatives endpoint can fail for long routes; supported supplementals still get a chance below.
