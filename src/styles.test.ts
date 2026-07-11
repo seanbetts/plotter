@@ -359,6 +359,7 @@ describe('inline route connector styles', () => {
     );
     expect(styles).toMatch(/\.inline-route-failure\s*{[^}]*display:\s*flex;[^}]*gap:\s*6px;/s);
     expect(styles).toMatch(/\.inline-route-failure-icon\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
+    expect(styles).toMatch(/\.inline-route-recovery-warning\s*{[^}]*order:\s*-1;/s);
     expect(styles).toMatch(/\.inline-route-metric \+ \.inline-route-metric::before\s*{[^}]*content:\s*"·";/s);
     expect(styles).toMatch(
       /\.inline-route-characteristics\s*{[^}]*display:\s*flex;[^}]*margin-left:\s*auto;[^}]*gap:\s*6px;/s,

@@ -136,6 +136,29 @@ function routeFailureLabel(routeLeg: RouteLeg) {
   return messages.length > 0 ? `Route failed: ${messages.join(' ')}` : 'Route failed';
 }
 
+function lowercaseSentenceStart(message: string) {
+  return /^[A-Z][a-z]+\b/.test(message)
+    ? `${message.charAt(0).toLocaleLowerCase()}${message.slice(1)}`
+    : message;
+}
+
+function routeRecoveryLabel(routeLeg: RouteLeg) {
+  const labels = (routeLeg.warnings ?? []).flatMap((warning) => {
+    const prefix = warning.code === 'ROUTING_ANCHOR_ADJUSTED'
+      ? 'Adjusted endpoint'
+      : warning.code === 'VEHICLE_PROFILE_FALLBACK'
+        ? 'Car-profile fallback'
+        : null;
+
+    if (!prefix) return [];
+
+    const message = lowercaseSentenceStart(warning.message);
+    return [`${prefix}${message ? `: ${message}` : ''}`];
+  });
+
+  return labels.length > 0 ? labels.join(' ') : null;
+}
+
 function reorderedDestinationIds(
   destinations: Destination[],
   draggedDestinationId: string,
@@ -480,6 +503,7 @@ export function ItineraryPanel({
               const routeWaypointLabel = `${routeWaypointCount} route ${routeWaypointCount === 1 ? 'waypoint' : 'waypoints'}`;
               const reviewLabel = routeLeg ? routeReviewLabel(routeLeg) : '';
               const failureLabel = routeLeg ? routeFailureLabel(routeLeg) : '';
+              const recoveryLabel = routeLeg ? routeRecoveryLabel(routeLeg) : null;
               const borderCrossingLabel = nextDestination
                 ? formatBorderCrossingLabel(destination, nextDestination)
                 : null;
@@ -635,6 +659,16 @@ export function ItineraryPanel({
                           </span>
                         ) : (
                           <>
+                            {recoveryLabel ? (
+                              <span
+                                className="inline-route-indicator is-warning inline-route-recovery-warning"
+                                role="img"
+                                aria-label={recoveryLabel}
+                                title={recoveryLabel}
+                              >
+                                <TriangleAlert size={14} aria-hidden="true" />
+                              </span>
+                            ) : null}
                             {formatLegDistance(routeLeg) ? (
                               <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
                             ) : null}

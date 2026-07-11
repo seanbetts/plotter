@@ -19,6 +19,8 @@ export type TripAuditIssue = {
     | 'FERRY_REQUIRED_NOT_FOUND'
     | 'FERRY_AVOIDED_BUT_FOUND'
     | 'SUSPICIOUS_DETOUR'
+    | 'ROUTING_ANCHOR_ADJUSTED'
+    | 'VEHICLE_PROFILE_FALLBACK'
     | 'DEFAULT_STAY_AT_HOME_ANCHOR';
   message: string;
   destinationId?: string;
@@ -127,6 +129,25 @@ export function auditTripSnapshot(input: {
         ...(origin ? { origin: destinationContext(origin) } : {}),
         ...(target ? { target: destinationContext(target) } : {}),
       });
+    }
+
+    if (routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && routeLeg.status === 'ready') {
+      for (const warning of routeLeg.warnings ?? []) {
+        if (warning.code !== 'ROUTING_ANCHOR_ADJUSTED' && warning.code !== 'VEHICLE_PROFILE_FALLBACK') {
+          continue;
+        }
+
+        issues.push({
+          severity: 'warning',
+          code: warning.code,
+          message: warning.message,
+          routeLegId: routeLeg.id,
+          originDestinationId: routeLeg.originDestinationId,
+          targetDestinationId: routeLeg.targetDestinationId,
+          ...(origin ? { origin: destinationContext(origin) } : {}),
+          ...(target ? { target: destinationContext(target) } : {}),
+        });
+      }
     }
 
     if (

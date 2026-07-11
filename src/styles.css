@@ -2693,6 +2693,10 @@ select {
   background: var(--surface-danger-subtle);
 }
 
+.inline-route-recovery-warning {
+  order: -1;
+}
+
 .inline-route-failure-icon {
   width: 28px;
   height: 28px;

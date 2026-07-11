@@ -185,6 +185,107 @@ describe('ItineraryPanel', () => {
     expect(within(ordinaryRoute as HTMLElement).queryByLabelText(/Route requires review/)).not.toBeInTheDocument();
   });
 
+  it('shows a car-profile fallback warning on a ready route without hiding its metrics', () => {
+    const lillehammer = createDestination({
+      name: 'Lillehammer',
+      coordinates: { lat: 61.1153, lng: 10.4662 },
+      order: 0,
+    });
+    const oslo = createDestination({
+      name: 'Oslo',
+      coordinates: { lat: 59.9139, lng: 10.7522 },
+      order: 1,
+    });
+    const fallbackLeg = createRouteLeg({
+      originDestinationId: lillehammer.id,
+      targetDestinationId: oslo.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 200,
+      travelTimeHours: 3.2,
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated.',
+      }],
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[lillehammer, oslo]}
+        routeLegs={[fallbackLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('124 mi')).toBeVisible();
+    expect(screen.getByText('3.2 hrs')).toBeVisible();
+    expect(screen.getByRole('img', {
+      name: 'Car-profile fallback: truck dimensions were not validated.',
+    })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Retry .* route calculation/ })).not.toBeInTheDocument();
+  });
+
+  it('shows an adjusted-endpoint warning and includes both ready routes in total travel time', () => {
+    const lillehammer = createDestination({
+      name: 'Lillehammer',
+      coordinates: { lat: 61.1153, lng: 10.4662 },
+      order: 0,
+    });
+    const oslo = createDestination({
+      name: 'Oslo',
+      coordinates: { lat: 59.9139, lng: 10.7522 },
+      order: 1,
+    });
+    const alta = createDestination({
+      name: 'Alta',
+      coordinates: { lat: 69.9689, lng: 23.2716 },
+      order: 2,
+    });
+    const fallbackLeg = createRouteLeg({
+      originDestinationId: lillehammer.id,
+      targetDestinationId: oslo.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      travelTimeHours: 3.2,
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated.',
+      }],
+    });
+    const adjustedEndpointLeg = createRouteLeg({
+      originDestinationId: oslo.id,
+      targetDestinationId: alta.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      travelTimeHours: 1.6,
+      warnings: [{
+        code: 'ROUTING_ANCHOR_ADJUSTED',
+        message: 'Route target uses a routing point 1.6 km from the stop.',
+      }],
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[lillehammer, oslo, alta]}
+        routeLegs={[fallbackLeg, adjustedEndpointLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('img', {
+      name: 'Adjusted endpoint: route target uses a routing point 1.6 km from the stop.',
+    })).toBeVisible();
+    expect(within(screen.getByLabelText('Itinerary summary')).getByText('5 hrs travel')).toBeVisible();
+  });
+
   it('groups a ferry badge immediately before the border crossing badge', () => {
     const origin = createDestination({
       name: 'Dover',

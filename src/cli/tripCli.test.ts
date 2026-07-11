@@ -391,12 +391,25 @@ describe('runTripCli', () => {
   it('routes audit and preserves its issues in summary output', async () => {
     const audit = {
       errors: 0,
-      warnings: 1,
-      issues: [{
-        severity: 'warning',
-        code: 'DEFAULT_STAY_AT_HOME_ANCHOR',
-        message: 'Confirm the home stay.',
-      }],
+      warnings: 2,
+      issues: [
+        {
+          severity: 'warning',
+          code: 'VEHICLE_PROFILE_FALLBACK',
+          message: 'Truck dimensions were not validated.',
+          routeLegId: 'fallback-leg',
+          origin: { id: 'lillehammer', name: 'Lillehammer' },
+          target: { id: 'oslo', name: 'Oslo' },
+        },
+        {
+          severity: 'warning',
+          code: 'ROUTING_ANCHOR_ADJUSTED',
+          message: 'Route target uses a routing point 1.6 km from the stop.',
+          routeLegId: 'fallback-leg',
+          origin: { id: 'lillehammer', name: 'Lillehammer' },
+          target: { id: 'oslo', name: 'Oslo' },
+        },
+      ],
     };
     const { service, readFile, write, writeError } = createCliHarness({
       auditTrip: vi.fn(async () => ({ ok: true, summary: 'Audited trip.', audit })),
@@ -416,7 +429,7 @@ describe('runTripCli', () => {
       ok: true,
       summary: 'Audited trip.',
       audit,
-      counts: { auditErrors: 0, auditWarnings: 1 },
+      counts: { auditErrors: 0, auditWarnings: 2 },
     });
   });
 

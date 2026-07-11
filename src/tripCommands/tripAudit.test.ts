@@ -189,6 +189,60 @@ describe('trip semantic audit', () => {
     }));
   });
 
+  it('reports each ready-route recovery qualification with endpoint context', () => {
+    const lillehammer = createDestination({
+      name: 'Lillehammer',
+      coordinates: { lat: 61.1153, lng: 10.4662 },
+    });
+    const oslo = createDestination({
+      name: 'Oslo',
+      coordinates: { lat: 59.9139, lng: 10.7522 },
+    });
+    const recoveredLeg = {
+      ...createRouteLeg({
+        originDestinationId: lillehammer.id,
+        targetDestinationId: oslo.id,
+        movement: 'drive', calculation: 'automatic',
+        status: 'ready',
+        warnings: [
+          {
+            code: 'VEHICLE_PROFILE_FALLBACK' as const,
+            message: 'Truck dimensions were not validated.',
+          },
+          {
+            code: 'ROUTING_ANCHOR_ADJUSTED' as const,
+            message: 'Route target uses a routing point 1.6 km from the stop.',
+          },
+        ],
+      }),
+      id: 'fallback-leg',
+    };
+
+    const report = auditTripSnapshot({
+      destinations: [lillehammer, oslo],
+      activities: [],
+      routeLegs: [recoveredLeg],
+    });
+
+    expect(report.issues).toContainEqual(expect.objectContaining({
+      severity: 'warning',
+      code: 'VEHICLE_PROFILE_FALLBACK',
+      message: 'Truck dimensions were not validated.',
+      routeLegId: 'fallback-leg',
+      origin: expect.objectContaining({ name: 'Lillehammer' }),
+      target: expect.objectContaining({ name: 'Oslo' }),
+    }));
+    expect(report.issues).toContainEqual(expect.objectContaining({
+      severity: 'warning',
+      code: 'ROUTING_ANCHOR_ADJUSTED',
+      message: 'Route target uses a routing point 1.6 km from the stop.',
+      routeLegId: 'fallback-leg',
+      origin: expect.objectContaining({ name: 'Lillehammer' }),
+      target: expect.objectContaining({ name: 'Oslo' }),
+    }));
+    expect(report).toMatchObject({ errors: 0, warnings: 2 });
+  });
+
   it('does not report a detour for an approved manual shipping leg', () => {
     const larvik = createDestination({
       name: 'Larvik',
