@@ -7,6 +7,8 @@ import type { Activity, Coordinates, Destination, RouteLeg } from '../domain/typ
 import { calmBasemapStyle, mapLabelFontStack, mapStyleUrl, readMapLayerColors } from '../map/mapPresentation';
 import {
   buildStopPillPresentations,
+  positionStopPillPresentations,
+  stopPillCollisionBounds,
   stopPillClassName,
   type StopPillPresentation,
 } from '../map/stopPillPresentation';
@@ -664,29 +666,6 @@ function labelCandidateBounds(input: { title: string; x: number; y: number }, po
   };
 }
 
-function destinationLabelBounds(label: ProjectedDestinationLabel) {
-  return labelCandidateBounds(
-    { title: label.text, x: label.x, y: label.y },
-    label.position,
-  );
-}
-
-function positionDestinationLabels(labels: ProjectedDestinationLabel[]) {
-  const belowBounds = labels.map((label) =>
-    renderedLabelBounds(
-      { title: label.text, x: label.x, y: label.y },
-      'below',
-    ),
-  );
-
-  return labels.map((label, index) => ({
-    ...label,
-    position: belowBounds.slice(index + 1).some((bounds) =>
-      activityLabelBoundsOverlap(belowBounds[index], bounds),
-    ) ? 'above' as const : 'below' as const,
-  }));
-}
-
 function activityLabelBoundsOverlap(left: LabelBounds, right: LabelBounds) {
   return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
 }
@@ -932,7 +911,7 @@ export function MapCanvas({
     const map = mapRef.current;
     if (!map) return [];
 
-    return positionDestinationLabels(
+    return positionStopPillPresentations(
       buildStopPillPresentations({
         destinations: latestDestinationsRef.current,
         selectedDestinationId: latestSelectedDestinationIdRef.current,
@@ -953,7 +932,7 @@ export function MapCanvas({
       return;
     }
 
-    const reservedDestinationLabelBounds = projectDestinationLabels().map(destinationLabelBounds);
+    const reservedDestinationLabelBounds = projectDestinationLabels().map(stopPillCollisionBounds);
 
     setProjectedActivityLabels(
       visibleActivityLabels(

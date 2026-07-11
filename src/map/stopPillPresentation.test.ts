@@ -3,6 +3,7 @@ import { createDestination } from '../domain/destinations';
 import {
   buildStopPillPresentations,
   createStopPillElement,
+  positionStopPillPresentations,
   stopPillClassName,
   stopPillText,
 } from './stopPillPresentation';
@@ -59,6 +60,19 @@ describe('stopPillPresentation', () => {
     expect(stopPillClassName({ selected: true, position: 'above' })).toBe(
       'map-destination-label is-selected map-label-position-above',
     );
+  });
+
+  it('places an earlier overlapping pill above and leaves the later pill below', () => {
+    const projected = buildStopPillPresentations({
+      destinations: [balcombe, ghent],
+      selectedDestinationId: null,
+      project: () => ({ x: 240, y: 180 }),
+    });
+
+    expect(positionStopPillPresentations(projected).map(({ position }) => position)).toEqual([
+      'above',
+      'below',
+    ]);
   });
 
   it('creates a non-interactive export element with live pill text and geometry', () => {

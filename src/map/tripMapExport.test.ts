@@ -100,6 +100,7 @@ let createObjectURL: ReturnType<typeof vi.fn>;
 let revokeObjectURL: ReturnType<typeof vi.fn>;
 let exportOverlaySnapshot: Array<{ className: string; text: string; selected: boolean }>;
 let imageLoadShouldFail: boolean;
+let imageLoadShouldHang: boolean;
 let imageSources: string[];
 let imageInstances: Array<{
   onload: null | (() => void);
@@ -128,6 +129,10 @@ beforeEach(() => {
   maplibreMock.remove.mockReset();
   maplibreMock.instances.length = 0;
   toBlobResult = new Blob(['png'], { type: 'image/png' });
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: { ready: Promise.resolve() },
+  });
   context = {
     drawImage: vi.fn(),
     fillRect: vi.fn(),
@@ -140,6 +145,7 @@ beforeEach(() => {
   revokeObjectURL = vi.fn();
   exportOverlaySnapshot = [];
   imageLoadShouldFail = false;
+  imageLoadShouldHang = false;
   imageSources = [];
   imageInstances = [];
   overlayRemove = null;
@@ -166,6 +172,7 @@ beforeEach(() => {
           selected: element.classList.contains('is-selected'),
         }),
       );
+      if (imageLoadShouldHang) return;
       queueMicrotask(() => imageLoadShouldFail ? this.onerror?.() : this.onload?.());
     }
   });
@@ -176,6 +183,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(document, 'fonts');
   document
     .querySelectorAll('[data-trip-map-export], [data-trip-map-export-labels], a[download]')
     .forEach((element) => element.remove());
@@ -252,8 +260,25 @@ it('renders normal unselected app pills in an export overlay', async () => {
   await promise;
 
   expect(exportOverlaySnapshot).toEqual([
-    { className: 'map-destination-label', text: 'ST - Balcombe', selected: false },
+    { className: 'map-destination-label map-label-position-above', text: 'ST - Balcombe', selected: false },
     { className: 'map-destination-label', text: '02 - Paris', selected: false },
+  ]);
+});
+
+it('places an earlier overlapping export pill above and the later pill below', async () => {
+  const origin = first();
+  const returnStop = createDestination({
+    name: 'Balcombe return',
+    countryRegion: 'UK',
+    coordinates: origin.coordinates,
+  });
+  const { promise, map } = await advanceExportToIdle([origin, returnStop]);
+  map.callbacks.get('idle')?.();
+  await promise;
+
+  expect(exportOverlaySnapshot).toEqual([
+    { className: 'map-destination-label map-label-position-above', text: 'ST - Balcombe', selected: false },
+    { className: 'map-destination-label', text: '02 - Balcombe return', selected: false },
   ]);
 });
 
@@ -452,6 +477,76 @@ it('rejects label rasterization failure and removes the overlay', async () => {
   expect(document.querySelector('[data-trip-map-export-labels]')).not.toBeInTheDocument();
   expect(document.querySelector('[data-trip-map-export]')).not.toBeInTheDocument();
   expect(map.remove).toHaveBeenCalledOnce();
+});
+
+it('times out the font readiness wait after 15,000 ms', async () => {
+  vi.useFakeTimers();
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: { ready: new Promise(() => undefined) },
+  });
+  let settledError: Error | undefined;
+  const { promise, map } = await advanceExportToIdle();
+  void promise.catch((error: Error) => { settledError = error; });
+  map.callbacks.get('idle')?.();
+
+  await vi.advanceTimersByTimeAsync(15_000);
+
+  expect(settledError?.message).toBe('Timed out waiting for trip map fonts.');
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('times out image loading and clears its handlers after 15,000 ms', async () => {
+  vi.useFakeTimers();
+  imageLoadShouldHang = true;
+  let settledError: Error | undefined;
+  const { promise, map } = await advanceExportToIdle();
+  void promise.catch((error: Error) => { settledError = error; });
+  map.callbacks.get('idle')?.();
+  await vi.advanceTimersByTimeAsync(0);
+
+  await vi.advanceTimersByTimeAsync(15_000);
+
+  expect(settledError?.message).toBe('Timed out rendering trip map stop labels.');
+  expect(imageInstances[0].onload).toBeNull();
+  expect(imageInstances[0].onerror).toBeNull();
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('times out PNG conversion after 15,000 ms', async () => {
+  vi.useFakeTimers();
+  vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementation(() => undefined);
+  let settledError: Error | undefined;
+  const { promise, map } = await advanceExportToIdle();
+  void promise.catch((error: Error) => { settledError = error; });
+  map.callbacks.get('idle')?.();
+  await vi.advanceTimersByTimeAsync(0);
+
+  await vi.advanceTimersByTimeAsync(15_000);
+
+  expect(settledError?.message).toBe('Timed out creating trip map PNG.');
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('cancels image loading and clears handlers when the map fails', async () => {
+  vi.useFakeTimers();
+  imageLoadShouldHang = true;
+  const { promise, map } = await advanceExportToIdle();
+  map.callbacks.get('idle')?.();
+  await vi.advanceTimersByTimeAsync(0);
+
+  for (const listener of map.errorListeners) {
+    listener({ error: new Error('Tile request failed during label rendering.') });
+  }
+
+  await expect(promise).rejects.toThrow('Tile request failed during label rendering.');
+  expect(imageInstances[0].onload).toBeNull();
+  expect(imageInstances[0].onerror).toBeNull();
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 it('downloads with the sanitized trip name and cleans up all temporary resources', async () => {

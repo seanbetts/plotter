@@ -5,6 +5,7 @@ import { calmBasemapStyle, mapStyleUrl, readMapLayerColors } from './mapPresenta
 import {
   buildStopPillPresentations,
   createStopPillElement,
+  positionStopPillPresentations,
 } from './stopPillPresentation';
 import {
   buildRenderableRouteFeatures,
@@ -170,22 +171,6 @@ function waitForMapEvent(
   });
 }
 
-function rejectOnMapError<T>(promise: Promise<T>, errorMonitor: MapErrorMonitor) {
-  return new Promise<T>((resolve, reject) => {
-    const unsubscribeFromErrors = errorMonitor.subscribe(reject);
-    promise.then(
-      (value) => {
-        unsubscribeFromErrors();
-        resolve(value);
-      },
-      (error: unknown) => {
-        unsubscribeFromErrors();
-        reject(error);
-      },
-    );
-  });
-}
-
 function unwrapRouteFeatures(
   features: FeatureCollection<LineString, RouteFeatureProperties>,
   bounds: TripMapBounds,
@@ -280,14 +265,15 @@ function createStopPillOverlay(
   overlay.style.width = `${exportWidth}px`;
   overlay.style.height = `${exportHeight}px`;
 
-  for (const pill of buildStopPillPresentations({
+  const pills = buildStopPillPresentations({
     destinations,
     selectedDestinationId: null,
     project: ([longitude, latitude]) => map.project([
       unwrapLongitudeForBounds(longitude, bounds),
       latitude,
     ]),
-  })) {
+  });
+  for (const pill of positionStopPillPresentations(pills)) {
     overlay.append(createStopPillElement(pill));
   }
 
@@ -313,25 +299,76 @@ function inlineComputedStyles(source: Element, target: Element) {
   });
 }
 
-function loadImage(url: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
+function abortReason(signal: AbortSignal) {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException('Trip map export cancelled.', 'AbortError');
+}
+
+function waitForFonts(signal: AbortSignal) {
+  if (!document.fonts) return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
     let settled = false;
+    let timeout = 0;
     const settle = (callback: () => void) => {
       if (settled) return;
       settled = true;
+      window.clearTimeout(timeout);
+      signal.removeEventListener('abort', handleAbort);
+      callback();
+    };
+    const handleAbort = () => settle(() => reject(abortReason(signal)));
+
+    if (signal.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal.addEventListener('abort', handleAbort, { once: true });
+    timeout = window.setTimeout(() => {
+      settle(() => reject(new Error('Timed out waiting for trip map fonts.')));
+    }, exportTimeoutMs);
+    document.fonts.ready.then(
+      () => settle(resolve),
+      (error: unknown) => settle(() => reject(error)),
+    );
+  });
+}
+
+function loadImage(url: string, signal: AbortSignal) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    let settled = false;
+    let timeout = 0;
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      signal.removeEventListener('abort', handleAbort);
       image.onload = null;
       image.onerror = null;
       callback();
     };
+    const handleAbort = () => settle(() => reject(abortReason(signal)));
+
+    if (signal.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal.addEventListener('abort', handleAbort, { once: true });
+    timeout = window.setTimeout(() => {
+      settle(() => reject(new Error('Timed out rendering trip map stop labels.')));
+    }, exportTimeoutMs);
     image.onload = () => settle(() => resolve(image));
     image.onerror = () => settle(() => reject(new Error('Unable to render trip map stop labels.')));
     image.src = url;
   });
 }
 
-async function rasterizeStopPillOverlay(overlay: HTMLDivElement) {
-  if (document.fonts) await document.fonts.ready;
+async function rasterizeStopPillOverlay(overlay: HTMLDivElement, signal: AbortSignal) {
+  await waitForFonts(signal);
   const clone = overlay.cloneNode(true) as HTMLDivElement;
   clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
   inlineComputedStyles(overlay, clone);
@@ -339,7 +376,7 @@ async function rasterizeStopPillOverlay(overlay: HTMLDivElement) {
   const serialized = new XMLSerializer().serializeToString(clone);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${exportWidth}" height="${exportHeight}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
   const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  return loadImage(url);
+  return loadImage(url, signal);
 }
 
 function frameExportMap(map: maplibregl.Map, bounds: TripMapBounds) {
@@ -387,7 +424,7 @@ function drawAttribution(context: CanvasRenderingContext2D, map: maplibregl.Map)
   }
 }
 
-function exportBlob(map: maplibregl.Map, stopPillImage: HTMLImageElement) {
+function exportBlob(map: maplibregl.Map, stopPillImage: HTMLImageElement, signal: AbortSignal) {
   return new Promise<Blob>((resolve, reject) => {
     const output = document.createElement('canvas');
     output.width = exportWidth;
@@ -398,17 +435,42 @@ function exportBlob(map: maplibregl.Map, stopPillImage: HTMLImageElement) {
       return;
     }
 
+    let settled = false;
+    let timeout = 0;
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      signal.removeEventListener('abort', handleAbort);
+      callback();
+    };
+    const handleAbort = () => settle(() => reject(abortReason(signal)));
+
+    if (signal.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal.addEventListener('abort', handleAbort, { once: true });
+    timeout = window.setTimeout(() => {
+      settle(() => reject(new Error('Timed out creating trip map PNG.')));
+    }, exportTimeoutMs);
+
     context.drawImage(map.getCanvas(), 0, 0, exportWidth, exportHeight);
     context.drawImage(stopPillImage, 0, 0, exportWidth, exportHeight);
     drawAttribution(context, map);
 
-    output.toBlob((blob) => {
-      if (blob) {
-        resolve(blob);
-      } else {
-        reject(new Error('Unable to create trip map PNG.'));
-      }
-    }, 'image/png');
+    try {
+      output.toBlob((blob) => {
+        if (blob) {
+          settle(() => resolve(blob));
+        } else {
+          settle(() => reject(new Error('Unable to create trip map PNG.')));
+        }
+      }, 'image/png');
+    } catch (error) {
+      settle(() => reject(error));
+    }
   });
 }
 
@@ -424,6 +486,8 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
   let anchor: HTMLAnchorElement | null = null;
   let errorMonitor: MapErrorMonitor | null = null;
   let overlay: HTMLDivElement | null = null;
+  const postIdleController = new AbortController();
+  let unsubscribeFromPostIdleErrors: () => void = () => undefined;
 
   try {
     map = createExportMap(container);
@@ -433,9 +497,12 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
     frameExportMap(map, bounds);
     errorMonitor.rejectIfFailed();
     await waitForMapEvent(map, 'idle', exportTimeoutMs, errorMonitor);
+    unsubscribeFromPostIdleErrors = errorMonitor.subscribe((error) => {
+      postIdleController.abort(error);
+    });
     overlay = createStopPillOverlay(container, map, input.destinations, bounds);
-    const stopPillImage = await rejectOnMapError(rasterizeStopPillOverlay(overlay), errorMonitor);
-    const blob = await rejectOnMapError(exportBlob(map, stopPillImage), errorMonitor);
+    const stopPillImage = await rasterizeStopPillOverlay(overlay, postIdleController.signal);
+    const blob = await exportBlob(map, stopPillImage, postIdleController.signal);
     errorMonitor.rejectIfFailed();
     objectUrl = URL.createObjectURL(blob);
     anchor = document.createElement('a');
@@ -444,6 +511,8 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
     document.body.append(anchor);
     anchor.click();
   } finally {
+    postIdleController.abort();
+    unsubscribeFromPostIdleErrors();
     anchor?.remove();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     errorMonitor?.remove();
