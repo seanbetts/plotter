@@ -189,6 +189,12 @@ Endpoint selection differs by workflow:
 
 The complete current non-writable route-leg state is: `id`, `originDestinationId`, `targetDestinationId`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, `error`, `createdAt`, and `updatedAt`. Never put these fields in a manifest directive or `update-route-leg` input.
 
+Route-recovery ownership rules:
+
+- Copy the approved vehicle preset without changing it.
+- Treat routing anchors, profile fallback, provider retries, geometry, and recovery warnings as app-owned data.
+- A ready route may include `ROUTING_ANCHOR_ADJUSTED` or `VEHICLE_PROFILE_FALLBACK`; report the qualification but do not replan or rewrite the route.
+
 For stored waypoints, the app owns `id`, `order`, normalized `coordinates`, and resolved location/address/provider metadata. A supplied waypoint-draft `place.coordinates` remains valid source input; do not confuse it with the normalized stored `coordinates` field. The app also enriches each waypoint URL into stored `ResearchLink` metadata: `id`, `title`, normalized `url`, `domain`, `imageUrl`, `sortOrder`, and `previewFetchedAt`. Draft `links` remain writable URL strings.
 
 Vehicle changes require confirmation. Preview and apply are separate commands:
@@ -310,6 +316,8 @@ Failure envelope:
 For full creation and route recovery, counts include stops, activities, links, total route legs, ready/manual/failed/review-required route legs, the vehicle preset, and audit errors/warnings. Audit issues remain visible. Structural validation and activity-distance outliers block persistence.
 
 Automatic route-provider failure does not roll back an otherwise valid manifest. The app persists the trip and approved intent, marks or retains the affected leg as failed or review-required, and reports exact diagnostics through `audit`. Do not replan, change stops, weaken ferry intent, remove waypoints, switch to manual routing, or author substitute geometry. Retry persisted failed automatic legs with `recalculate-failed-routes`, then audit again.
+
+`recalculate-failed-routes` retries transient provider rate limits internally. Its full output reports `failedRoutesBefore`, `failedRoutesAfter`, and one `recalculatedRoutes` entry per attempted leg with `routeLegId`, `originName`, `targetName`, and final `status`; any stable failure remains in `routeLegs` with its provider error text. Run `audit` afterward for structured `FAILED_ROUTE_LEG` diagnostics containing the leg ID plus `origin` and `target` IDs, names, coordinates, resolved labels, and source providers when available.
 
 Audit issues include structured location context for implicated entities. Activity outliers include `destination` and `activity`; failed or implausible driving legs include `origin` and `target`. Each context contains the entity `id`, display `name`, resolved `coordinates`, `resolvedLabel`, and `sourceProvider` when available. Inspect these fields before reaching for source-code inspection or a custom route diagnostic.
 

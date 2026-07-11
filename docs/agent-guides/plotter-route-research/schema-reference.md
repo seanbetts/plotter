@@ -102,6 +102,12 @@ Older references to `implementation-ready` mean `handoff-ready`. Do not emit `im
 - `large-camper`
 - `expedition-truck`
 
+Vehicle preset and recovery rules:
+
+- Infer `large-camper` for a car and caravan, campervan, or large motorhome; it uses ordinary car routing in the app.
+- Reserve `expedition-truck` for a genuine heavy truck.
+- Never add stops, waypoints, manual shipping, or geometry to work around an automatic route-provider failure.
+
 `ferryPolicy`:
 
 - `allow`

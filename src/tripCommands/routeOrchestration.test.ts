@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { OpenRouteServiceError } from '../adapters/openRouteService';
 import { createDestination } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
@@ -101,6 +102,84 @@ describe('route orchestration', () => {
       routingAnchors: { 'driving-car': altaAnchor },
     });
     expect(result.destinations[1].updatedAt >= alta.updatedAt).toBe(true);
+  });
+
+  it('recovers Alta at 1.609 km and reuses its anchor on the outbound leg', async () => {
+    const olderdalen = createDestination({ name: 'Olderdalen', coordinates: { lat: 69.6041, lng: 20.5326 } });
+    const alta = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 } });
+    const kautokeino = createDestination({ name: 'Kautokeino', coordinates: { lat: 69.0125, lng: 23.0412 } });
+    const altaAnchorCoordinates = { lat: 69.98334, lng: 23.27165 };
+    const routeLegs = [
+      createRouteLeg({
+        originDestinationId: olderdalen.id,
+        targetDestinationId: alta.id,
+        movement: 'drive',
+        calculation: 'automatic',
+      }),
+      createRouteLeg({
+        originDestinationId: alta.id,
+        targetDestinationId: kautokeino.id,
+        movement: 'drive',
+        calculation: 'automatic',
+      }),
+    ];
+    let attempt = 0;
+    const calculateRoute: CalculateRoute = vi.fn(async (request) => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw new OpenRouteServiceError({
+          status: 404,
+          code: 2010,
+          coordinateIndex: 1,
+          profile: 'driving-car',
+          providerMessage: 'Could not find routable point within a radius of 350.0 meters of specified coordinate 1.',
+        });
+      }
+      const target = attempt === 2 ? altaAnchorCoordinates : request.target;
+      return {
+        distanceKm: attempt === 2 ? 361 : 132,
+        travelTimeHours: attempt === 2 ? 5.4 : 2.1,
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: [[request.origin.lng, request.origin.lat], [target.lng, target.lat]],
+        },
+        provider: 'openrouteservice',
+        profile: 'driving-car' as const,
+        sections: [{
+          kind: 'road' as const,
+          startGeometryIndex: 0,
+          endGeometryIndex: 1,
+          distanceKm: attempt === 2 ? 361 : 132,
+        }],
+      };
+    });
+
+    const result = await calculateAutomaticRouteLegs({
+      destinations: [olderdalen, alta, kautokeino],
+      routeLegs,
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute,
+    });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(3);
+    expect(calculateRoute).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      target: alta.coordinates,
+      radiuses: [350, 2000],
+    }));
+    expect(calculateRoute).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      origin: altaAnchorCoordinates,
+      target: kautokeino.coordinates,
+    }));
+    expect(vi.mocked(calculateRoute).mock.calls[2][0]).not.toHaveProperty('radiuses');
+    expect(result.destinations[1].routingAnchors['driving-car']).toMatchObject({
+      coordinates: altaAnchorCoordinates,
+      originalCoordinates: alta.coordinates,
+    });
+    expect(result.destinations[1].routingAnchors['driving-car']?.snapDistanceKm).toBeCloseTo(1.609, 3);
+    expect(result.routeLegs).toMatchObject([
+      { status: 'ready', warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED' }] },
+      { status: 'ready', warnings: [] },
+    ]);
   });
 
   it.each([

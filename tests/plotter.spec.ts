@@ -397,6 +397,118 @@ test('preserves Nordkapp routing intent and calculates both legs around an ordin
   await expect(page.getByLabel(/Route requires review/)).toBeVisible();
 });
 
+test('recovers a manually added stop route and persists its adjusted endpoint warning', async ({ baseURL, context, page }) => {
+  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
+  const cdpSession = await context.newCDPSession(page);
+  await cdpSession.send('Storage.clearDataForOrigin', { origin, storageTypes: 'indexeddb' });
+
+  const places = {
+    Olderdalen: {
+      id: 'place.olderdalen',
+      text: 'Olderdalen',
+      place_name: 'Olderdalen, Norway',
+      center: [20.5326, 69.6041],
+      properties: { country_code: 'no' },
+      context: [{ id: 'country.1', text: 'Norway', short_code: 'no' }],
+    },
+    Alta: {
+      id: 'place.alta',
+      text: 'Alta',
+      place_name: 'Alta, Norway',
+      center: [23.27165, 69.96887],
+      properties: { country_code: 'no' },
+      context: [{ id: 'country.1', text: 'Norway', short_code: 'no' }],
+    },
+  };
+  const altaAnchor: [number, number] = [23.27165, 69.98334];
+  const routeRequests: Array<{
+    coordinates: [number, number][];
+    radiuses?: number[];
+    alternative_routes?: Record<string, number>;
+  }> = [];
+
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    const url = new URL(route.request().url());
+    const query = decodeURIComponent(url.pathname.replace('/geocoding/', '').replace('.json', ''));
+    const place = places[query as keyof typeof places];
+    await route.fulfill({ contentType: 'application/json', json: { features: place ? [place] : [] } });
+  });
+  await page.route('https://api.openrouteservice.org/v2/directions/**', async (route) => {
+    const body = route.request().postDataJSON() as typeof routeRequests[number];
+    routeRequests.push(body);
+
+    if (routeRequests.length === 1) {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        json: {
+          error: {
+            code: 2010,
+            message: 'Could not find routable point within a radius of 350.0 meters of specified coordinate 1: 23.27165 69.96887.',
+          },
+        },
+      });
+      return;
+    }
+
+    const endpoint = body.radiuses ? altaAnchor : body.coordinates.at(-1)!;
+    const primaryCoordinates = [body.coordinates[0], endpoint];
+    const features = [{
+      type: 'Feature',
+      properties: { summary: { distance: 361_000, duration: 19_440 } },
+      geometry: { type: 'LineString', coordinates: primaryCoordinates },
+    }];
+    if (body.alternative_routes) {
+      features.push({
+        type: 'Feature',
+        properties: { summary: { distance: 369_000, duration: 20_160 } },
+        geometry: {
+          type: 'LineString',
+          coordinates: [body.coordinates[0], [22.5, 69.8], body.coordinates.at(-1)!],
+        },
+      });
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      json: { type: 'FeatureCollection', features },
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const searchInput = page.getByLabel('Search for a destination');
+  await expect(searchInput).toBeVisible();
+
+  await searchInput.fill('Olderdalen');
+  await page.getByRole('option', { name: 'Olderdalen, Norway' }).click();
+  await expect(searchInput).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Olderdalen, Norway' })).toBeVisible();
+  await searchInput.fill('Alta');
+  await page.getByRole('option', { name: 'Alta, Norway' }).click();
+  await expect(searchInput).toHaveValue('');
+
+  await expect.poll(() => routeRequests.length).toBeGreaterThanOrEqual(2);
+  expect(routeRequests[0]).not.toHaveProperty('radiuses');
+  expect(routeRequests[1].radiuses).toEqual([350, 2000]);
+  await expect(page.getByText('224 mi')).toBeVisible();
+  await expect(page.getByText('5.4 hrs')).toBeVisible();
+  await expect(page.getByRole('img', {
+    name: /Adjusted endpoint: route target uses a routing point 1\.6 km from the stop\./,
+  })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Edit route from Olderdalen to Alta' }).click();
+  const alternatives = page.getByRole('dialog', { name: 'Edit route from Olderdalen to Alta' });
+  await expect(alternatives.getByText('Adjusted endpoint', { exact: true })).toBeVisible();
+  await expect(alternatives.getByText('Uses a nearby routable road point for Alta.')).toBeVisible();
+  await alternatives.getByRole('button', { name: 'Close route options' }).click();
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByText('224 mi')).toBeVisible();
+  await expect(page.getByText('5.4 hrs')).toBeVisible();
+  await expect(page.getByRole('img', {
+    name: /Adjusted endpoint: route target uses a routing point 1\.6 km from the stop\./,
+  })).toBeVisible();
+});
+
 test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
   const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
   const cdpSession = await context.newCDPSession(page);

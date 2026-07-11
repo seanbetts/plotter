@@ -11,6 +11,9 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Do not write Supabase rows directly.
 - Do not author route geometry or app-derived fields.
 - Infer `standard`, `large-camper`, or `expedition-truck` from ordinary language; default to `standard` and do not ask for dimensions routinely.
+- Infer `large-camper` for a car and caravan, campervan, or large motorhome; it uses ordinary car routing in the app.
+- Reserve `expedition-truck` for a genuine heavy truck.
+- Never add stops, waypoints, manual shipping, or geometry to work around an automatic route-provider failure.
 - Keep ordinary adjacent automatic routes implicit, including ordinary ferries, tunnels, bridges, and vehicle shuttles that a normal road route can contain.
 - Add ordered waypoints only when a named place materially shapes an adjacent route.
 - Add `ferryPolicy: "avoid"` or `ferryPolicy: "require"` only when ferry intent is material; otherwise leave the ordinary `allow` default implicit.

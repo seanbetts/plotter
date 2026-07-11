@@ -191,9 +191,40 @@ describe('route recovery', () => {
       ferryPolicy: 'require',
     }));
     expect(result.profile).toBe('driving-car');
+    expect(result).toMatchObject({
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: expect.objectContaining({ type: 'LineString' }),
+    });
     expect(result.warnings).toEqual([
       expect.objectContaining({ code: 'VEHICLE_PROFILE_FALLBACK' }),
     ]);
+  });
+
+  it('routes a large camper from Lillehammer to Oslo as a car without a fallback warning', async () => {
+    const lillehammer = { lat: 61.1153, lng: 10.4662 };
+    const oslo = { lat: 59.9139, lng: 10.7522 };
+    const largeCamper = resolveVehiclePreset('large-camper');
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => (
+      routeFor({ origin: request.origin, target: request.target, profile: request.profile })
+    ));
+
+    const result = await calculateRouteWithRecovery({
+      origin: lillehammer,
+      target: oslo,
+      profile: largeCamper.profile,
+      routingVehicle: largeCamper,
+      waypoints: [],
+      ferryPolicy: 'allow',
+    }, calculate);
+
+    expect(calculate).toHaveBeenCalledTimes(1);
+    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving-car',
+      routingVehicle: largeCamper,
+    }));
+    expect(result.profile).toBe('driving-car');
+    expect(result.warnings).toEqual([]);
   });
 
   it('tries HGV endpoint recovery before car fallback and car endpoint recovery for HGV 2010', async () => {

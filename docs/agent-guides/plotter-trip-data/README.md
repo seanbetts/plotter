@@ -9,6 +9,9 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 - Use `npm run trip -- ...` for all trip data reads and writes.
 - Let the app own route-leg `id`, `originDestinationId`, `targetDestinationId`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, `error`, `createdAt`, and `updatedAt`.
 - Let the app own stored waypoint `id`, `order`, normalized `coordinates`, resolved location/address/provider metadata, and enriched `ResearchLink` metadata. Source `place.coordinates` and URL strings remain writable waypoint-draft inputs.
+- Copy the approved vehicle preset without changing it.
+- Treat routing anchors, profile fallback, provider retries, geometry, and recovery warnings as app-owned data.
+- A ready route may include `ROUTING_ANCHOR_ADJUSTED` or `VEHICLE_PROFILE_FALLBACK`; report the qualification but do not replan or rewrite the route.
 - Never author route geometry or app-derived fields by hand.
 - Treat overnight locations as stops.
 - Treat non-overnight visits, tours, meals, viewpoints, walks, and events as activities under the nearest relevant stop.

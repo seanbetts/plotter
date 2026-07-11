@@ -94,6 +94,41 @@ describe('OpenRouteService scheduler', () => {
     expect(startTimes).toEqual([0, 0, 1_000]);
   });
 
+  it('keeps a 41-stop-equivalent batch within 40 starts per rolling minute', async () => {
+    const clock = createFakeClock();
+    const startTimes: number[] = [];
+    const scheduler = createOpenRouteServiceScheduler({
+      maxRequests: 40,
+      windowMs: 60_000,
+      now: clock.now,
+      sleep: async (milliseconds) => {
+        clock.sleeps.push(milliseconds);
+        await clock.sleep(milliseconds);
+      },
+    });
+
+    const requests = Array.from({ length: 41 }, (_, index) => scheduler.schedule(async () => {
+      startTimes.push(clock.now());
+      return index;
+    }));
+
+    await flushMicrotasks(50);
+    await Promise.all(requests.slice(0, 40));
+    expect(startTimes).toHaveLength(40);
+    expect(clock.sleeps).toEqual([60_000]);
+
+    await clock.advance(60_000);
+    await expect(requests[40]).resolves.toBe(40);
+    expect(startTimes).toEqual([...Array(40).fill(0), 60_000]);
+
+    for (const windowEnd of startTimes) {
+      const startsInWindow = startTimes.filter((startedAt) => (
+        startedAt > windowEnd - 60_000 && startedAt <= windowEnd
+      ));
+      expect(startsInWindow.length).toBeLessThanOrEqual(40);
+    }
+  });
+
   it('retries one rate-limited request after the longer provider or window delay', async () => {
     const clock = createFakeClock();
     const scheduler = createOpenRouteServiceScheduler({
