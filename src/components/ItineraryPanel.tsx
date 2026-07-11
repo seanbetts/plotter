@@ -143,6 +143,14 @@ function lowercaseSentenceStart(message: string) {
 }
 
 function routeRecoveryLabel(routeLeg: RouteLeg) {
+  if (
+    routeLeg.status !== 'ready'
+    || routeLeg.movement !== 'drive'
+    || routeLeg.calculation !== 'automatic'
+  ) {
+    return null;
+  }
+
   const labels = (routeLeg.warnings ?? []).flatMap((warning) => {
     const prefix = warning.code === 'ROUTING_ANCHOR_ADJUSTED'
       ? 'Adjusted endpoint'

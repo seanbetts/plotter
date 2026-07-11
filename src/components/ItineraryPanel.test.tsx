@@ -286,6 +286,65 @@ describe('ItineraryPanel', () => {
     expect(within(screen.getByLabelText('Itinerary summary')).getByText('5 hrs travel')).toBeVisible();
   });
 
+  it.each([
+    {
+      rowState: 'manual shipping',
+      movement: 'vehicle-shipping' as const,
+      calculation: 'manual' as const,
+      status: 'ready' as const,
+    },
+    {
+      rowState: 'pending',
+      movement: 'drive' as const,
+      calculation: 'automatic' as const,
+      status: 'pending' as const,
+    },
+    {
+      rowState: 'review-required',
+      movement: 'drive' as const,
+      calculation: 'automatic' as const,
+      status: 'review-required' as const,
+    },
+  ])('does not show stale recovery warnings on $rowState rows', ({ movement, calculation, status }) => {
+    const lillehammer = createDestination({
+      name: 'Lillehammer',
+      coordinates: { lat: 61.1153, lng: 10.4662 },
+      order: 0,
+    });
+    const oslo = createDestination({
+      name: 'Oslo',
+      coordinates: { lat: 59.9139, lng: 10.7522 },
+      order: 1,
+    });
+    const staleRecoveredLeg = createRouteLeg({
+      originDestinationId: lillehammer.id,
+      targetDestinationId: oslo.id,
+      movement,
+      calculation,
+      status,
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated.',
+      }],
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[lillehammer, oslo]}
+        routeLegs={[staleRecoveredLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('img', {
+      name: 'Car-profile fallback: truck dimensions were not validated.',
+    })).not.toBeInTheDocument();
+  });
+
   it('groups a ferry badge immediately before the border crossing badge', () => {
     const origin = createDestination({
       name: 'Dover',
