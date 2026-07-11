@@ -6,6 +6,39 @@ import { describe, expect, it } from 'vitest';
 const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
 
 describe('trip map export styles', () => {
+  it('uses one shared glass rail for search and map export', () => {
+    expect(styles).toMatch(
+      /\.top-toolbar\s*{[^}]*padding:\s*8px;[^}]*border:\s*1px solid var\(--border-subtle\);[^}]*border-radius:\s*var\(--radius-panel\);[^}]*background:\s*var\(--surface-overlay\);[^}]*box-shadow:\s*var\(--shadow-panel\);/s,
+    );
+    expect(styles).toMatch(
+      /\.top-toolbar \.search-group\s*{[^}]*position:\s*relative;[^}]*min-width:\s*0;[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s,
+    );
+  });
+
+  it('renders a compact integrated camera with complete interaction states', () => {
+    expect(styles).toMatch(
+      /\.trip-map-export-action\s*{[^}]*width:\s*42px;[^}]*height:\s*42px;[^}]*border-radius:\s*var\(--radius-control\);[^}]*background:\s*var\(--surface-action-subtle\);[^}]*box-shadow:\s*none;/s,
+    );
+    expect(styles).toMatch(
+      /\.trip-map-export-action svg\s*{[^}]*width:\s*20px;[^}]*height:\s*20px;[^}]*stroke-width:\s*1\.8;/s,
+    );
+    expect(styles).toMatch(
+      /\.trip-map-export-action:focus-visible\s*{[^}]*outline:\s*var\(--focus-ring\);[^}]*outline-offset:\s*2px;/s,
+    );
+    expect(styles).toMatch(
+      /\.trip-map-export-action:active:not\(:disabled\)\s*{[^}]*transform:\s*translateY\(1px\);/s,
+    );
+  });
+
+  it('keeps the integrated rail on one mobile row', () => {
+    expect(styles).toMatch(
+      /@media \(max-width:\s*760px\)\s*{[^}]*\.top-toolbar\s*{[^}]*right:\s*12px;[^}]*left:\s*12px;[^}]*flex-wrap:\s*nowrap;[^}]*}/s,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width:\s*760px\)\s*{[^}]*\.top-toolbar \.search-group\s*{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*0;/s,
+    );
+  });
+
   it('keeps busy and error feedback local to the toolbar action', () => {
     expect(styles).toMatch(/\.trip-map-export-spinner\s*{[^}]*animation:\s*route-spin 900ms linear infinite;/s);
     expect(styles).toMatch(/\.trip-map-export-error\s*{[^}]*position:\s*absolute;/s);

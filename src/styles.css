@@ -417,9 +417,17 @@ select {
   z-index: 16;
   display: flex;
   width: min(680px, calc(100vw - 32px));
-  align-items: flex-start;
+  min-width: 0;
+  align-items: center;
   gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-panel);
   transform: translateX(-50%);
+  -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
+  backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
 }
 
 .toolbar-icon-action {
@@ -452,14 +460,61 @@ select {
   opacity: 0.58;
 }
 
+.trip-map-export-action {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-action-subtle);
+  box-shadow: none;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    opacity 140ms ease,
+    transform 90ms ease;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.trip-map-export-action svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.8;
+}
+
+.trip-map-export-action:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--surface-control-hover);
+}
+
+.trip-map-export-action:focus-visible {
+  border-color: var(--border-selected);
+  background: var(--surface-control-hover);
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.trip-map-export-action:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.trip-map-export-action:disabled {
+  width: 42px;
+  height: 42px;
+  color: var(--text-disabled);
+  background: var(--surface-action-subtle);
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .trip-map-export-spinner {
   animation: route-spin 900ms linear infinite;
 }
 
 .trip-map-export-error {
   position: absolute;
-  top: 52px;
-  right: 0;
+  top: calc(100% + 8px);
+  right: 8px;
   width: max-content;
   max-width: min(280px, calc(100vw - 32px));
   padding: 8px 10px;
@@ -485,6 +540,18 @@ select {
   -webkit-backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
   backdrop-filter: blur(var(--blur-overlay));
   backdrop-filter: blur(var(--blur-overlay)) saturate(1.25);
+}
+
+.top-toolbar .search-group {
+  position: relative;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .search-input-shell {
@@ -2954,6 +3021,31 @@ select {
 }
 
 @media (max-width: 760px) {
+  .top-toolbar {
+    right: 12px;
+    left: 12px;
+    width: auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+    transform: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .top-toolbar .search-group {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .top-toolbar .search-group input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .top-toolbar .search-results {
+    width: 100%;
+  }
+
   .app-shell,
   .map-stage {
     min-height: 100dvh;
@@ -2961,27 +3053,6 @@ select {
 
   .map-stage {
     --mobile-itinerary-panel-clearance: 38vh;
-  }
-
-  .top-toolbar {
-    right: 12px;
-    left: 12px;
-    width: auto;
-    flex-wrap: wrap;
-    transform: none;
-  }
-
-  .search-group {
-    flex: 1 1 100%;
-  }
-
-  .search-group input {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .search-results {
-    width: 100%;
   }
 
   .map-stop-confirmation {
