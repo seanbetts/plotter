@@ -341,6 +341,49 @@ async function waitForTripReady() {
   await waitFor(() => expect(screen.queryByText('Loading Plotter')).not.toBeInTheDocument());
 }
 
+function createRouteAlternativesRaceFixture() {
+  const origin = createDestination({
+    name: 'Bremen',
+    coordinates: { lat: 53.0793, lng: 8.8017 },
+    order: 0,
+  });
+  const target = createDestination({
+    name: 'Hamburg',
+    coordinates: { lat: 53.5502, lng: 10.0013 },
+    order: 1,
+  });
+  const routeLeg = createRouteLeg({
+    originDestinationId: origin.id,
+    targetDestinationId: target.id,
+    movement: 'drive',
+    calculation: 'automatic',
+    status: 'ready',
+    distanceKm: 125,
+    travelTimeHours: 2,
+    geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
+    provider: 'openrouteservice',
+    profile: 'driving-car',
+    routeKey: 'original-route',
+    calculatedAt: '2026-07-01T10:00:00.000Z',
+  });
+  const createOption = (label: string, routeKey: string): RouteOption => ({
+    id: routeKey,
+    label,
+    source: 'recommended',
+    distanceKm: 126,
+    travelTimeHours: 2.1,
+    geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
+    sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 126 }],
+    provider: 'openrouteservice',
+    profile: 'driving-car',
+    routeKey,
+    warnings: [],
+    endpointAnchors: {},
+  });
+
+  return { origin, target, routeLeg, createOption };
+}
+
 describe('App', () => {
   beforeEach(() => {
     repositoryMock.destinations = [];
@@ -1147,6 +1190,124 @@ describe('App', () => {
         }),
       ),
     );
+  });
+
+  it('keeps the second same-leg open when it resolves before the first open', async () => {
+    const { origin, target, routeLeg, createOption } = createRouteAlternativesRaceFixture();
+    const firstLoad = createDeferred<RouteOption[]>();
+    const secondLoad = createDeferred<RouteOption[]>();
+    vi.mocked(calculateOpenRouteServiceRouteOptions)
+      .mockReturnValueOnce(firstLoad.promise)
+      .mockReturnValueOnce(secondLoad.promise);
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    const editButton = await screen.findByRole('button', { name: 'Edit route from Bremen to Hamburg' });
+    await userEvent.click(editButton);
+    await userEvent.click(editButton);
+
+    await act(async () => {
+      secondLoad.resolve([createOption('Second open', 'second-open')]);
+      await secondLoad.promise;
+    });
+    expect(await screen.findByText('Second open')).toBeInTheDocument();
+
+    await act(async () => {
+      firstLoad.resolve([createOption('First open', 'first-open')]);
+      await firstLoad.promise;
+    });
+    expect(screen.getByText('Second open')).toBeInTheDocument();
+    expect(screen.queryByText('First open')).not.toBeInTheDocument();
+  });
+
+  it('does not publish a stale same-leg rejection over a newer open', async () => {
+    const { origin, target, routeLeg, createOption } = createRouteAlternativesRaceFixture();
+    const firstLoad = createDeferred<RouteOption[]>();
+    const secondLoad = createDeferred<RouteOption[]>();
+    vi.mocked(calculateOpenRouteServiceRouteOptions)
+      .mockReturnValueOnce(firstLoad.promise)
+      .mockReturnValueOnce(secondLoad.promise);
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    const editButton = await screen.findByRole('button', { name: 'Edit route from Bremen to Hamburg' });
+    await userEvent.click(editButton);
+    await userEvent.click(editButton);
+    await act(async () => {
+      secondLoad.resolve([createOption('Current open', 'current-open')]);
+      await secondLoad.promise;
+    });
+
+    await act(async () => {
+      firstLoad.reject(new Error('Stale provider failure'));
+      await firstLoad.promise.catch(() => undefined);
+    });
+    expect(screen.getByText('Current open')).toBeInTheDocument();
+    expect(screen.queryByText('Stale provider failure')).not.toBeInTheDocument();
+  });
+
+  it('invalidates a load when closing and reopening the same leg', async () => {
+    const { origin, target, routeLeg, createOption } = createRouteAlternativesRaceFixture();
+    const firstLoad = createDeferred<RouteOption[]>();
+    const secondLoad = createDeferred<RouteOption[]>();
+    vi.mocked(calculateOpenRouteServiceRouteOptions)
+      .mockReturnValueOnce(firstLoad.promise)
+      .mockReturnValueOnce(secondLoad.promise);
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    const editButton = await screen.findByRole('button', { name: 'Edit route from Bremen to Hamburg' });
+    await userEvent.click(editButton);
+    await userEvent.click(screen.getByRole('button', { name: 'Close route options' }));
+    await userEvent.click(editButton);
+    await act(async () => {
+      secondLoad.resolve([createOption('Reopened route', 'reopened-route')]);
+      await secondLoad.promise;
+    });
+
+    await act(async () => {
+      firstLoad.resolve([createOption('Closed route', 'closed-route')]);
+      await firstLoad.promise;
+    });
+    expect(screen.getByText('Reopened route')).toBeInTheDocument();
+    expect(screen.queryByText('Closed route')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { name: 'completion', rejectSave: false },
+    { name: 'failure', rejectSave: true },
+  ])('does not let an old save $name close or mutate a newer panel', async ({ rejectSave }) => {
+    const { origin, target, routeLeg, createOption } = createRouteAlternativesRaceFixture();
+    const oldSave = createDeferred<void>();
+    vi.mocked(calculateOpenRouteServiceRouteOptions)
+      .mockResolvedValueOnce([createOption('Old saved route', 'old-saved-route')])
+      .mockResolvedValueOnce([createOption('New panel route', 'new-panel-route')]);
+    repositoryMock.saveRouteLeg.mockImplementationOnce(() => oldSave.promise);
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    const editButton = await screen.findByRole('button', { name: 'Edit route from Bremen to Hamburg' });
+    await userEvent.click(editButton);
+    await userEvent.click(await screen.findByRole('button', { name: 'Use selected route' }));
+    expect(screen.getByRole('button', { name: 'Saving route' })).toBeDisabled();
+    await userEvent.click(editButton);
+    expect(await screen.findByText('New panel route')).toBeInTheDocument();
+
+    await act(async () => {
+      if (rejectSave) oldSave.reject(new Error('Old save failed')); else oldSave.resolve();
+      await oldSave.promise.catch(() => undefined);
+    });
+    expect(screen.getByRole('dialog', { name: 'Edit route from Bremen to Hamburg' })).toBeInTheDocument();
+    expect(screen.getByText('New panel route')).toBeInTheDocument();
+    expect(screen.queryByText('Old save failed')).not.toBeInTheDocument();
   });
 
   it('saves fallback route warnings and endpoint anchors when selecting a recovered alternative', async () => {

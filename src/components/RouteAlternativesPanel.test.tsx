@@ -224,6 +224,9 @@ describe('RouteAlternativesPanel', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Saving route' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close route options' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Recommended 284 mi 5.8 hr' })).toBeDisabled();
   });
 
   it('closes the route options panel', async () => {

@@ -79,6 +79,7 @@ type PreviewMediaSelection = {
   source: PreviewMediaSource;
 };
 type RouteAlternativesState = {
+  operationId: number;
   routeLegId: string;
   expectedFingerprint: string;
   status: 'loading' | 'ready' | 'empty' | 'error' | 'saving';
@@ -366,6 +367,7 @@ function TripWorkspace({
   const activityPanelRef = useRef<HTMLElement | null>(null);
   const rollupLoadSequenceRef = useRef(0);
   const pendingMapStopRequestIdRef = useRef(0);
+  const routeAlternativesOperationIdRef = useRef(0);
   const activePendingMapStopIdRef = useRef<number | null>(null);
   const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedMapStopElementRef = useRef<HTMLElement | null>(null);
@@ -688,18 +690,24 @@ function TripWorkspace({
   useEffect(() => {
     if (!isInteractionLocked) return;
 
+    routeAlternativesOperationIdRef.current += 1;
     setRouteAlternativesState(null);
   }, [isInteractionLocked]);
 
   useEffect(() => {
     if (!error) return;
 
+    routeAlternativesOperationIdRef.current += 1;
     setRouteAlternativesState(null);
     setPendingMapStop(null);
     setSelectedDestinationId(null);
     setSelectedActivityId(null);
     setPreviewMedia(null);
   }, [error]);
+
+  useEffect(() => () => {
+    routeAlternativesOperationIdRef.current += 1;
+  }, []);
 
   useEffect(() => {
     if (!selectedActivityPanelId) return;
@@ -918,9 +926,12 @@ function TripWorkspace({
       const origin = destinationsById.get(routeLeg.originDestinationId);
       const target = destinationsById.get(routeLeg.targetDestinationId);
       if (!origin || !target) return;
+      const operationId = routeAlternativesOperationIdRef.current + 1;
+      routeAlternativesOperationIdRef.current = operationId;
       const expectedFingerprint = createRouteResultFingerprint(routeLeg, activeTrip.routingVehicle);
 
       setRouteAlternativesState({
+        operationId,
         routeLegId,
         expectedFingerprint,
         status: 'loading',
@@ -943,9 +954,12 @@ function TripWorkspace({
         }));
 
         setRouteAlternativesState((current) =>
-          current?.routeLegId === routeLegId &&
+          routeAlternativesOperationIdRef.current === operationId &&
+          current?.operationId === operationId &&
+          current.routeLegId === routeLegId &&
           current.expectedFingerprint === expectedFingerprint
             ? {
+                operationId,
                 routeLegId,
                 expectedFingerprint,
                 ...(isRouteAlternativesFingerprintCurrent(routeLegId, expectedFingerprint)
@@ -966,7 +980,9 @@ function TripWorkspace({
         );
       } catch (caught) {
         setRouteAlternativesState((current) =>
-          current?.routeLegId === routeLegId &&
+          routeAlternativesOperationIdRef.current === operationId &&
+          current?.operationId === operationId &&
+          current.routeLegId === routeLegId &&
           current.expectedFingerprint === expectedFingerprint
             ? isRouteAlternativesFingerprintCurrent(routeLegId, expectedFingerprint)
               ? {
@@ -990,18 +1006,43 @@ function TripWorkspace({
     [activeTrip, destinationsById, isRouteAlternativesFingerprintCurrent, routeLegsById],
   );
 
-  const closeRouteAlternatives = useCallback(() => {
-    setRouteAlternativesState(null);
+  const closeRouteAlternatives = useCallback((
+    operationId: number,
+    routeLegId: string,
+    expectedFingerprint: string,
+  ) => {
+    if (routeAlternativesOperationIdRef.current !== operationId) return;
+
+    routeAlternativesOperationIdRef.current += 1;
+    setRouteAlternativesState((current) =>
+      current?.operationId === operationId &&
+      current.routeLegId === routeLegId &&
+      current.expectedFingerprint === expectedFingerprint
+        ? null
+        : current,
+    );
   }, []);
 
-  const selectRouteAlternative = useCallback((optionId: string) => {
+  const selectRouteAlternative = useCallback((
+    operationId: number,
+    routeLegId: string,
+    expectedFingerprint: string,
+    optionId: string,
+  ) => {
     setRouteAlternativesState((current) =>
-      current ? { ...current, selectedOptionId: optionId } : current,
+      routeAlternativesOperationIdRef.current === operationId &&
+      current?.operationId === operationId &&
+      current.routeLegId === routeLegId &&
+      current.expectedFingerprint === expectedFingerprint
+        ? { ...current, selectedOptionId: optionId }
+        : current,
     );
   }, []);
 
   const confirmRouteAlternative = useCallback(async () => {
     if (!routeAlternativesState?.selectedOptionId) return;
+    const { operationId, routeLegId, expectedFingerprint } = routeAlternativesState;
+    if (routeAlternativesOperationIdRef.current !== operationId) return;
 
     const selectedOption = routeAlternativesState.options.find(
       (option) => option.id === routeAlternativesState.selectedOptionId,
@@ -1016,7 +1057,14 @@ function TripWorkspace({
       return;
     }
 
-    setRouteAlternativesState((current) => (current ? { ...current, status: 'saving' } : current));
+    setRouteAlternativesState((current) =>
+      routeAlternativesOperationIdRef.current === operationId &&
+      current?.operationId === operationId &&
+      current.routeLegId === routeLegId &&
+      current.expectedFingerprint === expectedFingerprint
+        ? { ...current, status: 'saving' }
+        : current,
+    );
 
     try {
       let validatedOrigin = origin;
@@ -1047,23 +1095,37 @@ function TripWorkspace({
         },
       });
       const applied = await applyValidatedRouteLegResult({
-        routeLegId: routeAlternativesState.routeLegId,
-        expectedFingerprint: routeAlternativesState.expectedFingerprint,
+        routeLegId,
+        expectedFingerprint,
         validatedRouteLeg,
         destinationUpdates,
       });
       if (!applied) {
         setRouteAlternativesState((current) =>
-          current
+          routeAlternativesOperationIdRef.current === operationId &&
+          current?.operationId === operationId &&
+          current.routeLegId === routeLegId &&
+          current.expectedFingerprint === expectedFingerprint
             ? { ...current, status: 'error', error: 'Route intent changed. Recalculate route options.' }
             : current,
         );
         return;
       }
-      setRouteAlternativesState(null);
+      if (routeAlternativesOperationIdRef.current !== operationId) return;
+      routeAlternativesOperationIdRef.current += 1;
+      setRouteAlternativesState((current) =>
+        current?.operationId === operationId &&
+        current.routeLegId === routeLegId &&
+        current.expectedFingerprint === expectedFingerprint
+          ? null
+          : current,
+      );
     } catch (caught) {
       setRouteAlternativesState((current) =>
-        current
+        routeAlternativesOperationIdRef.current === operationId &&
+        current?.operationId === operationId &&
+        current.routeLegId === routeLegId &&
+        current.expectedFingerprint === expectedFingerprint
           ? {
               ...current,
               status: 'error',
@@ -1355,9 +1417,18 @@ function TripWorkspace({
             options={routeAlternativesState.options}
             selectedOptionId={routeAlternativesState.selectedOptionId}
             error={routeAlternativesState.error}
-            onSelectOption={selectRouteAlternative}
+            onSelectOption={(optionId) => selectRouteAlternative(
+              routeAlternativesState.operationId,
+              routeAlternativesState.routeLegId,
+              routeAlternativesState.expectedFingerprint,
+              optionId,
+            )}
             onConfirm={() => void confirmRouteAlternative()}
-            onClose={closeRouteAlternatives}
+            onClose={() => closeRouteAlternatives(
+              routeAlternativesState.operationId,
+              routeAlternativesState.routeLegId,
+              routeAlternativesState.expectedFingerprint,
+            )}
           />
         ) : null}
         {!isInteractionLocked && !error && selectedDestination ? (

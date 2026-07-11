@@ -66,6 +66,7 @@ export function RouteAlternativesPanel({
   onClose,
 }: RouteAlternativesPanelProps) {
   const dialogTitle = `Edit route from ${originName} to ${targetName}`;
+  const isSaving = status === 'saving';
   const canConfirm = Boolean(selectedOptionId) && options.length > 0 && status === 'ready';
 
   return (
@@ -79,6 +80,7 @@ export function RouteAlternativesPanel({
           type="button"
           className="route-alternatives-close"
           aria-label="Close route options"
+          disabled={isSaving}
           onClick={onClose}
         >
           <X size={16} aria-hidden="true" />
@@ -101,7 +103,7 @@ export function RouteAlternativesPanel({
       ) : null}
 
       {options.length > 0 ? (
-        <fieldset className="route-alternatives-options">
+        <fieldset className="route-alternatives-options" disabled={isSaving}>
           <legend>Route options</legend>
           {options.map((option) => {
             const distance = formatDistanceMiles(option.distanceKm);
@@ -136,7 +138,12 @@ export function RouteAlternativesPanel({
       ) : null}
 
       <footer className="route-alternatives-actions">
-        <button type="button" className="route-alternatives-secondary" onClick={onClose}>
+        <button
+          type="button"
+          className="route-alternatives-secondary"
+          disabled={isSaving}
+          onClick={onClose}
+        >
           Cancel
         </button>
         <button
