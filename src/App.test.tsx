@@ -12,7 +12,7 @@ import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import { createRouteLeg } from './domain/routeLegs';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
-import { standardRoutingVehicle } from './domain/vehiclePresets';
+import { resolveVehiclePreset, standardRoutingVehicle } from './domain/vehiclePresets';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { downloadTripMap } from './map/tripMapExport';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
@@ -595,6 +595,82 @@ describe('App', () => {
     });
   });
 
+  it('restores prior routes and trip metadata after a partial vehicle-route write failure', async () => {
+    const first = createDestination({ name: 'First', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const second = createDestination({ name: 'Second', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    const third = createDestination({ name: 'Third', coordinates: { lat: 52, lng: 3 }, order: 2 });
+    const priorRouteLegs = [
+      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, type: 'driving-auto' }),
+      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, type: 'shipping-manual' }),
+    ];
+    repositoryMock.initialDestinations = Promise.resolve([first, second, third]);
+    repositoryMock.initialRouteLegs = Promise.resolve(priorRouteLegs);
+    let saveCall = 0;
+    repositoryMock.saveRouteLeg.mockImplementation(async () => {
+      saveCall += 1;
+      if (saveCall === 2) throw new Error('second route write failed');
+    });
+    const updatedTrip = {
+      ...tripsMock[0],
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+    };
+    const updateTrip = vi.fn()
+      .mockResolvedValueOnce(updatedTrip)
+      .mockResolvedValueOnce(tripsMock[0]);
+    mockTripWorkspace({ updateTrip } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Expedition truck' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
+
+    await waitFor(() => expect(updateTrip).toHaveBeenCalledTimes(2));
+    expect(updateTrip).toHaveBeenLastCalledWith('trip-one', {
+      name: 'World tour',
+      vehiclePreset: 'standard',
+    });
+    expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(4);
+    expect(repositoryMock.saveRouteLeg).toHaveBeenNthCalledWith(3, priorRouteLegs[0]);
+    expect(repositoryMock.saveRouteLeg).toHaveBeenNthCalledWith(4, priorRouteLegs[1]);
+    expect(await screen.findByText(/second route write failed.*trip metadata was restored/i))
+      .toBeInTheDocument();
+  });
+
+  it('surfaces route and metadata rollback failures together', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    const priorRouteLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+    });
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([priorRouteLeg]);
+    repositoryMock.saveRouteLeg
+      .mockRejectedValueOnce(new Error('route write failed'))
+      .mockRejectedValueOnce(new Error('route rollback failed'));
+    const updateTrip = vi.fn()
+      .mockResolvedValueOnce({
+        ...tripsMock[0],
+        routingVehicle: resolveVehiclePreset('large-camper'),
+      })
+      .mockResolvedValueOnce(false);
+    mockTripWorkspace({ updateTrip } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Large camper' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
+
+    expect(await screen.findByText(
+      /route write failed.*route rollback failed.*trip metadata rollback failed/i,
+    )).toBeInTheDocument();
+  });
+
   it('shows one centered loading panel while app clients and trip data load', async () => {
     const initialDestinations = createDeferred<Destination[]>();
     const initialRouteLegs = createDeferred<RouteLeg[]>();
@@ -922,7 +998,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Use selected route' }));
 
     await waitFor(() =>
-      expect(repositoryMock.saveRouteLeg).toHaveBeenCalledWith(
+      expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
         expect.objectContaining({
           routeKey: 'avoid-highways-route-key',
           distanceKm: 220,

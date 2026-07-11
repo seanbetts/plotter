@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
+import type { RouteLeg } from '../domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
@@ -1478,6 +1479,74 @@ describe('useTripData', () => {
       profile: 'driving-hgv',
       distanceKm: 170,
     });
+  });
+
+  it('restores every prior route leg after a partial vehicle-route storage failure', async () => {
+    const first = createDestination({ name: 'First', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const second = createDestination({ name: 'Second', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    const third = createDestination({ name: 'Third', coordinates: { lat: 52, lng: 3 }, order: 2 });
+    const priorRouteLegs = [
+      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, type: 'driving-auto' }),
+      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, type: 'shipping-manual' }),
+    ];
+    let saveCall = 0;
+    const saveRouteLeg = vi.fn(async (_routeLeg: RouteLeg) => {
+      saveCall += 1;
+      if (saveCall === 2) throw new Error('second route write failed');
+    });
+    const repository = createMemoryRepository(Promise.resolve([first, second, third]), {
+      listRouteLegs: async () => priorRouteLegs,
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute: vi.fn(async () => ({
+        distanceKm: 100,
+        travelTimeHours: 2,
+        geometry: { type: 'LineString' as const, coordinates: [[1, 50], [2, 51]] },
+        provider: 'openrouteservice',
+        profile: 'driving-hgv' as const,
+        sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 100 }],
+      })),
+    }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.recalculateForVehicle(resolveVehiclePreset('large-camper')))
+        .rejects.toThrow('second route write failed');
+    });
+
+    expect(saveRouteLeg).toHaveBeenCalledTimes(4);
+    expect(saveRouteLeg.mock.calls.slice(-2).map(([routeLeg]) => routeLeg)).toEqual(priorRouteLegs);
+    expect(result.current.routeLegs).toEqual(priorRouteLegs);
+  });
+
+  it('reports primary and route rollback storage failures together', async () => {
+    const first = createDestination({ name: 'First', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const second = createDestination({ name: 'Second', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    const third = createDestination({ name: 'Third', coordinates: { lat: 52, lng: 3 }, order: 2 });
+    const priorRouteLegs = [
+      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, type: 'driving-auto' }),
+      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, type: 'driving-auto' }),
+    ];
+    let saveCall = 0;
+    const saveRouteLeg = vi.fn(async (_routeLeg: RouteLeg) => {
+      saveCall += 1;
+      if (saveCall === 2) throw new Error('new route write failed');
+      if (saveCall === 3) throw new Error('old route restore failed');
+    });
+    const repository = createMemoryRepository(Promise.resolve([first, second, third]), {
+      listRouteLegs: async () => priorRouteLegs,
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.recalculateForVehicle(resolveVehiclePreset('expedition-truck')))
+        .rejects.toThrow(/new route write failed.*old route restore failed/);
+    });
+
+    expect(saveRouteLeg).toHaveBeenCalledTimes(4);
   });
 
   it('uses the active trip vehicle for ordinary destination reconciliation', async () => {

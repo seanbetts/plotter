@@ -161,14 +161,14 @@ describe('TripSelector', () => {
 
     const vehicleGroup = screen.getByRole('group', { name: 'Vehicle for this trip' });
     const options = [
-      screen.getByRole('button', { name: 'Car' }),
+      screen.getByRole('button', { name: 'Standard vehicle' }),
       screen.getByRole('button', { name: 'Large camper' }),
       screen.getByRole('button', { name: 'Expedition truck' }),
     ];
 
     expect(vehicleGroup).toContainElement(options[0]);
     expect(options.map((option) => option.getAttribute('title'))).toEqual([
-      'Car',
+      'Standard vehicle',
       'Large camper',
       'Expedition truck',
     ]);

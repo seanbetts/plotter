@@ -19,7 +19,7 @@ type TripSelectorProps = {
 type DialogMode = 'create' | 'edit' | 'delete' | null;
 
 const vehicleOptions = [
-  { preset: 'standard', label: 'Car', Icon: Car },
+  { preset: 'standard', label: 'Standard vehicle', Icon: Car },
   { preset: 'large-camper', label: 'Large camper', Icon: Caravan },
   { preset: 'expedition-truck', label: 'Expedition truck', Icon: Truck },
 ] satisfies Array<{ preset: VehiclePreset; label: string; Icon: typeof Car }>;

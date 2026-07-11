@@ -343,6 +343,7 @@ function TripWorkspace({
   });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [tripConsistencyError, setTripConsistencyError] = useState<string | null>(null);
   const [isStopsPanelCollapsed, setIsStopsPanelCollapsed] = useState(readStopsPanelCollapsedPreference);
   const [previewMedia, setPreviewMedia] = useState<PreviewMediaSelection | null>(null);
   const [destinationMediaRollupItems, setDestinationMediaRollupItems] = useState<MediaRollupItem[]>([]);
@@ -393,6 +394,7 @@ function TripWorkspace({
     tripId: string,
     patch: { name: string; vehiclePreset: TripSummary['routingVehicle']['preset'] },
   ) => {
+    setTripConsistencyError(null);
     const previousTrip = trips.find((trip) => trip.id === tripId);
     const updatedTrip = await onUpdateTrip(tripId, patch);
     if (updatedTrip === false) return false;
@@ -401,7 +403,34 @@ function TripWorkspace({
       activeTrip?.id === tripId &&
       previousTrip?.routingVehicle.preset !== updatedTrip.routingVehicle.preset
     ) {
-      await recalculateForVehicle(updatedTrip.routingVehicle);
+      try {
+        await recalculateForVehicle(updatedTrip.routingVehicle);
+      } catch (caught) {
+        const primaryMessage = caught instanceof Error
+          ? caught.message
+          : 'Unable to save recalculated routes.';
+        let metadataRollbackMessage =
+          'Trip metadata rollback failed; trip metadata may not match the restored route legs.';
+
+        try {
+          const rollbackTrip = previousTrip
+            ? await onUpdateTrip(tripId, {
+              name: previousTrip.name,
+              vehiclePreset: previousTrip.routingVehicle.preset,
+            })
+            : false;
+          if (rollbackTrip !== false) {
+            metadataRollbackMessage = 'Trip metadata was restored.';
+          }
+        } catch (rollbackCaught) {
+          metadataRollbackMessage = `Trip metadata rollback failed: ${
+            rollbackCaught instanceof Error ? rollbackCaught.message : 'Unknown metadata rollback error'
+          }. Trip metadata may not match the restored route legs.`;
+        }
+
+        setTripConsistencyError(`${primaryMessage} ${metadataRollbackMessage}`);
+        return false;
+      }
     }
 
     return updatedTrip;
@@ -1145,7 +1174,7 @@ function TripWorkspace({
               <TripSelector
                 trips={trips}
                 activeTrip={activeTrip}
-                actionError={tripActionError}
+                actionError={tripConsistencyError ?? tripActionError}
                 onSelectTrip={onSelectTrip}
                 onCreateTrip={onCreateTrip}
                 onUpdateTrip={handleUpdateTrip}

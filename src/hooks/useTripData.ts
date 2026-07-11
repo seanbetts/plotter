@@ -530,9 +530,10 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         async recalculateForVehicle(nextRoutingVehicle: TripRoutingVehicle) {
           if (!isActiveAction()) return;
 
+          const priorRouteLegs = structuredClone(routeLegsRef.current);
           const invalidatedRouteLegs = recalculateAutomaticRouteLegsForVehicle({
             destinations: destinationsRef.current,
-            routeLegs: routeLegsRef.current,
+            routeLegs: priorRouteLegs,
             routingVehicle: nextRoutingVehicle,
           });
           const recalculatedRouteLegs = await calculateAutomaticRouteLegs({
@@ -544,7 +545,31 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           });
           if (!isActiveAction()) return;
 
-          await Promise.all(recalculatedRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)));
+          try {
+            for (const routeLeg of recalculatedRouteLegs) {
+              await repository.saveRouteLeg(routeLeg);
+            }
+          } catch (caught) {
+            const primaryMessage = caught instanceof Error ? caught.message : 'Unknown route storage error';
+            const rollbackResults = await Promise.allSettled(
+              priorRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)),
+            );
+            const rollbackMessages = rollbackResults.flatMap((result, index) =>
+              result.status === 'rejected'
+                ? [`${priorRouteLegs[index].id}: ${result.reason instanceof Error ? result.reason.message : 'Unknown rollback error'}`]
+                : [],
+            );
+
+            if (rollbackMessages.length > 0) {
+              throw new Error(
+                `Unable to save recalculated routes: ${primaryMessage}. Route rollback failed: ${rollbackMessages.join('; ')}`,
+              );
+            }
+
+            throw new Error(
+              `Unable to save recalculated routes: ${primaryMessage}. Previous route legs were restored.`,
+            );
+          }
           if (!isActiveAction()) return;
 
           replaceRouteLegs(recalculatedRouteLegs);
