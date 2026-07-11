@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Coordinates, FerryPolicy, RouteWaypoint, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
+import { createDestination } from '../domain/destinations';
+import { createRouteLeg } from '../domain/routeLegs';
+import { coordinateDistanceKm } from '../domain/routingAnchors';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import { OpenRouteServiceError } from '../adapters/openRouteService';
+import { calculateAutomaticRouteLegs } from './routeOrchestration';
 import {
   calculateRouteWithRecovery,
   type CalculateProviderRoute,
@@ -86,7 +90,7 @@ function savedAnchor(profile: TripRoutingVehicle['profile'], originalCoordinates
     profile,
     coordinates,
     originalCoordinates,
-    snapDistanceKm: 1.25,
+    snapDistanceKm: coordinateDistanceKm(originalCoordinates, coordinates),
     provider: 'openrouteservice',
     resolvedAt: '2026-07-11T00:00:00.000Z',
   };
@@ -738,7 +742,7 @@ describe('route recovery', () => {
     },
     {
       name: 'coordinates outside the recovery radius',
-      anchor: { ...savedAnchor('driving-hgv', alta, { lat: alta.lat + 0.03, lng: alta.lng }), snapDistanceKm: 1.25 },
+      anchor: { ...savedAnchor('driving-hgv', alta, { lat: alta.lat + 0.03, lng: alta.lng }), snapDistanceKm: 1 },
     },
     {
       name: 'reported snap distance outside the recovery radius',
@@ -755,6 +759,14 @@ describe('route recovery', () => {
     {
       name: 'non-ORS provider',
       anchor: { ...savedAnchor('driving-hgv', alta, altaAnchorCoordinates), provider: 'other' } as unknown as RoutingAnchor,
+    },
+    {
+      name: 'close coordinates inconsistent with the reported snap distance',
+      anchor: { ...savedAnchor('driving-hgv', alta, altaAnchorCoordinates), snapDistanceKm: 0.5 },
+    },
+    {
+      name: 'out-of-bounds coordinates',
+      anchor: { ...savedAnchor('driving-hgv', alta, altaAnchorCoordinates), coordinates: { lat: 91, lng: alta.lng } },
     },
   ])('ignores a saved anchor with $name before the provider request', async ({ anchor }) => {
     const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => (
@@ -773,6 +785,83 @@ describe('route recovery', () => {
     }));
     expect(result.warnings).toEqual([]);
     expect(result.endpointAnchors).toEqual({});
+  });
+
+  it('accepts the stored-distance tolerance boundary and warns with validated distance', async () => {
+    const coordinates = { lat: alta.lat + 0.009, lng: alta.lng };
+    const actualDistanceKm = coordinateDistanceKm(alta, coordinates);
+    const anchor = {
+      ...savedAnchor('driving-hgv', alta, coordinates),
+      snapDistanceKm: actualDistanceKm + 0.05,
+    };
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => (
+      routeFor({ origin: request.origin, target: request.target, profile: request.profile })
+    ));
+
+    const result = await calculateRouteWithRecovery({
+      ...expeditionInput,
+      targetAnchors: { 'driving-hgv': anchor },
+    }, calculate);
+
+    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({ target: coordinates }));
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        code: 'ROUTING_ANCHOR_ADJUSTED',
+        message: `Route target uses a routing point ${actualDistanceKm.toFixed(1)} km from the stop.`,
+      }),
+    ]);
+  });
+
+  it('replaces an inconsistent saved anchor after 2010 and reuses the valid replacement', async () => {
+    const invalidAnchor = {
+      ...savedAnchor('driving-car', alta, altaAnchorCoordinates),
+      snapDistanceKm: 0.5,
+    };
+    const originDestination = createDestination({ name: 'Balcombe', coordinates: balcombe, order: 0 });
+    const targetDestination = {
+      ...createDestination({ name: 'Alta', coordinates: alta, order: 1 }),
+      routingAnchors: { 'driving-car': invalidAnchor },
+    };
+    const firstCalculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      if (!request.radiuses) {
+        expect(request.target).toEqual(alta);
+        throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: 1 });
+      }
+      return routeFor({ origin: request.origin, target: altaAnchorCoordinates, profile: request.profile });
+    });
+
+    const recovered = await calculateAutomaticRouteLegs({
+      destinations: [originDestination, targetDestination],
+      routeLegs: [createRouteLeg({
+        originDestinationId: originDestination.id,
+        targetDestinationId: targetDestination.id,
+      })],
+      routingVehicle: carVehicle,
+      calculateRoute: firstCalculate,
+    });
+
+    const persistedAnchor = recovered.destinations[1].routingAnchors['driving-car'];
+    expect(persistedAnchor).toMatchObject({
+      originalCoordinates: alta,
+      coordinates: altaAnchorCoordinates,
+      snapDistanceKm: coordinateDistanceKm(alta, altaAnchorCoordinates),
+    });
+
+    const reloadCalculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => (
+      routeFor({ origin: request.origin, target: request.target, profile: request.profile })
+    ));
+    await calculateRouteWithRecovery({
+      origin: balcombe,
+      target: alta,
+      profile: 'driving-car',
+      routingVehicle: carVehicle,
+      waypoints: [],
+      ferryPolicy: 'allow',
+      targetAnchors: recovered.destinations[1].routingAnchors,
+    }, reloadCalculate);
+
+    expect(reloadCalculate).toHaveBeenCalledTimes(1);
+    expect(reloadCalculate).toHaveBeenCalledWith(expect.objectContaining({ target: altaAnchorCoordinates }));
   });
 
   it('does not fall back from car failures to HGV', async () => {

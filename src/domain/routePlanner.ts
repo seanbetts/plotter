@@ -2,6 +2,9 @@ import { createRouteKey, createRouteLeg, createStraightLineGeometry } from './ro
 import type { LineString } from 'geojson';
 import type { Coordinates, Destination, RouteIntentSnapshot, RouteLeg, RouteWaypoint, TripRoutingVehicle } from './types';
 import { standardRoutingVehicle } from './vehiclePresets';
+import { coordinateDistanceKm, validateRoutingAnchor } from './routingAnchors';
+
+export { coordinateDistanceKm };
 
 type ReconcileRouteLegsResult = {
   routeLegs: RouteLeg[];
@@ -27,26 +30,6 @@ function routePairKey(originDestinationId: string, targetDestinationId: string) 
 
 const createTimestamp = () => new Date().toISOString();
 const drivingGeometryEndpointTolerance = 0.001;
-const recoveredAnchorRadiusKm = 2;
-const recoveredAnchorDistanceToleranceKm = 0.05;
-
-function degreesToRadians(degrees: number) {
-  return (degrees * Math.PI) / 180;
-}
-
-export function coordinateDistanceKm(left: Coordinates, right: Coordinates) {
-  const earthRadiusKm = 6371;
-  const latDelta = degreesToRadians(right.lat - left.lat);
-  const lngDelta = degreesToRadians(right.lng - left.lng);
-  const leftLat = degreesToRadians(left.lat);
-  const rightLat = degreesToRadians(right.lat);
-  const haversine =
-    Math.sin(latDelta / 2) ** 2 +
-    Math.cos(leftLat) * Math.cos(rightLat) * Math.sin(lngDelta / 2) ** 2;
-
-  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-}
-
 function coordinateMatches(value: number | undefined, expected: number, tolerance = 0) {
   return value !== undefined && Math.abs(value - expected) <= tolerance;
 }
@@ -178,32 +161,15 @@ function routeGeometryMatchesCurrentEndpoints(
     }
     if (!hasAdjustedAnchorProvenance || !profile) return false;
 
-    const anchor = destination.routingAnchors[profile];
-    if (
-      !anchor ||
-      anchor.profile !== profile ||
-      anchor.provider !== 'openrouteservice' ||
-      !Number.isFinite(anchor.originalCoordinates.lat) ||
-      !Number.isFinite(anchor.originalCoordinates.lng) ||
-      !Number.isFinite(anchor.coordinates.lat) ||
-      !Number.isFinite(anchor.coordinates.lng) ||
-      !Number.isFinite(anchor.snapDistanceKm) ||
-      anchor.snapDistanceKm < 0 ||
-      anchor.snapDistanceKm > recoveredAnchorRadiusKm ||
-      !coordinateMatches(anchor.originalCoordinates.lng, destination.coordinates.lng) ||
-      !coordinateMatches(anchor.originalCoordinates.lat, destination.coordinates.lat) ||
-      !coordinateMatches(coordinate?.[0], anchor.coordinates.lng, drivingGeometryEndpointTolerance) ||
-      !coordinateMatches(coordinate?.[1], anchor.coordinates.lat, drivingGeometryEndpointTolerance)
-    ) return false;
-
-    const actualSnapDistanceKm = coordinateDistanceKm(
-      destination.coordinates,
-      anchor.coordinates,
-    );
-    return (
-      Number.isFinite(actualSnapDistanceKm) &&
-      actualSnapDistanceKm <= recoveredAnchorRadiusKm &&
-      Math.abs(actualSnapDistanceKm - anchor.snapDistanceKm) <= recoveredAnchorDistanceToleranceKm
+    const validatedAnchor = validateRoutingAnchor({
+      anchor: destination.routingAnchors[profile],
+      canonicalCoordinates: destination.coordinates,
+      profile,
+    });
+    return Boolean(
+      validatedAnchor &&
+      coordinateMatches(coordinate?.[0], validatedAnchor.anchor.coordinates.lng, drivingGeometryEndpointTolerance) &&
+      coordinateMatches(coordinate?.[1], validatedAnchor.anchor.coordinates.lat, drivingGeometryEndpointTolerance),
     );
   };
 

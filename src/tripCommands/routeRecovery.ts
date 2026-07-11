@@ -1,5 +1,11 @@
 import { isOpenRouteServiceError, type OpenRouteServiceError } from '../adapters/openRouteService';
 import type { Coordinates, RouteWarning, RoutingAnchor, RoutingAnchors, TripRoutingVehicle } from '../domain/types';
+import {
+  coordinateDistanceKm,
+  routingAnchorMaxDistanceKm,
+  validateRoutingAnchor,
+  type ValidatedRoutingAnchor,
+} from '../domain/routingAnchors';
 import type { CalculatedRoute, CalculateRouteInput } from './routeOrchestration';
 
 export type RecoveredRoute = CalculatedRoute & {
@@ -24,7 +30,7 @@ type RecoveryInput = CalculateRouteInput & {
 
 type EndpointName = 'origin' | 'target';
 
-const endpointRadiusMeters = 2000;
+const endpointRadiusMeters = routingAnchorMaxDistanceKm * 1000;
 const endpointRadiusKm = endpointRadiusMeters / 1000;
 const strictEndpointRadiusMeters = 350;
 const snapToleranceKm = 0.001;
@@ -41,23 +47,6 @@ class EndpointRecoveryRejectedError extends Error {
   }
 }
 
-function degreesToRadians(degrees: number) {
-  return (degrees * Math.PI) / 180;
-}
-
-function coordinateDistanceKm(left: Coordinates, right: Coordinates) {
-  const earthRadiusKm = 6371;
-  const latDelta = degreesToRadians(right.lat - left.lat);
-  const lngDelta = degreesToRadians(right.lng - left.lng);
-  const leftLatitude = degreesToRadians(left.lat);
-  const rightLatitude = degreesToRadians(right.lat);
-  const haversine =
-    Math.sin(latDelta / 2) ** 2 +
-    Math.cos(leftLatitude) * Math.cos(rightLatitude) * Math.sin(lngDelta / 2) ** 2;
-
-  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
-}
-
 function coordinateFromPair(pair: number[]): Coordinates {
   const [lng, lat] = pair;
   if (typeof lat !== 'number' || typeof lng !== 'number') {
@@ -72,38 +61,16 @@ function matchingAnchor(input: {
   profile: TripRoutingVehicle['profile'];
   canonicalCoordinates: Coordinates;
 }) {
-  const isValid = (anchor: RoutingAnchor | undefined): anchor is RoutingAnchor => {
-    if (
-      !anchor ||
-      anchor.profile !== input.profile ||
-      anchor.provider !== 'openrouteservice' ||
-      !Number.isFinite(anchor.originalCoordinates?.lat) ||
-      !Number.isFinite(anchor.originalCoordinates?.lng) ||
-      !Number.isFinite(anchor.coordinates?.lat) ||
-      !Number.isFinite(anchor.coordinates?.lng) ||
-      !Number.isFinite(anchor.snapDistanceKm) ||
-      anchor.snapDistanceKm < 0 ||
-      anchor.snapDistanceKm > endpointRadiusKm
-    ) {
-      return false;
-    }
-
-    const originalCoordinateDistanceKm = coordinateDistanceKm(
-      anchor.originalCoordinates,
-      input.canonicalCoordinates,
-    );
-    const anchorDistanceKm = coordinateDistanceKm(input.canonicalCoordinates, anchor.coordinates);
-    return (
-      Number.isFinite(originalCoordinateDistanceKm) &&
-      originalCoordinateDistanceKm <= snapToleranceKm &&
-      Number.isFinite(anchorDistanceKm) &&
-      anchorDistanceKm <= endpointRadiusKm
-    );
-  };
-
   const mappedAnchor = input.anchors?.[input.profile];
-  if (isValid(mappedAnchor)) return mappedAnchor;
-  return isValid(input.anchor) ? input.anchor : undefined;
+  return validateRoutingAnchor({
+    anchor: mappedAnchor,
+    canonicalCoordinates: input.canonicalCoordinates,
+    profile: input.profile,
+  }) ?? validateRoutingAnchor({
+    anchor: input.anchor,
+    canonicalCoordinates: input.canonicalCoordinates,
+    profile: input.profile,
+  });
 }
 
 function routeRequestInput(input: RecoveryInput) {
@@ -154,8 +121,8 @@ function requestWithSavedAnchors(input: RecoveryInput, profile: TripRoutingVehic
     ...routeRequestInput(input),
     profile,
     routingVehicle: vehicleForProfile(input.routingVehicle, profile),
-    origin: originAnchor?.coordinates ?? input.origin,
-    target: targetAnchor?.coordinates ?? input.target,
+    origin: originAnchor?.anchor.coordinates ?? input.origin,
+    target: targetAnchor?.anchor.coordinates ?? input.target,
   };
 }
 
@@ -176,8 +143,8 @@ function requestWithEndpointRadii(
     ...routeRequestInput(input),
     profile,
     routingVehicle: vehicleForProfile(input.routingVehicle, profile),
-    origin: originAnchor?.coordinates ?? input.origin,
-    target: targetAnchor?.coordinates ?? input.target,
+    origin: originAnchor?.anchor.coordinates ?? input.origin,
+    target: targetAnchor?.anchor.coordinates ?? input.target,
     radiuses,
   };
 }
@@ -235,13 +202,18 @@ function isEndpointRecoveryRejectedError(error: unknown): error is EndpointRecov
   return error instanceof EndpointRecoveryRejectedError;
 }
 
-function anchorWarning(endpointAnchors: RecoveredRoute['endpointAnchors']): RouteWarning[] {
-  const adjustedAnchors = Object.entries(endpointAnchors) as Array<[EndpointName, RoutingAnchor | undefined]>;
+type ValidatedEndpointAnchors = {
+  origin?: ValidatedRoutingAnchor;
+  target?: ValidatedRoutingAnchor;
+};
+
+function anchorWarning(endpointAnchors: ValidatedEndpointAnchors): RouteWarning[] {
+  const adjustedAnchors = Object.entries(endpointAnchors) as Array<[EndpointName, ValidatedRoutingAnchor | undefined]>;
   return adjustedAnchors
-    .filter((entry): entry is [EndpointName, RoutingAnchor] => Boolean(entry[1]))
-    .map(([endpoint, anchor]) => ({
+    .filter((entry): entry is [EndpointName, ValidatedRoutingAnchor] => Boolean(entry[1]))
+    .map(([endpoint, validatedAnchor]) => ({
       code: 'ROUTING_ANCHOR_ADJUSTED',
-      message: `Route ${endpoint} uses a routing point ${anchor.snapDistanceKm.toFixed(1)} km from the stop.`,
+      message: `Route ${endpoint} uses a routing point ${validatedAnchor.actualSnapDistanceKm.toFixed(1)} km from the stop.`,
     }));
 }
 
@@ -317,9 +289,13 @@ async function calculateWithEndpointRecovery(
         ...(targetAnchor ? { target: targetAnchor } : {}),
       };
       const savedAnchors = savedAnchorsFor(input, profile);
-      const usedAnchors: RecoveredRoute['endpointAnchors'] = {
-        origin: widenedEndpointIndices.has(0) ? originAnchor : savedAnchors.origin,
-        target: widenedEndpointIndices.has(targetIndex) ? targetAnchor : savedAnchors.target,
+      const usedAnchors: ValidatedEndpointAnchors = {
+        origin: widenedEndpointIndices.has(0)
+          ? validateRoutingAnchor({ anchor: originAnchor, canonicalCoordinates: input.origin, profile })
+          : savedAnchors.origin,
+        target: widenedEndpointIndices.has(targetIndex)
+          ? validateRoutingAnchor({ anchor: targetAnchor, canonicalCoordinates: input.target, profile })
+          : savedAnchors.target,
       };
       const recoveredRoute = asRecoveredRoute(route);
 
