@@ -9,6 +9,7 @@ import type { TripRepository } from '../storage/tripRepository';
 import {
   calculateAutomaticRouteLegs,
   finalizeRouteLeg,
+  hasFinalizedAutomaticRouteResult,
   hasPreservableDrivingRouteData,
   recalculateAutomaticRouteLegsForVehicle,
   reconcileAndSaveRouteLegs,
@@ -406,9 +407,12 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
                 error: patch.error,
               }
               : mergedRouteLeg;
+          const hasExplicitFinalizedResult =
+            patch.status !== undefined && hasFinalizedAutomaticRouteResult(routeLegForFinalization);
           const pendingRouteLeg =
             routeLegForFinalization.type === 'driving-auto' &&
-            !hasPreservableDrivingRouteData(routeLegForFinalization)
+            !hasPreservableDrivingRouteData(routeLegForFinalization) &&
+            !hasExplicitFinalizedResult
               ? {
                 ...routeLegForFinalization,
                 status: 'pending' as const,
@@ -422,11 +426,13 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             );
           }
 
-          const updated = await finalizeRouteLeg({
-            routeLeg: pendingRouteLeg,
-            destinations: destinationsRef.current,
-            calculateRoute,
-          });
+          const updated = hasExplicitFinalizedResult
+            ? pendingRouteLeg
+            : await finalizeRouteLeg({
+                routeLeg: pendingRouteLeg,
+                destinations: destinationsRef.current,
+                calculateRoute,
+              });
           if (!isActiveAction()) return;
 
           await repository.saveRouteLeg(updated);

@@ -185,6 +185,39 @@ describe('ItineraryPanel', () => {
     expect(within(ordinaryRoute as HTMLElement).queryByLabelText(/Route requires review/)).not.toBeInTheDocument();
   });
 
+  it('excludes failed route metrics from totals and labels the failure warning', () => {
+    const origin = createDestination({ name: 'Dover', coordinates: { lat: 51.1279, lng: 1.3134 }, order: 0 });
+    const target = createDestination({ name: 'Calais', coordinates: { lat: 50.9513, lng: 1.8587 }, order: 1 });
+    const failedLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'failed',
+      distanceKm: 500,
+      travelTimeHours: 10,
+      error: 'Required ferry section was not returned.',
+      warnings: [{ code: 'FERRY_REQUIRED_NOT_FOUND', message: 'Required ferry section was not returned.' }],
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[failedLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(within(screen.getByLabelText('Itinerary summary')).getByText('0 hrs travel')).toBeInTheDocument();
+    expect(screen.getByLabelText('Route failed: Required ferry section was not returned.')).toHaveAttribute(
+      'title',
+      'Route failed: Required ferry section was not returned.',
+    );
+  });
+
   it('pluralises inline route hours at two displayed hours and above', () => {
     const origin = createDestination({
       name: 'Brest',

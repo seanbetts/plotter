@@ -4,7 +4,8 @@ import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
-import { buildRouteFeatures, MapCanvas } from './MapCanvas';
+import { buildRouteFeatures } from '../map/tripRouteFeatures';
+import { MapCanvas } from './MapCanvas';
 
 type MockMap = {
   on: Mock;

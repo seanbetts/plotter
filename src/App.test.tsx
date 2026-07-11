@@ -12,6 +12,7 @@ import {
 import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import { createRouteLeg } from './domain/routeLegs';
+import type { RouteOption } from './domain/routeOptions';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from './domain/vehiclePresets';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
@@ -1018,12 +1019,19 @@ describe('App', () => {
     });
     const waypoint = {
       id: 'waypoint-batumi',
-      order: 0,
+      order: 1,
       name: 'Batumi',
       coordinates: { lat: 41.6461, lng: 41.6402 },
       location: tbilisi.location,
       notes: 'Keep the Black Sea route.',
       links: [],
+    };
+    const earlierWaypoint = {
+      ...waypoint,
+      id: 'waypoint-samsun',
+      order: 0,
+      name: 'Samsun',
+      coordinates: { lat: 41.2867, lng: 36.33 },
     };
     const routeLeg = {
       ...createRouteLeg({
@@ -1032,8 +1040,9 @@ describe('App', () => {
         type: 'driving-auto',
         movement: 'drive',
         calculation: 'automatic',
-        ferryPolicy: 'require',
-        waypoints: [waypoint],
+        ferryPolicy: 'allow',
+        waypoints: [waypoint, earlierWaypoint],
+        warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Stale warning.' }],
         notes: 'Keep the border research notes.',
       }),
       status: 'ready' as const,
@@ -1066,8 +1075,8 @@ describe('App', () => {
       origin: istanbul.coordinates,
       target: tbilisi.coordinates,
       routingVehicle,
-      waypoints: [waypoint],
-      ferryPolicy: 'require',
+      waypoints: [earlierWaypoint, waypoint],
+      ferryPolicy: 'allow',
     });
 
     expect(await screen.findByRole('dialog', { name: 'Edit route from Istanbul to Tbilisi' })).toBeInTheDocument();
@@ -1085,13 +1094,109 @@ describe('App', () => {
           status: 'ready',
           movement: 'drive',
           calculation: 'automatic',
-          ferryPolicy: 'require',
-          waypoints: [waypoint],
+          ferryPolicy: 'allow',
+          waypoints: [waypoint, earlierWaypoint],
           notes: 'Keep the border research notes.',
           sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 220 }],
+          warnings: [],
         }),
       ),
     );
+  });
+
+  it.each([
+    {
+      name: 'fails when a required ferry is missing',
+      ferryPolicy: 'require' as const,
+      distanceKm: 800,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 800 }],
+      expectedStatus: 'failed',
+      warningCode: 'FERRY_REQUIRED_NOT_FOUND',
+      retainsGeometry: false,
+    },
+    {
+      name: 'fails when an avoided ferry is returned',
+      ferryPolicy: 'avoid' as const,
+      distanceKm: 800,
+      sections: [{ kind: 'ferry' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 800 }],
+      expectedStatus: 'failed',
+      warningCode: 'FERRY_AVOIDED_BUT_FOUND',
+      retainsGeometry: false,
+    },
+    {
+      name: 'requires review for a suspicious detour',
+      ferryPolicy: 'allow' as const,
+      distanceKm: 1372.6,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1372.6 }],
+      expectedStatus: 'review-required',
+      warningCode: 'SUSPICIOUS_DETOUR',
+      retainsGeometry: true,
+    },
+  ])('$name when applying a route alternative', async ({
+    ferryPolicy,
+    distanceKm,
+    sections,
+    expectedStatus,
+    warningCode,
+    retainsGeometry,
+  }) => {
+    const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const hirtshals = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.5881, lng: 9.9598 }, order: 1 });
+    const geometry = {
+      type: 'LineString' as const,
+      coordinates: [[bremen.coordinates.lng, bremen.coordinates.lat], [hirtshals.coordinates.lng, hirtshals.coordinates.lat]],
+    };
+    const routeLeg = createRouteLeg({
+      originDestinationId: bremen.id,
+      targetDestinationId: hirtshals.id,
+      type: 'driving-auto',
+      status: 'ready',
+      ferryPolicy,
+      distanceKm: 700,
+      travelTimeHours: 9,
+      geometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'old-route',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+      warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Stale warning.' }],
+      notes: 'Preserve route notes.',
+    });
+    const option: RouteOption = {
+      id: 'selected-option',
+      label: 'Selected option',
+      source: 'recommended',
+      distanceKm,
+      travelTimeHours: 18,
+      geometry,
+      sections,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'selected-route-key',
+    };
+    vi.mocked(calculateOpenRouteServiceRouteOptions).mockResolvedValueOnce([option]);
+    repositoryMock.initialDestinations = Promise.resolve([bremen, hirtshals]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit route from Bremen to Hirtshals' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Use selected route' }));
+
+    await waitFor(() => expect(repositoryMock.saveRouteLeg).toHaveBeenCalled());
+    const savedRoute = repositoryMock.saveRouteLeg.mock.calls.at(-1)?.[0];
+    expect(savedRoute).toMatchObject({
+      status: expectedStatus,
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: retainsGeometry ? geometry : undefined,
+      warnings: [expect.objectContaining({ code: warningCode })],
+      movement: 'drive',
+      calculation: 'automatic',
+      ferryPolicy,
+      waypoints: [],
+      notes: 'Preserve route notes.',
+    });
   });
 
   it('hides an open route alternatives panel while trip data reloads in the loading state', async () => {

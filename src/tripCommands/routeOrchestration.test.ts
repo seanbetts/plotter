@@ -4,6 +4,7 @@ import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { RouteLeg } from '../domain/types';
 import {
+  applyCalculatedRouteResult,
   calculateAutomaticRouteLegs,
   recalculateAutomaticRouteLegsForVehicle,
   reconcileAndSaveRouteLegs,
@@ -37,6 +38,121 @@ function createRepository(routeLegs: RouteLeg[] = []) {
 }
 
 describe('route orchestration', () => {
+  it.each([
+    {
+      name: 'required ferry missing',
+      ferryPolicy: 'require' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 800 }],
+      distanceKm: 800,
+      status: 'failed',
+      warningCode: 'FERRY_REQUIRED_NOT_FOUND',
+      retainsGeometry: false,
+    },
+    {
+      name: 'avoided ferry returned',
+      ferryPolicy: 'avoid' as const,
+      sections: [{ kind: 'ferry' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 800 }],
+      distanceKm: 800,
+      status: 'failed',
+      warningCode: 'FERRY_AVOIDED_BUT_FOUND',
+      retainsGeometry: false,
+    },
+    {
+      name: 'suspicious detour',
+      ferryPolicy: 'allow' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1372.6 }],
+      distanceKm: 1372.6,
+      status: 'review-required',
+      warningCode: 'SUSPICIOUS_DETOUR',
+      retainsGeometry: true,
+    },
+  ])('validates an applied route result when $name', ({
+    ferryPolicy,
+    sections,
+    distanceKm,
+    status,
+    warningCode,
+    retainsGeometry,
+  }) => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 } });
+    const target = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.5881, lng: 9.9598 } });
+    const geometry = { type: 'LineString' as const, coordinates: [[8.8017, 53.0793], [9.9598, 57.5881]] };
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'review-required',
+      ferryPolicy,
+      warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'stale warning' }],
+      notes: 'Preserve these notes.',
+    });
+
+    const result = applyCalculatedRouteResult({
+      routeLeg,
+      origin,
+      target,
+      routeKey: 'selected-option',
+      route: {
+        distanceKm,
+        travelTimeHours: 18,
+        geometry,
+        provider: 'test',
+        profile: 'driving-car',
+        sections,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status,
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: retainsGeometry ? geometry : undefined,
+      warnings: [expect.objectContaining({ code: warningCode })],
+      movement: routeLeg.movement,
+      calculation: routeLeg.calculation,
+      ferryPolicy,
+      waypoints: routeLeg.waypoints,
+      notes: 'Preserve these notes.',
+    });
+  });
+
+  it('marks a valid applied option ready and clears stale calculated warnings', () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 } });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 } });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'review-required',
+      warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'stale warning' }],
+    });
+    const geometry = { type: 'LineString' as const, coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] };
+
+    const result = applyCalculatedRouteResult({
+      routeLeg,
+      origin,
+      target,
+      routeKey: 'valid-option',
+      route: {
+        distanceKm: 125,
+        travelTimeHours: 2,
+        geometry,
+        provider: 'test',
+        profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 125 }],
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'ready',
+      distanceKm: 125,
+      travelTimeHours: 2,
+      geometry,
+      warnings: [],
+      error: undefined,
+    });
+  });
+
   it('creates and calculates adjacent driving route legs', async () => {
     const origin = createDestination({
       name: 'Boroughbridge',

@@ -18,7 +18,7 @@ import { TopToolbar } from './components/TopToolbar';
 import { TripSelector } from './components/TripSelector';
 import { buildTagSuggestions } from './components/tagEditorModel';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
-import { routeLegPatchFromRouteOption, type RouteOption } from './domain/routeOptions';
+import type { RouteOption } from './domain/routeOptions';
 import type {
   Activity,
   ActivityLocation,
@@ -26,6 +26,7 @@ import type {
   Destination,
   DestinationLocation,
   MediaRollupItem,
+  RouteLeg,
 } from './domain/types';
 import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
@@ -33,6 +34,7 @@ import { useTripData } from './hooks/useTripData';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { downloadTripMap } from './map/tripMapExport';
 import { preloadImageUrls } from './media/imagePreloading';
+import { applyCalculatedRouteResult } from './tripCommands/routeOrchestration';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { LinkPreviewClient } from './services/linkPreviewClient';
 import { createAppWebImageSearchClient } from './services/webImageSearchClient';
@@ -81,6 +83,22 @@ type RouteAlternativesState = {
   selectedOptionId: string | null;
   error: string | null;
 };
+
+function calculatedRoutePatch(routeLeg: RouteLeg) {
+  return {
+    status: routeLeg.status,
+    distanceKm: routeLeg.distanceKm,
+    travelTimeHours: routeLeg.travelTimeHours,
+    geometry: routeLeg.geometry,
+    provider: routeLeg.provider,
+    profile: routeLeg.profile,
+    routeKey: routeLeg.routeKey,
+    sections: routeLeg.sections,
+    warnings: routeLeg.warnings,
+    calculatedAt: routeLeg.calculatedAt,
+    error: routeLeg.error,
+  };
+}
 type AppProps = {
   webImageSearchClient?: WebImageSearchClient;
 };
@@ -903,7 +921,7 @@ function TripWorkspace({
           origin: origin.coordinates,
           target: target.coordinates,
           routingVehicle: activeTrip?.routingVehicle,
-          waypoints: routeLeg.waypoints ?? [],
+          waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order),
           ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
         });
 
@@ -952,13 +970,33 @@ function TripWorkspace({
       (option) => option.id === routeAlternativesState.selectedOptionId,
     );
     if (!selectedOption) return;
+    const routeLeg = routeLegsById.get(routeAlternativesState.routeLegId);
+    if (!routeLeg) return;
+    const origin = destinationsById.get(routeLeg.originDestinationId);
+    const target = destinationsById.get(routeLeg.targetDestinationId);
+    if (!origin || !target) return;
+    if (selectedOption.profile !== 'driving-car' && selectedOption.profile !== 'driving-hgv') {
+      return;
+    }
 
     setRouteAlternativesState((current) => (current ? { ...current, status: 'saving' } : current));
 
     try {
-      const calculatedPatch = routeLegPatchFromRouteOption(selectedOption);
-      delete calculatedPatch.type;
-      await updateRouteLeg(routeAlternativesState.routeLegId, calculatedPatch);
+      const validatedRouteLeg = applyCalculatedRouteResult({
+        routeLeg,
+        origin,
+        target,
+        routeKey: selectedOption.routeKey,
+        route: {
+          distanceKm: selectedOption.distanceKm,
+          travelTimeHours: selectedOption.travelTimeHours,
+          geometry: selectedOption.geometry,
+          sections: selectedOption.sections,
+          provider: selectedOption.provider,
+          profile: selectedOption.profile,
+        },
+      });
+      await updateRouteLeg(routeAlternativesState.routeLegId, calculatedRoutePatch(validatedRouteLeg));
       setRouteAlternativesState(null);
     } catch (caught) {
       setRouteAlternativesState((current) =>
@@ -971,7 +1009,7 @@ function TripWorkspace({
           : current,
       );
     }
-  }, [routeAlternativesState, updateRouteLeg]);
+  }, [destinationsById, routeAlternativesState, routeLegsById, updateRouteLeg]);
 
   const handleCloseDestinationProfile = useCallback(() => {
     setSelectedDestinationId(null);

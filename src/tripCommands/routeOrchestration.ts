@@ -131,6 +131,107 @@ function suspiciousDetourWarning(input: {
   };
 }
 
+type ApplyCalculatedRouteResultInput = {
+  routeLeg: RouteLeg;
+  origin: Destination;
+  target: Destination;
+  route: CalculatedRoute;
+  routeKey: string;
+  preserveUnresolvedReview?: boolean;
+};
+
+export function applyCalculatedRouteResult({
+  routeLeg,
+  origin,
+  target,
+  route,
+  routeKey,
+  preserveUnresolvedReview = false,
+}: ApplyCalculatedRouteResultInput): RouteLeg {
+  const clearedLeg = clearCalculatedRouteData(routeLeg, route.profile);
+  const retainedWarnings = clearedLeg.warnings ?? [];
+  const timestamp = createTimestamp();
+
+  if (!hasCompleteCalculatedRoute(route)) {
+    return {
+      ...clearedLeg,
+      status: 'failed',
+      routeKey,
+      error: 'Route calculation returned incomplete data',
+      updatedAt: timestamp,
+    };
+  }
+  if (!Array.isArray(route.sections)) {
+    return {
+      ...clearedLeg,
+      status: 'failed',
+      routeKey,
+      error: 'Route calculation returned incomplete section metadata',
+      updatedAt: timestamp,
+    };
+  }
+
+  const ferryErrorCode = ferryIntentError(routeLeg.ferryPolicy ?? 'allow', route.sections);
+  if (ferryErrorCode) {
+    const message = ferryIntentMessage(ferryErrorCode);
+    return {
+      ...clearedLeg,
+      status: 'failed',
+      routeKey,
+      warnings: [...retainedWarnings, { code: ferryErrorCode, message }],
+      error: message,
+      updatedAt: timestamp,
+    };
+  }
+
+  const detourWarning = suspiciousDetourWarning({
+    origin,
+    target,
+    routeDistanceKm: route.distanceKm,
+  });
+  const warnings = [...retainedWarnings, ...(detourWarning ? [detourWarning] : [])];
+  const reviewRequired = preserveUnresolvedReview || warnings.length > 0;
+
+  return {
+    ...clearedLeg,
+    ...route,
+    status: reviewRequired ? 'review-required' : 'ready',
+    distanceKm: reviewRequired ? undefined : route.distanceKm,
+    travelTimeHours: reviewRequired ? undefined : route.travelTimeHours,
+    routeKey,
+    warnings,
+    error: undefined,
+    calculatedAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export function hasFinalizedAutomaticRouteResult(routeLeg: RouteLeg): boolean {
+  if (routeLeg.type !== 'driving-auto') return false;
+  if (routeLeg.status === 'ready') return hasPreservableAutomaticRouteData(routeLeg);
+  if (routeLeg.status === 'failed') {
+    return Boolean(
+      routeLeg.error &&
+      routeLeg.distanceKm === undefined &&
+      routeLeg.travelTimeHours === undefined &&
+      routeLeg.geometry === undefined,
+    );
+  }
+  if (routeLeg.status !== 'review-required') return false;
+
+  return Boolean(
+    routeLeg.geometry?.type === 'LineString' &&
+    routeLeg.geometry.coordinates.length >= 2 &&
+    routeLeg.provider &&
+    (routeLeg.profile === 'driving-car' || routeLeg.profile === 'driving-hgv') &&
+    routeLeg.routeKey &&
+    routeLeg.calculatedAt &&
+    routeLeg.distanceKm === undefined &&
+    routeLeg.travelTimeHours === undefined &&
+    !routeLeg.error,
+  );
+}
+
 export async function calculateAutomaticRouteLegs(input: {
   destinations: Destination[];
   routeLegs: RouteLeg[];
@@ -163,7 +264,6 @@ export async function calculateAutomaticRouteLegs(input: {
     const routeKey = routeKeyForLeg({ origin, target, routeLeg: leg, routingVehicle: input.routingVehicle });
     const preservesUnresolvedReview = leg.status === 'review-required';
     const clearedLeg = clearCalculatedRouteData(leg, input.routingVehicle.profile);
-    const retainedWarnings = clearedLeg.warnings ?? [];
 
     try {
       const route = await input.calculateRoute({
@@ -174,48 +274,14 @@ export async function calculateAutomaticRouteLegs(input: {
         waypoints,
         ferryPolicy,
       });
-      if (!hasCompleteCalculatedRoute(route)) {
-        throw new Error('Route calculation returned incomplete data');
-      }
-      if (!Array.isArray(route.sections)) {
-        throw new Error('Route calculation returned incomplete section metadata');
-      }
-
-      const sections = route.sections;
-      const ferryErrorCode = ferryIntentError(ferryPolicy, sections);
-      if (ferryErrorCode) {
-        const message = ferryIntentMessage(ferryErrorCode);
-        calculatedRouteLegs.push({
-          ...clearedLeg,
-          status: 'failed',
-          routeKey,
-          warnings: [...retainedWarnings, { code: ferryErrorCode, message }],
-          error: message,
-          updatedAt: createTimestamp(),
-        });
-        continue;
-      }
-
-      const detourWarning = suspiciousDetourWarning({
+      calculatedRouteLegs.push(applyCalculatedRouteResult({
+        routeLeg: leg,
         origin,
         target,
-        routeDistanceKm: route.distanceKm,
-      });
-      const warnings = [...retainedWarnings, ...(detourWarning ? [detourWarning] : [])];
-      const reviewRequired = preservesUnresolvedReview || warnings.length > 0;
-      calculatedRouteLegs.push({
-        ...clearedLeg,
-        ...route,
-        sections,
-        status: reviewRequired ? 'review-required' : 'ready',
-        distanceKm: reviewRequired ? undefined : route.distanceKm,
-        travelTimeHours: reviewRequired ? undefined : route.travelTimeHours,
         routeKey,
-        warnings,
-        error: undefined,
-        calculatedAt: createTimestamp(),
-        updatedAt: createTimestamp(),
-      });
+        route,
+        preserveUnresolvedReview: preservesUnresolvedReview,
+      }));
     } catch (caught) {
       calculatedRouteLegs.push({
         ...clearedLeg,

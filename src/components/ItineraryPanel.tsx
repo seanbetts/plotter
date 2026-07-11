@@ -128,6 +128,14 @@ function routeReviewLabel(routeLeg: RouteLeg) {
     : 'Route requires review';
 }
 
+function routeFailureLabel(routeLeg: RouteLeg) {
+  const messages = Array.from(new Set([
+    routeLeg.error,
+    ...(routeLeg.warnings ?? []).map((warning) => warning.message),
+  ].filter((message): message is string => Boolean(message))));
+  return messages.length > 0 ? `Route failed: ${messages.join(' ')}` : 'Route failed';
+}
+
 function reorderedDestinationIds(
   destinations: Destination[],
   draggedDestinationId: string,
@@ -211,7 +219,11 @@ export function ItineraryPanel({
   );
   const totalTravelTimeHours = routeLegs.reduce(
     (totalHours, routeLeg) =>
-      totalHours + (routeLeg.status === 'review-required' ? 0 : routeLeg.travelTimeHours ?? 0),
+      totalHours + (
+        routeLeg.status === 'failed' || routeLeg.status === 'review-required'
+          ? 0
+          : routeLeg.travelTimeHours ?? 0
+      ),
     0,
   );
   const itineraryStats = [
@@ -467,6 +479,7 @@ export function ItineraryPanel({
               const routeWaypointCount = routeLeg?.waypoints?.length ?? 0;
               const routeWaypointLabel = `${routeWaypointCount} route ${routeWaypointCount === 1 ? 'waypoint' : 'waypoints'}`;
               const reviewLabel = routeLeg ? routeReviewLabel(routeLeg) : '';
+              const failureLabel = routeLeg ? routeFailureLabel(routeLeg) : '';
               const borderCrossingLabel = nextDestination
                 ? formatBorderCrossingLabel(destination, nextDestination)
                 : null;
@@ -626,8 +639,13 @@ export function ItineraryPanel({
                             <MapPin size={14} aria-hidden="true" />
                           </span>
                         ) : null}
-                        {routeLeg.status === 'review-required' ? (
-                          <span className="inline-route-indicator is-warning" role="img" aria-label={reviewLabel} title={reviewLabel}>
+                        {routeLeg.status === 'review-required' || routeLeg.status === 'failed' ? (
+                          <span
+                            className="inline-route-indicator is-warning"
+                            role="img"
+                            aria-label={routeLeg.status === 'failed' ? failureLabel : reviewLabel}
+                            title={routeLeg.status === 'failed' ? failureLabel : reviewLabel}
+                          >
                             <TriangleAlert size={14} aria-hidden="true" />
                           </span>
                         ) : null}

@@ -5,6 +5,7 @@ export type RouteFeatureProperties = {
   id: string;
   type: RouteLeg['type'] | 'failed';
   status: RouteLeg['status'];
+  kind: 'road' | 'ferry' | 'manual' | 'failed';
 };
 
 export type TripMapBounds = [[number, number], [number, number]];
@@ -24,7 +25,16 @@ function straightLineGeometry(origin: Destination, target: Destination): LineStr
 }
 
 function hasUsableLineString(geometry: RouteLeg['geometry']): geometry is LineString {
-  return geometry?.type === 'LineString' && geometry.coordinates.length >= 2;
+  return Boolean(
+    geometry?.type === 'LineString' &&
+    geometry.coordinates.length >= 2 &&
+    geometry.coordinates.every(
+      (coordinate) =>
+        coordinate.length >= 2 &&
+        Number.isFinite(coordinate[0]) &&
+        Number.isFinite(coordinate[1]),
+    ),
+  );
 }
 
 function normalizeLongitude(longitude: number) {
@@ -44,7 +54,14 @@ export function unwrapLongitudeForBounds(longitude: number, bounds: TripMapBound
 }
 
 export function routeGeometryForLeg(destinations: Destination[], leg: RouteLeg): LineString | null {
-  if (leg.type === 'driving-auto' && leg.status === 'ready' && hasUsableLineString(leg.geometry)) {
+  if (
+    leg.type === 'driving-auto' &&
+    (leg.status === 'ready' || leg.status === 'review-required') &&
+    hasUsableLineString(leg.geometry)
+  ) {
+    return leg.geometry;
+  }
+  if (leg.type === 'shipping-manual' && hasUsableLineString(leg.geometry)) {
     return leg.geometry;
   }
 
@@ -53,7 +70,7 @@ export function routeGeometryForLeg(destinations: Destination[], leg: RouteLeg):
   if (!origin || !target) return null;
 
   if (leg.type === 'shipping-manual') {
-    return hasUsableLineString(leg.geometry) ? leg.geometry : straightLineGeometry(origin, target);
+    return straightLineGeometry(origin, target);
   }
 
   if (leg.status === 'failed') {
@@ -67,30 +84,113 @@ function routeTypeForLeg(leg: RouteLeg): RouteFeatureProperties['type'] {
   return leg.status === 'failed' ? 'failed' : leg.type;
 }
 
+function featureForGeometry(
+  routeLeg: RouteLeg,
+  geometry: LineString,
+  kind: RouteFeatureProperties['kind'],
+  sectionIndex?: number,
+) {
+  return {
+    type: 'Feature' as const,
+    id: sectionIndex === undefined ? routeLeg.id : `${routeLeg.id}:${kind}:${sectionIndex}`,
+    geometry,
+    properties: {
+      id: routeLeg.id,
+      type: routeTypeForLeg(routeLeg),
+      status: routeLeg.status,
+      kind,
+    },
+  };
+}
+
+function hasValidSections(routeLeg: RouteLeg, coordinateCount: number) {
+  let previousEndGeometryIndex = 0;
+
+  for (const [index, section] of (routeLeg.sections ?? []).entries()) {
+    if (
+      !Number.isFinite(section.startGeometryIndex) ||
+      !Number.isFinite(section.endGeometryIndex) ||
+      !Number.isInteger(section.startGeometryIndex) ||
+      !Number.isInteger(section.endGeometryIndex) ||
+      section.startGeometryIndex < 0 ||
+      section.endGeometryIndex >= coordinateCount ||
+      section.startGeometryIndex >= section.endGeometryIndex ||
+      (index > 0 && section.startGeometryIndex < previousEndGeometryIndex)
+    ) {
+      return false;
+    }
+
+    previousEndGeometryIndex = section.endGeometryIndex;
+  }
+
+  return true;
+}
+
+function sectionFeatures(routeLeg: RouteLeg, geometry: LineString) {
+  const coordinates = geometry.coordinates;
+  const sections = routeLeg.sections ?? [];
+  if (sections.length === 0 || !hasValidSections(routeLeg, coordinates.length)) {
+    return [featureForGeometry(routeLeg, geometry, 'road')];
+  }
+
+  const features: ReturnType<typeof featureForGeometry>[] = [];
+  let currentGeometryIndex = 0;
+  let featureIndex = 0;
+
+  for (const section of sections) {
+    if (section.startGeometryIndex > currentGeometryIndex) {
+      features.push(featureForGeometry(routeLeg, {
+        type: 'LineString',
+        coordinates: coordinates.slice(currentGeometryIndex, section.startGeometryIndex + 1),
+      }, 'road', featureIndex));
+      featureIndex += 1;
+    }
+
+    features.push(featureForGeometry(routeLeg, {
+      type: 'LineString',
+      coordinates: coordinates.slice(section.startGeometryIndex, section.endGeometryIndex + 1),
+    }, section.kind, featureIndex));
+    featureIndex += 1;
+    currentGeometryIndex = section.endGeometryIndex;
+  }
+
+  if (currentGeometryIndex < coordinates.length - 1) {
+    features.push(featureForGeometry(routeLeg, {
+      type: 'LineString',
+      coordinates: coordinates.slice(currentGeometryIndex),
+    }, 'road', featureIndex));
+  }
+
+  return features;
+}
+
+export function buildRouteFeatures(
+  routeLegs: RouteLeg[],
+  destinations: Destination[] = [],
+): FeatureCollection<LineString, RouteFeatureProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: routeLegs.flatMap((routeLeg) => {
+      const geometry = routeGeometryForLeg(destinations, routeLeg);
+      if (!geometry) return [];
+
+      if (routeLeg.type === 'shipping-manual') {
+        return [featureForGeometry(routeLeg, geometry, 'manual')];
+      }
+      if (routeLeg.status === 'failed') {
+        return [featureForGeometry(routeLeg, geometry, 'failed')];
+      }
+
+      return sectionFeatures(routeLeg, geometry);
+    }),
+  };
+}
+
 export function buildRenderableRouteFeatures(
   destinations: Destination[],
   routeLegs: RouteLeg[],
 ): FeatureCollection<LineString, RouteFeatureProperties> {
-  return {
-    type: 'FeatureCollection',
-    features: routeLegs.flatMap((leg) => {
-      const geometry = routeGeometryForLeg(destinations, leg);
-      if (!geometry) return [];
-
-      return [
-        {
-          type: 'Feature' as const,
-          id: leg.id,
-          geometry,
-          properties: {
-            id: leg.id,
-            type: routeTypeForLeg(leg),
-            status: leg.status,
-          },
-        },
-      ];
-    }),
-  };
+  return buildRouteFeatures(routeLegs, destinations);
 }
 
 export function tripMapBounds(
