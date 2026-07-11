@@ -338,12 +338,8 @@ async function rasterizeStopPillOverlay(overlay: HTMLDivElement) {
 
   const serialized = new XMLSerializer().serializeToString(clone);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${exportWidth}" height="${exportHeight}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
-  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
-  try {
-    return await loadImage(url);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  return loadImage(url);
 }
 
 function frameExportMap(map: maplibregl.Map, bounds: TripMapBounds) {

@@ -100,6 +100,7 @@ let createObjectURL: ReturnType<typeof vi.fn>;
 let revokeObjectURL: ReturnType<typeof vi.fn>;
 let exportOverlaySnapshot: Array<{ className: string; text: string; selected: boolean }>;
 let imageLoadShouldFail: boolean;
+let imageSources: string[];
 let imageInstances: Array<{
   onload: null | (() => void);
   onerror: null | (() => void);
@@ -135,10 +136,11 @@ beforeEach(() => {
   } as unknown as CanvasRenderingContext2D;
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
   vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => callback(toBlobResult));
-  createObjectURL = vi.fn((blob: Blob) => blob.type === 'image/svg+xml;charset=utf-8' ? 'blob:labels' : 'blob:trip-map');
+  createObjectURL = vi.fn(() => 'blob:trip-map');
   revokeObjectURL = vi.fn();
   exportOverlaySnapshot = [];
   imageLoadShouldFail = false;
+  imageSources = [];
   imageInstances = [];
   overlayRemove = null;
   vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
@@ -150,7 +152,8 @@ beforeEach(() => {
       imageInstances.push(this);
     }
 
-    set src(_value: string) {
+    set src(value: string) {
+      imageSources.push(value);
       const overlay = document.querySelector<HTMLDivElement>('[data-trip-map-export-labels]');
       if (overlay) overlayRemove = vi.spyOn(overlay, 'remove');
       exportOverlaySnapshot = Array.from(
@@ -252,6 +255,15 @@ it('renders normal unselected app pills in an export overlay', async () => {
     { className: 'map-destination-label', text: 'ST - Balcombe', selected: false },
     { className: 'map-destination-label', text: '02 - Paris', selected: false },
   ]);
+});
+
+it('loads the rasterized SVG from a canvas-safe data URL', async () => {
+  const { promise, map } = await advanceExportToIdle();
+  map.callbacks.get('idle')?.();
+  await promise;
+
+  expect(imageSources[0]).toMatch(/^data:image\/svg\+xml;charset=utf-8,/);
+  expect(decodeURIComponent(imageSources[0].split(',', 2)[1])).toContain('<foreignObject');
 });
 
 it('fits multi-point bounds with deterministic padding and zoom', async () => {
@@ -434,7 +446,8 @@ it('rejects label rasterization failure and removes the overlay', async () => {
   expect(imageInstances[0].onload).toBeNull();
   expect(imageInstances[0].onerror).toBeNull();
   expect(anchorClick).not.toHaveBeenCalled();
-  expect(revokeObjectURL).toHaveBeenCalledWith('blob:labels');
+  expect(createObjectURL).not.toHaveBeenCalled();
+  expect(revokeObjectURL).not.toHaveBeenCalled();
   expect(overlayRemove).toHaveBeenCalledOnce();
   expect(document.querySelector('[data-trip-map-export-labels]')).not.toBeInTheDocument();
   expect(document.querySelector('[data-trip-map-export]')).not.toBeInTheDocument();
@@ -455,8 +468,7 @@ it('downloads with the sanitized trip name and cleans up all temporary resources
   expect(container).not.toBeInTheDocument();
   expect(document.querySelector('a[download]')).not.toBeInTheDocument();
   expect(overlayRemove).toHaveBeenCalledOnce();
-  expect(createObjectURL).toHaveBeenCalledTimes(2);
-  expect(revokeObjectURL).toHaveBeenCalledWith('blob:labels');
+  expect(createObjectURL).toHaveBeenCalledOnce();
   expect(revokeObjectURL).toHaveBeenCalledWith('blob:trip-map');
 });
 

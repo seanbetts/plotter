@@ -123,3 +123,67 @@ The full suite again emitted Node's existing `localStorage` experimental warning
 ### Follow-up concerns
 
 None.
+
+## Browser canvas-taint follow-up
+
+### Browser RED
+
+Exact command:
+
+```text
+npm run test:e2e -- --grep "downloads a map-only PNG"
+```
+
+Result: exit 1; 1 Chromium test failed after 30.0 seconds. Playwright timed out at `tests/world-tour.spec.ts:144` while `page.waitForEvent('download')` waited for a download that never arrived. The captured page state showed the toolbar alert `Couldn't export trip map. Try again.`
+
+### Root cause evidence
+
+The failure occurs after the rasterized SVG image is drawn into the PNG output canvas. A standalone real-Chromium comparison loaded the same SVG `foreignObject` through each candidate URL type and attempted a canvas export:
+
+- `blob:` SVG image: `SecurityError: Failed to execute 'toDataURL' on 'HTMLCanvasElement': Tainted canvases may not be exported.`
+- Percent-encoded `data:image/svg+xml;charset=utf-8,` image: exported successfully.
+
+This isolates the taint to the blob-backed SVG image URL, not the computed CSS, serialized `foreignObject`, MapLibre canvas, or PNG download URL.
+
+The in-app Browser connection was unavailable (`No browser is available`), so the task-authorized repository Playwright workflow and standalone Playwright Chromium comparison were used.
+
+### Fix
+
+- Preserved the exact cloned DOM, recursively inlined computed styles, SVG dimensions, and `foreignObject` content.
+- Replaced only the SVG image transport: the serialized SVG is now percent-encoded into a `data:image/svg+xml;charset=utf-8,` URL before `loadImage`.
+- Removed the now-nonexistent SVG blob URL creation/revocation lifecycle.
+- Preserved image success/failure handler cleanup, explicit overlay removal, and the final PNG blob URL creation/revocation lifecycle.
+- Added a unit regression requiring a canvas-safe SVG data URL containing the serialized `foreignObject`; returning to a blob-backed raster image fails this test.
+- Updated success/failure cleanup tests so failure creates/revokes no object URL and success creates/revokes only the final PNG URL.
+
+### Unit RED/GREEN
+
+RED command:
+
+```text
+npm test -- src/map/tripMapExport.test.ts
+```
+
+RED result: exit 1; 1 file failed, 3 tests failed and 31 passed. The raster image source was `blob:trip-map` instead of a data URL, the failure path still created one SVG object URL, and success still created two object URLs.
+
+GREEN command:
+
+```text
+npm test -- src/map/tripMapExport.test.ts
+```
+
+GREEN result: exit 0; 1 file passed, 34 tests passed.
+
+### Browser GREEN and final verification
+
+- `npm run test:e2e -- --grep "downloads a map-only PNG"` — exit 0; 1 Chromium test passed in 11.2 seconds (`downloads a map-only PNG` completed in 10.5 seconds).
+- `npm test -- src/map/tripMapExport.test.ts` — exit 0; 1 file passed, 34 tests passed.
+- `npm test` — exit 0; 57 files passed, 709 tests passed.
+- `npm run lint` — exit 0; no ESLint errors.
+- `npm run build` — exit 0; TypeScript and Vite production build succeeded.
+
+The full suite emitted Node's existing `localStorage` experimental warnings. The build emitted Vite's existing large-chunk advisory; neither command failed.
+
+### Browser follow-up concerns
+
+None. The authoritative Chromium export/download regression now passes. Other browser engines were not part of the requested e2e project.
