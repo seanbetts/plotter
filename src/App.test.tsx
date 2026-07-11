@@ -13,6 +13,7 @@ import { createDestination } from './domain/destinations';
 import { createRouteLeg } from './domain/routeLegs';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
+import { downloadTripMap } from './map/tripMapExport';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { WebImageSearchClient, WebImageSearchResult } from './services/webImageSearchClient';
 import type { TripRepository } from './storage/tripRepository';
@@ -219,6 +220,8 @@ vi.mock('./hooks/useTripWorkspace', () => ({
   useTripWorkspace: vi.fn(),
 }));
 
+vi.mock('./map/tripMapExport', () => ({ downloadTripMap: vi.fn() }));
+
 vi.mock('./services/linkPreviewClient', () => ({
   createAppLinkPreviewClient: vi.fn(() => linkPreviewClientMock),
 }));
@@ -353,6 +356,7 @@ describe('App', () => {
     vi.mocked(resolveMapTilerCoordinates).mockReset();
     vi.mocked(calculateOpenRouteServiceRoute).mockClear();
     vi.mocked(calculateOpenRouteServiceRouteOptions).mockClear();
+    vi.mocked(downloadTripMap).mockReset().mockResolvedValue(undefined);
     maplibreMock.Map.mockClear();
     maplibreMock.NavigationControl.mockClear();
     maplibreMock.mapInstances.length = 0;
@@ -393,6 +397,61 @@ describe('App', () => {
       }
     }
     vi.stubGlobal('Image', FakeImage);
+  });
+
+  it('disables trip map export for an empty trip', async () => {
+    repositoryMock.initialDestinations = Promise.resolve([]);
+    repositoryMock.initialRouteLegs = Promise.resolve([]);
+
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Download trip map' })).toBeDisabled();
+  });
+
+  it('exports the active trip name, stops, and route legs', async () => {
+    const user = userEvent.setup();
+    const balcombe = createDestination({
+      name: 'Balcombe',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.0579, lng: -0.1371 },
+      order: 0,
+    });
+    const paris = createDestination({
+      name: 'Paris',
+      countryRegion: 'France',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+      order: 1,
+    });
+    const readyRouteLeg = createRouteLeg({
+      originDestinationId: balcombe.id,
+      targetDestinationId: paris.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 442,
+      travelTimeHours: 5.5,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [balcombe.coordinates.lng, balcombe.coordinates.lat],
+          [paris.coordinates.lng, paris.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      routeKey: 'balcombe-paris',
+    });
+    repositoryMock.initialDestinations = Promise.resolve([balcombe, paris]);
+    repositoryMock.initialRouteLegs = Promise.resolve([readyRouteLeg]);
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Download trip map' }));
+    await waitFor(() =>
+      expect(downloadTripMap).toHaveBeenCalledWith({
+        tripName: tripsMock[0].name,
+        destinations: [balcombe, paris],
+        routeLegs: [readyRouteLeg],
+      }),
+    );
   });
 
   it('shows a centered storage bootstrap error when the app repository cannot be prepared', async () => {

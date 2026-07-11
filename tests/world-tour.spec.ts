@@ -1,4 +1,28 @@
-import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { expect, test, type Locator } from '@playwright/test';
+
+async function stableCanvasPixels(canvas: Locator) {
+  let previousHash: string | null = null;
+  let matchingSamples = 0;
+  let stablePixelHash = '';
+
+  await expect.poll(async () => {
+    stablePixelHash = await canvas.evaluate(async (element: HTMLCanvasElement) => {
+      const bytes = new TextEncoder().encode(element.toDataURL('image/png'));
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    });
+    matchingSamples = stablePixelHash === previousHash ? matchingSamples + 1 : 1;
+    previousHash = stablePixelHash;
+    return matchingSamples;
+  }, {
+    message: 'live map canvas pixels should settle for five consecutive samples',
+    timeout: 15_000,
+    intervals: [250, 500],
+  }).toBeGreaterThanOrEqual(5);
+
+  return stablePixelHash;
+}
 
 const savedTags = ['gateway', 'asia'];
 const istanbulResult = [
@@ -22,6 +46,109 @@ const parisResult = [
     context: [{ id: 'country.1', text: 'France', short_code: 'fr' }],
   },
 ];
+
+test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
+  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
+  const cdpSession = await context.newCDPSession(page);
+  const galwayResult = [
+    {
+      id: 'place.galway',
+      text: 'Galway',
+      place_name: 'Galway, Ireland',
+      center: [-9.0568, 53.2707],
+      properties: { country_code: 'ie' },
+      context: [{ id: 'country.1', text: 'Ireland', short_code: 'ie' }],
+    },
+  ];
+  const corkResult = [
+    {
+      id: 'place.cork',
+      text: 'Cork',
+      place_name: 'Cork, Ireland',
+      center: [-8.4756, 51.8985],
+      properties: { country_code: 'ie' },
+      context: [{ id: 'country.1', text: 'Ireland', short_code: 'ie' }],
+    },
+  ];
+
+  await cdpSession.send('Storage.clearDataForOrigin', {
+    origin,
+    storageTypes: 'indexeddb',
+  });
+
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    const url = new URL(route.request().url());
+    const features = url.pathname === '/geocoding/Galway.json'
+      ? galwayResult
+      : url.pathname === '/geocoding/Cork.json'
+        ? corkResult
+        : [];
+
+    await route.fulfill({
+      contentType: 'application/json',
+      json: { features },
+    });
+  });
+  await page.route('https://api.openrouteservice.org/v2/directions/**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: {
+              summary: {
+                distance: 210_000,
+                duration: 10_800,
+              },
+            },
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [-9.0568, 53.2707],
+                [-9.8, 52.7],
+                [-8.4756, 51.8985],
+              ],
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const searchInput = page.getByLabel('Search for a destination');
+  await expect(searchInput).toBeVisible();
+
+  await page.getByRole('button', { name: 'New trip' }).click();
+  await page.getByLabel('Trip name').fill('Wild Atlantic Way');
+  await page.getByRole('button', { name: 'Create trip' }).click();
+  await expect(page.getByRole('button', { name: /current trip: Wild Atlantic Way/i })).toBeVisible();
+
+  await searchInput.fill('Galway');
+  await page.getByRole('option', { name: 'Galway, Ireland' }).click();
+  await expect(searchInput).toHaveValue('');
+  await searchInput.fill('Cork');
+  await page.getByRole('option', { name: 'Cork, Ireland' }).click();
+  await expect(page.getByText('130 mi')).toBeVisible();
+
+  const liveCanvas = page.locator('.maplibregl-canvas').first();
+  const liveMapBefore = await stableCanvasPixels(liveCanvas);
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download trip map' }).click();
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toBe('Wild-Atlantic-Way.png');
+  const bytes = await readFile((await download.path())!);
+  expect(bytes.subarray(1, 4).toString()).toBe('PNG');
+  expect(bytes.readUInt32BE(16)).toBe(1600);
+  expect(bytes.readUInt32BE(20)).toBe(1000);
+
+  const liveMapAfter = await stableCanvasPixels(liveCanvas);
+  expect(liveMapAfter).toBe(liveMapBefore);
+});
 
 test('keeps the itinerary title row visible while scrolling the stop list', async ({ baseURL, context, page }) => {
   const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
@@ -96,7 +223,6 @@ test('keeps the itinerary title row visible while scrolling the stop list', asyn
   }
 
   const itinerary = page.getByRole('complementary', { name: 'Itinerary' });
-  const stopList = itinerary.locator('.stop-list');
   const header = itinerary.locator('.itinerary-panel-header');
   await expect(header).toBeVisible();
 

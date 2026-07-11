@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createBoundingBoxAroundCoordinates,
   resolveMapTilerCoordinates,
@@ -31,6 +31,7 @@ import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
+import { downloadTripMap } from './map/tripMapExport';
 import { preloadImageUrls } from './media/imagePreloading';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { LinkPreviewClient } from './services/linkPreviewClient';
@@ -213,9 +214,10 @@ function getAvailableOverlayHeight(position: OverlayPosition) {
 }
 
 export default function App({ webImageSearchClient: injectedWebImageSearchClient }: AppProps = {}) {
-  const [linkPreviewClient, setLinkPreviewClient] = useState<LinkPreviewClient | null>(null);
-  const [webImageSearchClient, setWebImageSearchClient] = useState<WebImageSearchClient | null>(
-    injectedWebImageSearchClient ?? null,
+  const linkPreviewClient = useMemo(() => createAppLinkPreviewClient(), []);
+  const webImageSearchClient = useMemo(
+    () => injectedWebImageSearchClient ?? createAppWebImageSearchClient(),
+    [injectedWebImageSearchClient],
   );
   const {
     trips,
@@ -231,19 +233,6 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     refreshTrips,
     realtime,
   } = useTripWorkspace();
-
-  useEffect(() => {
-    setLinkPreviewClient(createAppLinkPreviewClient());
-  }, []);
-
-  useEffect(() => {
-    if (injectedWebImageSearchClient) {
-      setWebImageSearchClient(injectedWebImageSearchClient);
-      return;
-    }
-
-    setWebImageSearchClient(createAppWebImageSearchClient());
-  }, [injectedWebImageSearchClient]);
 
   useEffect(() => {
     if (!realtime) return undefined;
@@ -380,6 +369,18 @@ function TripWorkspace({
   const activeRouteAlternativesTarget = activeRouteAlternativesLeg
     ? destinationsById.get(activeRouteAlternativesLeg.targetDestinationId) ?? null
     : null;
+
+  const handleExportTripMap = useCallback(async () => {
+    if (!activeTrip || destinations.length === 0) {
+      throw new Error('Trip map export requires an active trip with at least one stop.');
+    }
+
+    await downloadTripMap({
+      tripName: activeTrip.name,
+      destinations,
+      routeLegs,
+    });
+  }, [activeTrip, destinations, routeLegs]);
 
   useEffect(() => {
     if (!realtime || !activeTrip) return undefined;
@@ -1109,9 +1110,11 @@ function TripWorkspace({
         {!isInteractionLocked && !error ? (
           <>
             <TopToolbar
+              canExportTripMap={Boolean(activeTrip) && destinations.length > 0}
               searchPlaces={searchStopPlaces}
               resolveSearchResult={resolveSearchResult}
               onAddDestination={handleAddDestination}
+              onExportTripMap={handleExportTripMap}
             />
             <div className="trip-selector-anchor">
               <TripSelector

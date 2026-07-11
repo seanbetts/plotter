@@ -1,3 +1,5 @@
+import { Camera, LoaderCircle } from 'lucide-react';
+import { useState } from 'react';
 import type { PlaceSearchResult } from '../adapters/geocoding';
 import type { Coordinates, DestinationLocation } from '../domain/types';
 import { SearchCombobox } from './SearchCombobox';
@@ -9,9 +11,11 @@ type AddDestinationInput = {
 };
 
 type TopToolbarProps = {
+  canExportTripMap: boolean;
   searchPlaces: (query: string) => Promise<PlaceSearchResult[]>;
   resolveSearchResult: (result: PlaceSearchResult) => Promise<Extract<PlaceSearchResult, { kind: 'place' }>>;
   onAddDestination: (input: AddDestinationInput) => Promise<unknown> | unknown;
+  onExportTripMap: () => Promise<void> | void;
 };
 
 function addInputFromResult(result: Extract<PlaceSearchResult, { kind: 'place' }>): AddDestinationInput {
@@ -38,10 +42,82 @@ function formatSearchResult(result: PlaceSearchResult) {
   };
 }
 
+function TripMapExportAction({
+  canExportTripMap,
+  onExportTripMap,
+}: Pick<TopToolbarProps, 'canExportTripMap' | 'onExportTripMap'>) {
+  const [isExporting, setIsExporting] = useState(false);
+
+  return (
+    <TripMapExportGeneration
+      key={canExportTripMap ? 'available' : 'unavailable'}
+      canExportTripMap={canExportTripMap}
+      isExporting={isExporting}
+      onExportFinished={() => setIsExporting(false)}
+      onExportStarted={() => setIsExporting(true)}
+      onExportTripMap={onExportTripMap}
+    />
+  );
+}
+
+type TripMapExportGenerationProps = Pick<TopToolbarProps, 'canExportTripMap' | 'onExportTripMap'> & {
+  isExporting: boolean;
+  onExportFinished: () => void;
+  onExportStarted: () => void;
+};
+
+function TripMapExportGeneration({
+  canExportTripMap,
+  isExporting,
+  onExportFinished,
+  onExportStarted,
+  onExportTripMap,
+}: TripMapExportGenerationProps) {
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExportTripMap = async () => {
+    setExportError(null);
+    onExportStarted();
+
+    try {
+      await onExportTripMap();
+    } catch {
+      setExportError("Couldn't export trip map. Try again.");
+    } finally {
+      onExportFinished();
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="toolbar-icon-action trip-map-export-action"
+        aria-label={isExporting ? 'Generating trip map' : 'Download trip map'}
+        disabled={!canExportTripMap || isExporting}
+        onClick={() => void handleExportTripMap()}
+      >
+        {isExporting ? (
+          <LoaderCircle className="trip-map-export-spinner" aria-hidden="true" />
+        ) : (
+          <Camera aria-hidden="true" />
+        )}
+      </button>
+      {exportError ? (
+        <span className="trip-map-export-error" role="alert">
+          {exportError}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 export function TopToolbar({
+  canExportTripMap,
   searchPlaces,
   resolveSearchResult,
   onAddDestination,
+  onExportTripMap,
 }: TopToolbarProps) {
   return (
     <header className="top-toolbar" aria-label="Map planning tools">
@@ -69,6 +145,7 @@ export function TopToolbar({
           );
         }}
       />
+      <TripMapExportAction canExportTripMap={canExportTripMap} onExportTripMap={onExportTripMap} />
     </header>
   );
 }

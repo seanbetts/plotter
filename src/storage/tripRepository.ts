@@ -84,22 +84,26 @@ type LegacyRouteLeg = Omit<RouteLeg, 'type' | 'status'> & {
 const defaultLocalTripId = 'local-default-trip';
 
 function stripDestinationTripId(destination: StoredDestination): Destination {
-  const { entityId, tripId: _tripId, ...domainDestination } = destination;
+  const { entityId, tripId, ...domainDestination } = destination;
+  void tripId;
   return { ...domainDestination, id: entityId ?? domainDestination.id };
 }
 
 function stripRouteLegTripId(routeLeg: StoredRouteLeg): RouteLeg {
-  const { entityId, tripId: _tripId, ...domainRouteLeg } = routeLeg;
+  const { entityId, tripId, ...domainRouteLeg } = routeLeg;
+  void tripId;
   return { ...domainRouteLeg, id: entityId ?? domainRouteLeg.id };
 }
 
 function stripActivityTripId(activity: StoredActivity): Activity {
-  const { entityId, tripId: _tripId, ...domainActivity } = activity;
+  const { entityId, tripId, ...domainActivity } = activity;
+  void tripId;
   return { ...domainActivity, id: entityId ?? domainActivity.id };
 }
 
 function stripActivityMediaTripId(record: StoredActivityMediaRecord): ActivityMediaRecord {
-  const { entityId, tripId: _tripId, ...domainRecord } = record;
+  const { entityId, tripId, ...domainRecord } = record;
+  void tripId;
   return { ...domainRecord, id: entityId ?? domainRecord.id };
 }
 
