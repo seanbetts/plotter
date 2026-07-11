@@ -14,23 +14,25 @@ import type {
 
 export type RouteLegPatch = Partial<Omit<RouteLeg, 'id' | 'createdAt' | 'updatedAt'>>;
 
-export type CalculatedRoute = Pick<
-  RouteLeg,
-  'distanceKm' | 'travelTimeHours' | 'geometry' | 'provider' | 'profile' | 'sections'
->;
+export type CalculatedRoute = {
+  distanceKm: number;
+  travelTimeHours: number;
+  geometry: NonNullable<RouteLeg['geometry']>;
+  provider: string;
+  profile: TripRoutingVehicle['profile'];
+  sections: RouteSection[];
+};
 
 export type CalculateRouteInput = {
   origin: Coordinates;
   target: Coordinates;
   profile: TripRoutingVehicle['profile'];
-  routingVehicle?: TripRoutingVehicle;
-  waypoints?: RouteWaypoint[];
-  ferryPolicy?: FerryPolicy;
+  routingVehicle: TripRoutingVehicle;
+  waypoints: RouteWaypoint[];
+  ferryPolicy: FerryPolicy;
 };
 
-export type CalculateRoute = {
-  bivarianceHack(input: CalculateRouteInput): Promise<CalculatedRoute>;
-}['bivarianceHack'];
+export type CalculateRoute = (input: CalculateRouteInput) => Promise<CalculatedRoute>;
 
 export type RouteLegPersistence = {
   saveRouteLeg(routeLeg: RouteLeg): Promise<void>;
@@ -103,13 +105,7 @@ function ferryIntentMessage(code: 'FERRY_REQUIRED_NOT_FOUND' | 'FERRY_AVOIDED_BU
     : 'A ferry section was returned despite avoid-ferries intent.';
 }
 
-function hasCompleteCalculatedRoute(route: CalculatedRoute): route is CalculatedRoute & {
-  distanceKm: number;
-  travelTimeHours: number;
-  geometry: NonNullable<RouteLeg['geometry']>;
-  provider: string;
-  profile: string;
-} {
+function hasCompleteCalculatedRoute(route: CalculatedRoute) {
   return (
     route.distanceKm !== undefined &&
     route.travelTimeHours !== undefined &&
@@ -180,8 +176,11 @@ export async function calculateAutomaticRouteLegs(input: {
       if (!hasCompleteCalculatedRoute(route)) {
         throw new Error('Route calculation returned incomplete data');
       }
+      if (!Array.isArray(route.sections)) {
+        throw new Error('Route calculation returned incomplete section metadata');
+      }
 
-      const sections = route.sections ?? [];
+      const sections = route.sections;
       const ferryErrorCode = ferryIntentError(ferryPolicy, sections);
       if (ferryErrorCode) {
         const message = ferryIntentMessage(ferryErrorCode);

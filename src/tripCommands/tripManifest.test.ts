@@ -88,6 +88,7 @@ describe('trip manifest materialization', () => {
       },
       provider: 'test',
       profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 100 }],
     }));
 
     const materialized = await materializeTripManifest(manifest, {

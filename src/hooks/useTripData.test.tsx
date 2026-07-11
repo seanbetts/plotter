@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
+import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
 import { useTripData } from './useTripData';
@@ -292,6 +293,7 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
     });
     const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
 
@@ -314,6 +316,9 @@ describe('useTripData', () => {
       origin: { lat: 43.1306, lng: 19.0342 },
       target: { lat: 42.4247, lng: 18.7712 },
       profile: 'driving-car',
+      routingVehicle: standardRoutingVehicle,
+      waypoints: [],
+      ferryPolicy: 'allow',
     });
     expect(result.current.routeLegs).toMatchObject([
       {
@@ -341,6 +346,7 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
     });
     const selectedGeometry = {
       type: 'LineString' as const,
@@ -380,6 +386,7 @@ describe('useTripData', () => {
         geometry: selectedGeometry,
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
         routeKey: 'selected-alternative-key',
         calculatedAt: selectedCalculatedAt,
         error: undefined,
@@ -418,6 +425,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
       })
       .mockResolvedValueOnce({
         distanceKm: 141.2,
@@ -432,6 +440,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 141.2 }],
       });
     const selectedGeometry = {
       type: 'LineString' as const,
@@ -493,6 +502,7 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 141.2 }],
     });
   });
 
@@ -526,6 +536,7 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 142.6 }],
       routeKey: createRouteKey({
         origin: origin.coordinates,
         target: target.coordinates,
@@ -550,6 +561,7 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 142.6 }],
     });
     const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
 
@@ -594,6 +606,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
       })
       .mockResolvedValueOnce({
         distanceKm: 143.7,
@@ -608,6 +621,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 143.7 }],
       });
     const selectedGeometry = {
       type: 'LineString' as const,
@@ -684,7 +698,10 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470',
+      routeKey: createRouteKey({
+        origin: { lat: 43.1306, lng: 19.0342 },
+        target: { lat: 42.4247, lng: 18.7712 },
+      }),
     });
   });
 
@@ -704,6 +721,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
       })
       .mockResolvedValueOnce({
         distanceKm: 146.9,
@@ -718,6 +736,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 146.9 }],
       });
     const selectedGeometry = {
       type: 'LineString' as const,
@@ -793,7 +812,10 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470',
+      routeKey: createRouteKey({
+        origin: { lat: 43.1306, lng: 19.0342 },
+        target: { lat: 42.4247, lng: 18.7712 },
+      }),
     });
   });
 
@@ -813,6 +835,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
       })
       .mockResolvedValueOnce({
         distanceKm: 145.8,
@@ -827,6 +850,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 145.8 }],
       });
     const selectedGeometry = {
       type: 'LineString' as const,
@@ -888,7 +912,10 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470',
+      routeKey: createRouteKey({
+        origin: { lat: 43.1306, lng: 19.0342 },
+        target: { lat: 42.4247, lng: 18.7712 },
+      }),
     });
   });
 
@@ -908,6 +935,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
       })
       .mockRejectedValueOnce(new Error('Route calculation failed'));
     const selectedGeometry = {
@@ -963,7 +991,10 @@ describe('useTripData', () => {
       geometry: undefined,
       provider: undefined,
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470',
+      routeKey: createRouteKey({
+        origin: { lat: 43.1306, lng: 19.0342 },
+        target: { lat: 42.4247, lng: 18.7712 },
+      }),
       calculatedAt: undefined,
       error: 'Route calculation failed',
     });
@@ -985,6 +1016,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 123.4 }],
       })
       .mockResolvedValueOnce({
         distanceKm: 125.6,
@@ -998,6 +1030,7 @@ describe('useTripData', () => {
         },
         provider: 'openrouteservice',
         profile: 'driving-car',
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 125.6 }],
       });
     const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
 
@@ -1028,6 +1061,9 @@ describe('useTripData', () => {
       origin: { lat: 43.14, lng: 19.045 },
       target: { lat: 42.4247, lng: 18.7712 },
       profile: 'driving-car',
+      routingVehicle: standardRoutingVehicle,
+      waypoints: [],
+      ferryPolicy: 'allow',
     });
     expect(result.current.routeLegs[0]).toMatchObject({
       status: 'ready',
@@ -1368,6 +1404,7 @@ describe('useTripData', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 610 }],
     });
     const repository = createMemoryRepository(Promise.resolve([origin, target]), {
       listRouteLegs: async () => [failedLeg],

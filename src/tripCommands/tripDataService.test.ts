@@ -186,6 +186,7 @@ function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
     },
     provider: 'test',
     profile: 'driving-car' as const,
+    sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 10 }],
   }));
 
   const service = createTripDataService({
@@ -285,6 +286,7 @@ describe('TripDataService trips and stops', () => {
       },
       provider: 'test',
       profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 50 }],
     }));
     const service = createTripDataService({
       directory: {
@@ -530,6 +532,7 @@ describe('TripDataService trips and stops', () => {
       },
       provider: 'test',
       profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 120 }],
     }));
     const repository = {
       listDestinations: vi.fn(async () => destinations),

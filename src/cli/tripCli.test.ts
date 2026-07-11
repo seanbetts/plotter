@@ -489,6 +489,7 @@ describe('runTripCli', () => {
         },
         provider: 'in-memory',
         profile: 'driving-car' as const,
+        sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 20 }],
       })),
     });
     const stops = Array.from({ length: 26 }, (_, index) => ({

@@ -7,7 +7,20 @@ import {
   calculateAutomaticRouteLegs,
   recalculateAutomaticRouteLegsForVehicle,
   reconcileAndSaveRouteLegs,
+  type CalculateRoute,
 } from './routeOrchestration';
+
+if (false) {
+  // @ts-expect-error normalized route calculations require section metadata
+  const missingSectionsCalculator: CalculateRoute = async () => ({
+    distanceKm: 100,
+    travelTimeHours: 2,
+    geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] },
+    provider: 'test',
+    profile: 'driving-car',
+  });
+  void missingSectionsCalculator;
+}
 
 function createRepository(routeLegs: RouteLeg[] = []) {
   return {
@@ -284,6 +297,42 @@ describe('route orchestration', () => {
       provider: 'test',
       sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1372.6 }],
       warnings: [expect.objectContaining({ code: 'SUSPICIOUS_DETOUR' })],
+    });
+    const warningMessage = result.warnings?.[0]?.message ?? '';
+    expect(warningMessage).toContain('Bremen to Hirtshals');
+    expect(warningMessage).toContain('1373 km');
+    expect(warningMessage).toContain('507 km direct');
+    expect(warningMessage).toContain('2.7x');
+    expect(warningMessage).toContain('866 km excess');
+  });
+
+  it('fails incomplete provider output instead of silently accepting missing sections', async () => {
+    const origin = createDestination({ name: 'Calais', coordinates: { lat: 50.9513, lng: 1.8587 } });
+    const target = createDestination({ name: 'Dover', coordinates: { lat: 51.1279, lng: 1.3134 } });
+    const calculateWithoutSections = (async () => ({
+      distanceKm: 80,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString' as const, coordinates: [[1.8587, 50.9513], [1.3134, 51.1279]] },
+      provider: 'untyped-provider',
+      profile: 'driving-car' as const,
+    })) as unknown as CalculateRoute;
+
+    const [result] = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        type: 'driving-auto',
+      })],
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute: calculateWithoutSections,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      geometry: undefined,
+      sections: [],
+      error: 'Route calculation returned incomplete section metadata',
     });
   });
 

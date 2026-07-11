@@ -104,23 +104,21 @@ export type ChangedSummary = {
   routesRecalculated: number;
 };
 
-export type RouteCalculator = {
-  bivarianceHack(input: {
-    origin: Coordinates;
-    target: Coordinates;
-    profile: TripRoutingVehicle['profile'];
-    routingVehicle?: TripRoutingVehicle;
-    waypoints?: RouteWaypoint[];
-    ferryPolicy?: FerryPolicy;
-  }): Promise<{
-    distanceKm: number;
-    travelTimeHours: number;
-    geometry: LineString;
-    provider: string;
-    profile: TripRoutingVehicle['profile'];
-    sections?: RouteSection[];
-  }>;
-}['bivarianceHack'];
+export type RouteCalculator = (input: {
+  origin: Coordinates;
+  target: Coordinates;
+  profile: TripRoutingVehicle['profile'];
+  routingVehicle: TripRoutingVehicle;
+  waypoints: RouteWaypoint[];
+  ferryPolicy: FerryPolicy;
+}) => Promise<{
+  distanceKm: number;
+  travelTimeHours: number;
+  geometry: LineString;
+  provider: string;
+  profile: TripRoutingVehicle['profile'];
+  sections: RouteSection[];
+}>;
 
 export type PlaceResolver = (input: {
   place: PlaceInput;

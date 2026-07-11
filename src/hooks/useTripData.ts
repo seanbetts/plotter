@@ -9,6 +9,7 @@ import {
   finalizeRouteLeg,
   hasPreservableDrivingRouteData,
   reconcileAndSaveRouteLegs,
+  type CalculateRoute,
   type RouteLegPatch,
 } from '../tripCommands/routeOrchestration';
 
@@ -19,19 +20,8 @@ type AddDestinationInput = {
   coordinates: Coordinates;
 };
 
-type CalculatedRoute = Pick<
-  RouteLeg,
-  'distanceKm' | 'travelTimeHours' | 'geometry' | 'provider' | 'profile'
->;
-
-type CalculateRouteInput = {
-  origin: Coordinates;
-  target: Coordinates;
-  profile: 'driving-car';
-};
-
 type UseTripDataOptions = {
-  calculateRoute?: (input: CalculateRouteInput) => Promise<CalculatedRoute>;
+  calculateRoute?: CalculateRoute;
 };
 
 const createTimestamp = () => new Date().toISOString();
