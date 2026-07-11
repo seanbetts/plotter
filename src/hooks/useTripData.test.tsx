@@ -2851,6 +2851,70 @@ describe('useTripData', () => {
     expect(result.current.error).toBeNull();
   });
 
+  it('loads a new repository generation without waiting for an old generation save', async () => {
+    const oldOrigin = createDestination({ name: 'Old origin', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const oldTarget = createDestination({ name: 'Old target', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const newDestination = createDestination({ name: 'New repository', coordinates: { lat: 48.8566, lng: 2.3522 } });
+    const currentVehicle = resolveVehiclePreset('large-camper');
+    const currentOldRouteLeg = createReadyRouteLegForVehicle(oldOrigin, oldTarget, currentVehicle);
+    const legacyOldRouteLeg = createReadyRouteLegForVehicle(
+      oldOrigin,
+      oldTarget,
+      createLegacyLargeCamperRoutingVehicle(),
+    );
+    const releaseOldSave = createDeferred(undefined);
+    let storedOldRouteLeg = currentOldRouteLeg;
+    const saveOldRouteLeg = vi.fn(async (routeLeg: RouteLeg) => {
+      await releaseOldSave.promise;
+      storedOldRouteLeg = routeLeg;
+    });
+    const saveNewRouteLeg = vi.fn(async () => undefined);
+    const oldRepository = createMemoryRepository(Promise.resolve([oldOrigin, oldTarget]), {
+      listRouteLegs: async () => [storedOldRouteLeg],
+      saveRouteLeg: saveOldRouteLeg,
+    });
+    const newRepository = createMemoryRepository(Promise.resolve([newDestination]), {
+      saveRouteLeg: saveNewRouteLeg,
+    });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 128,
+      travelTimeHours: 2.1,
+      geometry: legacyOldRouteLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 128 }],
+    }));
+    const { result, rerender } = renderHook(
+      ({ repository }) => useTripData(repository, { calculateRoute, routingVehicle: currentVehicle }),
+      { initialProps: { repository: oldRepository } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    storedOldRouteLeg = legacyOldRouteLeg;
+    let oldReload!: Promise<void>;
+    await act(async () => {
+      oldReload = result.current.reload();
+      await waitFor(() => expect(saveOldRouteLeg).toHaveBeenCalledTimes(1));
+    });
+
+    rerender({ repository: newRepository });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.destinations).toEqual([newDestination]);
+    expect(result.current.routeLegs).toEqual([]);
+    expect(saveNewRouteLeg).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseOldSave.resolve();
+      await oldReload;
+    });
+
+    expect(storedOldRouteLeg).toMatchObject({ status: 'ready', profile: 'driving-car', distanceKm: 128 });
+    expect(result.current.destinations).toEqual([newDestination]);
+    expect(result.current.routeLegs).toEqual([]);
+    expect(saveNewRouteLeg).not.toHaveBeenCalled();
+  });
+
   it('performs no route calls or writes across repeated reloads of current data', async () => {
     const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
     const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });

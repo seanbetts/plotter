@@ -172,7 +172,9 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const isMountedRef = useRef(false);
   const activeRepositoryTokenRef = useRef<object | null>(null);
   const reloadSequenceRef = useRef(0);
-  const routeLegMutationQueuesRef = useRef(new Map<string, Promise<void>>());
+  const routeLegMutationQueuesByGenerationRef = useRef(
+    new Map<object, Map<string, Promise<void>>>(),
+  );
   const calculateRoute = options.calculateRoute;
   const calculateRouteRef = useRef(calculateRoute);
   const routingVehicle = options.routingVehicle ?? standardRoutingVehicle;
@@ -223,25 +225,35 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     routeLegIds: string[],
     mutation: () => Promise<T>,
   ) => {
+    const generation = repositoryToken;
+    let generationQueues = routeLegMutationQueuesByGenerationRef.current.get(generation);
+    if (!generationQueues) {
+      generationQueues = new Map<string, Promise<void>>();
+      routeLegMutationQueuesByGenerationRef.current.set(generation, generationQueues);
+    }
     const uniqueRouteLegIds = [...new Set([allRouteMutationsQueueKey, ...routeLegIds])].sort();
     const previousMutations = uniqueRouteLegIds.map(
-      (routeLegId) => routeLegMutationQueuesRef.current.get(routeLegId) ?? Promise.resolve(),
+      (routeLegId) => generationQueues.get(routeLegId) ?? Promise.resolve(),
     );
     const waitForPrevious = Promise.all(previousMutations).then(() => undefined, () => undefined);
     const queuedMutation = waitForPrevious.then(mutation, mutation);
     const queueTail = queuedMutation.then(() => undefined, () => undefined);
     for (const routeLegId of uniqueRouteLegIds) {
-      routeLegMutationQueuesRef.current.set(routeLegId, queueTail);
+      generationQueues.set(routeLegId, queueTail);
     }
     void queueTail.then(() => {
+      if (routeLegMutationQueuesByGenerationRef.current.get(generation) !== generationQueues) return;
       for (const routeLegId of uniqueRouteLegIds) {
-        if (routeLegMutationQueuesRef.current.get(routeLegId) === queueTail) {
-          routeLegMutationQueuesRef.current.delete(routeLegId);
+        if (generationQueues.get(routeLegId) === queueTail) {
+          generationQueues.delete(routeLegId);
         }
+      }
+      if (generationQueues.size === 0) {
+        routeLegMutationQueuesByGenerationRef.current.delete(generation);
       }
     });
     return queuedMutation;
-  }, []);
+  }, [repositoryToken]);
 
   const enqueueRouteLegMutation = useCallback(<T,>(routeLegId: string, mutation: () => Promise<T>) =>
     enqueueRouteLegMutations([routeLegId], mutation), [enqueueRouteLegMutations]);
@@ -291,7 +303,9 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
       if (!isCurrentReload()) return;
 
-      const mustRefreshAfterWaiting = routeLegMutationQueuesRef.current.has(allRouteMutationsQueueKey);
+      const mustRefreshAfterWaiting = routeLegMutationQueuesByGenerationRef.current
+        .get(generation)
+        ?.has(allRouteMutationsQueueKey) ?? false;
       await enqueueRouteLegMutations([], async () => {
         if (!isCurrentReload()) return;
 
