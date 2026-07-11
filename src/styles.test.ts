@@ -354,7 +354,17 @@ describe('inline route connector styles', () => {
       /\.inline-route-metrics\s*{[^}]*display:\s*flex;[^}]*gap:\s*6px;[^}]*min-width:\s*0;/s,
     );
     expect(styles).toMatch(/\.inline-route-metric \+ \.inline-route-metric::before\s*{[^}]*content:\s*"·";/s);
-    expect(styles).toMatch(/\.inline-route-border-crossing\s*{[^}]*margin-left:\s*auto;/s);
-    expect(styles).toMatch(/\.inline-route-retry \+ \.inline-route-border-crossing\s*{[^}]*margin-left:\s*0;/s);
+    expect(styles).toMatch(
+      /\.inline-route-characteristics\s*{[^}]*display:\s*flex;[^}]*margin-left:\s*auto;[^}]*gap:\s*6px;/s,
+    );
+    expect(styles).toMatch(
+      /\.inline-route-characteristic\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/s,
+    );
+    expect(styles).toMatch(
+      /\.inline-route-ferry\s*{[^}]*background:\s*var\(--color-route-shipping\);/s,
+    );
+    expect(styles).toMatch(
+      /\.inline-route-border-crossing\s*{[^}]*background:\s*var\(--color-route-border-crossing\);/s,
+    );
   });
 });

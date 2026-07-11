@@ -185,6 +185,51 @@ describe('ItineraryPanel', () => {
     expect(within(ordinaryRoute as HTMLElement).queryByLabelText(/Route requires review/)).not.toBeInTheDocument();
   });
 
+  it('groups a ferry badge immediately before the border crossing badge', () => {
+    const origin = createDestination({
+      name: 'Dover',
+      countryRegion: 'United Kingdom',
+      coordinates: { lat: 51.1279, lng: 1.3134 },
+    });
+    const target = createDestination({
+      name: 'Calais',
+      countryRegion: 'France',
+      coordinates: { lat: 50.9513, lng: 1.8587 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 135,
+      travelTimeHours: 2.5,
+      sections: [{ kind: 'ferry', startGeometryIndex: 2, endGeometryIndex: 8, distanceKm: 42 }],
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[routeLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    const ferryBadge = screen.getByRole('img', { name: 'Route includes a ferry' });
+    const borderBadge = screen.getByRole('img', {
+      name: 'Border crossing from United Kingdom to France',
+    });
+    const badgeGroup = ferryBadge.parentElement;
+
+    expect(badgeGroup).toHaveClass('inline-route-characteristics');
+    expect(Array.from(badgeGroup?.children ?? [])).toEqual([ferryBadge, borderBadge]);
+    expect(ferryBadge).toHaveClass('inline-route-characteristic', 'inline-route-ferry');
+    expect(borderBadge).toHaveClass('inline-route-characteristic', 'inline-route-border-crossing');
+  });
+
   it('excludes failed route metrics from totals and labels the failure warning', () => {
     const origin = createDestination({ name: 'Dover', coordinates: { lat: 51.1279, lng: 1.3134 }, order: 0 });
     const target = createDestination({ name: 'Calais', coordinates: { lat: 50.9513, lng: 1.8587 }, order: 1 });

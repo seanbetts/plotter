@@ -630,11 +630,6 @@ export function ItineraryPanel({
                         {formatLegTime(routeLeg) ? (
                           <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
                         ) : null}
-                        {hasFerrySection ? (
-                          <span className="inline-route-indicator" role="img" aria-label="Route includes a ferry" title="Route includes a ferry">
-                            <Ship size={14} aria-hidden="true" />
-                          </span>
-                        ) : null}
                         {routeWaypointCount > 0 ? (
                           <span className="inline-route-indicator" role="img" aria-label={routeWaypointLabel} title={routeWaypointLabel}>
                             <MapPin size={14} aria-hidden="true" />
@@ -650,14 +645,28 @@ export function ItineraryPanel({
                             <TriangleAlert size={14} aria-hidden="true" />
                           </span>
                         ) : null}
-                        {borderCrossingLabel ? (
-                          <span
-                            className="inline-route-border-crossing"
-                            role="img"
-                            aria-label={borderCrossingLabel}
-                            title={borderCrossingLabel}
-                          >
-                            <Signpost size={15} aria-hidden="true" />
+                        {hasFerrySection || borderCrossingLabel ? (
+                          <span className="inline-route-characteristics">
+                            {hasFerrySection ? (
+                              <span
+                                className="inline-route-characteristic inline-route-ferry"
+                                role="img"
+                                aria-label="Route includes a ferry"
+                                title="Route includes a ferry"
+                              >
+                                <Ship size={15} aria-hidden="true" />
+                              </span>
+                            ) : null}
+                            {borderCrossingLabel ? (
+                              <span
+                                className="inline-route-characteristic inline-route-border-crossing"
+                                role="img"
+                                aria-label={borderCrossingLabel}
+                                title={borderCrossingLabel}
+                              >
+                                <Signpost size={15} aria-hidden="true" />
+                              </span>
+                            ) : null}
                           </span>
                         ) : null}
                       </span>
