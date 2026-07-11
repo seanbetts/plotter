@@ -1469,6 +1469,8 @@ describe('MapCanvas', () => {
 
     expect(destinationLabelLayer).toBeUndefined();
     expect(startLabel).toHaveClass('map-destination-label');
+    expect(startLabel).toHaveAttribute('data-stop-pill-id', destination.id);
+    expect(nextStopLabel).toHaveAttribute('data-stop-pill-id', targetDestination.id);
     expect(nextStopLabel).toHaveClass('map-destination-label');
     expect(startLabel).not.toHaveClass('map-label-position-above');
     expect(nextStopLabel).not.toHaveClass('map-label-position-above');

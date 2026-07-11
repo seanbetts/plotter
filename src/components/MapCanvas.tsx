@@ -5,6 +5,13 @@ import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactP
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Activity, Coordinates, Destination, RouteLeg } from '../domain/types';
 import { calmBasemapStyle, mapLabelFontStack, mapStyleUrl, readMapLayerColors } from '../map/mapPresentation';
+import {
+  buildStopPillPresentations,
+  positionStopPillPresentations,
+  stopPillCollisionBounds,
+  stopPillClassName,
+  type StopPillPresentation,
+} from '../map/stopPillPresentation';
 import { buildRenderableRouteFeatures } from '../map/tripRouteFeatures';
 import type { RouteFeatureProperties } from '../map/tripRouteFeatures';
 import { formatStopMarker } from './stopLabels';
@@ -49,15 +56,7 @@ type CityFeatureProperties = {
   name: string;
 };
 
-type ProjectedDestinationLabel = {
-  id: string;
-  name: string;
-  label: string;
-  selected: boolean;
-  position: LabelPosition;
-  x: number;
-  y: number;
-};
+type ProjectedDestinationLabel = StopPillPresentation;
 
 type ProjectedActivityLabel = {
   id: string;
@@ -667,29 +666,6 @@ function labelCandidateBounds(input: { title: string; x: number; y: number }, po
   };
 }
 
-function destinationLabelBounds(label: ProjectedDestinationLabel) {
-  return labelCandidateBounds(
-    { title: `${label.label} - ${label.name}`, x: label.x, y: label.y },
-    label.position,
-  );
-}
-
-function positionDestinationLabels(labels: Array<Omit<ProjectedDestinationLabel, 'position'>>) {
-  const belowBounds = labels.map((label) =>
-    renderedLabelBounds(
-      { title: `${label.label} - ${label.name}`, x: label.x, y: label.y },
-      'below',
-    ),
-  );
-
-  return labels.map((label, index) => ({
-    ...label,
-    position: belowBounds.slice(index + 1).some((bounds) =>
-      activityLabelBoundsOverlap(belowBounds[index], bounds),
-    ) ? 'above' as const : 'below' as const,
-  }));
-}
-
 function activityLabelBoundsOverlap(left: LabelBounds, right: LabelBounds) {
   return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
 }
@@ -935,17 +911,11 @@ export function MapCanvas({
     const map = mapRef.current;
     if (!map) return [];
 
-    return positionDestinationLabels(
-      latestDestinationsRef.current.map((destination, index) => {
-        const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
-        return {
-          id: destination.id,
-          name: destination.name,
-          label: formatStopMarker(index + 1),
-          selected: destination.id === latestSelectedDestinationIdRef.current,
-          x: point.x,
-          y: point.y,
-        };
+    return positionStopPillPresentations(
+      buildStopPillPresentations({
+        destinations: latestDestinationsRef.current,
+        selectedDestinationId: latestSelectedDestinationIdRef.current,
+        project: (coordinates) => map.project(coordinates),
       }),
     );
   }, []);
@@ -962,7 +932,7 @@ export function MapCanvas({
       return;
     }
 
-    const reservedDestinationLabelBounds = projectDestinationLabels().map(destinationLabelBounds);
+    const reservedDestinationLabelBounds = projectDestinationLabels().map(stopPillCollisionBounds);
 
     setProjectedActivityLabels(
       visibleActivityLabels(
@@ -1614,13 +1584,8 @@ export function MapCanvas({
             <button
               key={destinationLabel.id}
               type="button"
-              className={[
-                'map-destination-label',
-                destinationLabel.position === 'above' ? 'map-label-position-above' : '',
-                destinationLabel.selected ? 'is-selected' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
+              className={stopPillClassName(destinationLabel)}
+              data-stop-pill-id={destinationLabel.id}
               style={{
                 left: `${destinationLabel.x}px`,
                 top: `${destinationLabel.y}px`,
@@ -1628,7 +1593,7 @@ export function MapCanvas({
               aria-label={`Open ${destinationLabel.name} stop details`}
               onClick={() => onSelectDestinationRef.current(destinationLabel.id)}
             >
-              {destinationLabel.label} - {destinationLabel.name}
+              {destinationLabel.text}
             </button>
           ))}
           {projectedActivityLabels.map((activityLabel) => (

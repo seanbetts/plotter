@@ -17,6 +17,8 @@ const maplibreMock = vi.hoisted(() => ({
     jumpTo: ReturnType<typeof vi.fn>;
     off: ReturnType<typeof vi.fn>;
     remove: ReturnType<typeof vi.fn>;
+    canvas: HTMLCanvasElement;
+    project: ReturnType<typeof vi.fn>;
   }>,
 }));
 
@@ -29,6 +31,11 @@ vi.mock('maplibre-gl', () => {
     fitBounds = vi.fn();
     jumpTo = vi.fn();
     remove = maplibreMock.remove;
+    canvas = document.createElement('canvas');
+    project = vi.fn(([longitude, latitude]: [number, number]) => ({
+      x: 800 + longitude * 10,
+      y: 500 - latitude * 5,
+    }));
     setLayoutProperty = vi.fn();
     setPaintProperty = vi.fn();
 
@@ -74,7 +81,7 @@ vi.mock('maplibre-gl', () => {
     }
 
     getCanvas() {
-      return document.createElement('canvas');
+      return this.canvas;
     }
   }
 
@@ -91,6 +98,15 @@ let toBlobResult: Blob | null;
 let anchorClick: ReturnType<typeof vi.spyOn>;
 let createObjectURL: ReturnType<typeof vi.fn>;
 let revokeObjectURL: ReturnType<typeof vi.fn>;
+let exportOverlaySnapshot: Array<{ className: string; text: string; selected: boolean }>;
+let imageLoadShouldFail: boolean;
+let imageLoadShouldHang: boolean;
+let imageSources: string[];
+let imageInstances: Array<{
+  onload: null | (() => void);
+  onerror: null | (() => void);
+}>;
+let overlayRemove: ReturnType<typeof vi.spyOn> | null;
 
 function input(destinations: Destination[] = [first(), second()], routeLegs: RouteLeg[] = []) {
   return { tripName: 'Wild Atlantic Way', destinations, routeLegs };
@@ -113,6 +129,10 @@ beforeEach(() => {
   maplibreMock.remove.mockReset();
   maplibreMock.instances.length = 0;
   toBlobResult = new Blob(['png'], { type: 'image/png' });
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: { ready: Promise.resolve() },
+  });
   context = {
     drawImage: vi.fn(),
     fillRect: vi.fn(),
@@ -123,7 +143,39 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => callback(toBlobResult));
   createObjectURL = vi.fn(() => 'blob:trip-map');
   revokeObjectURL = vi.fn();
+  exportOverlaySnapshot = [];
+  imageLoadShouldFail = false;
+  imageLoadShouldHang = false;
+  imageSources = [];
+  imageInstances = [];
+  overlayRemove = null;
   vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+  vi.stubGlobal('Image', class {
+    onload: null | (() => void) = null;
+    onerror: null | (() => void) = null;
+
+    constructor() {
+      imageInstances.push(this);
+    }
+
+    set src(value: string) {
+      imageSources.push(value);
+      const overlay = document.querySelector<HTMLDivElement>('[data-trip-map-export-labels]');
+      if (overlay) overlayRemove = vi.spyOn(overlay, 'remove');
+      exportOverlaySnapshot = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          '[data-trip-map-export-labels] .map-destination-label',
+        ),
+        (element) => ({
+          className: element.className,
+          text: element.textContent ?? '',
+          selected: element.classList.contains('is-selected'),
+        }),
+      );
+      if (imageLoadShouldHang) return;
+      queueMicrotask(() => imageLoadShouldFail ? this.onerror?.() : this.onload?.());
+    }
+  });
   anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 });
 
@@ -131,7 +183,10 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  document.querySelectorAll('[data-trip-map-export], a[download]').forEach((element) => element.remove());
+  Reflect.deleteProperty(document, 'fonts');
+  document
+    .querySelectorAll('[data-trip-map-export], [data-trip-map-export-labels], a[download]')
+    .forEach((element) => element.remove());
 });
 
 describe('tripMapFilename', () => {
@@ -163,8 +218,8 @@ it('numbers stop labels in canonical array order', () => {
   const origin = first();
   const target = second();
   expect(buildExportStopFeatures([origin, target]).features.map(({ properties }) => properties)).toEqual([
-    { id: origin.id, name: 'Balcombe', number: 1, label: '1 - Balcombe' },
-    { id: target.id, name: 'Paris', number: 2, label: '2 - Paris' },
+    { id: origin.id, name: 'Balcombe', number: 1, label: 'ST - Balcombe' },
+    { id: target.id, name: 'Paris', number: 2, label: '02 - Paris' },
   ]);
 });
 
@@ -189,35 +244,51 @@ it('constructs a deterministic non-interactive export map in a 1600 x 1000 conta
   await promise;
 });
 
-it('adds route, stop point, stop number, and stop name layers after load', async () => {
+it('uses MapLibre only for routes and stop points', async () => {
   const { promise, map } = await advanceExportToIdle();
-  const layerIds = map.layers.map(({ id }) => id);
-
-  expect(layerIds).toEqual([
+  expect(map.layers.map(({ id }) => id)).toEqual([
     'trip-map-export-routes',
     'trip-map-export-stop-points',
-    'trip-map-export-stop-numbers',
-    'trip-map-export-stop-names',
   ]);
-  expect(map.sources.map(([id]) => id)).toEqual(['trip-map-export-routes', 'trip-map-export-stops']);
   map.callbacks.get('idle')?.();
   await promise;
 });
 
-it('keeps all stop numbers visible and gives stop names variable anchors', async () => {
+it('renders normal unselected app pills in an export overlay', async () => {
   const { promise, map } = await advanceExportToIdle();
-  const numbers = map.layers.find(({ id }) => id === 'trip-map-export-stop-numbers')!;
-  const names = map.layers.find(({ id }) => id === 'trip-map-export-stop-names')!;
-
-  expect(numbers.layout).toMatchObject({
-    'text-allow-overlap': true,
-    'text-ignore-placement': true,
-  });
-  expect(names.layout).toMatchObject({
-    'text-variable-anchor': ['top', 'bottom', 'left', 'right'],
-  });
   map.callbacks.get('idle')?.();
   await promise;
+
+  expect(exportOverlaySnapshot).toEqual([
+    { className: 'map-destination-label map-label-position-above', text: 'ST - Balcombe', selected: false },
+    { className: 'map-destination-label', text: '02 - Paris', selected: false },
+  ]);
+});
+
+it('places an earlier overlapping export pill above and the later pill below', async () => {
+  const origin = first();
+  const returnStop = createDestination({
+    name: 'Balcombe return',
+    countryRegion: 'UK',
+    coordinates: origin.coordinates,
+  });
+  const { promise, map } = await advanceExportToIdle([origin, returnStop]);
+  map.callbacks.get('idle')?.();
+  await promise;
+
+  expect(exportOverlaySnapshot).toEqual([
+    { className: 'map-destination-label map-label-position-above', text: 'ST - Balcombe', selected: false },
+    { className: 'map-destination-label', text: '02 - Balcombe return', selected: false },
+  ]);
+});
+
+it('loads the rasterized SVG from a canvas-safe data URL', async () => {
+  const { promise, map } = await advanceExportToIdle();
+  map.callbacks.get('idle')?.();
+  await promise;
+
+  expect(imageSources[0]).toMatch(/^data:image\/svg\+xml;charset=utf-8,/);
+  expect(decodeURIComponent(imageSources[0].split(',', 2)[1])).toContain('<foreignObject');
 });
 
 it('fits multi-point bounds with deterministic padding and zoom', async () => {
@@ -232,7 +303,7 @@ it('fits multi-point bounds with deterministic padding and zoom', async () => {
   await promise;
 });
 
-it('unwraps dateline route and stop source coordinates into the fitted interval', async () => {
+it('unwraps dateline route, stop source, and overlay coordinates into the fitted interval', async () => {
   const alaska = createDestination({
     name: 'Alaska',
     countryRegion: 'USA',
@@ -272,6 +343,10 @@ it('unwraps dateline route and stop source coordinates into the fitted interval'
 
   map.callbacks.get('idle')?.();
   await promise;
+  expect(map.project.mock.calls).toEqual([
+    [[179, 52]],
+    [[181, 54]],
+  ]);
 });
 
 it('keeps ordinary European route and stop source coordinates unchanged', async () => {
@@ -370,17 +445,125 @@ it('draws source attribution before converting the output canvas', async () => {
   );
 });
 
+it('composites stop pills after the map canvas and before attribution and PNG conversion', async () => {
+  const { promise, map } = await advanceExportToIdle();
+  map.callbacks.get('idle')?.();
+  await promise;
+
+  const drawCalls = (context.drawImage as ReturnType<typeof vi.fn>).mock.calls;
+  expect(drawCalls).toHaveLength(2);
+  expect(drawCalls[0][0]).toBe(map.canvas);
+  expect(drawCalls[1][0]).toBe(imageInstances[0]);
+  expect((context.drawImage as ReturnType<typeof vi.fn>).mock.invocationCallOrder[1]).toBeLessThan(
+    (context.fillText as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+  );
+  expect((context.fillText as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]).toBeLessThan(
+    (HTMLCanvasElement.prototype.toBlob as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+  );
+});
+
+it('rejects label rasterization failure and removes the overlay', async () => {
+  imageLoadShouldFail = true;
+  const { promise, map } = await advanceExportToIdle();
+  map.callbacks.get('idle')?.();
+
+  await expect(promise).rejects.toThrow('Unable to render trip map stop labels.');
+  expect(imageInstances[0].onload).toBeNull();
+  expect(imageInstances[0].onerror).toBeNull();
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(createObjectURL).not.toHaveBeenCalled();
+  expect(revokeObjectURL).not.toHaveBeenCalled();
+  expect(overlayRemove).toHaveBeenCalledOnce();
+  expect(document.querySelector('[data-trip-map-export-labels]')).not.toBeInTheDocument();
+  expect(document.querySelector('[data-trip-map-export]')).not.toBeInTheDocument();
+  expect(map.remove).toHaveBeenCalledOnce();
+});
+
+it('times out the font readiness wait after 15,000 ms', async () => {
+  vi.useFakeTimers();
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: { ready: new Promise(() => undefined) },
+  });
+  let settledError: Error | undefined;
+  const { promise, map } = await advanceExportToIdle();
+  void promise.catch((error: Error) => { settledError = error; });
+  map.callbacks.get('idle')?.();
+
+  await vi.advanceTimersByTimeAsync(15_000);
+
+  expect(settledError?.message).toBe('Timed out waiting for trip map fonts.');
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('times out image loading and clears its handlers after 15,000 ms', async () => {
+  vi.useFakeTimers();
+  imageLoadShouldHang = true;
+  let settledError: Error | undefined;
+  const { promise, map } = await advanceExportToIdle();
+  void promise.catch((error: Error) => { settledError = error; });
+  map.callbacks.get('idle')?.();
+  await vi.advanceTimersByTimeAsync(0);
+
+  await vi.advanceTimersByTimeAsync(15_000);
+
+  expect(settledError?.message).toBe('Timed out rendering trip map stop labels.');
+  expect(imageInstances[0].onload).toBeNull();
+  expect(imageInstances[0].onerror).toBeNull();
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('times out PNG conversion after 15,000 ms', async () => {
+  vi.useFakeTimers();
+  vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementation(() => undefined);
+  let settledError: Error | undefined;
+  const { promise, map } = await advanceExportToIdle();
+  void promise.catch((error: Error) => { settledError = error; });
+  map.callbacks.get('idle')?.();
+  await vi.advanceTimersByTimeAsync(0);
+
+  await vi.advanceTimersByTimeAsync(15_000);
+
+  expect(settledError?.message).toBe('Timed out creating trip map PNG.');
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('cancels image loading and clears handlers when the map fails', async () => {
+  vi.useFakeTimers();
+  imageLoadShouldHang = true;
+  const { promise, map } = await advanceExportToIdle();
+  map.callbacks.get('idle')?.();
+  await vi.advanceTimersByTimeAsync(0);
+
+  for (const listener of map.errorListeners) {
+    listener({ error: new Error('Tile request failed during label rendering.') });
+  }
+
+  await expect(promise).rejects.toThrow('Tile request failed during label rendering.');
+  expect(imageInstances[0].onload).toBeNull();
+  expect(imageInstances[0].onerror).toBeNull();
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it('downloads with the sanitized trip name and cleans up all temporary resources', async () => {
   const { promise, map } = await advanceExportToIdle();
   const container = document.querySelector('[data-trip-map-export]');
   map.callbacks.get('idle')?.();
   await promise;
 
+  expect(imageInstances[0].onload).toBeNull();
+  expect(imageInstances[0].onerror).toBeNull();
   expect(anchorClick).toHaveBeenCalledOnce();
   expect(anchorClick.mock.instances[0].download).toBe('Wild-Atlantic-Way.png');
   expect(map.remove).toHaveBeenCalledOnce();
   expect(container).not.toBeInTheDocument();
   expect(document.querySelector('a[download]')).not.toBeInTheDocument();
+  expect(overlayRemove).toHaveBeenCalledOnce();
+  expect(createObjectURL).toHaveBeenCalledOnce();
   expect(revokeObjectURL).toHaveBeenCalledWith('blob:trip-map');
 });
 
