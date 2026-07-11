@@ -45,12 +45,14 @@ import type {
 import type { TripSummary } from './storage/tripDirectoryRepository';
 import type { TripRealtimeSubscriptions } from './storage/tripRealtime';
 import type { TripRepository } from './storage/tripRepository';
+import { getBrowserStorage, readMigratedStorageValue, writeStorageValue } from './storage/localPreferences';
 import './styles.css';
 
 const openRouteServiceApiKey = import.meta.env.VITE_OPENROUTESERVICE_API_KEY ?? '';
 const mapTilerApiKey = import.meta.env.VITE_MAPTILER_API_KEY ?? '';
 const mobileWorkspacePanelsQuery = '(max-width: 760px)';
-const stopsPanelCollapsedStorageKey = 'world-tour:stops-panel-collapsed';
+const stopsPanelCollapsedStorageKey = 'plotter:stops-panel-collapsed';
+const legacyStopsPanelCollapsedStorageKey = 'world-tour:stops-panel-collapsed';
 
 type PendingMapStop = {
   id: number;
@@ -141,12 +143,11 @@ function createActivityWebImageSearchContext(destination: Destination, activity:
 
 function readStopsPanelCollapsedPreference() {
   if (typeof window === 'undefined') return false;
-
-  try {
-    return window.localStorage.getItem(stopsPanelCollapsedStorageKey) === 'true';
-  } catch {
-    return false;
-  }
+  return readMigratedStorageValue(
+    getBrowserStorage(),
+    stopsPanelCollapsedStorageKey,
+    legacyStopsPanelCollapsedStorageKey,
+  ) === 'true';
 }
 
 function createFallbackMapStop(coordinates: Coordinates): Pick<PendingMapStop, 'name' | 'location'> {
@@ -248,7 +249,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     return (
       <main className="app-shell">
         <style>{blockingStatusMapStyles}</style>
-        <section className="map-stage map-stage--blocking-status" aria-label="World tour map workspace">
+        <section className="map-stage map-stage--blocking-status" aria-label="Plotter map workspace">
           <MapCanvas
             destinations={[]}
             routeLegs={[]}
@@ -257,7 +258,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
           />
           <AppStatusPanel
             status={error ? 'error' : 'loading'}
-            title={error?.title ?? 'Loading world tour'}
+            title={error?.title ?? 'Loading Plotter'}
             message={error?.message ?? 'Preparing your trip map.'}
           />
         </section>
@@ -470,7 +471,7 @@ function TripWorkspace({
     if (isInteractionLocked) {
       return {
         status: 'loading' as const,
-        title: 'Loading world tour',
+        title: 'Loading Plotter',
         message: 'Preparing your trip map.',
       };
     }
@@ -594,11 +595,7 @@ function TripWorkspace({
   }, [selectedActivityId]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(stopsPanelCollapsedStorageKey, String(isStopsPanelCollapsed));
-    } catch {
-      // Ignore private-mode or quota failures; the toggle should still work in-memory.
-    }
+    writeStorageValue(getBrowserStorage(), stopsPanelCollapsedStorageKey, String(isStopsPanelCollapsed));
   }, [isStopsPanelCollapsed]);
 
   useEffect(() => {
@@ -1197,7 +1194,7 @@ function TripWorkspace({
   return (
     <main className="app-shell">
       <style>{blockingStatusMapStyles}</style>
-      <section className={mapStageClassName} aria-label="World tour map workspace">
+      <section className={mapStageClassName} aria-label="Plotter map workspace">
         <MapCanvas
           destinations={destinations}
           routeLegs={routeLegs}

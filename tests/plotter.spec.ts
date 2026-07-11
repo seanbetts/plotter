@@ -670,9 +670,9 @@ test('creates and switches personal trips without Supabase', async ({ baseURL, c
   await expect(page.getByRole('button', { name: 'Kyoto, Japan' })).toBeVisible();
 
   await page.getByRole('button', { name: /current trip/i }).click();
-  await page.getByRole('menuitemradio', { name: 'World tour' }).click();
+  await page.getByRole('menuitemradio', { name: 'Untitled trip' }).click();
 
-  await expect(page.getByRole('button', { name: /current trip: World tour/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /current trip: Untitled trip/i })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Kyoto, Japan' })).toHaveCount(0);
 
   await page.getByRole('button', { name: /current trip/i }).click();
@@ -703,7 +703,7 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
 
   await page.getByLabel('Search for a destination').fill('Istanbul');
   await page.getByRole('option', { name: 'Istanbul, Turkey' }).click();
@@ -735,7 +735,7 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
   }
 
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await page.getByRole('button', { name: 'Istanbul, Turkey' }).last().click();
 
   await expect(profile).toBeVisible();
@@ -767,7 +767,7 @@ test('adds a stop from the map context menu', async ({ page }) => {
 
   await page.goto('/');
 
-  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
   const mapContainer = page.getByTestId('map-container');
   await expect(mapContainer).toBeVisible();
@@ -809,7 +809,7 @@ test('opens an activity panel with image region beside the selected stop', async
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
   await page.getByLabel('Search for a destination').fill('Paris');
   await page.getByRole('option', { name: 'Paris, France' }).click();
@@ -878,7 +878,7 @@ test('imports a web image result into a stop carousel', async ({ baseURL, contex
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
   await page.getByLabel('Search for a destination').fill('Paris');
   await page.getByRole('option', { name: 'Paris, France' }).click();

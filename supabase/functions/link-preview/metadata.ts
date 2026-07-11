@@ -18,7 +18,7 @@ const maxPreviewBytes = 512_000;
 const maxRedirects = 3;
 const previewTimeoutMs = 5_000;
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
-const userAgent = "WorldTourLinkPreview/1.0";
+const userAgent = "PlotterLinkPreview/1.0";
 
 export function normalizePreviewUrl(rawUrl: string) {
   const trimmed = rawUrl.trim();

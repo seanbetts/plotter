@@ -1,4 +1,4 @@
-# World Tour Trip Data Agent Guide
+# Plotter Trip Data Agent Guide
 
 Use this guide when an AI agent needs to read or modify trip data in this app through the trip CLI.
 
@@ -114,7 +114,7 @@ This folder is intentionally environment-agnostic. Agentic environments can eith
 For Codex, the active local skill can live at:
 
 ```text
-~/.codex/skills/world-tour-trip-data/
+~/.codex/skills/plotter-trip-data/
 ```
 
 The Codex `SKILL.md` should keep trigger metadata and point to the same workflow and reference material in this guide.

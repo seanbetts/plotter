@@ -701,19 +701,19 @@ describe('MapCanvas', () => {
     });
 
     expect(map.addSource).toHaveBeenCalledWith(
-      'world-tour-focused-activities',
+      'plotter-focused-activities',
       expect.objectContaining({ type: 'geojson' }),
     );
 
     const layers = map.addLayer.mock.calls.map(([layer]) => layer);
     expect(layers.map((layer) => layer.id)).toEqual(
       expect.arrayContaining([
-        'world-tour-activity-points',
-        'world-tour-selected-activity-halo',
+        'plotter-activity-points',
+        'plotter-selected-activity-halo',
       ]),
     );
-    expect(layers.map((layer) => layer.id)).not.toContain('world-tour-activity-labels');
-    expect(layers.find((layer) => layer.id === 'world-tour-selected-activity-halo')).toMatchObject({
+    expect(layers.map((layer) => layer.id)).not.toContain('plotter-activity-labels');
+    expect(layers.find((layer) => layer.id === 'plotter-selected-activity-halo')).toMatchObject({
       filter: ['==', ['get', 'selected'], true],
       paint: {
         'circle-color': 'rgba(217, 70, 122, 0.22)',
@@ -723,9 +723,9 @@ describe('MapCanvas', () => {
         'circle-stroke-width': 1,
       },
     });
-    expect(layers.find((layer) => layer.id === 'world-tour-activity-points')).toMatchObject({
+    expect(layers.find((layer) => layer.id === 'plotter-activity-points')).toMatchObject({
       type: 'circle',
-      source: 'world-tour-focused-activities',
+      source: 'plotter-focused-activities',
       paint: {
         'circle-color': '#d9467a',
         'circle-radius': ['case', ['get', 'selected'], 8, 7],
@@ -1009,7 +1009,7 @@ describe('MapCanvas', () => {
 
     const map = maplibreMock.mapInstances[0];
     const activityClickHandler = map.on.mock.calls.find(
-      ([eventName, layerId]) => eventName === 'click' && layerId === 'world-tour-activity-points',
+      ([eventName, layerId]) => eventName === 'click' && layerId === 'plotter-activity-points',
     )?.[2];
 
     act(() => {
@@ -1056,7 +1056,7 @@ describe('MapCanvas', () => {
       loadHandler();
     });
 
-    const activitySource = maplibreMock.getSource('world-tour-focused-activities');
+    const activitySource = maplibreMock.getSource('plotter-focused-activities');
     const activityData = activitySource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<Point>;
 
     expect(activityData.features).toHaveLength(1);
@@ -1095,7 +1095,7 @@ describe('MapCanvas', () => {
       loadHandler();
     });
 
-    const activitySource = maplibreMock.getSource('world-tour-focused-activities');
+    const activitySource = maplibreMock.getSource('plotter-focused-activities');
     const activityData = activitySource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<Point>;
 
     expect(activityData.features).toEqual([]);
@@ -1417,25 +1417,25 @@ describe('MapCanvas', () => {
     });
 
     expect(map.addSource).toHaveBeenCalledWith(
-      'world-tour-destinations',
+      'plotter-destinations',
       expect.objectContaining({ type: 'geojson' }),
     );
     expect(map.addSource).toHaveBeenCalledWith(
-      'world-tour-routes',
+      'plotter-routes',
       expect.objectContaining({ type: 'geojson' }),
     );
-    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-routes-line' }));
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'plotter-routes-line' }));
     const routeLayer = map.addLayer.mock.calls
       .map(([layer]) => layer)
-      .find((layer) => layer.id === 'world-tour-routes-line');
+      .find((layer) => layer.id === 'plotter-routes-line');
     expect(routeLayer.paint['line-color'].flat(Infinity)).toEqual(
       expect.arrayContaining(['kind', 'ferry', 'manual', 'review-required']),
     );
     expect(routeLayer.paint['line-dasharray'].flat(Infinity)).toEqual(
       expect.arrayContaining(['manual', 2, 2, 'review-required', 3, 1]),
     );
-    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-selected-destination-halo' }));
-    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-destination-points' }));
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'plotter-selected-destination-halo' }));
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'plotter-destination-points' }));
     expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();
   });
 
@@ -1457,8 +1457,8 @@ describe('MapCanvas', () => {
     });
 
     const layers = map.addLayer.mock.calls.map(([layer]) => layer);
-    const selectedHaloLayer = layers.find((layer) => layer.id === 'world-tour-selected-destination-halo');
-    const destinationPointsLayer = layers.find((layer) => layer.id === 'world-tour-destination-points');
+    const selectedHaloLayer = layers.find((layer) => layer.id === 'plotter-selected-destination-halo');
+    const destinationPointsLayer = layers.find((layer) => layer.id === 'plotter-destination-points');
 
     expect(layers.indexOf(selectedHaloLayer)).toBeLessThan(layers.indexOf(destinationPointsLayer));
     expect(selectedHaloLayer).toMatchObject({
@@ -1509,7 +1509,7 @@ describe('MapCanvas', () => {
 
     const destinationLabelLayer = map.addLayer.mock.calls
       .map(([layer]) => layer)
-      .find((layer) => layer.id === 'world-tour-destination-labels');
+      .find((layer) => layer.id === 'plotter-destination-labels');
     const startLabel = screen.getByText('ST - Cappadocia');
     const nextStopLabel = screen.getByText('02 - Tbilisi');
 
@@ -1671,8 +1671,8 @@ describe('MapCanvas', () => {
       loadHandler();
     });
 
-    const destinationSource = maplibreMock.getSource('world-tour-destinations');
-    const routeSource = maplibreMock.getSource('world-tour-routes');
+    const destinationSource = maplibreMock.getSource('plotter-destinations');
+    const routeSource = maplibreMock.getSource('plotter-routes');
     const destinationData = destinationSource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<Point>;
     const routeData = routeSource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<LineString>;
 
@@ -1704,7 +1704,7 @@ describe('MapCanvas', () => {
     const map = maplibreMock.mapInstances[0];
     const clickHandler = map.on.mock.calls.find(
       ([eventName, layerId]) =>
-        eventName === 'click' && layerId === 'world-tour-destination-points',
+        eventName === 'click' && layerId === 'plotter-destination-points',
     )?.[2];
 
     clickHandler({
@@ -1738,7 +1738,7 @@ describe('MapCanvas', () => {
       loadHandler();
     });
 
-    const routeSource = maplibreMock.getSource('world-tour-routes');
+    const routeSource = maplibreMock.getSource('plotter-routes');
     const routeData = routeSource?.setData.mock.calls.at(-1)?.[0] as FeatureCollection<LineString>;
 
     expect(routeData.features).toEqual([]);
@@ -2243,11 +2243,11 @@ describe('MapCanvas', () => {
     });
 
     expect(map.addSource).not.toHaveBeenCalledWith(
-      'world-tour-major-cities',
+      'plotter-major-cities',
       expect.objectContaining({ type: 'geojson' }),
     );
-    expect(map.addLayer).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-city-points' }));
-    expect(map.addLayer).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-city-labels' }));
+    expect(map.addLayer).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'plotter-city-points' }));
+    expect(map.addLayer).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'plotter-city-labels' }));
   });
 
   it('removes the map on unmount', () => {

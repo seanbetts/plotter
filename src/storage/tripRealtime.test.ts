@@ -26,7 +26,7 @@ describe('trip realtime', () => {
     const onChange = vi.fn();
     const unsubscribe = createSupabaseTripRealtime(supabase as never).subscribeToTrips(onChange);
 
-    expect(supabase.channel).toHaveBeenCalledWith('world-tour-trips');
+    expect(supabase.channel).toHaveBeenCalledWith('plotter-trips');
     handlers[0]();
     expect(onChange).toHaveBeenCalledTimes(1);
     unsubscribe();

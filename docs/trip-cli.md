@@ -1,6 +1,6 @@
 # Trip Data CLI
 
-The trip CLI lets agents and local scripts read and write Supabase-backed world-tour trip data through app-owned commands.
+The trip CLI lets agents and local scripts read and write Supabase-backed Plotter trip data through app-owned commands.
 
 ## Safety Workflow
 
@@ -331,7 +331,7 @@ The wrapper should prefer narrow commands such as `insert-stop`, `update-stop`, 
 
 The CLI reads `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`, then creates or reuses an anonymous Supabase session with the publishable key.
 
-The Node CLI stores its reusable anonymous session in `~/.world-tour/trip-cli-session-<supabase-host>.json` with file mode `0600`. If the cached session cannot be restored, the CLI clears it and creates a fresh anonymous session.
+The Node CLI stores its reusable anonymous session in `~/.plotter/trip-cli-session-<supabase-host>.json` with file mode `0600`. On first use it safely copies a valid legacy `~/.world-tour/` session forward while retaining the old file. If the cached session cannot be restored, the CLI clears both locations and creates a fresh anonymous session.
 
 Optional environment values used by the command layer:
 

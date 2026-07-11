@@ -483,17 +483,17 @@ const majorCities = [
   { id: 'addis-ababa', name: 'Addis Ababa', coordinates: { lat: 8.9806, lng: 38.7578 } },
 ];
 
-const destinationsSourceId = 'world-tour-destinations';
-const focusedActivitiesSourceId = 'world-tour-focused-activities';
-const routesSourceId = 'world-tour-routes';
-const majorCitiesSourceId = 'world-tour-major-cities';
-const selectedDestinationHaloLayerId = 'world-tour-selected-destination-halo';
-const activityPointsLayerId = 'world-tour-activity-points';
-const selectedActivityHaloLayerId = 'world-tour-selected-activity-halo';
-const destinationPointsLayerId = 'world-tour-destination-points';
-const routeLineLayerId = 'world-tour-routes-line';
-const cityPointsLayerId = 'world-tour-city-points';
-const cityLabelsLayerId = 'world-tour-city-labels';
+const destinationsSourceId = 'plotter-destinations';
+const focusedActivitiesSourceId = 'plotter-focused-activities';
+const routesSourceId = 'plotter-routes';
+const majorCitiesSourceId = 'plotter-major-cities';
+const selectedDestinationHaloLayerId = 'plotter-selected-destination-halo';
+const activityPointsLayerId = 'plotter-activity-points';
+const selectedActivityHaloLayerId = 'plotter-selected-activity-halo';
+const destinationPointsLayerId = 'plotter-destination-points';
+const routeLineLayerId = 'plotter-routes-line';
+const cityPointsLayerId = 'plotter-city-points';
+const cityLabelsLayerId = 'plotter-city-labels';
 const overlayViewportPaddingPx = 16;
 const addStopMenuApproxSize = {
   width: 180,
@@ -1571,7 +1571,7 @@ export function MapCanvas({
   };
 
   return (
-    <section className="map-canvas" aria-label="Interactive world tour map">
+    <section className="map-canvas" aria-label="Interactive Plotter map">
       <div
         ref={mapContainerRef}
         className="maplibre-container"

@@ -483,7 +483,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -598,7 +598,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -697,7 +697,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -767,7 +767,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -851,7 +851,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -910,7 +910,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -997,7 +997,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -1104,7 +1104,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -1189,7 +1189,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -1271,7 +1271,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -1387,7 +1387,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: userId, name: 'World tour' },
+            { id: tripId, owner_user_id: userId, name: 'Example trip' },
           ]);
         }
 
@@ -1531,7 +1531,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: userId, name: 'World tour' },
+            { id: tripId, owner_user_id: userId, name: 'Example trip' },
           ]);
         }
 
@@ -1608,7 +1608,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -1681,7 +1681,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -1760,7 +1760,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: userId, name: 'World tour' },
+            { id: tripId, owner_user_id: userId, name: 'Example trip' },
           ]);
         }
 
@@ -1852,7 +1852,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: userId, name: 'World tour' },
+            { id: tripId, owner_user_id: userId, name: 'Example trip' },
           ]);
         }
 
@@ -1923,7 +1923,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: userId, name: 'World tour' },
+            { id: tripId, owner_user_id: userId, name: 'Example trip' },
           ]);
         }
 
@@ -1981,7 +1981,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: userId, name: 'World tour' },
+            { id: tripId, owner_user_id: userId, name: 'Example trip' },
           ]);
         }
 
@@ -2060,7 +2060,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -2259,7 +2259,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: userId, name: 'World tour' },
+            { id: tripId, owner_user_id: userId, name: 'Example trip' },
           ]);
         }
 
@@ -2337,7 +2337,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -2401,7 +2401,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -2515,7 +2515,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -2596,7 +2596,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -2749,7 +2749,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -2830,7 +2830,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -2903,7 +2903,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -2981,7 +2981,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -3057,7 +3057,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -3167,7 +3167,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -3246,7 +3246,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -3376,7 +3376,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 
@@ -3467,7 +3467,7 @@ describe('supabase trip repository mappers', () => {
       from: vi.fn((tableName: string) => {
         if (tableName === 'trips') {
           return createTripsTableMock([
-            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'World tour' },
+            { id: tripId, owner_user_id: crypto.randomUUID(), name: 'Example trip' },
           ]);
         }
 

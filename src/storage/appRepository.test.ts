@@ -91,7 +91,7 @@ describe('app repository bootstrap', () => {
     const cloudDirectory = {
       listTrips: vi.fn(async () => [{
         id: 'trip-1',
-        name: 'World tour',
+        name: 'Example trip',
         description: '',
         routingVehicle: standardRoutingVehicle,
         createdAt: '2026-07-01T10:00:00.000Z',
@@ -226,6 +226,6 @@ describe('app repository bootstrap', () => {
   });
 
   it('exports the selected trip storage key used by the app shell', () => {
-    expect(selectedTripStorageKey).toBe('world-tour:selected-trip-id');
+    expect(selectedTripStorageKey).toBe('plotter:selected-trip-id');
   });
 });

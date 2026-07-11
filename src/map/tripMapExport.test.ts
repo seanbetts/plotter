@@ -193,7 +193,7 @@ describe('tripMapFilename', () => {
   it.each([
     ['Wild Atlantic Way', 'Wild-Atlantic-Way.png'],
     ['  Japan / Korea: 2027  ', 'Japan-Korea-2027.png'],
-    ['***', 'world-tour.png'],
+    ['***', 'plotter.png'],
   ])('turns %j into %j', (inputName, expected) => {
     expect(tripMapFilename(inputName)).toBe(expected);
   });

@@ -35,7 +35,7 @@ const allowedImageTypes = new Set([
 const maxImageBytes = 50 * 1024 * 1024;
 const maxRedirects = 3;
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
-const userAgent = "WorldTourImageImport/1.0";
+const userAgent = "PlotterImageImport/1.0";
 const bearerTokenPattern = /^Bearer\s+(.+)$/i;
 const defaultFetcher: Fetcher = (input, init) => globalThis.fetch(input, init);
 const defaultUuid = () => globalThis.crypto.randomUUID();

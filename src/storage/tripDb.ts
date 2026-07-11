@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from 'dexie';
 import type { Activity, ActivityMediaRecord, Destination, RouteLeg } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { TripSummary } from './tripDirectoryRepository';
+import { defaultTripName } from '../domain/tripDefaults';
 
 const defaultLocalTripId = 'local-default-trip';
 // v6 upgrade-only compatibility. Fragmented tokens keep the active legacy gate focused on runtime code.
@@ -37,6 +38,7 @@ export type StoredActivityMediaRecord = ActivityMediaRecord & {
   entityId?: string;
 };
 
+// Keep the original database name so the rename does not orphan existing browser data.
 export function createTripDb(name = 'world-tour-planner'): TripDb {
   const db = new Dexie(name) as TripDb;
 
@@ -82,7 +84,7 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
 
     await transaction.table('trips').put({
       id: defaultLocalTripId,
-      name: 'World tour',
+      name: defaultTripName,
       description: '',
       createdAt: timestamp,
       updatedAt: timestamp,

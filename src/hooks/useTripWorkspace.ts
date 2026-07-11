@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VehiclePreset } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
+import { defaultTripName } from '../domain/tripDefaults';
 import {
   createAppTripStorage,
+  legacySelectedTripStorageKey,
   selectedTripStorageKey,
 } from '../storage/appRepository';
+import {
+  getBrowserStorage,
+  readMigratedStorageValue,
+  removeStorageValue,
+  writeStorageValue,
+} from '../storage/localPreferences';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRealtimeSubscriptions } from '../storage/tripRealtime';
 import type { TripRepository } from '../storage/tripRepository';
@@ -55,7 +63,7 @@ function chooseInitialTrip(trips: TripSummary[], storedTripId: string | null) {
 }
 
 function getDefaultLocalStorage(): LocalStorageLike | null {
-  return typeof window === 'undefined' ? null : window.localStorage;
+  return getBrowserStorage();
 }
 
 export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
@@ -71,7 +79,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
   const activeTripRef = useRef<TripSummary | null>(null);
 
   const activateTrip = useCallback((nextStorage: AppTripStorage, nextTrip: TripSummary) => {
-    localStorage?.setItem(selectedTripStorageKey, nextTrip.id);
+    writeStorageValue(localStorage ?? null, selectedTripStorageKey, nextTrip.id);
     activeTripRef.current = nextTrip;
     setActiveTrip(nextTrip);
     setRepository(nextStorage.createTripRepository(nextTrip.id));
@@ -93,11 +101,15 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
         let nextTrips = await nextStorage.directory.listTrips();
         let selectedTrip = chooseInitialTrip(
           nextTrips,
-          localStorage?.getItem(selectedTripStorageKey) ?? null,
+          readMigratedStorageValue(
+            localStorage ?? null,
+            selectedTripStorageKey,
+            legacySelectedTripStorageKey,
+          ),
         );
 
         if (!selectedTrip) {
-          selectedTrip = await nextStorage.directory.createTrip({ name: 'World tour' });
+          selectedTrip = await nextStorage.directory.createTrip({ name: defaultTripName });
           nextTrips = [selectedTrip];
         }
 
@@ -187,7 +199,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
       let nextTrips = trips.filter((trip) => trip.id !== tripId);
 
       if (nextTrips.length === 0) {
-        const replacementTrip = await storage.directory.createTrip({ name: 'World tour' });
+        const replacementTrip = await storage.directory.createTrip({ name: defaultTripName });
         nextTrips = [replacementTrip];
       }
 
@@ -205,7 +217,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
 
     let nextTrips = await storage.directory.listTrips();
     if (nextTrips.length === 0) {
-      const replacementTrip = await storage.directory.createTrip({ name: 'World tour' });
+      const replacementTrip = await storage.directory.createTrip({ name: defaultTripName });
       nextTrips = [replacementTrip];
     }
 
@@ -219,9 +231,9 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     activeTripRef.current = nextActive;
     setRepository(nextActive ? storage.createTripRepository(nextActive.id) : null);
     if (nextActive) {
-      localStorage?.setItem(selectedTripStorageKey, nextActive.id);
+      writeStorageValue(localStorage ?? null, selectedTripStorageKey, nextActive.id);
     } else {
-      localStorage?.removeItem(selectedTripStorageKey);
+      removeStorageValue(localStorage ?? null, selectedTripStorageKey);
     }
   }, [localStorage, storage]);
 

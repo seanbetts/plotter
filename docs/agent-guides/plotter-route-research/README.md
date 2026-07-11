@@ -1,8 +1,8 @@
-# World Tour Route Research Agent Guide
+# Plotter Route Research Agent Guide
 
-Use this guide when an AI agent needs to research a potential overland route before any data is written to the world-tour app.
+Use this guide when an AI agent needs to research a potential overland route before any data is written to the Plotter app.
 
-This guide is research-only. It produces a reviewable route research plan. It does not create, delete, or update trips. After the user approves a plan, use the `world-tour-trip-data` guide and `npm run trip -- ...` CLI commands to implement approved content.
+This guide is research-only. It produces a reviewable route research plan. It does not create, delete, or update trips. After the user approves a plan, use the `plotter-trip-data` guide and `npm run trip -- ...` CLI commands to implement approved content.
 
 ## Core Rules
 
@@ -346,4 +346,4 @@ After the user gives final approval to implement an approved route research plan
 - Files under `examples/` are synthetic validation fixtures. Do not read them while researching or planning a live route, and never reuse their assumptions, locations, recommendations, or placeholder sources as evidence.
 - See `examples/ambiguous-point-to-point-user-response-fixture.md` only when validating the default user-facing output shape.
 - See `examples/ambiguous-point-to-point-handoff-artifact-fixture.md` only when validating optional handoff-ready structure.
-- See `../world-tour-trip-data/README.md` for the approved implementation workflow after user approval.
+- See `../plotter-trip-data/README.md` for the approved implementation workflow after user approval.

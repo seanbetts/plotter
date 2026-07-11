@@ -208,7 +208,7 @@ const defaultWebImageSearchClientMock = vi.hoisted(() => ({
 const tripsMock = [
   {
     id: 'trip-one',
-    name: 'World tour',
+    name: 'Example trip',
     description: '',
     routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-01T10:00:00.000Z',
@@ -326,7 +326,7 @@ vi.mock('maplibre-gl', () => ({
 }));
 
 async function waitForTripReady() {
-  await waitFor(() => expect(screen.queryByText('Loading world tour')).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText('Loading Plotter')).not.toBeInTheDocument());
 }
 
 describe('App', () => {
@@ -617,13 +617,13 @@ describe('App', () => {
     render(<App />);
     await waitForTripReady();
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit Example trip' }));
     await userEvent.click(screen.getByRole('button', { name: 'Expedition truck' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
 
     await waitFor(() => expect(calculateOpenRouteServiceRoute).toHaveBeenCalledTimes(1));
     expect(updateTrip).toHaveBeenCalledWith('trip-one', {
-      name: 'World tour',
+      name: 'Example trip',
       vehiclePreset: 'expedition-truck',
     });
   });
@@ -655,13 +655,13 @@ describe('App', () => {
     render(<App />);
     await waitForTripReady();
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit Example trip' }));
     await userEvent.click(screen.getByRole('button', { name: 'Expedition truck' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
 
     await waitFor(() => expect(updateTrip).toHaveBeenCalledTimes(2));
     expect(updateTrip).toHaveBeenLastCalledWith('trip-one', {
-      name: 'World tour',
+      name: 'Example trip',
       vehiclePreset: 'standard',
     });
     expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(4);
@@ -695,7 +695,7 @@ describe('App', () => {
     render(<App />);
     await waitForTripReady();
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit Example trip' }));
     await userEvent.click(screen.getByRole('button', { name: 'Large camper' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
 
@@ -746,7 +746,7 @@ describe('App', () => {
     render(<App />);
     await waitForTripReady();
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit Example trip' }));
     await userEvent.click(screen.getByRole('button', { name: 'Large camper' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
 
@@ -765,7 +765,7 @@ describe('App', () => {
 
     const status = screen.getByRole('status');
     expect(status).toHaveClass('app-status-panel', 'app-status-panel--loading');
-    expect(status).toHaveTextContent('Loading world tour');
+    expect(status).toHaveTextContent('Loading Plotter');
     expect(status).toHaveTextContent('Preparing your trip map.');
     expect(screen.queryByText('Loading trip data')).not.toBeInTheDocument();
     expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
@@ -1327,7 +1327,7 @@ describe('App', () => {
       tripDataChanges[0]?.();
     });
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Loading world tour');
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading Plotter');
     expect(screen.queryByRole('dialog', { name: 'Edit route from Paris to Rome' })).not.toBeInTheDocument();
 
     await act(async () => {
@@ -1361,7 +1361,22 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Expand itinerary panel' }));
 
     expect(screen.getByRole('button', { name: 'Brest, France' })).toBeInTheDocument();
-    expect(window.localStorage.getItem('world-tour:stops-panel-collapsed')).toBe('false');
+    expect(window.localStorage.getItem('plotter:stops-panel-collapsed')).toBe('false');
+    expect(window.localStorage.getItem('world-tour:stops-panel-collapsed')).toBe('true');
+  });
+
+  it('still loads when browser preference storage is unavailable', async () => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('Blocked', 'SecurityError');
+      },
+    });
+
+    render(<App />);
+
+    await waitForTripReady();
+    expect(screen.getByRole('region', { name: 'Plotter map workspace' })).toBeInTheDocument();
   });
 
   it('adds a right-clicked map stop after reverse-geocoded confirmation and opens its profile', async () => {
@@ -2000,7 +2015,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Open full image: Balcombe lane' }));
 
     const profile = screen.getByRole('complementary', { name: 'Balcombe profile' });
-    const mapStage = screen.getByRole('region', { name: 'World tour map workspace' });
+    const mapStage = screen.getByRole('region', { name: 'Plotter map workspace' });
     const preview = screen.getByRole('dialog', { name: 'Image preview' });
 
     expect(mapStage).toContainElement(preview);
@@ -2244,7 +2259,7 @@ describe('App', () => {
     await screen.findByRole('complementary', { name: 'Paris profile' });
 
     const map = maplibreMock.mapInstances.at(-1)!;
-    triggerMapLayerEvent(map, 'click', 'world-tour-activity-points', {
+    triggerMapLayerEvent(map, 'click', 'plotter-activity-points', {
       features: [{ properties: { id: louvre.id } }],
     });
 
@@ -2942,7 +2957,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading world tour');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading Plotter');
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add stop at map center' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export trip data' })).not.toBeInTheDocument();

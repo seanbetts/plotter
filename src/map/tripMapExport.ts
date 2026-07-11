@@ -47,7 +47,7 @@ export function tripMapFilename(name: string) {
     .replace(/^-+|-+$/g, '');
   stem = Array.from(stem).slice(0, 100).join('').replace(/-+$/g, '');
   if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem)) stem = `trip-${stem}`;
-  return `${stem || 'world-tour'}.png`;
+  return `${stem || 'plotter'}.png`;
 }
 
 export function buildExportStopFeatures(

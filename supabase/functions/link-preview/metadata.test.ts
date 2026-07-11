@@ -232,7 +232,7 @@ Deno.test("fetches HTML previews through an injectable fetcher", async () => {
     assertEquals(init?.redirect, "manual");
     const headers = new Headers(init?.headers);
     assertEquals(headers.get("accept"), "text/html, application/xhtml+xml");
-    assertEquals(headers.get("user-agent"), "WorldTourLinkPreview/1.0");
+    assertEquals(headers.get("user-agent"), "PlotterLinkPreview/1.0");
 
     return Promise.resolve(
       new Response(

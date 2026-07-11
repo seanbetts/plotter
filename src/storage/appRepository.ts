@@ -1,4 +1,5 @@
 import { createBrowserSupabaseClient, isSupabaseConfigured as defaultIsSupabaseConfigured } from './supabaseClient';
+import { defaultTripName } from '../domain/tripDefaults';
 import { createSupabaseTripRepository } from './supabaseTripRepository';
 import { tripDb } from './tripDb';
 import { createTripRepository } from './tripRepository';
@@ -32,7 +33,8 @@ type SupabaseAuthClient = {
   };
 };
 
-export const selectedTripStorageKey = 'world-tour:selected-trip-id';
+export const selectedTripStorageKey = 'plotter:selected-trip-id';
+export const legacySelectedTripStorageKey = 'world-tour:selected-trip-id';
 
 type AppTripStorage = {
   directory: TripDirectoryRepository;
@@ -107,7 +109,7 @@ export async function createAppTripStorage(
 export async function createAppTripRepository(options: CreateAppTripStorageOptions = {}) {
   const storage = await createAppTripStorage(options);
   const trips = await storage.directory.listTrips();
-  const trip = trips[0] ?? await storage.directory.createTrip({ name: 'World tour' });
+  const trip = trips[0] ?? await storage.directory.createTrip({ name: defaultTripName });
 
   return storage.createTripRepository(trip.id);
 }

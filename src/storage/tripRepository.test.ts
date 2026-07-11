@@ -21,7 +21,7 @@ describe('trip repository', () => {
   });
 
   function createTestRepository(tripId = 'local-default-trip') {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
 
@@ -29,7 +29,7 @@ describe('trip repository', () => {
   }
 
   it('keeps local destinations isolated by trip id', async () => {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
     const firstTrip = createTripRepository(db, 'trip-one');
@@ -51,7 +51,7 @@ describe('trip repository', () => {
   });
 
   it('keeps imported local rows isolated when different trips use the same entity ids', async () => {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
     const firstTrip = createTripRepository(db, 'trip-one');
@@ -77,7 +77,7 @@ describe('trip repository', () => {
   });
 
   it('creates, renames, lists, and deletes local trips', async () => {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
     const directory = createLocalTripDirectoryRepository(db);
@@ -93,7 +93,7 @@ describe('trip repository', () => {
   });
 
   it('defaults a new local trip to standard', async () => {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
     const directory = createLocalTripDirectoryRepository(db);
@@ -109,7 +109,7 @@ describe('trip repository', () => {
   });
 
   it('deletes local trip contents when deleting a trip', async () => {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
     const directory = createLocalTripDirectoryRepository(db);
@@ -127,7 +127,7 @@ describe('trip repository', () => {
   });
 
   it('backfills existing v4 local rows into the default trip during upgrade', async () => {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const legacyDb = new Dexie(name);
     const legacyDestination = createDestination({
       name: 'Legacy Paris',
@@ -151,14 +151,14 @@ describe('trip repository', () => {
     await expect(directory.listTrips()).resolves.toEqual([
       expect.objectContaining({
         id: 'local-default-trip',
-        name: 'World tour',
+        name: 'Untitled trip',
       }),
     ]);
     await expect(repository.listDestinations()).resolves.toEqual([legacyDestination]);
   });
 
   it('physically canonicalizes trip vehicles and legacy route intent during the v6 upgrade', async () => {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const legacyDb = new Dexie(name);
     const timestamp = '2026-07-10T12:00:00.000Z';
     const routeLeg = createRouteLeg({
@@ -261,7 +261,7 @@ describe('trip repository', () => {
   });
 
   it('physically persists route intent for local saves and snapshot replacements', async () => {
-    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
     const repository = createTripRepository(db, 'trip-one');

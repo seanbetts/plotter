@@ -84,10 +84,19 @@ function createStorage(initialTrips: TripSummary[]) {
 }
 
 function createLocalStorage(storedTripId: string | null) {
+  const values = new Map<string, string>();
+  if (storedTripId !== null) {
+    values.set('world-tour:selected-trip-id', storedTripId);
+  }
+
   return {
-    getItem: vi.fn(() => storedTripId),
-    setItem: vi.fn(),
-    removeItem: vi.fn(),
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      values.set(key, value);
+    }),
+    removeItem: vi.fn((key: string) => {
+      values.delete(key);
+    }),
   };
 }
 
@@ -107,9 +116,11 @@ describe('useTripWorkspace', () => {
 
     await waitFor(() => expect(result.current.activeTrip?.id).toBe(remembered.id));
     expect(createTripRepository).toHaveBeenCalledWith(remembered.id);
+    expect(localStorage.setItem).toHaveBeenCalledWith(selectedTripStorageKey, remembered.id);
+    expect(localStorage.getItem('world-tour:selected-trip-id')).toBe(remembered.id);
   });
 
-  it('creates World tour when no trips exist', async () => {
+  it('creates Untitled trip when no trips exist', async () => {
     const localStorage = createLocalStorage(null);
     const { storage, directory } = createStorage([]);
 
@@ -120,8 +131,8 @@ describe('useTripWorkspace', () => {
       }),
     );
 
-    await waitFor(() => expect(result.current.activeTrip?.name).toBe('World tour'));
-    expect(directory.createTrip).toHaveBeenCalledWith({ name: 'World tour' });
+    await waitFor(() => expect(result.current.activeTrip?.name).toBe('Untitled trip'));
+    expect(directory.createTrip).toHaveBeenCalledWith({ name: 'Untitled trip' });
     expect(localStorage.setItem).toHaveBeenCalledWith(
       selectedTripStorageKey,
       result.current.activeTrip!.id,
@@ -294,9 +305,9 @@ describe('useTripWorkspace', () => {
       await result.current.refreshTrips();
     });
 
-    expect(directory.createTrip).toHaveBeenCalledWith({ name: 'World tour' });
+    expect(directory.createTrip).toHaveBeenCalledWith({ name: 'Untitled trip' });
     expect(result.current.trips).toHaveLength(1);
-    expect(result.current.activeTrip?.name).toBe('World tour');
+    expect(result.current.activeTrip?.name).toBe('Untitled trip');
     expect(result.current.repository).not.toBeNull();
     expect(createTripRepository).toHaveBeenLastCalledWith(result.current.activeTrip!.id);
     expect(localStorage.setItem).toHaveBeenLastCalledWith(

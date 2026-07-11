@@ -36,7 +36,7 @@ async function createParisStop(page: Page) {
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await expect(page.getByLabel('Interactive world tour map')).toBeVisible();
+  await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
   await page.getByLabel('Search for a destination').fill('Paris');
   await page.getByRole('option', { name: 'Paris, France' }).click();

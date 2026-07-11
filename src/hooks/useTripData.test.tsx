@@ -25,7 +25,7 @@ describe('useTripData', () => {
   });
 
   function createTestRepository() {
-    const name = `world-tour-hook-test-${crypto.randomUUID()}`;
+    const name = `plotter-hook-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
     return createTripRepository(db);

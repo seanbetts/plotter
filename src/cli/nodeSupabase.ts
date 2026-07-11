@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
@@ -32,7 +32,7 @@ export function createNodeSupabaseClient() {
   });
 }
 
-function createSessionPath() {
+function createSessionPath(directoryName: '.plotter' | '.world-tour') {
   const supabaseUrl = process.env.VITE_SUPABASE_URL ?? '';
   const host = (() => {
     try {
@@ -42,32 +42,56 @@ function createSessionPath() {
     }
   })();
 
-  return join(homedir(), '.world-tour', `trip-cli-session-${host}.json`);
+  return join(homedir(), directoryName, `trip-cli-session-${host}.json`);
 }
 
-export function createNodeSupabaseSessionStore(path = createSessionPath()): NodeSupabaseSessionStore {
+async function readSession(path: string) {
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8')) as Partial<NodeSupabaseSession>;
+    if (typeof value.access_token === 'string' && typeof value.refresh_token === 'string') {
+      return {
+        access_token: value.access_token,
+        refresh_token: value.refresh_token,
+      };
+    }
+  } catch {
+    // Missing and invalid session files are treated as an empty cache.
+  }
+
+  return null;
+}
+
+export function createNodeSupabaseSessionStore(
+  path = createSessionPath('.plotter'),
+  legacyPath: string | null = createSessionPath('.world-tour'),
+): NodeSupabaseSessionStore {
+  async function writeSession(session: NodeSupabaseSession) {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify(session)}\n`, { mode: 0o600 });
+    await chmod(path, 0o600);
+  }
+
   return {
     async read() {
-      try {
-        const value = JSON.parse(await readFile(path, 'utf8')) as Partial<NodeSupabaseSession>;
-        if (typeof value.access_token === 'string' && typeof value.refresh_token === 'string') {
-          return {
-            access_token: value.access_token,
-            refresh_token: value.refresh_token,
-          };
+      const currentSession = await readSession(path);
+      if (currentSession) return currentSession;
+
+      if (legacyPath) {
+        const legacySession = await readSession(legacyPath);
+        if (legacySession) {
+          await writeSession(legacySession);
+          return legacySession;
         }
-      } catch {
-        return null;
       }
 
       return null;
     },
-    async write(session) {
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, `${JSON.stringify(session)}\n`, { mode: 0o600 });
-    },
+    write: writeSession,
     async clear() {
-      await rm(path, { force: true });
+      await Promise.all([
+        rm(path, { force: true }),
+        ...(legacyPath ? [rm(legacyPath, { force: true })] : []),
+      ]);
     },
   };
 }

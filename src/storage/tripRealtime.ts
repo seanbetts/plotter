@@ -32,7 +32,7 @@ export function createSupabaseTripRealtime(supabase: SupabaseClient): TripRealti
   return {
     subscribeToTrips(onChange) {
       const channel = supabase
-        .channel('world-tour-trips')
+        .channel('plotter-trips')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, onChange)
         .subscribe();
 
@@ -44,7 +44,7 @@ export function createSupabaseTripRealtime(supabase: SupabaseClient): TripRealti
     subscribeToTripData(tripId, onChange) {
       const debounced = debounce(onChange, 150);
       const channel = supabase
-        .channel(`world-tour-trip-${tripId}`)
+        .channel(`plotter-trip-${tripId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'destinations', filter: `trip_id=eq.${tripId}` }, debounced)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'route_legs', filter: `trip_id=eq.${tripId}` }, debounced)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'activities', filter: `trip_id=eq.${tripId}` }, debounced)

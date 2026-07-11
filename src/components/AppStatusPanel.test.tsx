@@ -8,14 +8,14 @@ describe('AppStatusPanel', () => {
     const { container } = render(
       <AppStatusPanel
         status="loading"
-        title="Loading world tour"
+        title="Loading Plotter"
         message="Preparing your trip map."
       />,
     );
 
     const status = screen.getByRole('status');
     expect(status).toHaveAttribute('aria-live', 'polite');
-    expect(status).toHaveTextContent('Loading world tour');
+    expect(status).toHaveTextContent('Loading Plotter');
     expect(status).toHaveTextContent('Preparing your trip map.');
     expect(container.querySelector('.app-status-panel__spinner')).toHaveAttribute('aria-hidden', 'true');
   });

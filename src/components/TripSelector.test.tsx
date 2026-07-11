@@ -8,7 +8,7 @@ import { TripSelector } from './TripSelector';
 const trips: TripSummary[] = [
   {
     id: 'trip-one',
-    name: 'World tour',
+    name: 'Example trip',
     description: '',
     routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-01T10:00:00.000Z',
@@ -157,7 +157,7 @@ describe('TripSelector', () => {
     renderSelector({ trips: [camperTrip, trips[1]], activeTrip: camperTrip });
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit Example trip' }));
 
     const vehicleGroup = screen.getByRole('group', { name: 'Vehicle for this trip' });
     const options = [
@@ -246,8 +246,8 @@ describe('TripSelector', () => {
     });
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete World tour' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Delete World tour' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete Example trip' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Delete Example trip' }));
 
     expect(props.onDeleteTrip).toHaveBeenCalledWith('trip-one');
     expect(screen.getByRole('dialog', { name: 'Delete trip' })).toBeInTheDocument();
