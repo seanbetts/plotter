@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import { selectedTripStorageKey } from '../storage/appRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
@@ -10,6 +11,7 @@ function createTrip(name: string, id: string = crypto.randomUUID()): TripSummary
     id,
     name,
     description: '',
+    routingVehicle: resolveVehiclePreset('standard'),
     createdAt: '2026-07-03T10:00:00.000Z',
     updatedAt: '2026-07-03T10:00:00.000Z',
   };
@@ -152,20 +154,64 @@ describe('useTripWorkspace', () => {
     expect(result.current.activeTrip?.name).toBe('Third');
 
     await act(async () => {
-      await result.current.renameTrip(result.current.activeTrip!.id, 'Renamed third');
+      await result.current.updateTrip(result.current.activeTrip!.id, {
+        name: 'Renamed third',
+        vehiclePreset: 'large-camper',
+      });
     });
     expect(result.current.activeTrip?.name).toBe('Renamed third');
+    expect(result.current.activeTrip?.routingVehicle).toEqual(resolveVehiclePreset('large-camper'));
 
     await act(async () => {
-      await result.current.renameTrip(first.id, 'Renamed first');
+      await result.current.updateTrip(first.id, {
+        name: 'Renamed first',
+        vehiclePreset: 'expedition-truck',
+      });
     });
     expect(result.current.activeTrip?.name).toBe('Renamed third');
     expect(result.current.trips.find((trip) => trip.id === first.id)?.name).toBe('Renamed first');
+    expect(result.current.trips.find((trip) => trip.id === first.id)?.routingVehicle)
+      .toEqual(resolveVehiclePreset('expedition-truck'));
 
     await act(async () => {
       await result.current.deleteTrip(result.current.activeTrip!.id);
     });
     expect(result.current.activeTrip).not.toBeNull();
+  });
+
+  it('returns the saved trip from an update and false when an update fails', async () => {
+    const first = createTrip('First', 'first-trip');
+    const localStorage = createLocalStorage(null);
+    const { storage, directory } = createStorage([first]);
+    const { result } = renderHook(() => useTripWorkspace({
+      createStorage: async () => storage,
+      localStorage,
+    }));
+
+    await waitFor(() => expect(result.current.activeTrip?.id).toBe(first.id));
+
+    let updated: TripSummary | false = false;
+    await act(async () => {
+      updated = await result.current.updateTrip(first.id, {
+        name: 'Updated',
+        vehiclePreset: 'large-camper',
+      });
+    });
+    expect(updated).toMatchObject({
+      id: first.id,
+      name: 'Updated',
+      routingVehicle: resolveVehiclePreset('large-camper'),
+    });
+
+    vi.mocked(directory.updateTrip).mockRejectedValueOnce(new Error('Update failed'));
+    await act(async () => {
+      updated = await result.current.updateTrip(first.id, {
+        name: 'Ignored',
+        vehiclePreset: 'standard',
+      });
+    });
+    expect(updated).toBe(false);
+    expect(result.current.actionError).toBe('Update failed');
   });
 
   it('refreshes trips against the current active trip when it was removed externally', async () => {
@@ -202,6 +248,30 @@ describe('useTripWorkspace', () => {
     expect(result.current.trips).toEqual([third]);
     expect(result.current.activeTrip?.id).toBe(third.id);
     expect(createTripRepository).toHaveBeenLastCalledWith(third.id);
+  });
+
+  it('refreshes the selected trip vehicle after an external metadata update', async () => {
+    const first = createTrip('First', 'first-trip');
+    const localStorage = createLocalStorage(null);
+    const { storage, setTrips } = createStorage([first]);
+    const { result } = renderHook(() => useTripWorkspace({
+      createStorage: async () => storage,
+      localStorage,
+    }));
+
+    await waitFor(() => expect(result.current.activeTrip?.id).toBe(first.id));
+    setTrips([{
+      ...first,
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+      updatedAt: '2026-07-03T12:00:00.000Z',
+    }]);
+
+    await act(async () => {
+      await result.current.refreshTrips();
+    });
+
+    expect(result.current.activeTrip?.routingVehicle)
+      .toEqual(resolveVehiclePreset('expedition-truck'));
   });
 
   it('creates and activates a replacement trip when refresh finds no trips', async () => {

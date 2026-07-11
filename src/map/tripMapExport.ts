@@ -220,7 +220,7 @@ function addExportSourcesAndLayers(
       'line-color': [
         'match',
         ['get', 'type'],
-        'shipping-manual',
+        'manual',
         mapColors.shipping,
         'failed',
         mapColors.text,
@@ -229,7 +229,7 @@ function addExportSourcesAndLayers(
       'line-dasharray': [
         'match',
         ['get', 'type'],
-        'shipping-manual',
+        'manual',
         ['literal', [2, 2]],
         'failed',
         ['literal', [1, 2]],

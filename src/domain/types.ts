@@ -17,8 +17,28 @@ export type DestinationLocation = {
 
 export type DestinationStatus = 'idea' | 'planned' | 'confirmed' | 'visited';
 export type Priority = 'low' | 'medium' | 'high' | 'must-do';
-export type RouteLegType = 'driving-auto' | 'shipping-manual';
-export type RouteLegStatus = 'pending' | 'calculating' | 'ready' | 'failed' | 'manual';
+export type RouteLegStatus = 'pending' | 'calculating' | 'ready' | 'failed' | 'manual' | 'review-required';
+
+export type VehiclePreset = 'standard' | 'large-camper' | 'expedition-truck';
+
+export type VehicleRestrictions = {
+  length?: number;
+  width?: number;
+  height?: number;
+  weight?: number;
+  axleLoad?: number;
+};
+
+export type TripRoutingVehicle = {
+  preset: VehiclePreset;
+  profile: 'driving-car' | 'driving-hgv';
+  vehicleType?: 'hgv';
+  restrictions: VehicleRestrictions;
+};
+
+export type RouteMovement = 'drive' | 'vehicle-shipping';
+export type RouteCalculationMode = 'automatic' | 'manual';
+export type FerryPolicy = 'allow' | 'avoid' | 'require';
 
 export type MediaItem = {
   id: string;
@@ -153,11 +173,54 @@ export type Destination = {
   updatedAt: string;
 };
 
+export type RouteWaypoint = {
+  id: string;
+  order: number;
+  name: string;
+  coordinates: Coordinates;
+  location: DestinationLocation;
+  notes: string;
+  links: ResearchLink[];
+};
+
+export type RouteSection = {
+  kind: 'road' | 'ferry';
+  startGeometryIndex: number;
+  endGeometryIndex: number;
+  distanceKm: number;
+};
+
+export type RouteIntentSnapshot = {
+  movement: RouteMovement;
+  calculation: RouteCalculationMode;
+  ferryPolicy: FerryPolicy;
+  waypoints: RouteWaypoint[];
+  notes: string;
+};
+
+export type RouteWarning = {
+  code:
+    | 'SUSPICIOUS_DETOUR'
+    | 'FERRY_REQUIRED_NOT_FOUND'
+    | 'FERRY_AVOIDED_BUT_FOUND'
+    | 'ROUTE_INTENT_REASSIGNMENT_REQUIRED';
+  message: string;
+  context?: {
+    sourceRouteLegId: string;
+    unresolvedIntent: RouteIntentSnapshot;
+  };
+};
+
 export type RouteLeg = {
   id: string;
   originDestinationId: string;
   targetDestinationId: string;
-  type: RouteLegType;
+  movement: RouteMovement;
+  calculation: RouteCalculationMode;
+  ferryPolicy?: FerryPolicy;
+  waypoints?: RouteWaypoint[];
+  sections?: RouteSection[];
+  warnings?: RouteWarning[];
   status: RouteLegStatus;
   distanceKm?: number;
   travelTimeHours?: number;

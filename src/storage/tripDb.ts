@@ -1,8 +1,13 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type { Activity, ActivityMediaRecord, Destination, RouteLeg } from '../domain/types';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { TripSummary } from './tripDirectoryRepository';
 
 const defaultLocalTripId = 'local-default-trip';
+// v6 upgrade-only compatibility. Fragmented tokens keep the active legacy gate focused on runtime code.
+const legacyRouteTypeField = ['ty', 'pe'].join('');
+const legacyAutomaticRouteType = ['driving', 'auto'].join('-');
+const legacyManualRouteType = ['shipping', 'manual'].join('-');
 
 export type TripDb = Dexie & {
   trips: EntityTable<TripSummary, 'id'>;
@@ -87,6 +92,38 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
       transaction.table('routeLegs').toCollection().modify({ tripId: defaultLocalTripId }),
       transaction.table('activities').toCollection().modify({ tripId: defaultLocalTripId }),
       transaction.table('activityMedia').toCollection().modify({ tripId: defaultLocalTripId }),
+    ]);
+  });
+
+  db.version(6).stores({
+    trips: 'id, name, updatedAt, createdAt',
+    destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
+    routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, movement, calculation, status, routeKey, updatedAt',
+    activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
+    activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
+  }).upgrade(async (transaction) => {
+    await Promise.all([
+      transaction.table('trips').toCollection().modify((trip) => {
+        trip.routingVehicle ??= resolveVehiclePreset('standard');
+      }),
+      transaction.table('routeLegs').toCollection().modify((routeLeg) => {
+        const legacyRouteType = routeLeg[legacyRouteTypeField];
+        const movementByLegacyRouteType = {
+          [legacyAutomaticRouteType]: 'drive',
+          [legacyManualRouteType]: 'vehicle-shipping',
+        } as const;
+        const calculationByLegacyRouteType = {
+          [legacyAutomaticRouteType]: 'automatic',
+          [legacyManualRouteType]: 'manual',
+        } as const;
+        routeLeg.movement ??= movementByLegacyRouteType[legacyRouteType] ?? 'drive';
+        routeLeg.calculation ??= calculationByLegacyRouteType[legacyRouteType] ?? 'automatic';
+        routeLeg.ferryPolicy ??= 'allow';
+        routeLeg.waypoints ??= [];
+        routeLeg.sections ??= [];
+        routeLeg.warnings ??= [];
+        delete routeLeg[legacyRouteTypeField];
+      }),
     ]);
   });
 

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,10 +12,13 @@ import {
 import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import { createRouteLeg } from './domain/routeLegs';
+import type { RouteOption } from './domain/routeOptions';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
+import { resolveVehiclePreset, standardRoutingVehicle } from './domain/vehiclePresets';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { downloadTripMap } from './map/tripMapExport';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
+import { createAppWebImageSearchClient } from './services/webImageSearchClient';
 import type { WebImageSearchClient, WebImageSearchResult } from './services/webImageSearchClient';
 import type { TripRepository } from './storage/tripRepository';
 
@@ -100,9 +104,18 @@ const repositoryMock = vi.hoisted(() => {
     routeLegs: [] as RouteLeg[],
     initialDestinations: Promise.resolve([] as Destination[]),
     initialRouteLegs: Promise.resolve([] as RouteLeg[]),
-    listDestinations: vi.fn(async () => repository.initialDestinations),
+    destinationsLoaded: false,
+    routeLegsLoaded: false,
+    listDestinations: vi.fn(async () => {
+      if (!repository.destinationsLoaded) {
+        repository.destinations = structuredClone(await repository.initialDestinations);
+        repository.destinationsLoaded = true;
+      }
+      return repository.destinations;
+    }),
     saveDestination: vi.fn(async (destination: Destination) => {
-      repository.destinations.push(destination);
+      const index = repository.destinations.findIndex(({ id }) => id === destination.id);
+      if (index === -1) repository.destinations.push(destination); else repository.destinations[index] = destination;
     }),
     deleteDestination: vi.fn(async (destinationId: string) => {
       repository.destinations = repository.destinations.filter((destination) => destination.id !== destinationId);
@@ -144,9 +157,16 @@ const repositoryMock = vi.hoisted(() => {
     })),
     deleteActivity: vi.fn(async (): Promise<void> => undefined),
     reorderActivities: vi.fn(async (): Promise<Activity[]> => []),
-    listRouteLegs: vi.fn(async () => repository.initialRouteLegs),
+    listRouteLegs: vi.fn(async () => {
+      if (!repository.routeLegsLoaded) {
+        repository.routeLegs = structuredClone(await repository.initialRouteLegs);
+        repository.routeLegsLoaded = true;
+      }
+      return repository.routeLegs;
+    }),
     saveRouteLeg: vi.fn(async (routeLeg: RouteLeg) => {
-      repository.routeLegs.push(routeLeg);
+      const index = repository.routeLegs.findIndex(({ id }) => id === routeLeg.id);
+      if (index === -1) repository.routeLegs.push(routeLeg); else repository.routeLegs[index] = routeLeg;
     }),
     deleteRouteLeg: vi.fn(async (routeLegId: string) => {
       repository.routeLegs = repository.routeLegs.filter((routeLeg) => routeLeg.id !== routeLegId);
@@ -181,11 +201,16 @@ const linkPreviewClientMock = vi.hoisted(() => ({
   })),
 }));
 
+const defaultWebImageSearchClientMock = vi.hoisted(() => ({
+  searchImages: vi.fn(async () => []),
+}));
+
 const tripsMock = [
   {
     id: 'trip-one',
     name: 'World tour',
     description: '',
+    routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-01T10:00:00.000Z',
     updatedAt: '2026-07-01T10:00:00.000Z',
   },
@@ -193,6 +218,7 @@ const tripsMock = [
     id: 'trip-two',
     name: 'Japan winter',
     description: '',
+    routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-02T10:00:00.000Z',
     updatedAt: '2026-07-02T10:00:00.000Z',
   },
@@ -208,7 +234,7 @@ function mockTripWorkspace(overrides: Partial<ReturnType<typeof useTripWorkspace
     actionError: null,
     selectTrip: vi.fn(),
     createTrip: vi.fn(),
-    renameTrip: vi.fn(),
+    updateTrip: vi.fn(),
     deleteTrip: vi.fn(),
     refreshTrips: vi.fn(),
     realtime: null,
@@ -224,6 +250,10 @@ vi.mock('./map/tripMapExport', () => ({ downloadTripMap: vi.fn() }));
 
 vi.mock('./services/linkPreviewClient', () => ({
   createAppLinkPreviewClient: vi.fn(() => linkPreviewClientMock),
+}));
+
+vi.mock('./services/webImageSearchClient', () => ({
+  createAppWebImageSearchClient: vi.fn(() => defaultWebImageSearchClientMock),
 }));
 
 vi.mock('./adapters/geocoding', () => ({
@@ -245,6 +275,7 @@ vi.mock('./adapters/openRouteService', () => ({
     },
     provider: 'openrouteservice',
     profile: 'driving-car',
+    sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 160 }],
   })),
   calculateOpenRouteServiceRouteOptions: vi.fn(async () => [
     {
@@ -263,6 +294,7 @@ vi.mock('./adapters/openRouteService', () => ({
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'recommended-route-key',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 160 }],
     },
     {
       id: 'avoid-highways',
@@ -281,6 +313,7 @@ vi.mock('./adapters/openRouteService', () => ({
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'avoid-highways-route-key',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 220 }],
     },
   ]),
 }));
@@ -302,11 +335,20 @@ describe('App', () => {
     repositoryMock.routeLegs = [];
     repositoryMock.initialDestinations = Promise.resolve([]);
     repositoryMock.initialRouteLegs = Promise.resolve([]);
+    repositoryMock.destinationsLoaded = false;
+    repositoryMock.routeLegsLoaded = false;
     repositoryMock.listDestinations.mockClear();
-    repositoryMock.listDestinations.mockImplementation(async () => repositoryMock.initialDestinations);
+    repositoryMock.listDestinations.mockImplementation(async () => {
+      if (!repositoryMock.destinationsLoaded) {
+        repositoryMock.destinations = structuredClone(await repositoryMock.initialDestinations);
+        repositoryMock.destinationsLoaded = true;
+      }
+      return repositoryMock.destinations;
+    });
     repositoryMock.saveDestination.mockClear();
     repositoryMock.saveDestination.mockImplementation(async (destination: Destination) => {
-      repositoryMock.destinations.push(destination);
+      const index = repositoryMock.destinations.findIndex(({ id }) => id === destination.id);
+      if (index === -1) repositoryMock.destinations.push(destination); else repositoryMock.destinations[index] = destination;
     });
     repositoryMock.deleteDestination.mockClear();
     repositoryMock.listActivities.mockClear();
@@ -324,7 +366,13 @@ describe('App', () => {
     repositoryMock.reorderActivities.mockClear();
     repositoryMock.reorderActivities.mockImplementation(async () => []);
     repositoryMock.listRouteLegs.mockClear();
-    repositoryMock.listRouteLegs.mockImplementation(async () => repositoryMock.initialRouteLegs);
+    repositoryMock.listRouteLegs.mockImplementation(async () => {
+      if (!repositoryMock.routeLegsLoaded) {
+        repositoryMock.routeLegs = structuredClone(await repositoryMock.initialRouteLegs);
+        repositoryMock.routeLegsLoaded = true;
+      }
+      return repositoryMock.routeLegs;
+    });
     repositoryMock.saveRouteLeg.mockClear();
     repositoryMock.deleteRouteLeg.mockClear();
     repositoryMock.replaceTripData.mockClear();
@@ -352,6 +400,9 @@ describe('App', () => {
     });
     vi.mocked(createAppLinkPreviewClient).mockReset();
     vi.mocked(createAppLinkPreviewClient).mockReturnValue(linkPreviewClientMock);
+    vi.mocked(createAppWebImageSearchClient).mockReset();
+    vi.mocked(createAppWebImageSearchClient).mockReturnValue(defaultWebImageSearchClientMock);
+    defaultWebImageSearchClientMock.searchImages.mockReset().mockResolvedValue([]);
     vi.mocked(searchMapTilerPlaces).mockReset();
     vi.mocked(resolveMapTilerCoordinates).mockReset();
     vi.mocked(calculateOpenRouteServiceRoute).mockClear();
@@ -425,7 +476,7 @@ describe('App', () => {
     const readyRouteLeg = createRouteLeg({
       originDestinationId: balcombe.id,
       targetDestinationId: paris.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 442,
       travelTimeHours: 5.5,
@@ -520,6 +571,7 @@ describe('App', () => {
 
     tripsChanges[0]();
     expect(refreshTrips).toHaveBeenCalledTimes(1);
+    expect(calculateOpenRouteServiceRoute).not.toHaveBeenCalled();
 
     repositoryMock.listDestinations.mockClear();
     tripDataChanges[0]();
@@ -528,6 +580,179 @@ describe('App', () => {
     unmount();
     expect(unsubscribeTrips).toHaveBeenCalledTimes(1);
     expect(unsubscribeTripData).toHaveBeenCalledTimes(1);
+  });
+
+  it('recalculates routes exactly once when the active trip vehicle is saved', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    const readyLeg = {
+      ...createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        movement: 'drive', calculation: 'automatic',
+      }),
+      status: 'ready' as const,
+      distanceKm: 150,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString' as const, coordinates: [[1, 50], [2, 51]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      routeKey: 'old-car-key',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+    };
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([readyLeg]);
+    const updatedTrip = {
+      ...tripsMock[0],
+      routingVehicle: {
+        preset: 'expedition-truck' as const,
+        profile: 'driving-hgv' as const,
+        vehicleType: 'hgv' as const,
+        restrictions: { length: 9, width: 2.55, height: 3.8, weight: 15, axleLoad: 7.5 },
+      },
+    };
+    const updateTrip = vi.fn(async () => updatedTrip);
+    mockTripWorkspace({ updateTrip } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Expedition truck' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
+
+    await waitFor(() => expect(calculateOpenRouteServiceRoute).toHaveBeenCalledTimes(1));
+    expect(updateTrip).toHaveBeenCalledWith('trip-one', {
+      name: 'World tour',
+      vehiclePreset: 'expedition-truck',
+    });
+  });
+
+  it('restores prior routes and trip metadata after a partial vehicle-route write failure', async () => {
+    const first = createDestination({ name: 'First', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const second = createDestination({ name: 'Second', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    const third = createDestination({ name: 'Third', coordinates: { lat: 52, lng: 3 }, order: 2 });
+    const priorRouteLegs = [
+      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, movement: 'drive', calculation: 'automatic' }),
+      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, movement: 'vehicle-shipping', calculation: 'manual' }),
+    ];
+    repositoryMock.initialDestinations = Promise.resolve([first, second, third]);
+    repositoryMock.initialRouteLegs = Promise.resolve(priorRouteLegs);
+    let saveCall = 0;
+    repositoryMock.saveRouteLeg.mockImplementation(async () => {
+      saveCall += 1;
+      if (saveCall === 2) throw new Error('second route write failed');
+    });
+    const updatedTrip = {
+      ...tripsMock[0],
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+    };
+    const updateTrip = vi.fn()
+      .mockResolvedValueOnce(updatedTrip)
+      .mockResolvedValueOnce(tripsMock[0]);
+    mockTripWorkspace({ updateTrip } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Expedition truck' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
+
+    await waitFor(() => expect(updateTrip).toHaveBeenCalledTimes(2));
+    expect(updateTrip).toHaveBeenLastCalledWith('trip-one', {
+      name: 'World tour',
+      vehiclePreset: 'standard',
+    });
+    expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(4);
+    expect(repositoryMock.saveRouteLeg).toHaveBeenNthCalledWith(3, priorRouteLegs[0]);
+    expect(repositoryMock.saveRouteLeg).toHaveBeenNthCalledWith(4, priorRouteLegs[1]);
+    expect(await screen.findByText(/second route write failed.*trip metadata was restored/i))
+      .toBeInTheDocument();
+  });
+
+  it('surfaces route and metadata rollback failures together', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    const priorRouteLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+    });
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([priorRouteLeg]);
+    repositoryMock.saveRouteLeg
+      .mockRejectedValueOnce(new Error('route write failed'))
+      .mockRejectedValueOnce(new Error('route rollback failed'));
+    const updateTrip = vi.fn()
+      .mockResolvedValueOnce({
+        ...tripsMock[0],
+        routingVehicle: resolveVehiclePreset('large-camper'),
+      })
+      .mockResolvedValueOnce(false);
+    mockTripWorkspace({ updateTrip } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Large camper' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
+
+    expect(await screen.findByText(
+      /route write failed.*route rollback failed.*trip metadata rollback failed/i,
+    )).toBeInTheDocument();
+  });
+
+  it('keeps the concrete workspace rollback error visible with the consistency warning', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([
+      createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        movement: 'drive', calculation: 'automatic',
+      }),
+    ]);
+    repositoryMock.saveRouteLeg.mockRejectedValueOnce(new Error('route write rejected'));
+    const updateTrip = vi.fn();
+    vi.mocked(useTripWorkspace).mockImplementation(() => {
+      const [actionError, setActionError] = useState<string | null>(null);
+      updateTrip.mockImplementationOnce(async () => ({
+        ...tripsMock[0],
+        routingVehicle: resolveVehiclePreset('large-camper'),
+      }));
+      updateTrip.mockImplementationOnce(async () => {
+        setActionError('metadata write rejected');
+        return false;
+      });
+      return {
+        trips: tripsMock,
+        activeTrip: tripsMock[0],
+        repository: repositoryMock,
+        isLoading: false,
+        error: null,
+        actionError,
+        selectTrip: vi.fn(),
+        createTrip: vi.fn(),
+        updateTrip,
+        deleteTrip: vi.fn(),
+        refreshTrips: vi.fn(),
+        realtime: null,
+      } as ReturnType<typeof useTripWorkspace>;
+    });
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Large camper' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
+
+    const error = await screen.findByText(/trip metadata rollback failed/i);
+    expect(error).toHaveTextContent('metadata write rejected');
+    expect(error).toHaveTextContent('trip metadata may not match the restored route legs');
   });
 
   it('shows one centered loading panel while app clients and trip data load', async () => {
@@ -618,7 +843,7 @@ describe('App', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: paris.id,
       targetDestinationId: rome.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 1420,
       travelTimeHours: 14.5,
@@ -767,7 +992,7 @@ describe('App', () => {
       actionError: null,
       selectTrip: vi.fn(),
       createTrip: vi.fn(),
-      renameTrip: vi.fn(),
+      updateTrip: vi.fn(),
       deleteTrip: vi.fn(),
     });
     rerender(<App />);
@@ -813,42 +1038,76 @@ describe('App', () => {
 
   it('opens route alternatives from the route row and saves the selected option', async () => {
     const user = userEvent.setup();
-    vi.mocked(searchMapTilerPlaces)
-      .mockResolvedValueOnce([
-        createPlaceSearchResult({
-          id: 'place-istanbul',
-          label: 'Istanbul, Turkey',
-          placeName: 'Istanbul',
-          regionName: '',
-          countryName: 'Turkey',
-          coordinates: { lat: 41.0082, lng: 28.9784 },
-        }),
-      ])
-      .mockResolvedValueOnce([
-        createPlaceSearchResult({
-          id: 'place-tbilisi',
-          label: 'Tbilisi, Georgia',
-          placeName: 'Tbilisi',
-          regionName: '',
-          countryName: 'Georgia',
-          coordinates: { lat: 41.7151, lng: 44.8271 },
-        }),
-      ]);
+    const istanbul = createDestination({
+      name: 'Istanbul',
+      coordinates: { lat: 41.0082, lng: 28.9784 },
+      order: 0,
+    });
+    const tbilisi = createDestination({
+      name: 'Tbilisi',
+      coordinates: { lat: 41.7151, lng: 44.8271 },
+      order: 1,
+    });
+    const waypoint = {
+      id: 'waypoint-batumi',
+      order: 1,
+      name: 'Batumi',
+      coordinates: { lat: 41.6461, lng: 41.6402 },
+      location: tbilisi.location,
+      notes: 'Keep the Black Sea route.',
+      links: [],
+    };
+    const earlierWaypoint = {
+      ...waypoint,
+      id: 'waypoint-samsun',
+      order: 0,
+      name: 'Samsun',
+      coordinates: { lat: 41.2867, lng: 36.33 },
+    };
+    const routeLeg = {
+      ...createRouteLeg({
+        originDestinationId: istanbul.id,
+        targetDestinationId: tbilisi.id,
+        movement: 'drive',
+        calculation: 'automatic',
+        ferryPolicy: 'allow',
+        waypoints: [waypoint, earlierWaypoint],
+        warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Stale warning.' }],
+        notes: 'Keep the border research notes.',
+      }),
+      status: 'ready' as const,
+      distanceKm: 160,
+      travelTimeHours: 2.25,
+      geometry: { type: 'LineString' as const, coordinates: [[28.9784, 41.0082], [44.8271, 41.7151]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      routeKey: 'recommended-route-key',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+    };
+    repositoryMock.initialDestinations = Promise.resolve([istanbul, tbilisi]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+    const routingVehicle = resolveVehiclePreset('large-camper');
+    mockTripWorkspace({
+      activeTrip: { ...tripsMock[0], routingVehicle },
+    } as Partial<ReturnType<typeof useTripWorkspace>>);
 
     render(<App />);
 
     await waitForTripReady();
 
-    await user.type(screen.getByLabelText('Search for a destination'), 'Istanbul');
-    await user.click(await screen.findByRole('option', { name: 'Istanbul, Turkey' }));
-    await user.clear(screen.getByLabelText('Search for a destination'));
-    await user.type(screen.getByLabelText('Search for a destination'), 'Tbilisi');
-    await user.click(await screen.findByRole('option', { name: 'Tbilisi, Georgia' }));
-
     const editRouteButton = await screen.findByRole('button', {
       name: 'Edit route from Istanbul to Tbilisi',
     });
     await user.click(editRouteButton);
+
+    expect(calculateOpenRouteServiceRouteOptions).toHaveBeenCalledWith({
+      apiKey: expect.any(String),
+      origin: istanbul.coordinates,
+      target: tbilisi.coordinates,
+      routingVehicle,
+      waypoints: [earlierWaypoint, waypoint],
+      ferryPolicy: 'allow',
+    });
 
     expect(await screen.findByRole('dialog', { name: 'Edit route from Istanbul to Tbilisi' })).toBeInTheDocument();
     expect(await screen.findByText('Avoid highways')).toBeInTheDocument();
@@ -863,9 +1122,145 @@ describe('App', () => {
           distanceKm: 220,
           travelTimeHours: 3.4,
           status: 'ready',
+          movement: 'drive',
+          calculation: 'automatic',
+          ferryPolicy: 'allow',
+          waypoints: [waypoint, earlierWaypoint],
+          notes: 'Keep the border research notes.',
+          sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 220 }],
+          warnings: [],
         }),
       ),
     );
+  });
+
+  it('does not save a stale alternative after route intent changes while the picker is open', async () => {
+    const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const hamburg = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createRouteLeg({
+      originDestinationId: bremen.id,
+      targetDestinationId: hamburg.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 125,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'original-route',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+      notes: 'Original intent.',
+    });
+    repositoryMock.initialDestinations = Promise.resolve([bremen, hamburg]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit route from Bremen to Hamburg' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Set Bremen to Hamburg to Vehicle shipping' }));
+    await waitFor(() => expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Use selected route' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Route intent changed'));
+    expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
+      expect.objectContaining({ movement: 'vehicle-shipping', calculation: 'manual', status: 'manual', notes: 'Original intent.' }),
+    );
+  });
+
+  it.each([
+    {
+      name: 'fails when a required ferry is missing',
+      ferryPolicy: 'require' as const,
+      distanceKm: 800,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 800 }],
+      expectedStatus: 'failed',
+      warningCode: 'FERRY_REQUIRED_NOT_FOUND',
+      retainsGeometry: false,
+    },
+    {
+      name: 'fails when an avoided ferry is returned',
+      ferryPolicy: 'avoid' as const,
+      distanceKm: 800,
+      sections: [{ kind: 'ferry' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 800 }],
+      expectedStatus: 'failed',
+      warningCode: 'FERRY_AVOIDED_BUT_FOUND',
+      retainsGeometry: false,
+    },
+    {
+      name: 'requires review for a suspicious detour',
+      ferryPolicy: 'allow' as const,
+      distanceKm: 1372.6,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1372.6 }],
+      expectedStatus: 'review-required',
+      warningCode: 'SUSPICIOUS_DETOUR',
+      retainsGeometry: true,
+    },
+  ])('$name when applying a route alternative', async ({
+    ferryPolicy,
+    distanceKm,
+    sections,
+    expectedStatus,
+    warningCode,
+    retainsGeometry,
+  }) => {
+    const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const hirtshals = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.5881, lng: 9.9598 }, order: 1 });
+    const geometry = {
+      type: 'LineString' as const,
+      coordinates: [[bremen.coordinates.lng, bremen.coordinates.lat], [hirtshals.coordinates.lng, hirtshals.coordinates.lat]],
+    };
+    const routeLeg = createRouteLeg({
+      originDestinationId: bremen.id,
+      targetDestinationId: hirtshals.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      ferryPolicy,
+      distanceKm: 700,
+      travelTimeHours: 9,
+      geometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'old-route',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+      warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Stale warning.' }],
+      notes: 'Preserve route notes.',
+    });
+    const option: RouteOption = {
+      id: 'selected-option',
+      label: 'Selected option',
+      source: 'recommended',
+      distanceKm,
+      travelTimeHours: 18,
+      geometry,
+      sections,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'selected-route-key',
+    };
+    vi.mocked(calculateOpenRouteServiceRouteOptions).mockResolvedValueOnce([option]);
+    repositoryMock.initialDestinations = Promise.resolve([bremen, hirtshals]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit route from Bremen to Hirtshals' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Use selected route' }));
+
+    await waitFor(() => expect(repositoryMock.saveRouteLeg).toHaveBeenCalled());
+    const savedRoute = repositoryMock.saveRouteLeg.mock.calls.at(-1)?.[0];
+    expect(savedRoute).toMatchObject({
+      status: expectedStatus,
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: retainsGeometry ? geometry : undefined,
+      warnings: [expect.objectContaining({ code: warningCode })],
+      movement: 'drive',
+      calculation: 'automatic',
+      ferryPolicy,
+      waypoints: [],
+      notes: 'Preserve route notes.',
+    });
   });
 
   it('hides an open route alternatives panel while trip data reloads in the loading state', async () => {

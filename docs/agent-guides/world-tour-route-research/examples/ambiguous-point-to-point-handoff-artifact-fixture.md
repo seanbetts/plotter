@@ -5,7 +5,7 @@ This synthetic fixture demonstrates `handoff-ready` structure after corridor app
 ## Assumptions
 
 - The approved corridor uses efficient inland transit with a scenic final approach.
-- The naturally paced recommendation and approved plan are both 15 days for one-way summer travel in a standard road vehicle.
+- The naturally paced recommendation and approved plan are both 15 days for one-way summer travel using the `standard` vehicle preset.
 - Research depth is `handoff-ready`.
 - No app data is written by this plan.
 
@@ -58,6 +58,8 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
 
 ```json
 {
+  "manifestVersion": 2,
+  "vehiclePreset": "standard",
   "recommendedDuration": {
     "days": 15,
     "rangeDays": { "min": 13, "max": 17 },
@@ -227,6 +229,7 @@ The reserved `example.com` URLs below demonstrate field shape only. A live hando
       ]
     }
   ],
+  "routeLegs": [],
   "logisticsGates": [
     {
       "id": "final-access-refresh",
@@ -258,6 +261,7 @@ No unresolved route-shaping questions remain. A separate final user approval is 
 - The remote endpoint viewpoint becomes an activity under Destination base.
 - Approved tags and links remain attached to their owning stop or activity.
 - Copy the approved `plannedDurationDays` and `expectedStayDays` allocation without replanning it.
+- Copy `manifestVersion: 2`, `vehiclePreset: "standard"`, and `routeLegs: []` into the write handoff. The empty route directive list keeps every ordinary adjacent automatic leg implicit.
 - Operational unknowns remain scoped validation notes unless they invalidate the approved corridor.
 - Route geometry and normalized location details are left to the app.
 - A separate final user approval is still required before using the trip data guide.

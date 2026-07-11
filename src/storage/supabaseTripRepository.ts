@@ -11,7 +11,12 @@ import type {
   Priority,
   RouteLeg,
   RouteLegStatus,
-  RouteLegType,
+  RouteMovement,
+  RouteCalculationMode,
+  FerryPolicy,
+  RouteWaypoint,
+  RouteSection,
+  RouteWarning,
 } from '../domain/types';
 import { sortResearchLinks } from '../domain/researchLinks';
 import { mediaImageVariants } from '../media/imageOptimization';
@@ -64,7 +69,12 @@ type SupabaseRouteLegRow = {
   trip_id: string;
   origin_destination_id: string;
   target_destination_id: string;
-  type: RouteLegType;
+  movement: RouteMovement;
+  calculation_mode: RouteCalculationMode;
+  ferry_policy?: FerryPolicy;
+  waypoints?: RouteWaypoint[];
+  sections?: RouteSection[];
+  warnings?: RouteWarning[];
   status: RouteLegStatus;
   distance_km: number | null;
   travel_time_hours: number | null;
@@ -359,7 +369,12 @@ export function routeLegToSupabaseRow(routeLeg: RouteLeg, tripId: string): Supab
     trip_id: tripId,
     origin_destination_id: routeLeg.originDestinationId,
     target_destination_id: routeLeg.targetDestinationId,
-    type: routeLeg.type,
+    movement: routeLeg.movement,
+    calculation_mode: routeLeg.calculation,
+    ferry_policy: routeLeg.ferryPolicy ?? 'allow',
+    waypoints: routeLeg.waypoints ?? [],
+    sections: routeLeg.sections ?? [],
+    warnings: routeLeg.warnings ?? [],
     status: routeLeg.status,
     distance_km: routeLeg.distanceKm ?? null,
     travel_time_hours: routeLeg.travelTimeHours ?? null,
@@ -380,7 +395,12 @@ export function routeLegFromSupabaseRow(row: SupabaseRouteLegRow): RouteLeg {
     id: row.id,
     originDestinationId: row.origin_destination_id,
     targetDestinationId: row.target_destination_id,
-    type: row.type,
+    movement: row.movement,
+    calculation: row.calculation_mode,
+    ferryPolicy: row.ferry_policy ?? 'allow',
+    waypoints: row.waypoints ?? [],
+    sections: row.sections ?? [],
+    warnings: row.warnings ?? [],
     status: row.status,
     distanceKm: row.distance_km ?? undefined,
     travelTimeHours: row.travel_time_hours ?? undefined,
@@ -431,6 +451,44 @@ export function createSupabaseTripRepository(
   tripId: string,
   options: SupabaseTripRepositoryOptions = {},
 ): TripRepository {
+  async function prepareDestinationDeletion(destinationIds: string[]) {
+    const uniqueIds = [...new Set(destinationIds)];
+    if (uniqueIds.length === 0) return async () => undefined;
+    const mediaRows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
+      await supabase
+        .from('media_assets')
+        .select('*')
+        .eq('trip_id', tripId)
+        .in('destination_id', uniqueIds),
+      'Unable to load destination media.',
+    );
+    const objectPathsByBucketId = new Map<string, string[]>();
+    for (const row of mediaRows) {
+      objectPathsByBucketId.set(row.bucket_id, [
+        ...(objectPathsByBucketId.get(row.bucket_id) ?? []),
+        row.object_path,
+      ]);
+    }
+    return async () => {
+      assertSupabaseWriteSucceeded(
+        await supabase
+          .from('destinations')
+          .delete()
+          .eq('trip_id', tripId)
+          .in('id', uniqueIds),
+        'Unable to delete destinations.',
+      );
+      for (const [bucketId, objectPaths] of objectPathsByBucketId) {
+        await removeStorageObjectsBestEffort(bucketId, objectPaths);
+      }
+    };
+  }
+
+  async function deleteDestinations(destinationIds: string[]) {
+    const commit = await prepareDestinationDeletion(destinationIds);
+    await commit();
+  }
+
   async function listExistingDestinationMediaSortOrders(tripId: string, destinationId: string) {
     return assertNoSupabaseError<Pick<SupabaseMediaAssetRow, 'sort_order'>[]>(
       await supabase
@@ -863,6 +921,9 @@ export function createSupabaseTripRepository(
         await removeStorageObjectsBestEffort(bucketId, objectPaths);
       }
     },
+
+    deleteDestinations,
+    prepareDestinationDeletion,
 
     async listActivities(destinationId) {
       return listTripActivities(tripId, destinationId);

@@ -1,9 +1,17 @@
 import { createRouteKey, createRouteLeg, createStraightLineGeometry } from './routeLegs';
-import type { Coordinates, Destination, RouteLeg } from './types';
+import type { LineString } from 'geojson';
+import type { Coordinates, Destination, RouteIntentSnapshot, RouteLeg, RouteWaypoint, TripRoutingVehicle } from './types';
+import { standardRoutingVehicle } from './vehiclePresets';
 
 type ReconcileRouteLegsResult = {
   routeLegs: RouteLeg[];
   removedRouteLegIds: string[];
+};
+
+type PlanRouteLegReconciliationInput = {
+  destinations: Destination[];
+  currentRouteLegs: RouteLeg[];
+  routingVehicle: TripRoutingVehicle;
 };
 
 export type DestinationInsertionCandidate = {
@@ -59,40 +67,55 @@ function routeGeometryMatchesCoordinates(
   );
 }
 
-function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg) {
+function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg, routingVehicle: TripRoutingVehicle) {
   return (
-    routeLeg.type === 'driving-auto' &&
+    routeLeg.movement === 'drive' &&
+    routeLeg.calculation === 'automatic' &&
     routeLeg.status === 'ready' &&
     routeLeg.geometry &&
     routeLeg.distanceKm !== undefined &&
     routeLeg.travelTimeHours !== undefined &&
     routeLeg.provider &&
-    routeLeg.profile === 'driving-car' &&
+    routeLeg.profile === routingVehicle.profile &&
     routeLeg.routeKey &&
     routeLeg.calculatedAt &&
     !routeLeg.error
   );
 }
 
-function routeKeyMatchesCurrentDrivingEndpoints(routeLeg: RouteLeg, origin: Destination, target: Destination) {
+function routeKeyMatchesCurrentIntent(
+  routeLeg: RouteLeg,
+  origin: Destination,
+  target: Destination,
+  routingVehicle: TripRoutingVehicle,
+) {
   const routeKey = routeLeg.routeKey;
   if (!routeKey) return false;
-
-  const currentRouteKey = createRouteKey({
-    origin: origin.coordinates,
-    target: target.coordinates,
-    profile: 'driving-car',
-  });
-
-  return routeKey === currentRouteKey || routeKey.startsWith(`${currentRouteKey}:`);
+  try {
+    const parsed = JSON.parse(routeKey) as { variant?: string; providerOptions?: Record<string, unknown> };
+    return routeKey === createRouteKey({
+      origin: origin.coordinates,
+      target: target.coordinates,
+      routingVehicle,
+      waypoints: [...(routeLeg.waypoints ?? [])]
+        .sort((left, right) => left.order - right.order)
+        .map((waypoint) => waypoint.coordinates),
+      ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+      variant: parsed.variant ?? undefined,
+      providerOptions: parsed.providerOptions ?? {},
+    });
+  } catch {
+    return false;
+  }
 }
 
 function refreshRouteLegForDestinationCoordinates(
   routeLeg: RouteLeg,
   origin: Destination,
   target: Destination,
+  routingVehicle: TripRoutingVehicle,
 ): RouteLeg {
-  if (routeLeg.type === 'shipping-manual') {
+  if (routeLeg.movement === 'vehicle-shipping' && routeLeg.calculation === 'manual') {
     if (!routeLeg.geometry || routeGeometryMatchesCoordinates(routeLeg, origin, target)) {
       return routeLeg;
     }
@@ -114,8 +137,8 @@ function refreshRouteLegForDestinationCoordinates(
 
   if (routeLeg.status === 'ready') {
     if (
-      hasCompleteAppImplementableDrivingRouteData(routeLeg) &&
-      routeKeyMatchesCurrentDrivingEndpoints(routeLeg, origin, target) &&
+      hasCompleteAppImplementableDrivingRouteData(routeLeg, routingVehicle) &&
+      routeKeyMatchesCurrentIntent(routeLeg, origin, target, routingVehicle) &&
       routeGeometryMatchesCoordinates(routeLeg, origin, target, drivingGeometryEndpointTolerance)
     ) {
       return routeLeg;
@@ -128,11 +151,11 @@ function refreshRouteLegForDestinationCoordinates(
       travelTimeHours: undefined,
       geometry: undefined,
       provider: undefined,
-      profile: 'driving-car',
+      profile: routingVehicle.profile,
       routeKey: createRouteKey({
-        origin: origin.coordinates,
-        target: target.coordinates,
-        profile: 'driving-car',
+        origin: origin.coordinates, target: target.coordinates, routingVehicle,
+        waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order).map((waypoint) => waypoint.coordinates),
+        ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
       }),
       calculatedAt: undefined,
       error: undefined,
@@ -141,9 +164,9 @@ function refreshRouteLegForDestinationCoordinates(
   }
 
   const routeKey = createRouteKey({
-    origin: origin.coordinates,
-    target: target.coordinates,
-    profile: routeLeg.profile,
+    origin: origin.coordinates, target: target.coordinates, routingVehicle,
+    waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order).map((waypoint) => waypoint.coordinates),
+    ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
   });
 
   if (routeLeg.routeKey === routeKey) {
@@ -157,7 +180,7 @@ function refreshRouteLegForDestinationCoordinates(
     travelTimeHours: undefined,
     geometry: undefined,
     provider: undefined,
-    profile: routeLeg.profile ?? 'driving-car',
+    profile: routingVehicle.profile,
     routeKey,
     calculatedAt: undefined,
     error: undefined,
@@ -227,9 +250,195 @@ export function getDestinationInsertionCandidates(
   return candidates;
 }
 
+function nearestGeometryIndex(geometry: LineString, coordinates: Coordinates) {
+  return geometry.coordinates.reduce(
+    (best, [lng, lat], index) => {
+      const distance = coordinateDistanceKm(coordinates, { lat, lng });
+      return distance < best.distance ? { index, distance } : best;
+    },
+    { index: 0, distance: Number.POSITIVE_INFINITY },
+  ).index;
+}
+
+function routeIntent(routeLeg: RouteLeg): RouteIntentSnapshot {
+  return {
+    movement: routeLeg.movement,
+    calculation: routeLeg.calculation,
+    ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+    waypoints: routeLeg.waypoints ?? [],
+    notes: routeLeg.notes,
+  };
+}
+
+function isManualVehicleShipping(routeLeg: RouteLeg) {
+  const intent = routeIntent(routeLeg);
+  return intent.movement === 'vehicle-shipping' && intent.calculation === 'manual';
+}
+
+function hasConstrainedIntent(intent: RouteIntentSnapshot) {
+  return intent.ferryPolicy !== 'allow' || intent.waypoints.length > 0 || intent.notes.trim().length > 0;
+}
+
+function createReplacementLeg(input: {
+  origin: Destination;
+  target: Destination;
+  routingVehicle: TripRoutingVehicle;
+  ferryPolicy?: RouteLeg['ferryPolicy'];
+  waypoints?: RouteWaypoint[];
+  status?: RouteLeg['status'];
+  warnings?: RouteLeg['warnings'];
+}) {
+  return createRouteLeg({
+    originDestinationId: input.origin.id,
+    targetDestinationId: input.target.id,
+    movement: 'drive',
+    calculation: 'automatic',
+    ferryPolicy: input.ferryPolicy ?? 'allow',
+    waypoints: (input.waypoints ?? []).map((waypoint, order) => ({ ...waypoint, order })),
+    status: input.status,
+    warnings: input.warnings,
+    profile: input.routingVehicle.profile,
+    routeKey: createRouteKey({
+      origin: input.origin.coordinates,
+      target: input.target.coordinates,
+      routingVehicle: input.routingVehicle,
+      waypoints: (input.waypoints ?? []).map((waypoint) => waypoint.coordinates),
+      ferryPolicy: input.ferryPolicy ?? 'allow',
+    }),
+  });
+}
+
+function splitRouteLeg(input: {
+  source: RouteLeg;
+  destinations: Destination[];
+  routingVehicle: TripRoutingVehicle;
+}): RouteLeg[] {
+  if (isManualVehicleShipping(input.source)) {
+    throw new Error('Resolve vehicle shipping before inserting a stop');
+  }
+
+  const intent = routeIntent(input.source);
+  const segmentCount = input.destinations.length - 1;
+  const defaultSegments = () => Array.from({ length: segmentCount }, (_, index) => createReplacementLeg({
+    origin: input.destinations[index],
+    target: input.destinations[index + 1],
+    routingVehicle: input.routingVehicle,
+  }));
+  const ambiguousSegments = (message: string) => {
+    const warning = {
+      code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED' as const,
+      message,
+      context: { sourceRouteLegId: input.source.id, unresolvedIntent: intent },
+    };
+    return defaultSegments().map((leg, index) => ({
+      ...leg,
+      status: 'review-required' as const,
+      warnings: index === 0 ? [warning] : [],
+    }));
+  };
+
+  if (!hasConstrainedIntent(intent)) return defaultSegments();
+
+  const geometry = input.source.status === 'ready' ? input.source.geometry : undefined;
+  const boundaryIndexes = geometry
+    ? input.destinations.map((destination) => nearestGeometryIndex(geometry, destination.coordinates))
+    : [];
+  const waypointIndexes = geometry
+    ? intent.waypoints.map((waypoint) => nearestGeometryIndex(geometry, waypoint.coordinates))
+    : [];
+  const canProject = Boolean(
+    geometry &&
+    intent.notes.trim().length === 0 &&
+    boundaryIndexes.every((index, position) => position === 0 || index > boundaryIndexes[position - 1]) &&
+    waypointIndexes.every((index, position) => position === 0 || index >= waypointIndexes[position - 1]) &&
+    waypointIndexes.every((index) => index >= boundaryIndexes[0] && index <= boundaryIndexes.at(-1)!),
+  );
+
+  if (!canProject) {
+    return ambiguousSegments('Route intent could not be assigned safely after the stop change.');
+  }
+
+  const waypointSegments = Array.from({ length: segmentCount }, () => [] as RouteWaypoint[]);
+  intent.waypoints.forEach((waypoint, waypointPosition) => {
+    const geometryIndex = waypointIndexes[waypointPosition];
+    const segmentIndex = boundaryIndexes.findIndex((boundaryIndex, index) => (
+      index < segmentCount && geometryIndex <= boundaryIndexes[index + 1]
+    ));
+    waypointSegments[Math.max(0, segmentIndex)].push(waypoint);
+  });
+
+  let requiredFerrySegment = -1;
+  if (intent.ferryPolicy === 'require') {
+    const ferrySection = input.source.sections?.find((section) => section.kind === 'ferry');
+    const validFerrySection = ferrySection &&
+      Number.isInteger(ferrySection.startGeometryIndex) &&
+      Number.isInteger(ferrySection.endGeometryIndex) &&
+      ferrySection.startGeometryIndex >= 0 &&
+      ferrySection.endGeometryIndex >= ferrySection.startGeometryIndex &&
+      ferrySection.endGeometryIndex < geometry!.coordinates.length;
+    if (!validFerrySection) {
+      return ambiguousSegments('Required ferry intent could not be assigned safely after the stop change.');
+    }
+    const midpoint = (ferrySection.startGeometryIndex + ferrySection.endGeometryIndex) / 2;
+    requiredFerrySegment = boundaryIndexes.findIndex((boundaryIndex, index) => (
+      index < segmentCount && midpoint <= boundaryIndexes[index + 1]
+    ));
+    if (requiredFerrySegment === -1 || midpoint < boundaryIndexes[0]) {
+      return ambiguousSegments('Required ferry intent could not be assigned safely after the stop change.');
+    }
+  }
+
+  return Array.from({ length: segmentCount }, (_, index) => createReplacementLeg({
+    origin: input.destinations[index],
+    target: input.destinations[index + 1],
+    routingVehicle: input.routingVehicle,
+    waypoints: waypointSegments[index],
+    ferryPolicy: intent.ferryPolicy === 'avoid'
+      ? 'avoid'
+      : intent.ferryPolicy === 'require' && index === requiredFerrySegment
+        ? 'require'
+        : 'allow',
+  }));
+}
+
+export function planRouteLegReconciliation({
+  destinations,
+  currentRouteLegs,
+  routingVehicle,
+}: PlanRouteLegReconciliationInput): ReconcileRouteLegsResult {
+  const destinationIndexById = new Map(destinations.map((destination, index) => [destination.id, index]));
+  const splitSources = currentRouteLegs.filter((routeLeg) => {
+    const originIndex = destinationIndexById.get(routeLeg.originDestinationId);
+    const targetIndex = destinationIndexById.get(routeLeg.targetDestinationId);
+    return originIndex !== undefined && targetIndex !== undefined && targetIndex > originIndex + 1;
+  });
+  const base = reconcileRouteLegsForDestinations(destinations, currentRouteLegs, routingVehicle);
+  if (splitSources.length === 0) return base;
+
+  const replacementsByPair = new Map<string, RouteLeg>();
+  for (const source of splitSources) {
+    const originIndex = destinationIndexById.get(source.originDestinationId)!;
+    const targetIndex = destinationIndexById.get(source.targetDestinationId)!;
+    const replacements = splitRouteLeg({
+      source,
+      destinations: destinations.slice(originIndex, targetIndex + 1),
+      routingVehicle,
+    });
+    for (const replacement of replacements) {
+      replacementsByPair.set(routePairKey(replacement.originDestinationId, replacement.targetDestinationId), replacement);
+    }
+  }
+
+  return {
+    routeLegs: base.routeLegs.map((routeLeg) => replacementsByPair.get(routePairKey(routeLeg.originDestinationId, routeLeg.targetDestinationId)) ?? routeLeg),
+    removedRouteLegIds: [...new Set([...base.removedRouteLegIds, ...splitSources.map((source) => source.id)])],
+  };
+}
+
 export function reconcileRouteLegsForDestinations(
   destinations: Destination[],
   routeLegs: RouteLeg[],
+  routingVehicle: TripRoutingVehicle = standardRoutingVehicle,
 ): ReconcileRouteLegsResult {
   const existingRouteLegsByPair = new Map(
     routeLegs.map((leg) => [
@@ -248,7 +457,7 @@ export function reconcileRouteLegsForDestinations(
 
     const existingRouteLeg = existingRouteLegsByPair.get(pairKey);
     if (existingRouteLeg) {
-      nextRouteLegs.push(refreshRouteLegForDestinationCoordinates(existingRouteLeg, origin, target));
+      nextRouteLegs.push(refreshRouteLegForDestinationCoordinates(existingRouteLeg, origin, target, routingVehicle));
       continue;
     }
 
@@ -256,11 +465,14 @@ export function reconcileRouteLegsForDestinations(
       createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
-        routeKey: createRouteKey({
-          origin: origin.coordinates,
-          target: target.coordinates,
-        }),
+        movement: 'drive',
+        calculation: 'automatic',
+          routeKey: createRouteKey({
+            origin: origin.coordinates,
+            target: target.coordinates,
+            routingVehicle,
+          }),
+          profile: routingVehicle.profile,
       }),
     );
   }

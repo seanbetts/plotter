@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import { TripSelector } from './TripSelector';
 
@@ -9,6 +10,7 @@ const trips: TripSummary[] = [
     id: 'trip-one',
     name: 'World tour',
     description: '',
+    routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-01T10:00:00.000Z',
     updatedAt: '2026-07-01T10:00:00.000Z',
   },
@@ -16,6 +18,7 @@ const trips: TripSummary[] = [
     id: 'trip-two',
     name: 'Japan winter',
     description: '',
+    routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-02T10:00:00.000Z',
     updatedAt: '2026-07-02T10:00:00.000Z',
   },
@@ -28,7 +31,7 @@ function renderSelector(overrides: Partial<Parameters<typeof TripSelector>[0]> =
     actionError: null,
     onSelectTrip: vi.fn(),
     onCreateTrip: vi.fn(),
-    onRenameTrip: vi.fn(),
+    onUpdateTrip: vi.fn(),
     onDeleteTrip: vi.fn(),
     ...overrides,
   };
@@ -105,7 +108,7 @@ describe('TripSelector', () => {
       actionError: null,
       onSelectTrip: vi.fn(),
       onCreateTrip: vi.fn(),
-      onRenameTrip: vi.fn(),
+      onUpdateTrip: vi.fn(),
       onDeleteTrip: vi.fn(),
     };
     render(
@@ -130,16 +133,50 @@ describe('TripSelector', () => {
     expect(props.onCreateTrip).toHaveBeenCalledWith('North Coast 500');
   });
 
-  it('renames a trip from its list row', async () => {
+  it('edits name and vehicle in the existing pencil dialog', async () => {
     const props = renderSelector();
 
     await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename Japan winter' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit Japan winter' }));
     await userEvent.clear(screen.getByLabelText('Trip name'));
     await userEvent.type(screen.getByLabelText('Trip name'), 'Renamed tour');
-    await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Expedition truck' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
 
-    expect(props.onRenameTrip).toHaveBeenCalledWith('trip-two', 'Renamed tour');
+    expect(props.onUpdateTrip).toHaveBeenCalledWith('trip-two', {
+      name: 'Renamed tour',
+      vehiclePreset: 'expedition-truck',
+    });
+  });
+
+  it('provides accessible, stable vehicle choices with selected state', async () => {
+    const camperTrip = {
+      ...trips[0],
+      routingVehicle: resolveVehiclePreset('large-camper'),
+    };
+    renderSelector({ trips: [camperTrip, trips[1]], activeTrip: camperTrip });
+
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+
+    const vehicleGroup = screen.getByRole('group', { name: 'Vehicle for this trip' });
+    const options = [
+      screen.getByRole('button', { name: 'Standard vehicle' }),
+      screen.getByRole('button', { name: 'Large camper' }),
+      screen.getByRole('button', { name: 'Expedition truck' }),
+    ];
+
+    expect(vehicleGroup).toContainElement(options[0]);
+    expect(options.map((option) => option.getAttribute('title'))).toEqual([
+      'Standard vehicle',
+      'Large camper',
+      'Expedition truck',
+    ]);
+    expect(options.every((option) => option.classList.contains('trip-selector__vehicle-option'))).toBe(true);
+    expect(options.map((option) => option.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
+
+    await userEvent.click(options[2]);
+    expect(options.map((option) => option.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'true']);
   });
 
   it('renders delete as one compact confirmation row without a trip-name field', async () => {

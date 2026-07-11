@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
+import { standardRoutingVehicle } from '../domain/vehiclePresets';
+import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import { createTripDataService } from '../tripCommands/tripDataService';
 import { parseTripCliArgs, runTripCli, runTripProgram } from './trip';
@@ -17,6 +19,8 @@ function createMockService(): MockService {
       routeLegs: [],
       changed: {},
     })),
+    setVehicle: vi.fn(async () => ({ ok: true, summary: 'set vehicle', changed: {}, routeLegs: [] })),
+    updateRouteLeg: vi.fn(async () => ({ ok: true, summary: 'updated route leg', changed: {}, routeLeg: {} })),
     createTrip: vi.fn(async () => ({ ok: true, summary: 'created', trip: { id: 'trip-1' } })),
     deleteTrip: vi.fn(async () => ({ ok: true, summary: 'deleted', changed: {} })),
     renameTrip: vi.fn(async () => ({ ok: true, summary: 'renamed', trip: { id: 'trip-1' }, changed: {} })),
@@ -152,6 +156,7 @@ describe('runTripCli', () => {
         readyRouteLegs: 1,
         manualRouteLegs: 0,
         failedRouteLegs: 0,
+        reviewRequiredRouteLegs: 0,
       },
     });
     expect(write.mock.calls[0]?.[0]).not.toContain('coordinates');
@@ -161,6 +166,7 @@ describe('runTripCli', () => {
   it('routes every supported command to the matching service method with parsed inputs', async () => {
     const { service, readFile, write, writeError } = createCliHarness();
     readFile
+      .mockResolvedValueOnce('{"ferryPolicy":"require","notes":"Ferry crossing"}')
       .mockResolvedValueOnce('{"name":"Road trip"}')
       .mockResolvedValueOnce('[{"name":"Inverness","place":{"coordinates":{"lat":57.48,"lng":-4.22}}}]')
       .mockResolvedValueOnce('{"name":"Ullapool","place":{"coordinates":{"lat":57.9,"lng":-5.16}}}')
@@ -174,6 +180,8 @@ describe('runTripCli', () => {
       ['list'],
       ['get', '--trip-id', 'trip-1', '--include-activities', '--include-links'],
       ['recalculate-failed-routes', '--trip-id', 'trip-1'],
+      ['set-vehicle', '--trip-id', 'trip-1', '--preset', 'large-camper'],
+      ['update-route-leg', '--trip-id', 'trip-1', '--route-leg-id', 'leg-1', '--input', '/tmp/route-intent.json', '--dry-run'],
       ['create', '--input', '/tmp/trip.json', '--dry-run', '--yes'],
       ['delete', '--trip-id', 'trip-1', '--dry-run', '--yes'],
       ['rename', '--trip-id', 'trip-1', '--name', 'Renamed Trip', '--dry-run', '--yes'],
@@ -211,6 +219,13 @@ describe('runTripCli', () => {
       includeLinks: true,
     });
     expect(service.recalculateFailedRoutes).toHaveBeenCalledWith({ tripId: 'trip-1' });
+    expect(service.setVehicle).toHaveBeenCalledWith(
+      { tripId: 'trip-1', preset: 'large-camper' }, { dryRun: false, yes: false },
+    );
+    expect(service.updateRouteLeg).toHaveBeenCalledWith(
+      { tripId: 'trip-1', routeLegId: 'leg-1', patch: { ferryPolicy: 'require', notes: 'Ferry crossing' } },
+      { dryRun: true, yes: false },
+    );
     expect(service.createTrip).toHaveBeenCalledWith({ name: 'Road trip' }, { dryRun: true, yes: true });
     expect(service.deleteTrip).toHaveBeenCalledWith({ tripId: 'trip-1' }, { dryRun: true, yes: true });
     expect(service.renameTrip).toHaveBeenCalledWith({ tripId: 'trip-1', name: 'Renamed Trip' }, { dryRun: true, yes: true });
@@ -284,6 +299,7 @@ describe('runTripCli', () => {
           ...Array.from({ length: 23 }, (_, index) => ({ id: `ready-${index}`, status: 'ready' })),
           { id: 'manual-1', status: 'manual' },
           { id: 'manual-2', status: 'manual' },
+          { id: 'review-1', status: 'review-required' },
         ],
       })),
     });
@@ -302,10 +318,11 @@ describe('runTripCli', () => {
       summary: 'Recalculated 2 failed routes.',
       changed: { routesRecalculated: 2 },
       counts: {
-        routeLegs: 25,
+        routeLegs: 26,
         readyRouteLegs: 23,
         manualRouteLegs: 2,
         failedRouteLegs: 0,
+        reviewRequiredRouteLegs: 1,
       },
     });
   });
@@ -325,7 +342,7 @@ describe('runTripCli', () => {
       createTrip: vi.fn(async () => ({
         ok: true,
         summary: 'Created trip Nordkapp.',
-        trip: { id: 'trip-nordkapp', name: 'Nordkapp' },
+        trip: { id: 'trip-nordkapp', name: 'Nordkapp', routingVehicle: standardRoutingVehicle },
         changed: { linksAdded: Array.from({ length: 18 }, (_, index) => `https://example.com/${index}`) },
         stops: Array.from({ length: 26 }, (_, index) => ({ id: `stop-${index}` })),
         activities: Array.from({ length: 15 }, (_, index) => ({ id: `activity-${index}` })),
@@ -362,11 +379,12 @@ describe('runTripCli', () => {
       readyRouteLegs: 23,
       manualRouteLegs: 2,
       failedRouteLegs: 0,
+      reviewRequiredRouteLegs: 0,
       auditErrors: 0,
       auditWarnings: 0,
     });
     expect(payload.audit).toEqual({ errors: 0, warnings: 0, issues: [] });
-    expect(payload.trip).toEqual({ id: 'trip-nordkapp', name: 'Nordkapp' });
+    expect(payload.trip).toEqual({ id: 'trip-nordkapp', name: 'Nordkapp', vehiclePreset: 'standard' });
     expect(write.mock.calls[0]?.[0]).not.toContain('coordinates');
   });
 
@@ -403,7 +421,7 @@ describe('runTripCli', () => {
   });
 
   it('creates and audits a large manifest in two CLI calls with in-memory dependencies', async () => {
-    const trips: Array<{ id: string; name: string; description: string; createdAt: string; updatedAt: string }> = [];
+    const trips: TripSummary[] = [];
     const state = {
       destinations: [] as Destination[],
       activities: [] as Activity[],
@@ -435,6 +453,7 @@ describe('runTripCli', () => {
         id: 'trip-in-memory',
         name,
         description: '',
+        routingVehicle: standardRoutingVehicle,
         createdAt: '2026-07-10T12:00:00.000Z',
         updatedAt: '2026-07-10T12:00:00.000Z',
       };
@@ -486,6 +505,7 @@ describe('runTripCli', () => {
         },
         provider: 'in-memory',
         profile: 'driving-car' as const,
+        sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 20 }],
       })),
     });
     const stops = Array.from({ length: 26 }, (_, index) => ({
@@ -505,12 +525,13 @@ describe('runTripCli', () => {
         : {}),
     }));
     const manifest = {
-      manifestVersion: 1,
+      manifestVersion: 2,
       name: 'In-memory route',
+      vehiclePreset: 'standard',
       stops,
       routeLegs: [
-        { fromStopKey: 'stop-4', toStopKey: 'stop-5', type: 'shipping-manual' },
-        { fromStopKey: 'stop-15', toStopKey: 'stop-16', type: 'shipping-manual' },
+        { fromStopKey: 'stop-4', toStopKey: 'stop-5', movement: 'vehicle-shipping', calculation: 'manual' },
+        { fromStopKey: 'stop-15', toStopKey: 'stop-16', movement: 'vehicle-shipping', calculation: 'manual' },
       ],
     };
     const write = vi.fn();

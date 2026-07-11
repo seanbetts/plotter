@@ -1,5 +1,16 @@
 import type { LineString } from 'geojson';
-import type { ResearchLink, Coordinates, ActivityLocation } from '../domain/types';
+import type {
+  ActivityLocation,
+  Coordinates,
+  FerryPolicy,
+  ResearchLink,
+  RouteCalculationMode,
+  RouteMovement,
+  RouteSection,
+  RouteWaypoint,
+  TripRoutingVehicle,
+  VehiclePreset,
+} from '../domain/types';
 import type { TripRepository } from '../storage/tripRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripAuditReport } from './tripAudit';
@@ -55,18 +66,54 @@ export type StopManifestDraft = {
   activities: ActivityManifestDraft[];
 };
 
-export type RouteLegDirectiveDraft = {
+export type RouteWaypointDraft = {
+  name: string;
+  place: PlaceInput;
+  notes?: string;
+  links: string[];
+};
+
+export type RouteLegDirectiveDraftV2 = {
   fromStopKey: string;
   toStopKey: string;
-  type: 'shipping-manual';
+  movement?: RouteMovement;
+  calculation?: RouteCalculationMode;
+  ferryPolicy?: FerryPolicy;
+  waypoints?: RouteWaypointDraft[];
   notes?: string;
 };
 
-export type TripManifestDraft = {
+export type RouteLegDirectiveDraft = RouteLegDirectiveDraftV2;
+
+export type RouteLegDirectiveInputV1 = Record<string, unknown> & {
+  fromStopKey?: unknown;
+  toStopKey?: unknown;
+  notes?: unknown;
+};
+
+export type TripManifestDraftV1 = {
   manifestVersion: 1;
   name: string;
   stops: StopManifestDraft[];
-  routeLegs: RouteLegDirectiveDraft[];
+  routeLegs: RouteLegDirectiveDraftV2[];
+};
+
+export type TripManifestDraftV2 = {
+  manifestVersion: 2;
+  name: string;
+  vehiclePreset: VehiclePreset;
+  stops: StopManifestDraft[];
+  routeLegs: RouteLegDirectiveDraftV2[];
+};
+
+export type TripManifestDraft = TripManifestDraftV1 | TripManifestDraftV2;
+
+export type RouteLegIntentPatch = {
+  movement?: RouteMovement;
+  calculation?: RouteCalculationMode;
+  ferryPolicy?: FerryPolicy;
+  waypoints?: RouteWaypointDraft[];
+  notes?: string;
 };
 
 export type CommandError = {
@@ -99,13 +146,17 @@ export type ChangedSummary = {
 export type RouteCalculator = (input: {
   origin: Coordinates;
   target: Coordinates;
-  profile: 'driving-car';
+  profile: TripRoutingVehicle['profile'];
+  routingVehicle: TripRoutingVehicle;
+  waypoints: RouteWaypoint[];
+  ferryPolicy: FerryPolicy;
 }) => Promise<{
   distanceKm: number;
   travelTimeHours: number;
   geometry: LineString;
   provider: string;
-  profile: 'driving-car';
+  profile: TripRoutingVehicle['profile'];
+  sections: RouteSection[];
 }>;
 
 export type PlaceResolver = (input: {

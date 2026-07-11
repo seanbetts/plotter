@@ -8,7 +8,7 @@
     "dev:e2e": "VITE_TRIP_STORAGE=e2e-local vite --host 127.0.0.1 --port 5174 --strictPort",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "VITE_MAPTILER_API_KEY=e2e-test-key vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "trip": "tsx src/cli/trip.ts"

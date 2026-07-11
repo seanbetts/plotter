@@ -116,6 +116,7 @@ function summarizeRouteLegs(counts: Record<string, number>, value: unknown) {
   counts.readyRouteLegs = value.filter((routeLeg) => isRecord(routeLeg) && routeLeg.status === 'ready').length;
   counts.manualRouteLegs = value.filter((routeLeg) => isRecord(routeLeg) && routeLeg.status === 'manual').length;
   counts.failedRouteLegs = value.filter((routeLeg) => isRecord(routeLeg) && routeLeg.status === 'failed').length;
+  counts.reviewRequiredRouteLegs = value.filter((routeLeg) => isRecord(routeLeg) && routeLeg.status === 'review-required').length;
 }
 
 function summarizeCommandResult(result: unknown) {
@@ -140,7 +141,12 @@ function summarizeCommandResult(result: unknown) {
   if (isRecord(result.trip)) {
     const tripSummary = isRecord(result.trip.trip) ? result.trip.trip : result.trip;
     if (typeof tripSummary.id === 'string' && typeof tripSummary.name === 'string') {
-      summary.trip = { id: tripSummary.id, name: tripSummary.name };
+      const routingVehicle = isRecord(tripSummary.routingVehicle) ? tripSummary.routingVehicle : undefined;
+      summary.trip = {
+        id: tripSummary.id,
+        name: tripSummary.name,
+        ...(typeof routingVehicle?.preset === 'string' ? { vehiclePreset: routingVehicle.preset } : {}),
+      };
     }
   }
 
@@ -217,6 +223,25 @@ export async function runTripCli(input: RunTripCliInput) {
         result = await input.service.recalculateFailedRoutes({
           tripId: stringFlag(flags, 'trip-id') ?? '',
         });
+        break;
+      case 'set-vehicle':
+        result = await input.service.setVehicle(
+          {
+            tripId: stringFlag(flags, 'trip-id') ?? '',
+            preset: stringFlag(flags, 'preset') as 'standard' | 'large-camper' | 'expedition-truck',
+          },
+          { dryRun, yes },
+        );
+        break;
+      case 'update-route-leg':
+        result = await input.service.updateRouteLeg(
+          {
+            tripId: stringFlag(flags, 'trip-id') ?? '',
+            routeLegId: stringFlag(flags, 'route-leg-id') ?? '',
+            patch: await readJson(stringFlag(flags, 'input'), input.readFile),
+          },
+          { dryRun, yes },
+        );
         break;
       case 'create':
         result = await input.service.createTrip(

@@ -18,7 +18,7 @@ import { TopToolbar } from './components/TopToolbar';
 import { TripSelector } from './components/TripSelector';
 import { buildTagSuggestions } from './components/tagEditorModel';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
-import { routeLegPatchFromRouteOption, type RouteOption } from './domain/routeOptions';
+import type { RouteOption } from './domain/routeOptions';
 import type {
   Activity,
   ActivityLocation,
@@ -33,6 +33,7 @@ import { useTripData } from './hooks/useTripData';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { downloadTripMap } from './map/tripMapExport';
 import { preloadImageUrls } from './media/imagePreloading';
+import { applyCalculatedRouteResult, createRouteResultFingerprint } from './tripCommands/routeOrchestration';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { LinkPreviewClient } from './services/linkPreviewClient';
 import { createAppWebImageSearchClient } from './services/webImageSearchClient';
@@ -76,6 +77,7 @@ type PreviewMediaSelection = {
 };
 type RouteAlternativesState = {
   routeLegId: string;
+  expectedFingerprint: string;
   status: 'loading' | 'ready' | 'empty' | 'error' | 'saving';
   options: RouteOption[];
   selectedOptionId: string | null;
@@ -228,7 +230,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     actionError,
     selectTrip,
     createTrip,
-    renameTrip,
+    updateTrip,
     deleteTrip,
     refreshTrips,
     realtime,
@@ -274,7 +276,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
       tripActionError={actionError}
       onSelectTrip={selectTrip}
       onCreateTrip={createTrip}
-      onRenameTrip={renameTrip}
+      onUpdateTrip={updateTrip}
       onDeleteTrip={deleteTrip}
       isTripWorkspaceLoading={isLoading}
       realtime={realtime}
@@ -291,7 +293,7 @@ function TripWorkspace({
   tripActionError,
   onSelectTrip,
   onCreateTrip,
-  onRenameTrip,
+  onUpdateTrip,
   onDeleteTrip,
   isTripWorkspaceLoading,
   realtime,
@@ -304,7 +306,10 @@ function TripWorkspace({
   tripActionError: string | null;
   onSelectTrip: (tripId: string) => void;
   onCreateTrip: (name: string) => Promise<boolean | void> | boolean | void;
-  onRenameTrip: (tripId: string, name: string) => Promise<boolean | void> | boolean | void;
+  onUpdateTrip: (
+    tripId: string,
+    patch: { name: string; vehiclePreset: TripSummary['routingVehicle']['preset'] },
+  ) => Promise<TripSummary | false> | TripSummary | false;
   onDeleteTrip: (tripId: string) => Promise<boolean | void> | boolean | void;
   isTripWorkspaceLoading: boolean;
   realtime: TripRealtimeSubscriptions | null;
@@ -328,14 +333,23 @@ function TripWorkspace({
     deleteDestination,
     reorderDestinations,
     updateRouteLeg,
+    applyValidatedRouteLegResult,
     createActivity,
     updateActivity,
     deleteActivity,
     reorderActivities,
+    recalculateForVehicle,
     reload,
-  } = useTripData(repository, { calculateRoute });
+  } = useTripData(repository, {
+    calculateRoute,
+    routingVehicle: activeTrip?.routingVehicle,
+  });
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [tripConsistencyError, setTripConsistencyError] = useState<string | null>(null);
+  const combinedTripActionError = [tripConsistencyError, tripActionError]
+    .filter((message): message is string => Boolean(message))
+    .join(' ') || null;
   const [isStopsPanelCollapsed, setIsStopsPanelCollapsed] = useState(readStopsPanelCollapsedPreference);
   const [previewMedia, setPreviewMedia] = useState<PreviewMediaSelection | null>(null);
   const [destinationMediaRollupItems, setDestinationMediaRollupItems] = useState<MediaRollupItem[]>([]);
@@ -381,6 +395,52 @@ function TripWorkspace({
       routeLegs,
     });
   }, [activeTrip, destinations, routeLegs]);
+
+  const handleUpdateTrip = useCallback(async (
+    tripId: string,
+    patch: { name: string; vehiclePreset: TripSummary['routingVehicle']['preset'] },
+  ) => {
+    setTripConsistencyError(null);
+    const previousTrip = trips.find((trip) => trip.id === tripId);
+    const updatedTrip = await onUpdateTrip(tripId, patch);
+    if (updatedTrip === false) return false;
+
+    if (
+      activeTrip?.id === tripId &&
+      previousTrip?.routingVehicle.preset !== updatedTrip.routingVehicle.preset
+    ) {
+      try {
+        await recalculateForVehicle(updatedTrip.routingVehicle);
+      } catch (caught) {
+        const primaryMessage = caught instanceof Error
+          ? caught.message
+          : 'Unable to save recalculated routes.';
+        let metadataRollbackMessage =
+          'Trip metadata rollback failed; trip metadata may not match the restored route legs.';
+
+        try {
+          const rollbackTrip = previousTrip
+            ? await onUpdateTrip(tripId, {
+              name: previousTrip.name,
+              vehiclePreset: previousTrip.routingVehicle.preset,
+            })
+            : false;
+          if (rollbackTrip !== false) {
+            metadataRollbackMessage = 'Trip metadata was restored.';
+          }
+        } catch (rollbackCaught) {
+          metadataRollbackMessage = `Trip metadata rollback failed: ${
+            rollbackCaught instanceof Error ? rollbackCaught.message : 'Unknown metadata rollback error'
+          }. Trip metadata may not match the restored route legs.`;
+        }
+
+        setTripConsistencyError(`${primaryMessage} ${metadataRollbackMessage}`);
+        return false;
+      }
+    }
+
+    return updatedTrip;
+  }, [activeTrip?.id, onUpdateTrip, recalculateForVehicle, trips]);
 
   useEffect(() => {
     if (!realtime || !activeTrip) return undefined;
@@ -826,14 +886,21 @@ function TripWorkspace({
   const openRouteAlternatives = useCallback(
     async (routeLegId: string) => {
       const routeLeg = routeLegsById.get(routeLegId);
-      if (!routeLeg || routeLeg.type !== 'driving-auto') return;
+      if (
+        !routeLeg ||
+        routeLeg.movement !== 'drive' ||
+        routeLeg.calculation !== 'automatic' ||
+        !activeTrip
+      ) return;
 
       const origin = destinationsById.get(routeLeg.originDestinationId);
       const target = destinationsById.get(routeLeg.targetDestinationId);
       if (!origin || !target) return;
+      const expectedFingerprint = createRouteResultFingerprint(routeLeg, activeTrip.routingVehicle);
 
       setRouteAlternativesState({
         routeLegId,
+        expectedFingerprint,
         status: 'loading',
         options: [],
         selectedOptionId: null,
@@ -845,13 +912,16 @@ function TripWorkspace({
           apiKey: openRouteServiceApiKey,
           origin: origin.coordinates,
           target: target.coordinates,
-          profile: 'driving-car',
+          routingVehicle: activeTrip?.routingVehicle,
+          waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order),
+          ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
         });
 
         setRouteAlternativesState((current) =>
           current?.routeLegId === routeLegId
             ? {
                 routeLegId,
+                expectedFingerprint,
                 status: options.length > 0 ? 'ready' : 'empty',
                 options,
                 selectedOptionId: options[0]?.id ?? null,
@@ -873,7 +943,7 @@ function TripWorkspace({
         );
       }
     },
-    [destinationsById, routeLegsById],
+    [activeTrip, destinationsById, routeLegsById],
   );
 
   const closeRouteAlternatives = useCallback(() => {
@@ -893,14 +963,45 @@ function TripWorkspace({
       (option) => option.id === routeAlternativesState.selectedOptionId,
     );
     if (!selectedOption) return;
+    const routeLeg = routeLegsById.get(routeAlternativesState.routeLegId);
+    if (!routeLeg) return;
+    const origin = destinationsById.get(routeLeg.originDestinationId);
+    const target = destinationsById.get(routeLeg.targetDestinationId);
+    if (!origin || !target) return;
+    if (selectedOption.profile !== 'driving-car' && selectedOption.profile !== 'driving-hgv') {
+      return;
+    }
 
     setRouteAlternativesState((current) => (current ? { ...current, status: 'saving' } : current));
 
     try {
-      await updateRouteLeg(
-        routeAlternativesState.routeLegId,
-        routeLegPatchFromRouteOption(selectedOption),
-      );
+      const validatedRouteLeg = applyCalculatedRouteResult({
+        routeLeg,
+        origin,
+        target,
+        routeKey: selectedOption.routeKey,
+        route: {
+          distanceKm: selectedOption.distanceKm,
+          travelTimeHours: selectedOption.travelTimeHours,
+          geometry: selectedOption.geometry,
+          sections: selectedOption.sections,
+          provider: selectedOption.provider,
+          profile: selectedOption.profile,
+        },
+      });
+      const applied = await applyValidatedRouteLegResult({
+        routeLegId: routeAlternativesState.routeLegId,
+        expectedFingerprint: routeAlternativesState.expectedFingerprint,
+        validatedRouteLeg,
+      });
+      if (!applied) {
+        setRouteAlternativesState((current) =>
+          current
+            ? { ...current, status: 'error', error: 'Route intent changed. Recalculate route options.' }
+            : current,
+        );
+        return;
+      }
       setRouteAlternativesState(null);
     } catch (caught) {
       setRouteAlternativesState((current) =>
@@ -913,7 +1014,7 @@ function TripWorkspace({
           : current,
       );
     }
-  }, [routeAlternativesState, updateRouteLeg]);
+  }, [applyValidatedRouteLegResult, destinationsById, routeAlternativesState, routeLegsById]);
 
   const handleCloseDestinationProfile = useCallback(() => {
     setSelectedDestinationId(null);
@@ -1120,10 +1221,10 @@ function TripWorkspace({
               <TripSelector
                 trips={trips}
                 activeTrip={activeTrip}
-                actionError={tripActionError}
+                actionError={combinedTripActionError}
                 onSelectTrip={onSelectTrip}
                 onCreateTrip={onCreateTrip}
-                onRenameTrip={onRenameTrip}
+                onUpdateTrip={handleUpdateTrip}
                 onDeleteTrip={onDeleteTrip}
               />
             </div>

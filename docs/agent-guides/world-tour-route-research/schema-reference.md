@@ -8,7 +8,9 @@ All values in the JSON examples are synthetic structural fixtures. Reserved `exa
 
 ```json
 {
+  "manifestVersion": 2,
   "routeName": "Home to Remote Endpoint",
+  "vehiclePreset": "standard",
   "start": "Home",
   "end": "Remote Endpoint",
   "routeShape": "ambiguous-point-to-point",
@@ -38,6 +40,8 @@ All values in the JSON examples are synthetic structural fixtures. Reserved `exa
 `recommendedDuration.days` is the research skill's naturally paced recommendation. `rangeDays` is optional and should be narrow enough to remain the same trip shape. `plannedDurationDays` is the exact duration of the currently approved itinerary; it may differ from the recommendation after user feedback.
 
 At handoff-ready depth, `plannedDurationDays` is required and must equal the sum of every stop's positive integer `expectedStayDays`. This is an objective handoff consistency check, not permission for the trip-data skill or app audit to assess itinerary quality.
+
+At handoff-ready depth, `manifestVersion` is always `2`. Infer `vehiclePreset` from ordinary language as `standard`, `large-camper`, or `expedition-truck`; default to `standard` and do not ask for dimensions routinely. Keep ordinary adjacent automatic legs out of `routeLegs`. Each exceptional directive uses the same writable fields as manifest V2, so trip-data can copy it without reconstructing prose.
 
 ## Allowed Values
 
@@ -91,6 +95,23 @@ At handoff-ready depth, `plannedDurationDays` is required and must equal the sum
 - `handoff-ready`
 
 Older references to `implementation-ready` mean `handoff-ready`. Do not emit `implementation-ready` in new plans.
+
+`vehiclePreset`:
+
+- `standard`
+- `large-camper`
+- `expedition-truck`
+
+`ferryPolicy`:
+
+- `allow`
+- `avoid`
+- `require`
+
+Supported route movement/calculation pairs:
+
+- `drive` + `automatic`
+- `vehicle-shipping` + `manual`
 
 `RoutePhase.status`:
 
@@ -321,21 +342,45 @@ Schema-native activities should stay nested under their parent `CandidateStop`. 
 
 ## RouteLegDirective
 
-Ordered adjacent stops use automatic app routing by default. Do not emit a route directive merely because the route includes an ordinary ferry, tunnel, bridge, or vehicle shuttle. Keep operator, booking, and timetable information in links, notes, or logistics gates.
+Ordered adjacent stops use `drive` + `automatic` + `allow` with no waypoints by default. Keep these ordinary legs implicit, including ordinary ferries, tunnels, bridges, and vehicle shuttles. Keep operator, booking, and timetable information in links, notes, or logistics gates.
 
-Emit shipping-manual only for an approved genuine route discontinuity or independent vehicle-shipping transfer that the app cannot represent as continuous driving. The directive is explicit because the trip-data skill must preserve research decisions rather than infer route mode from prose.
+Emit a directive only when structured intent materially changes an adjacent route:
+
+- Add ordered `waypoints` only when a named place materially shapes the route.
+- Add `ferryPolicy: "avoid"` or `ferryPolicy: "require"` only when ferry intent is material.
+- Use `movement: "vehicle-shipping"` plus `calculation: "manual"` only for a genuine discontinuity or independent vehicle-shipping transfer.
+
+For a required Hirtshals crossing shaped by the named terminal waypoint:
+
+```json
+{
+  "fromStopKey": "continental-origin",
+  "toStopKey": "norway-arrival",
+  "ferryPolicy": "require",
+  "waypoints": [
+    {
+      "name": "Hirtshals ferry terminal",
+      "place": { "query": "Hirtshals ferry terminal, Denmark" },
+      "links": []
+    }
+  ],
+  "notes": "Use the approved Hirtshals crossing."
+}
+```
+
+For a genuine discontinuity:
 
 ```json
 {
   "fromStopKey": "vehicle-shipping-origin",
   "toStopKey": "vehicle-shipping-destination",
-  "type": "shipping-manual",
-  "notes": "Approved vehicle-shipping transfer around a physical route discontinuity.",
-  "sources": ["shipping-operator"]
+  "movement": "vehicle-shipping",
+  "calculation": "manual",
+  "notes": "Approved vehicle-shipping transfer around a physical route discontinuity."
 }
 ```
 
-The stop keys must identify adjacent stops in canonical order. `sources` must resolve through `sourceEvidence`. Include a directive only after the crossing itself is approved; unresolved shipping remains a scoped logistics gate. During trip-data conversion, preserve the type and notes, map source URLs to relevant stop links when useful, and omit the research-only `sources` field from the app manifest.
+The stop keys must identify adjacent stops in canonical order. Keep directive evidence in `sourceEvidence`, candidate links, or logistics gates; do not add research-only fields to the manifest-compatible directive. Include a directive only after the route intent is approved. Unresolved vehicle shipping remains a scoped logistics gate.
 
 ## Tag Guidance
 
@@ -426,7 +471,9 @@ If one of these details matters to the recommendation, describe the caveat in `n
 - Approved `placeQuery` values become `place.query` for both stop and activity writes.
 - Approved `coordinates` values become `place.coordinates` for both stop and activity writes.
 - Approved candidate `tags` become stop or activity tags.
-- Approved route-leg directives become `shipping-manual` entries between adjacent full-manifest stop keys.
+- The approved handoff supplies `manifestVersion: 2` and one inferred `vehiclePreset`; default to `standard`.
+- Approved exceptional route-leg directives copy directly into manifest V2 between adjacent full-manifest stop keys.
+- Ordinary adjacent automatic legs remain implicit. Never synthesize directives for them during implementation.
 - Candidate and activity source IDs or inline `sources.url` values become stop or activity links.
 - Scores, vehicle warnings, logistics gates, caveats, and evidence notes become notes.
 - Preserve approved stop order, activities, `plannedDurationDays`, and `expectedStayDays` without judging or changing them.

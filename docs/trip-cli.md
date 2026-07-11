@@ -24,7 +24,20 @@ npm run trip -- create --input ./trip.json
 npm run trip -- delete --trip-id <id> --dry-run
 npm run trip -- delete --trip-id <id> --yes
 npm run trip -- rename --trip-id <id> --name "North Coast 500 Trip"
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck
 ```
+
+Vehicle presets are `standard`, `large-camper`, and `expedition-truck`. Changing the preset replaces the complete trip vehicle snapshot and recalculates automatic route legs; manual vehicle-shipping legs are preserved.
+
+### Routes
+
+```bash
+npm run trip -- audit --trip-id trip-1
+npm run trip -- recalculate-failed-routes --trip-id trip-1
+npm run trip -- update-route-leg --trip-id trip-1 --route-leg-id leg-1 --input /tmp/route-intent.json
+```
+
+`update-route-leg` accepts route intent only: `movement`, `calculation`, `ferryPolicy`, ordered `waypoints`, and `notes`. It rejects calculated or app-owned fields including type, status, geometry, distance, time, provider, profile, route key, calculation time, sections, warnings, and errors. The command never accepts authored geometry or asks the agent to replan stop order.
 
 ### Stops
 
@@ -69,7 +82,7 @@ npm run trip -- delete-activity-link --trip-id <id> --activity-id <id> --link-id
 
 ## Output Contract
 
-Commands print JSON to stdout by default. Pass `--pretty` for formatted output. Pass `--summary` to return `ok`, `summary`, `changed`, and entity counts without full stop, activity, or route geometry payloads.
+Commands print JSON to stdout by default. Pass `--pretty` for formatted output. Pass `--summary` to return `ok`, `summary`, `changed`, the trip vehicle preset, and entity counts without full stop, activity, or route geometry payloads. Route counts distinguish ready, manual, failed, and review-required legs.
 
 Successful responses use a shared envelope:
 
@@ -109,6 +122,71 @@ Failures use:
 ```
 
 Agents may write `name` and an optional ordered array of stop drafts.
+
+### Trip Manifest V1 And V2
+
+Manifest V1 remains readable for existing files. Its exceptional route directives use `type: "shipping-manual"`, and the trip resolves the `standard` vehicle preset.
+
+Manifest V2 requires `vehiclePreset`, creates an automatic driving leg for every adjacent stop pair, and overlays only the exceptional route directives supplied in `routeLegs`:
+
+```json
+{
+  "manifestVersion": 2,
+  "name": "Nordkapp",
+  "vehiclePreset": "expedition-truck",
+  "stops": [
+    {
+      "key": "bremen",
+      "name": "Bremen",
+      "place": { "query": "Bremen, Germany" },
+      "expectedStayDays": 1
+    },
+    {
+      "key": "kristiansand",
+      "name": "Kristiansand",
+      "place": { "query": "Kristiansand, Norway" },
+      "expectedStayDays": 1
+    }
+  ],
+  "routeLegs": [
+    {
+      "fromStopKey": "bremen",
+      "toStopKey": "kristiansand",
+      "ferryPolicy": "require",
+      "waypoints": [
+        {
+          "name": "Hirtshals ferry terminal",
+          "place": { "query": "Hirtshals ferry terminal, Denmark" },
+          "links": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+Supported movement/calculation pairs are `drive` + `automatic` and `vehicle-shipping` + `manual`. Route directives must reference adjacent stop keys. Waypoint places and links are resolved and enriched by the same app services used for stops and research links.
+
+Automatic route calculation failure does not roll back an otherwise valid manifest. Failed and review-required legs are persisted, shown in summary counts, and reported by `audit` with exact leg diagnostics. Structural validation failures and activity-distance outliers remain blocking.
+
+### RouteIntentPatch
+
+```json
+{
+  "movement": "drive",
+  "calculation": "automatic",
+  "ferryPolicy": "require",
+  "waypoints": [
+    {
+      "name": "Hirtshals ferry terminal",
+      "place": { "query": "Hirtshals ferry terminal, Denmark" },
+      "notes": "Check in early.",
+      "links": ["https://example.com/ferry"]
+    }
+  ],
+  "notes": "Use the booked crossing."
+}
+```
 
 ### StopDraft
 
@@ -198,7 +276,7 @@ The CLI should not ask agents to author fields the app already derives. The serv
 - route geometry when OpenRouteService is available
 - failure states for invalid places, ids, URLs, or duplicates
 
-Write stops and activities. Let the service derive routes, links, and default fields.
+Write stops, activities, and route intent. Let the service derive routes, links, and default fields.
 
 ## Itinerary Interpretation
 

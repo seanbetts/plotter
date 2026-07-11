@@ -101,14 +101,14 @@ describe('ItineraryPanel', () => {
           createRouteLeg({
             originDestinationId: origin.id,
             targetDestinationId: middle.id,
-            type: 'driving-auto',
+            movement: 'drive', calculation: 'automatic',
             status: 'ready',
             travelTimeHours: 24,
           }),
           createRouteLeg({
             originDestinationId: middle.id,
             targetDestinationId: target.id,
-            type: 'driving-auto',
+            movement: 'drive', calculation: 'automatic',
             status: 'ready',
             travelTimeHours: 25.4,
           }),
@@ -123,6 +123,99 @@ describe('ItineraryPanel', () => {
 
     const summary = screen.getByLabelText('Itinerary summary');
     expect(within(summary).getByText('2 days 1 hr travel')).toBeInTheDocument();
+  });
+
+  it('shows exceptional route indicators only when present and excludes review-required metrics from totals', () => {
+    const origin = createDestination({ name: 'Dover', coordinates: { lat: 51.1279, lng: 1.3134 }, order: 0 });
+    const middle = createDestination({ name: 'Calais', coordinates: { lat: 50.9513, lng: 1.8587 }, order: 1 });
+    const target = createDestination({ name: 'Paris', coordinates: { lat: 48.8566, lng: 2.3522 }, order: 2 });
+    const waypoint = {
+      id: 'waypoint-folkestone',
+      order: 0,
+      name: 'Folkestone terminal',
+      coordinates: { lat: 51.095, lng: 1.121 },
+      location: origin.location,
+      notes: '',
+      links: [],
+    };
+    const reviewRequiredLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: middle.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'review-required',
+      distanceKm: 135,
+      travelTimeHours: 10,
+      waypoints: [waypoint],
+      sections: [{ kind: 'ferry', startGeometryIndex: 2, endGeometryIndex: 8, distanceKm: 42 }],
+      warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Route is much longer than expected.' }],
+    });
+    const ordinaryLeg = createRouteLeg({
+      originDestinationId: middle.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 290,
+      travelTimeHours: 3,
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, middle, target]}
+        routeLegs={[reviewRequiredLeg, ordinaryLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Route includes a ferry')).toHaveAttribute('title', 'Route includes a ferry');
+    expect(screen.getByLabelText('1 route waypoint')).toHaveAttribute('title', '1 route waypoint');
+    expect(screen.getByLabelText(/Route requires review/)).toHaveAttribute(
+      'title',
+      'Route requires review: Route is much longer than expected.',
+    );
+    expect(within(screen.getByLabelText('Itinerary summary')).getByText('3 hrs travel')).toBeInTheDocument();
+
+    const ordinaryRoute = screen.getByText('180 mi').closest('.inline-route-leg');
+    expect(ordinaryRoute).not.toBeNull();
+    expect(within(ordinaryRoute as HTMLElement).queryByLabelText('Route includes a ferry')).not.toBeInTheDocument();
+    expect(within(ordinaryRoute as HTMLElement).queryByLabelText(/route waypoint/)).not.toBeInTheDocument();
+    expect(within(ordinaryRoute as HTMLElement).queryByLabelText(/Route requires review/)).not.toBeInTheDocument();
+  });
+
+  it('excludes failed route metrics from totals and labels the failure warning', () => {
+    const origin = createDestination({ name: 'Dover', coordinates: { lat: 51.1279, lng: 1.3134 }, order: 0 });
+    const target = createDestination({ name: 'Calais', coordinates: { lat: 50.9513, lng: 1.8587 }, order: 1 });
+    const failedLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'failed',
+      distanceKm: 500,
+      travelTimeHours: 10,
+      error: 'Required ferry section was not returned.',
+      warnings: [{ code: 'FERRY_REQUIRED_NOT_FOUND', message: 'Required ferry section was not returned.' }],
+    });
+
+    render(
+      <ItineraryPanel
+        destinations={[origin, target]}
+        routeLegs={[failedLeg]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+        onDeleteDestination={vi.fn()}
+        onReorderDestinations={vi.fn()}
+        onUpdateRouteLeg={vi.fn()}
+      />,
+    );
+
+    expect(within(screen.getByLabelText('Itinerary summary')).getByText('0 hrs travel')).toBeInTheDocument();
+    expect(screen.getByLabelText('Route failed: Required ferry section was not returned.')).toHaveAttribute(
+      'title',
+      'Route failed: Required ferry section was not returned.',
+    );
   });
 
   it('pluralises inline route hours at two displayed hours and above', () => {
@@ -149,14 +242,14 @@ describe('ItineraryPanel', () => {
           createRouteLeg({
             originDestinationId: origin.id,
             targetDestinationId: middle.id,
-            type: 'driving-auto',
+            movement: 'drive', calculation: 'automatic',
             status: 'ready',
             travelTimeHours: 1.9,
           }),
           createRouteLeg({
             originDestinationId: middle.id,
             targetDestinationId: target.id,
-            type: 'driving-auto',
+            movement: 'drive', calculation: 'automatic',
             status: 'ready',
             travelTimeHours: 2,
           }),
@@ -189,7 +282,7 @@ describe('ItineraryPanel', () => {
       ...createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 715,
         travelTimeHours: 7.6,
@@ -235,7 +328,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       status: 'manual',
     });
 
@@ -271,7 +364,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
     });
 
@@ -310,7 +403,7 @@ describe('ItineraryPanel', () => {
       id: 'route-durmitor-kotor',
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'failed',
       error: 'OpenRouteService route calculation failed',
       notes: '',
@@ -341,7 +434,7 @@ describe('ItineraryPanel', () => {
     await user.click(retryButton);
 
     expect(onUpdateRouteLeg).toHaveBeenCalledWith('route-durmitor-kotor', {
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
   });
 });

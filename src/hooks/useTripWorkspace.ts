@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { VehiclePreset } from '../domain/types';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import {
   createAppTripStorage,
   selectedTripStorageKey,
@@ -149,12 +151,18 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     }
   }, [activateTrip, storage]);
 
-  const renameTrip = useCallback(async (tripId: string, name: string) => {
+  const updateTrip = useCallback(async (
+    tripId: string,
+    patch: { name: string; vehiclePreset: VehiclePreset },
+  ): Promise<TripSummary | false> => {
     if (!storage) return false;
 
     setActionError(null);
     try {
-      const updatedTrip = await storage.directory.updateTrip(tripId, { name });
+      const updatedTrip = await storage.directory.updateTrip(tripId, {
+        name: patch.name,
+        routingVehicle: resolveVehiclePreset(patch.vehiclePreset),
+      });
       setTrips((current) =>
         current.map((trip) => (trip.id === updatedTrip.id ? updatedTrip : trip)),
       );
@@ -163,9 +171,9 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
         activeTripRef.current = nextActive;
         return nextActive;
       });
-      return true;
+      return updatedTrip;
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : 'Unable to rename trip');
+      setActionError(caught instanceof Error ? caught.message : 'Unable to update trip');
       return false;
     }
   }, [storage]);
@@ -227,7 +235,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     actionError,
     selectTrip,
     createTrip,
-    renameTrip,
+    updateTrip,
     deleteTrip,
     refreshTrips,
   }), [
@@ -238,7 +246,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     error,
     isLoading,
     repository,
-    renameTrip,
+    updateTrip,
     refreshTrips,
     selectTrip,
     storage?.realtime,

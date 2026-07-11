@@ -10,8 +10,12 @@ This guide is research-only. It produces a reviewable route research plan. It do
 - Do not mutate app data from this guide.
 - Do not write Supabase rows directly.
 - Do not author route geometry or app-derived fields.
-- Assume automatic driving routing between adjacent stops, including ordinary ferries, tunnels, bridges, and vehicle shuttles that a normal road route can contain.
-- Emit shipping-manual only for a genuine physical discontinuity or independent vehicle-shipping transfer that automatic driving routing cannot represent.
+- Infer `standard`, `large-camper`, or `expedition-truck` from ordinary language; default to `standard` and do not ask for dimensions routinely.
+- Keep ordinary adjacent automatic routes implicit, including ordinary ferries, tunnels, bridges, and vehicle shuttles that a normal road route can contain.
+- Add ordered waypoints only when a named place materially shapes an adjacent route.
+- Add `ferryPolicy: "avoid"` or `ferryPolicy: "require"` only when ferry intent is material; otherwise leave the ordinary `allow` default implicit.
+- Use `vehicle-shipping` plus `manual` only for a genuine physical discontinuity or independent vehicle-shipping transfer that automatic driving routing cannot represent.
+- Maintain a manifest-version-2-compatible approved handoff so the trip-data workflow copies structured vehicle and exceptional route intent instead of reconstructing prose.
 - Re-check current ferry, road, border, weather, access, and seasonal restriction facts during each research run.
 - Treat overnight or base locations as candidate stops.
 - Treat non-overnight sights, hikes, tours, food stops, viewpoints, and experiences as candidate activities under a nearby candidate stop.
@@ -189,6 +193,8 @@ The agent should decide:
 - a conservative duration, pace, direction, or density when the user asks for a recommendation
 - the route's naturally paced recommended duration and, at handoff-ready depth, the exact `plannedDurationDays` and `expectedStayDays` allocation
 - conservative placeholders for non-blocking operational details, recorded as assumptions or validation items
+- the vehicle preset inferred from ordinary language, defaulting to `standard` without routinely asking for dimensions
+- which exceptional adjacent legs need material waypoints or `avoid`/`require` ferry intent; leave ordinary adjacent automatic legs implicit
 
 The user should decide:
 
@@ -329,9 +335,10 @@ After the user gives final approval to implement an approved route research plan
 7. Store source URLs as stop or activity links.
 8. Put scores, vehicle warnings, caveats, timing, costs, logistics gates, and evidence notes into stop or activity notes.
 9. Use source coordinates when available.
-10. Preserve approved stop order, activities, `plannedDurationDays`, and `expectedStayDays` without judging or changing them.
-11. Let the app calculate routes and derived data.
-12. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
+10. Copy the approved `manifestVersion: 2`, `vehiclePreset`, and exceptional `routeLegs` fields without reconstructing route intent from prose.
+11. Preserve approved stop order, activities, `plannedDurationDays`, and `expectedStayDays` without judging or changing them.
+12. Let the app calculate routes and derived data.
+13. Verify with `npm run trip -- get --include-activities --include-links --summary --pretty`.
 
 ## References
 

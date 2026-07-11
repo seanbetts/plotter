@@ -16,6 +16,8 @@ export type TripRepository = {
   listDestinations(): Promise<Destination[]>;
   saveDestination(destination: Destination): Promise<void>;
   deleteDestination(destinationId: string): Promise<void>;
+  deleteDestinations?(destinationIds: string[]): Promise<void>;
+  prepareDestinationDeletion?(destinationIds: string[]): Promise<() => Promise<void>>;
   listActivities(destinationId: string): Promise<Activity[]>;
   createActivity(input: {
     destinationId: string;
@@ -74,11 +76,6 @@ export type TripRepository = {
     routeLegs: RouteLeg[];
     activities?: Activity[];
   }): Promise<void>;
-};
-
-type LegacyRouteLeg = Omit<RouteLeg, 'type' | 'status'> & {
-  type?: RouteLeg['type'] | 'driving' | 'ferry-shipping' | 'uncertain';
-  status?: RouteLeg['status'];
 };
 
 const defaultLocalTripId = 'local-default-trip';
@@ -154,16 +151,13 @@ function normalizeActivity(activity: Activity): Activity {
   };
 }
 
-function normalizeRouteLeg(routeLeg: LegacyRouteLeg): RouteLeg {
-  const type = routeLeg.type === 'shipping-manual' || routeLeg.type === 'ferry-shipping' || routeLeg.type === 'uncertain'
-    ? 'shipping-manual'
-    : 'driving-auto';
-
+function normalizeRouteLeg(routeLeg: RouteLeg): RouteLeg {
   return {
     ...routeLeg,
-    type,
-    status: routeLeg.status ?? (type === 'shipping-manual' ? 'manual' : 'pending'),
-    profile: routeLeg.profile ?? (type === 'driving-auto' ? 'driving-car' : undefined),
+    ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+    waypoints: routeLeg.waypoints ?? [],
+    sections: routeLeg.sections ?? [],
+    warnings: routeLeg.warnings ?? [],
   };
 }
 
@@ -212,6 +206,24 @@ async function createLocalMediaUrl(file: File) {
 }
 
 export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): TripRepository {
+  async function deleteDestinations(destinationIds: string[]): Promise<void> {
+    const requestedIds = new Set(destinationIds);
+    if (requestedIds.size === 0) return;
+    await db.transaction('rw', db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
+      const attachedActivities = (await db.activities.where('tripId').equals(tripId).toArray())
+        .filter((activity) => requestedIds.has(activity.destinationId));
+      const attachedActivityMedia = (await db.activityMedia.where('tripId').equals(tripId).toArray())
+        .filter((mediaItem) => requestedIds.has(mediaItem.destinationId));
+      const attachedLegs = (await db.routeLegs.where('tripId').equals(tripId).toArray()).filter(
+        (leg) => requestedIds.has(leg.originDestinationId) || requestedIds.has(leg.targetDestinationId),
+      );
+      await db.destinations.bulkDelete([...requestedIds].map((id) => localTripKey(tripId, id)));
+      await db.activities.bulkDelete(attachedActivities.map((activity) => activity.id));
+      await db.activityMedia.bulkDelete(attachedActivityMedia.map((mediaItem) => mediaItem.id));
+      await db.routeLegs.bulkDelete(attachedLegs.map((leg) => leg.id));
+    });
+  }
+
   return {
     async listDestinations(): Promise<Destination[]> {
       const destinations = await db.destinations.where('tripId').equals(tripId).toArray();
@@ -226,29 +238,12 @@ export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): T
     },
 
     async deleteDestination(destinationId: string): Promise<void> {
-      await db.transaction('rw', db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
-        const destination = await db.destinations.get(localTripKey(tripId, destinationId));
-        if (destination?.tripId !== tripId) return;
+      await deleteDestinations([destinationId]);
+    },
 
-        const attachedActivities = await db.activities
-          .where('[tripId+destinationId]')
-          .equals([tripId, destinationId])
-          .toArray();
-        const attachedActivityMedia = await db.activityMedia
-          .where('[tripId+destinationId]')
-          .equals([tripId, destinationId])
-          .toArray();
-        const attachedLegs = (await db.routeLegs.where('tripId').equals(tripId).toArray()).filter(
-          (leg) =>
-            leg.originDestinationId === destinationId ||
-            leg.targetDestinationId === destinationId,
-        );
-
-        await db.destinations.delete(localTripKey(tripId, destinationId));
-        await db.activities.bulkDelete(attachedActivities.map((activity) => activity.id));
-        await db.activityMedia.bulkDelete(attachedActivityMedia.map((mediaItem) => mediaItem.id));
-        await db.routeLegs.bulkDelete(attachedLegs.map((leg) => leg.id));
-      });
+    deleteDestinations,
+    async prepareDestinationDeletion(destinationIds) {
+      return () => deleteDestinations(destinationIds);
     },
 
     async listActivities(destinationId: string): Promise<Activity[]> {
@@ -667,12 +662,12 @@ export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): T
       const routeLegs = await db.routeLegs.where('tripId').equals(tripId).toArray();
 
       return routeLegs
-        .map((routeLeg) => normalizeRouteLeg(stripRouteLegTripId(routeLeg) as LegacyRouteLeg))
+        .map((routeLeg) => normalizeRouteLeg(stripRouteLegTripId(routeLeg)))
         .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
     },
 
     async saveRouteLeg(routeLeg: RouteLeg): Promise<void> {
-      await db.routeLegs.put(storeRouteLeg(routeLeg, tripId));
+      await db.routeLegs.put(storeRouteLeg(normalizeRouteLeg(routeLeg), tripId));
     },
 
     async deleteRouteLeg(routeLegId: string): Promise<void> {
@@ -700,7 +695,9 @@ export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): T
         await db.destinations.bulkPut(snapshot.destinations.map((destination, index) =>
           storeDestination(normalizeDestination(destination, index), tripId),
         ));
-        await db.routeLegs.bulkPut(snapshot.routeLegs.map((routeLeg) => storeRouteLeg(routeLeg, tripId)));
+        await db.routeLegs.bulkPut(snapshot.routeLegs.map((routeLeg) =>
+          storeRouteLeg(normalizeRouteLeg(routeLeg), tripId),
+        ));
         if (snapshot.activities) {
           await db.activities.bulkPut(snapshot.activities.map((activity) => storeActivity(activity, tripId)));
         }

@@ -1,14 +1,224 @@
 import { describe, expect, it } from 'vitest';
 import { createDestination } from './destinations';
-import { createRouteLeg } from './routeLegs';
+import { createRouteKey, createRouteLeg } from './routeLegs';
+import { resolveVehiclePreset } from './vehiclePresets';
 import {
   coordinateDistanceKm,
   findBestDestinationInsertionIndex,
   getDestinationInsertionCandidates,
+  planRouteLegReconciliation,
   reconcileRouteLegsForDestinations,
 } from './routePlanner';
 
 describe('route planner helpers', () => {
+  it('preserves an unrelated ready expedition-truck leg byte-for-relevant-fields', () => {
+    const vehicle = resolveVehiclePreset('expedition-truck');
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53, lng: 8 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 54, lng: 9 }, order: 1 });
+    const unrelated = createDestination({ name: 'Berlin', coordinates: { lat: 52.5, lng: 13.4 }, order: 2 });
+    const waypoint = { id: 'wp', order: 0, name: 'Via', coordinates: { lat: 53.5, lng: 8.5 }, location: origin.location, notes: '', links: [] };
+    const ready = createRouteLeg({
+      originDestinationId: origin.id, targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', ferryPolicy: 'avoid', waypoints: [waypoint],
+      status: 'ready', distanceKm: 120, travelTimeHours: 2,
+      geometry: { type: 'LineString', coordinates: [[8, 53], [8.5, 53.5], [9, 54]] },
+      provider: 'openrouteservice', profile: 'driving-hgv', calculatedAt: '2026-07-11T00:00:00.000Z',
+      routeKey: createRouteKey({
+        origin: origin.coordinates, target: target.coordinates, routingVehicle: vehicle,
+        waypoints: [waypoint.coordinates], ferryPolicy: 'avoid',
+      }),
+    });
+
+    const result = planRouteLegReconciliation({
+      destinations: [origin, target, unrelated], currentRouteLegs: [ready], routingVehicle: vehicle,
+    });
+
+    expect(result.routeLegs[0]).toBe(ready);
+    expect(result.routeLegs[0]).toMatchObject({
+      status: 'ready', profile: 'driving-hgv', routeKey: ready.routeKey,
+      ferryPolicy: 'avoid', waypoints: [waypoint], geometry: ready.geometry,
+      distanceKm: 120, travelTimeHours: 2,
+    });
+  });
+  it('creates two automatic trip-vehicle legs after an ordinary insertion', () => {
+    const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.08, lng: 8.8 }, order: 0 });
+    const hirtshals = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.59, lng: 9.96 }, order: 1 });
+    const kristiansand = createDestination({ name: 'Kristiansand', coordinates: { lat: 58.15, lng: 8.0 }, order: 2 });
+    const bremenToKristiansand = createRouteLeg({
+      originDestinationId: bremen.id,
+      targetDestinationId: kristiansand.id,
+      movement: 'drive', calculation: 'automatic',
+    });
+
+    const result = planRouteLegReconciliation({
+      destinations: [bremen, hirtshals, kristiansand],
+      currentRouteLegs: [bremenToKristiansand],
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+    });
+
+    expect(result.routeLegs).toHaveLength(2);
+    expect(result.routeLegs.every((leg) => leg.calculation === 'automatic')).toBe(true);
+    expect(result.routeLegs.every((leg) => leg.profile === 'driving-hgv')).toBe(true);
+    expect(result.routeLegs.every((leg) => leg.geometry === undefined)).toBe(true);
+  });
+
+  it('partitions waypoints and keeps require with the ferry section', () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const insertedStop = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const location = origin.location;
+    const constrainedReadyLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      ferryPolicy: 'require',
+      waypoints: [
+        { id: 'before', order: 0, name: 'Before stop', coordinates: { lat: 0, lng: 2 }, location, notes: '', links: [] },
+        { id: 'ferry', order: 1, name: 'Ferry terminal', coordinates: { lat: 0, lng: 8 }, location, notes: '', links: [] },
+      ],
+      sections: [
+        { kind: 'road', startGeometryIndex: 0, endGeometryIndex: 5, distanceKm: 5 },
+        { kind: 'ferry', startGeometryIndex: 6, endGeometryIndex: 9, distanceKm: 4 },
+        { kind: 'road', startGeometryIndex: 9, endGeometryIndex: 10, distanceKm: 1 },
+      ],
+      geometry: {
+        type: 'LineString',
+        coordinates: Array.from({ length: 11 }, (_, lng) => [lng, 0]),
+      },
+      distanceKm: 10,
+      travelTimeHours: 1,
+      provider: 'test',
+      profile: 'driving-car',
+      routeKey: 'ready',
+      calculatedAt: '2026-07-11T00:00:00.000Z',
+    });
+
+    const result = planRouteLegReconciliation({
+      destinations: [origin, insertedStop, target],
+      currentRouteLegs: [constrainedReadyLeg],
+      routingVehicle: resolveVehiclePreset('standard'),
+    });
+
+    expect(result.routeLegs[0].waypoints?.map((item) => item.name)).toEqual(['Before stop']);
+    expect(result.routeLegs[1]).toMatchObject({
+      ferryPolicy: 'require',
+      waypoints: [expect.objectContaining({ name: 'Ferry terminal' })],
+    });
+    expect(result.routeLegs[0].ferryPolicy).toBe('allow');
+  });
+
+  it('copies avoid intent to both projected sections without copying waypoints to both', () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const inserted = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const waypoint = { id: 'only', order: 0, name: 'Only once', coordinates: { lat: 0, lng: 3 }, location: origin.location, notes: '', links: [] };
+    const source = createRouteLeg({
+      originDestinationId: origin.id, targetDestinationId: target.id, movement: 'drive', calculation: 'automatic', status: 'ready',
+      ferryPolicy: 'avoid', waypoints: [waypoint], geometry: { type: 'LineString', coordinates: Array.from({ length: 11 }, (_, lng) => [lng, 0]) },
+      distanceKm: 10, travelTimeHours: 1, provider: 'test', profile: 'driving-car', routeKey: 'ready', calculatedAt: '2026-07-11T00:00:00.000Z',
+    });
+
+    const result = planRouteLegReconciliation({ destinations: [origin, inserted, target], currentRouteLegs: [source], routingVehicle: resolveVehiclePreset('standard') });
+
+    expect(result.routeLegs.map((leg) => leg.ferryPolicy)).toEqual(['avoid', 'avoid']);
+    expect(result.routeLegs.flatMap((leg) => leg.waypoints ?? []).map((item) => item.id)).toEqual(['only']);
+  });
+
+  it('treats reversed waypoint projections as ambiguous instead of reordering intent', () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const inserted = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const waypoints = [
+      { id: 'later', order: 0, name: 'Later', coordinates: { lat: 0, lng: 8 }, location: origin.location, notes: '', links: [] },
+      { id: 'earlier', order: 1, name: 'Earlier', coordinates: { lat: 0, lng: 2 }, location: origin.location, notes: '', links: [] },
+    ];
+    const source = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      waypoints,
+      geometry: { type: 'LineString', coordinates: Array.from({ length: 11 }, (_, lng) => [lng, 0]) },
+      distanceKm: 10,
+      travelTimeHours: 1,
+      provider: 'test',
+      profile: 'driving-car',
+      routeKey: 'ready',
+      calculatedAt: '2026-07-11T00:00:00.000Z',
+    });
+
+    const result = planRouteLegReconciliation({ destinations: [origin, inserted, target], currentRouteLegs: [source], routingVehicle: resolveVehiclePreset('standard') });
+
+    expect(result.routeLegs.every((leg) => leg.status === 'review-required')).toBe(true);
+    expect(result.routeLegs.every((leg) => (leg.waypoints ?? []).length === 0)).toBe(true);
+    expect(result.routeLegs.flatMap((leg) => leg.warnings ?? [])).toEqual([
+      expect.objectContaining({
+        code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED',
+        context: { sourceRouteLegId: source.id, unresolvedIntent: expect.objectContaining({ waypoints }) },
+      }),
+    ]);
+  });
+
+  it('treats out-of-range ferry section indices as ambiguous without dropping require', () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const inserted = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const source = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      ferryPolicy: 'require',
+      sections: [{ kind: 'ferry', startGeometryIndex: 90, endGeometryIndex: 100, distanceKm: 10 }],
+      geometry: { type: 'LineString', coordinates: Array.from({ length: 11 }, (_, lng) => [lng, 0]) },
+      distanceKm: 10,
+      travelTimeHours: 1,
+      provider: 'test',
+      profile: 'driving-car',
+      routeKey: 'ready',
+      calculatedAt: '2026-07-11T00:00:00.000Z',
+    });
+
+    const result = planRouteLegReconciliation({ destinations: [origin, inserted, target], currentRouteLegs: [source], routingVehicle: resolveVehiclePreset('standard') });
+
+    expect(result.routeLegs.every((leg) => leg.status === 'review-required')).toBe(true);
+    expect(result.routeLegs.every((leg) => leg.ferryPolicy === 'allow')).toBe(true);
+    expect(result.routeLegs.flatMap((leg) => leg.warnings ?? [])).toEqual([
+      expect.objectContaining({
+        code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED',
+        context: { sourceRouteLegId: source.id, unresolvedIntent: expect.objectContaining({ ferryPolicy: 'require' }) },
+      }),
+    ]);
+  });
+
+  it('marks ambiguous constrained replacements review-required with one complete intent warning', () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const inserted = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const unresolvedIntent = {
+      movement: 'drive' as const,
+      calculation: 'automatic' as const,
+      ferryPolicy: 'require' as const,
+      waypoints: [],
+      notes: 'Use the overnight ferry.',
+    };
+    const source = createRouteLeg({
+      originDestinationId: origin.id, targetDestinationId: target.id,
+      ...unresolvedIntent,
+    });
+
+    const result = planRouteLegReconciliation({ destinations: [origin, inserted, target], currentRouteLegs: [source], routingVehicle: resolveVehiclePreset('standard') });
+
+    expect(result.routeLegs).toHaveLength(2);
+    expect(result.routeLegs.every((leg) => leg.status === 'review-required')).toBe(true);
+    expect(result.routeLegs.flatMap((leg) => leg.warnings ?? [])).toEqual([
+      expect.objectContaining({
+        code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED',
+        context: { sourceRouteLegId: source.id, unresolvedIntent },
+      }),
+    ]);
+  });
   it('calculates a known great-circle distance', () => {
     expect(coordinateDistanceKm(
       { lat: 51.5072, lng: -0.1276 },
@@ -151,13 +361,13 @@ describe('route planner helpers', () => {
       {
         originDestinationId: london.id,
         targetDestinationId: paris.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
       },
       {
         originDestinationId: paris.id,
         targetDestinationId: istanbul.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
       },
     ]);
@@ -177,7 +387,7 @@ describe('route planner helpers', () => {
     const shippingLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       notes: 'Ship the truck across here.',
     });
 
@@ -201,7 +411,7 @@ describe('route planner helpers', () => {
     const shippingLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       geometry: {
         type: 'LineString',
         coordinates: [
@@ -232,7 +442,7 @@ describe('route planner helpers', () => {
     const selectedAlternativeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -246,7 +456,7 @@ describe('route planner helpers', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, variant: 'alternative-1' }),
       calculatedAt: '2026-07-04T12:00:00.000Z',
     });
 
@@ -270,7 +480,7 @@ describe('route planner helpers', () => {
     const selectedAlternativeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -284,7 +494,7 @@ describe('route planner helpers', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, variant: 'alternative-1' }),
       calculatedAt: '2026-07-04T12:00:00.000Z',
     });
 
@@ -312,7 +522,7 @@ describe('route planner helpers', () => {
     const selectedAlternativeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -326,7 +536,7 @@ describe('route planner helpers', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, variant: 'alternative-1' }),
       calculatedAt: '2026-07-04T12:00:00.000Z',
     });
 
@@ -335,14 +545,14 @@ describe('route planner helpers', () => {
     expect(result.routeLegs).toMatchObject([
       {
         id: selectedAlternativeLeg.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
         distanceKm: undefined,
         travelTimeHours: undefined,
         geometry: undefined,
         provider: undefined,
         profile: 'driving-car',
-        routeKey: 'driving-car:19.04500,43.14000:18.77120,42.42470',
+        routeKey: createRouteKey({ origin: movedOrigin.coordinates, target: target.coordinates }),
         calculatedAt: undefined,
         error: undefined,
       },
@@ -367,7 +577,7 @@ describe('route planner helpers', () => {
     const selectedAlternativeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -381,7 +591,7 @@ describe('route planner helpers', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, variant: 'alternative-1' }),
       calculatedAt: '2026-07-04T12:00:00.000Z',
     });
 
@@ -389,14 +599,14 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs[0]).toMatchObject({
       id: selectedAlternativeLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
       geometry: undefined,
       distanceKm: undefined,
       travelTimeHours: undefined,
       provider: undefined,
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03430,43.13070:18.77120,42.42470',
+      routeKey: createRouteKey({ origin: slightlyMovedOrigin.coordinates, target: target.coordinates }),
       calculatedAt: undefined,
       error: undefined,
     });
@@ -416,7 +626,7 @@ describe('route planner helpers', () => {
     const incompleteLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -430,7 +640,7 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs[0]).toMatchObject({
       id: incompleteLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
       geometry: undefined,
       distanceKm: undefined,
@@ -456,7 +666,7 @@ describe('route planner helpers', () => {
     const erroredLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -479,7 +689,7 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs[0]).toMatchObject({
       id: erroredLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
       geometry: undefined,
       distanceKm: undefined,
@@ -505,7 +715,7 @@ describe('route planner helpers', () => {
     const cyclingLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -527,14 +737,14 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs[0]).toMatchObject({
       id: cyclingLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
       geometry: undefined,
       distanceKm: undefined,
       travelTimeHours: undefined,
       provider: undefined,
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
       calculatedAt: undefined,
       error: undefined,
     });
@@ -559,7 +769,7 @@ describe('route planner helpers', () => {
     const oldLeg = createRouteLeg({
       originDestinationId: first.id,
       targetDestinationId: second.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
 
     const result = reconcileRouteLegsForDestinations([first, third, second], [oldLeg]);

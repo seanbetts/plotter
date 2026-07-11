@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { formatDestinationLocation } from '../domain/locations';
-import type { Destination, RouteLegType } from '../domain/types';
+import type { Destination, RouteMovement } from '../domain/types';
 
 type CreateRouteLegInput = {
   originDestinationId: string;
   targetDestinationId: string;
-  type: RouteLegType;
+  movement: RouteMovement;
+  calculation: 'automatic' | 'manual';
   notes: string;
 };
 
@@ -26,7 +27,7 @@ function formatDestinationOption(destination: Destination) {
 export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEditorProps) {
   const [originDestinationId, setOriginDestinationId] = useState('');
   const [targetDestinationId, setTargetDestinationId] = useState('');
-  const [type, setType] = useState<RouteLegType>('driving-auto');
+  const [movement, setMovement] = useState<RouteMovement>('drive');
   const [notes, setNotes] = useState('');
 
   const originSelectValue = hasDestination(destinations, originDestinationId) ? originDestinationId : '';
@@ -48,7 +49,8 @@ export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEdito
     await onCreateRouteLeg({
       originDestinationId,
       targetDestinationId,
-      type,
+      movement,
+      calculation: movement === 'vehicle-shipping' ? 'manual' : 'automatic',
       notes,
     });
     setNotes('');
@@ -82,9 +84,9 @@ export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEdito
 
       <label>
         Leg type
-        <select value={type} onChange={(event) => setType(event.target.value as RouteLegType)}>
-          <option value="driving-auto">driving-auto</option>
-          <option value="shipping-manual">shipping-manual</option>
+        <select value={movement} onChange={(event) => setMovement(event.target.value as RouteMovement)}>
+          <option value="drive">Automatic driving</option>
+          <option value="vehicle-shipping">Vehicle shipping</option>
         </select>
       </label>
 

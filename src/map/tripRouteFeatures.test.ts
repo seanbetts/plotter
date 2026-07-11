@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg } from '../domain/routeLegs';
-import { buildRenderableRouteFeatures, routeGeometryForLeg, tripMapBounds } from './tripRouteFeatures';
+import type { RouteLeg } from '../domain/types';
+import { buildRenderableRouteFeatures, buildRouteFeatures, routeGeometryForLeg, tripMapBounds } from './tripRouteFeatures';
 
 const origin = createDestination({ name: 'Origin', countryRegion: 'A', coordinates: { lat: 10, lng: 20 } });
 const target = createDestination({ name: 'Target', countryRegion: 'B', coordinates: { lat: 30, lng: 40 } });
@@ -12,7 +13,7 @@ describe('tripRouteFeatures', () => {
       ...createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
       status: 'ready' as const,
       geometry: { type: 'LineString' as const, coordinates: [[20, 10], [55, -5], [40, 30]] },
@@ -26,13 +27,13 @@ describe('tripRouteFeatures', () => {
     const shipping = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
     });
     const failed = {
       ...createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
       status: 'failed' as const,
     };
@@ -44,9 +45,62 @@ describe('tripRouteFeatures', () => {
     const pending = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
     expect(buildRenderableRouteFeatures([origin, target], [pending]).features).toEqual([]);
+  });
+
+  it.each([
+    ['out-of-range', [{ kind: 'ferry' as const, startGeometryIndex: 1, endGeometryIndex: 6, distanceKm: 10 }]],
+    ['reversed', [{ kind: 'ferry' as const, startGeometryIndex: 3, endGeometryIndex: 2, distanceKm: 10 }]],
+    ['non-integer', [{ kind: 'ferry' as const, startGeometryIndex: 1.5, endGeometryIndex: 3, distanceKm: 10 }]],
+    ['non-finite', [{ kind: 'ferry' as const, startGeometryIndex: 1, endGeometryIndex: Number.NaN, distanceKm: 10 }]],
+    ['non-array', { kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 3, distanceKm: 10 }],
+    ['null entry', [null]],
+    ['unsupported kind', [{ kind: 'rail', startGeometryIndex: 1, endGeometryIndex: 3, distanceKm: 10 }]],
+    ['non-finite distance', [{ kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 3, distanceKm: Number.NaN }]],
+    ['negative distance', [{ kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 3, distanceKm: -1 }]],
+    ['unsorted', [
+      { kind: 'ferry' as const, startGeometryIndex: 2, endGeometryIndex: 4, distanceKm: 10 },
+      { kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 10 },
+    ]],
+    ['overlapping', [
+      { kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 3, distanceKm: 10 },
+      { kind: 'ferry' as const, startGeometryIndex: 2, endGeometryIndex: 4, distanceKm: 10 },
+    ]],
+  ])('falls back to one full road feature for %s section metadata', (_name, sections) => {
+    const geometry = {
+      type: 'LineString' as const,
+      coordinates: [[20, 10], [25, 15], [30, 20], [35, 25], [40, 30]],
+    };
+    const leg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      geometry,
+      sections: sections as unknown as RouteLeg['sections'],
+    });
+
+    expect(buildRouteFeatures([leg]).features).toEqual([
+      expect.objectContaining({
+        geometry,
+        properties: expect.objectContaining({ kind: 'road' }),
+      }),
+    ]);
+  });
+
+  it('omits invalid route geometry instead of emitting invalid GeoJSON', () => {
+    const leg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      geometry: { type: 'LineString', coordinates: [[20, 10], [Number.NaN, 30]] },
+      sections: [],
+    });
+
+    expect(buildRouteFeatures([leg]).features).toEqual([]);
   });
 
   it('returns identical corners for one stop and null for no stops', () => {
@@ -69,7 +123,7 @@ describe('tripRouteFeatures', () => {
       ...createRouteLeg({
         originDestinationId: fiji.id,
         targetDestinationId: samoa.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
       status: 'ready' as const,
       geometry: {

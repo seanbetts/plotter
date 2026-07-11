@@ -1,6 +1,8 @@
 import type { LineString } from 'geojson';
 import { describe, expect, it } from 'vitest';
 import { createRouteLeg } from './routeLegs';
+import type { RouteSection } from './types';
+import { resolveVehiclePreset } from './vehiclePresets';
 import {
   createRouteOptionKey,
   dedupeRouteOptions,
@@ -26,16 +28,39 @@ describe('route option helpers', () => {
       [2.3522, 48.8566],
     ],
   };
+  const sections: RouteSection[] = [
+    { kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 220 },
+    { kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 2, distanceKm: 238.25 },
+  ];
 
-  it('creates stable route option keys from coordinates, profile, and variant', () => {
+  it('creates canonical route option keys from the complete calculation contract', () => {
+    const routingVehicle = resolveVehiclePreset('expedition-truck');
     expect(
       createRouteOptionKey({
         origin,
         target,
-        profile: 'driving-car',
+        routingVehicle,
+        waypoints: [{ lat: 50, lng: 1 }],
+        ferryPolicy: 'require',
+        providerOptions: { alternativeRoutes: { targetCount: 3, shareFactor: 0.6, weightFactor: 2 } },
         variant: 'avoid:highways',
       }),
-    ).toBe('driving-car:-0.12760,51.50720:2.35220,48.85660:avoid:highways');
+    ).toBe(createRouteOptionKey({
+      target,
+      origin,
+      routingVehicle: {
+        restrictions: { axleLoad: 7.5, weight: 15, height: 3.8, width: 2.55, length: 9 },
+        vehicleType: 'hgv', profile: 'driving-hgv', preset: 'expedition-truck',
+      },
+      waypoints: [{ lng: 1, lat: 50 }],
+      ferryPolicy: 'require',
+      providerOptions: { alternativeRoutes: { weightFactor: 2, shareFactor: 0.6, targetCount: 3 } },
+      variant: 'avoid:highways',
+    }));
+    expect(createRouteOptionKey({ origin, target, routingVehicle, variant: 'recommended' }))
+      .not.toBe(createRouteOptionKey({
+        origin, target, routingVehicle, variant: 'recommended', ferryPolicy: 'avoid',
+      }));
   });
 
   it('normalizes calculated route options with labels and provider metadata', () => {
@@ -48,6 +73,7 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'recommended',
@@ -60,9 +86,10 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:-0.12760,51.50720:2.35220,48.85660:recommended',
+      routeKey: createRouteOptionKey({ origin, target, profile: 'driving-car', variant: 'recommended' }),
     });
   });
 
@@ -76,6 +103,7 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'recommended',
@@ -89,6 +117,7 @@ describe('route option helpers', () => {
       distanceKm: 458.26,
       travelTimeHours: 5.01,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'alternative-1',
@@ -102,6 +131,7 @@ describe('route option helpers', () => {
       distanceKm: 520,
       travelTimeHours: 6.4,
       geometry: avoidHighwaysGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'avoid:highways',
@@ -123,6 +153,7 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'recommended',
@@ -136,6 +167,7 @@ describe('route option helpers', () => {
       distanceKm: 459,
       travelTimeHours: 5.1,
       geometry: avoidHighwaysGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'recommended',
@@ -150,11 +182,12 @@ describe('route option helpers', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: 'origin-id',
       targetDestinationId: 'target-id',
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'old-key',
@@ -168,23 +201,44 @@ describe('route option helpers', () => {
       distanceKm: 520,
       travelTimeHours: 6.4,
       geometry: avoidHighwaysGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'avoid:highways',
     });
 
     expect(routeLegPatchFromRouteOption(option, '2026-07-04T12:00:00.000Z')).toEqual({
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 520,
       travelTimeHours: 6.4,
       geometry: avoidHighwaysGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: option.routeKey,
       calculatedAt: '2026-07-04T12:00:00.000Z',
       error: undefined,
     });
-    expect(routeLeg.type).toBe('driving-auto');
+    expect(routeLeg).not.toHaveProperty('type');
+  });
+
+  it('rejects applying an option whose section metadata is missing', () => {
+    const malformedOption = {
+      id: 'missing-sections',
+      label: 'Missing sections',
+      source: 'recommended',
+      distanceKm: 458.25,
+      travelTimeHours: 5,
+      geometry: directGeometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'missing-sections',
+      sections: undefined,
+    } as unknown as Parameters<typeof routeLegPatchFromRouteOption>[0];
+
+    expect(() => routeLegPatchFromRouteOption(malformedOption)).toThrow(
+      'Route option sections are required',
+    );
   });
 });

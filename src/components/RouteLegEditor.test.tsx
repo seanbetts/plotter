@@ -7,7 +7,7 @@ import { ItineraryPanel } from './ItineraryPanel';
 import { RouteLegEditor } from './RouteLegEditor';
 
 describe('RouteLegEditor', () => {
-  it('creates a ferry/shipping route leg between two destinations', async () => {
+  it('creates a Vehicle shipping route leg without waypoint or ferry policy controls', async () => {
     const user = userEvent.setup();
     const origin = createDestination({
       name: 'Panama City',
@@ -27,14 +27,17 @@ describe('RouteLegEditor', () => {
     expect(screen.getAllByRole('option', { name: 'Cartagena, Colombia' })).toHaveLength(2);
     await user.selectOptions(screen.getByLabelText('Origin'), origin.id);
     await user.selectOptions(screen.getByLabelText('Target'), target.id);
-    await user.selectOptions(screen.getByLabelText('Leg type'), 'shipping-manual');
+    await user.selectOptions(screen.getByLabelText('Leg type'), 'vehicle-shipping');
+    expect(screen.getByRole('option', { name: 'Vehicle shipping' })).toHaveValue('vehicle-shipping');
+    expect(screen.queryByLabelText(/waypoint/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/ferry policy/i)).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Route notes'), 'Darien Gap shipping leg.');
     await user.click(screen.getByRole('button', { name: 'Add route leg' }));
 
     expect(onCreateRouteLeg).toHaveBeenCalledWith({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       notes: 'Darien Gap shipping leg.',
     });
     expect(screen.getByLabelText('Route notes')).toHaveValue('');
@@ -109,7 +112,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 160,
       travelTimeHours: 2.25,
@@ -162,10 +165,11 @@ describe('ItineraryPanel', () => {
     expect(onDeleteDestination).toHaveBeenCalledWith(origin.id);
     expect(onSelectDestination).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole('button', { name: 'Set Istanbul to Tbilisi to shipping/manual' }));
+    await user.click(screen.getByRole('button', { name: 'Set Istanbul to Tbilisi to Vehicle shipping' }));
 
     expect(onUpdateRouteLeg).toHaveBeenCalledWith(routeLeg.id, {
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
     });
   });
 
@@ -184,7 +188,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       status: 'manual',
     });
     const onUpdateRouteLeg = vi.fn();
@@ -204,7 +208,8 @@ describe('ItineraryPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Set Panama City to Cartagena to driving' }));
 
     expect(onUpdateRouteLeg).toHaveBeenCalledWith(routeLeg.id, {
-      type: 'driving-auto',
+      movement: 'drive',
+      calculation: 'automatic',
     });
   });
 
@@ -222,7 +227,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
     });
 
@@ -260,7 +265,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 160,
       travelTimeHours: 2.25,
@@ -295,7 +300,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 315,
       travelTimeHours: 3.25,

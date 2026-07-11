@@ -2,14 +2,16 @@ import { createActivity, updateActivity } from '../domain/activities';
 import { createDestination, updateDestination } from '../domain/destinations';
 import { createFallbackResearchLink } from '../domain/researchLinks';
 import { createManualRouteLeg, createRouteLeg } from '../domain/routeLegs';
-import type { Activity, ActivityLocation, Destination, ResearchLink, RouteLeg } from '../domain/types';
-import { calculateDrivingRouteLegs } from './routeOrchestration';
+import type { Activity, ActivityLocation, Destination, ResearchLink, RouteLeg, RouteWaypoint } from '../domain/types';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
+import { calculateAutomaticRouteLegs } from './routeOrchestration';
 import type {
   ChangedSummary,
   LinkEnricher,
   PlaceInput,
   PlaceResolver,
   RouteCalculator,
+  RouteLegDirectiveDraftV2,
   TripManifestDraft,
 } from './types';
 import { TripCommandValidationError } from './validation';
@@ -24,6 +26,7 @@ export type MaterializedTripManifest = {
   destinations: Destination[];
   activities: Activity[];
   routeLegs: RouteLeg[];
+  routingVehicle: import('../domain/types').TripRoutingVehicle;
   changed: ChangedSummary;
 };
 
@@ -157,36 +160,72 @@ export async function materializeTripManifest(
     });
   }));
 
-  const destinationByKey = new Map(manifest.stops.map((stop, index) => [stop.key, destinations[index]]));
   const directiveByPair = new Map(manifest.routeLegs.map((directive) => [
     `${directive.fromStopKey}\u0000${directive.toStopKey}`,
     directive,
   ]));
+  const resolvedWaypoints = new Map(await Promise.all(manifest.routeLegs.map(async (directive, directiveIndex) => {
+        const waypoints = await Promise.all((directive.waypoints ?? []).map(async (waypoint, order): Promise<RouteWaypoint> => {
+          const [resolved, links] = await Promise.all([
+            resolveStop(
+              waypoint.place,
+              waypoint.name,
+              dependencies.resolvePlace,
+              `routeLegs[${directiveIndex}].waypoints[${order}].place`,
+            ),
+            enrichLinks(waypoint.links, dependencies.enrichLink),
+          ]);
+          return {
+            id: crypto.randomUUID(),
+            order,
+            name: waypoint.name,
+            coordinates: resolved.coordinates,
+            location: resolved.location ?? {
+              placeName: waypoint.name,
+              regionName: '',
+              countryName: '',
+              sourceLabel: waypoint.name,
+              sourceProvider: 'legacy',
+            },
+            notes: waypoint.notes ?? '',
+            links,
+          };
+        }));
+        return [`${directive.fromStopKey}\u0000${directive.toStopKey}`, waypoints] as const;
+      })));
   const pendingRouteLegs = destinations.slice(0, -1).map((origin, index) => {
     const target = destinations[index + 1];
     const fromKey = manifest.stops[index].key;
     const toKey = manifest.stops[index + 1].key;
     const directive = directiveByPair.get(`${fromKey}\u0000${toKey}`);
-    if (directive) {
-      const directiveOrigin = destinationByKey.get(directive.fromStopKey)!;
-      const directiveTarget = destinationByKey.get(directive.toStopKey)!;
+    const normalizedDirective = directive as RouteLegDirectiveDraftV2 | undefined;
+    if (
+      normalizedDirective?.movement === 'vehicle-shipping' &&
+      normalizedDirective.calculation === 'manual'
+    ) {
       return createManualRouteLeg({
-        origin: directiveOrigin.coordinates,
-        target: directiveTarget.coordinates,
-        originDestinationId: directiveOrigin.id,
-        targetDestinationId: directiveTarget.id,
-        notes: directive.notes,
+        origin: origin.coordinates,
+        target: target.coordinates,
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        notes: normalizedDirective.notes,
       });
     }
     return createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: normalizedDirective?.movement,
+      calculation: normalizedDirective?.calculation,
+      ferryPolicy: normalizedDirective?.ferryPolicy,
+      waypoints: normalizedDirective ? resolvedWaypoints.get(`${fromKey}\u0000${toKey}`) : undefined,
+      notes: normalizedDirective?.notes,
     });
   });
-  const routeLegs = await calculateDrivingRouteLegs({
+  const routingVehicle = resolveVehiclePreset(manifest.manifestVersion === 2 ? manifest.vehiclePreset : 'standard');
+  const routeLegs = await calculateAutomaticRouteLegs({
     destinations,
     routeLegs: pendingRouteLegs,
+    routingVehicle,
     calculateRoute: dependencies.calculateRoute,
   });
 
@@ -197,8 +236,13 @@ export async function materializeTripManifest(
   changed.linksAdded.push(
     ...destinations.flatMap((destination) => destination.research.links.map((link) => link.url)),
     ...activities.flatMap((activity) => activity.links.map((link) => link.url)),
+    ...routeLegs.flatMap((routeLeg) => (
+      routeLeg.waypoints ?? []
+    ).flatMap((waypoint) => waypoint.links.map((link) => link.url))),
   );
-  changed.routesRecalculated = routeLegs.filter((leg) => leg.type === 'driving-auto').length;
+  changed.routesRecalculated = routeLegs.filter((leg) => (
+    leg.movement === 'drive' && leg.calculation === 'automatic'
+  )).length;
 
-  return { destinations, activities, routeLegs, changed };
+  return { destinations, activities, routeLegs, routingVehicle, changed };
 }

@@ -7,7 +7,8 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 ## Core Rules
 
 - Use `npm run trip -- ...` for all trip data reads and writes.
-- Let the app calculate derived data: routes, geometry, normalized locations, link metadata, sort order, timestamps, and defaults.
+- Let the app own route-leg `id`, `originDestinationId`, `targetDestinationId`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, `error`, `createdAt`, and `updatedAt`.
+- Let the app own stored waypoint `id`, `order`, normalized `coordinates`, resolved location/address/provider metadata, and enriched `ResearchLink` metadata. Source `place.coordinates` and URL strings remain writable waypoint-draft inputs.
 - Never author route geometry or app-derived fields by hand.
 - Treat overnight locations as stops.
 - Treat non-overnight visits, tours, meals, viewpoints, walks, and events as activities under the nearest relevant stop.
@@ -17,13 +18,14 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 - Do not write address fields directly. The app resolves address/location metadata from `place.query` or `place.coordinates`.
 - Translate the approved research handoff faithfully. Do not reconsider stop selection, order, activities, pacing, stay allocation, or route semantics.
 - Before manifest construction, verify the handoff `plannedDurationDays` equals the sum of every stop's `expectedStayDays`. If it differs, report the mismatch without replanning or changing the allocation. `plannedDurationDays` is handoff-only and is omitted from the CLI manifest because app duration is derived from stop stays.
-- Omit route directives for ordinary adjacent driving legs, including normal ferry, tunnel, bridge, and vehicle-shuttle crossings, so the app calculates them automatically.
-- Preserve shipping-manual only when the approved handoff explicitly marks a genuine route discontinuity or independent vehicle-shipping transfer. Never infer it from notes or links.
-- Use the versioned full manifest for agent-authored new trips so stops, activities, links, and explicit route discontinuities are written together.
+- Omit route directives for ordinary adjacent `drive` + `automatic` legs, including normal ferry, tunnel, bridge, and vehicle-shuttle crossings, so the app applies `allow` and calculates them automatically.
+- Copy only approved exceptional route intent: `movement`, `calculation`, `ferryPolicy`, ordered `waypoints`, and `notes`. Never infer it from prose, notes, or links.
+- Preserve `vehicle-shipping` + `manual` only when the approved handoff explicitly marks a genuine route discontinuity or independent vehicle-shipping transfer.
+- Use one `manifestVersion: 2` full manifest for agent-authored new trips so the vehicle preset, stops, activities, links, and exceptional route intent are written together.
 - Give every full-manifest stop a unique key and explicit positive `expectedStayDays`; use `1` for departure and return anchors.
 - Use `--summary` for large commands to avoid huge route geometry output.
 - Link-add commands are idempotent; retrying an existing URL should be safe.
-- Image import/upload is not part of the CLI v1 surface.
+- Image import/upload is not part of the current CLI surface.
 
 ## Workflow Branches
 
@@ -37,7 +39,7 @@ When the user has clearly authorized creating a new isolated trip:
 npm run trip -- list --pretty
 ```
 
-2. Build one `manifestVersion: 1` input using the full-manifest shape in the CLI reference, then create it once:
+2. Build one `manifestVersion: 2` input using the full-manifest shape in the CLI reference, then create it once:
 
 ```bash
 npm run trip -- create --input /tmp/trip-manifest.json --summary --pretty
@@ -71,6 +73,21 @@ npm run trip -- get --trip-id <trip-id> --include-activities --include-links --s
 
 Use the least broad granular command: `insert-stop`, `update-stop`, `delete-stop`, `reorder-stops`, activity commands, or link commands. Existing destructive edits and broad stop replacement remain preview-first; apply only after approval with `--yes` where required.
 
+Apply approved vehicle and exceptional route intent with these exact forms:
+
+```bash
+# Preview the vehicle change.
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck --dry-run
+
+# Apply only after separate approval.
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck --yes
+
+# Apply the approved route-intent patch; this command does not require --yes.
+npm run trip -- update-route-leg --trip-id trip-1 --route-leg-id leg-1 --input /tmp/route-intent.json
+```
+
+The route-intent input may contain only `movement`, `calculation`, `ferryPolicy`, ordered `waypoints`, and `notes`. Use `--dry-run` separately when a route-intent preview is useful; the implemented apply form above writes without a confirmation flag.
+
 Use `recalculate-failed-routes` for persisted failed legs. Never use a no-op stop reorder to force route calculation.
 
 ## Source Mapping
@@ -85,7 +102,8 @@ Interpret source material as follows:
 - activity/provider/map URLs -> activity links
 - booking references and uncertain source notes -> `notes`
 - approved source or route-research `tags` -> stop or activity `tags`
-- approved route-research `shipping-manual` directive -> full-manifest route directive
+- approved route-research `vehiclePreset` -> manifest `vehiclePreset` or existing-trip `set-vehicle --preset`
+- approved exceptional route directive -> manifest V2 `routeLegs` entry or existing-trip `update-route-leg` input
 
 Use source coordinates for short or ambiguous names, including single-letter places and named viewpoints. Otherwise provide a specific `place.query`. The app, not the agent, owns normalized addresses and location metadata.
 
@@ -108,8 +126,9 @@ Read [cli-reference.md](./cli-reference.md) for exact command forms, writable JS
 ## Failure Handling
 
 - If a write fails because a place cannot resolve, use source coordinates if available or ask for a more precise place query.
-- A full-manifest route or semantic error blocks persistence, so do not claim that a new trip exists. Inspect the issue's structured `destination`, `activity`, `origin`, and `target` location contexts first; they include the resolved labels, coordinates, and providers needed to spot bad geocoding. Correct the implicated manifest coordinates or query before inspecting service source or building custom diagnostics.
-- For a persisted trip with failed routes, run `recalculate-failed-routes`, then `audit`; preserve ready and manual legs.
+- Structural validation and activity-distance errors block persistence, so do not claim that a new trip exists. Inspect structured `destination`, `activity`, `origin`, and `target` contexts before correcting implicated source coordinates or queries.
+- Automatic provider failures do not roll back an otherwise valid manifest. Preserve the trip and approved route intent, report failed or review-required legs, and run `audit` for exact diagnostics. Do not replan, change stops, weaken ferry intent, remove waypoints, switch to manual routing, or author substitute geometry after a provider failure.
+- For a persisted trip with failed routes, run `recalculate-failed-routes`, then `audit`; preserve ready, review-required, and manual legs.
 - If link preview is slow or unavailable, the CLI should still be able to store a fallback link.
 - If output is too large, rerun with `--summary`.
 - Do not replace a failed bulk create with a generated sequence of granular activity commands.
