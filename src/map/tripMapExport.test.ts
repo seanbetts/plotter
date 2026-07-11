@@ -247,7 +247,7 @@ it('unwraps dateline route and stop source coordinates into the fitted interval'
     ...createRouteLeg({
       originDestinationId: alaska.id,
       targetDestinationId: russia.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     }),
     status: 'ready' as const,
     geometry: {
@@ -281,7 +281,7 @@ it('keeps ordinary European route and stop source coordinates unchanged', async 
     ...createRouteLeg({
       originDestinationId: balcombe.id,
       targetDestinationId: paris.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     }),
     status: 'ready' as const,
     geometry: {

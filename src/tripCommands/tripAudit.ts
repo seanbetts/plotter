@@ -102,7 +102,7 @@ export function auditTripSnapshot(input: {
       : undefined;
     const suspiciousDetour = routeLeg.warnings?.find((warning) => warning.code === 'SUSPICIOUS_DETOUR');
 
-    if (routeLeg.type === 'driving-auto' && routeLeg.status === 'failed') {
+    if (routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && routeLeg.status === 'failed') {
       issues.push({
         severity: 'error',
         code: ferryContradictionCode ?? 'FAILED_ROUTE_LEG',
@@ -116,7 +116,7 @@ export function auditTripSnapshot(input: {
       });
     }
 
-    if (routeLeg.type === 'driving-auto' && routeLeg.status === 'review-required' && suspiciousDetour) {
+    if (routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && routeLeg.status === 'review-required' && suspiciousDetour) {
       issues.push({
         severity: 'warning',
         code: 'SUSPICIOUS_DETOUR',
@@ -130,7 +130,8 @@ export function auditTripSnapshot(input: {
     }
 
     if (
-      routeLeg.type === 'driving-auto'
+      routeLeg.movement === 'drive'
+      && routeLeg.calculation === 'automatic'
       && routeLeg.distanceKm !== undefined
       && routeLeg.distanceKm > 250
       && origin

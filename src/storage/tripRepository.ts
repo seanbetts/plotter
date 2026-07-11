@@ -76,11 +76,6 @@ export type TripRepository = {
   }): Promise<void>;
 };
 
-type LegacyRouteLeg = Omit<RouteLeg, 'type' | 'status'> & {
-  type?: RouteLeg['type'] | 'driving' | 'ferry-shipping' | 'uncertain';
-  status?: RouteLeg['status'];
-};
-
 const defaultLocalTripId = 'local-default-trip';
 
 function stripDestinationTripId(destination: StoredDestination): Destination {
@@ -154,22 +149,13 @@ function normalizeActivity(activity: Activity): Activity {
   };
 }
 
-function normalizeRouteLeg(routeLeg: LegacyRouteLeg): RouteLeg {
-  const type = routeLeg.type === 'shipping-manual' || routeLeg.type === 'ferry-shipping' || routeLeg.type === 'uncertain'
-    ? 'shipping-manual'
-    : 'driving-auto';
-
+function normalizeRouteLeg(routeLeg: RouteLeg): RouteLeg {
   return {
     ...routeLeg,
-    type,
-    status: routeLeg.status ?? (type === 'shipping-manual' ? 'manual' : 'pending'),
-    movement: routeLeg.movement ?? (type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
-    calculation: routeLeg.calculation ?? (type === 'shipping-manual' ? 'manual' : 'automatic'),
     ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
     waypoints: routeLeg.waypoints ?? [],
     sections: routeLeg.sections ?? [],
     warnings: routeLeg.warnings ?? [],
-    profile: routeLeg.profile ?? (type === 'driving-auto' ? 'driving-car' : undefined),
   };
 }
 
@@ -673,7 +659,7 @@ export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): T
       const routeLegs = await db.routeLegs.where('tripId').equals(tripId).toArray();
 
       return routeLegs
-        .map((routeLeg) => normalizeRouteLeg(stripRouteLegTripId(routeLeg) as LegacyRouteLeg))
+        .map((routeLeg) => normalizeRouteLeg(stripRouteLegTripId(routeLeg)))
         .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
     },
 

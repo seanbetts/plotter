@@ -16,7 +16,7 @@ describe('trip snapshots', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
 
     const json = serializeTripSnapshot({
@@ -29,7 +29,7 @@ describe('trip snapshots', () => {
       'Meteora',
       'Cappadocia',
     ]);
-    expect(parsed.routeLegs[0].type).toBe('driving-auto');
+    expect(parsed.routeLegs[0]).not.toHaveProperty('type');
   });
 
   it('normalizes legacy destinations without structured location data', () => {

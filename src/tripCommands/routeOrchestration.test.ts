@@ -11,7 +11,7 @@ import {
   type CalculateRoute,
 } from './routeOrchestration';
 
-if (false) {
+const assertCalculateRouteContract = () => {
   // @ts-expect-error normalized route calculations require section metadata
   const missingSectionsCalculator: CalculateRoute = async () => ({
     distanceKm: 100,
@@ -21,7 +21,8 @@ if (false) {
     profile: 'driving-car',
   });
   void missingSectionsCalculator;
-}
+};
+void assertCalculateRouteContract;
 
 function createRepository(routeLegs: RouteLeg[] = []) {
   return {
@@ -80,7 +81,7 @@ describe('route orchestration', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'review-required',
       ferryPolicy,
       warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'stale warning' }],
@@ -122,7 +123,7 @@ describe('route orchestration', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'review-required',
       warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'stale warning' }],
     });
@@ -210,7 +211,7 @@ describe('route orchestration', () => {
     const readyLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 96,
       travelTimeHours: 2,
@@ -256,7 +257,7 @@ describe('route orchestration', () => {
     const failedLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: middle.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'failed',
       error: 'Load failed',
       routeKey: createRouteKey({ origin: origin.coordinates, target: middle.coordinates }),
@@ -325,7 +326,7 @@ describe('route orchestration', () => {
       routeLegs: [createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         ferryPolicy: 'require',
         waypoints: [waypoint],
       })],
@@ -354,7 +355,7 @@ describe('route orchestration', () => {
       routeLegs: [createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         ferryPolicy,
       })],
       routingVehicle: resolveVehiclePreset('standard'),
@@ -392,7 +393,7 @@ describe('route orchestration', () => {
       routeLegs: [createRouteLeg({
         originDestinationId: bremen.id,
         targetDestinationId: hirtshals.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       })],
       routingVehicle: resolveVehiclePreset('standard'),
       calculateRoute: async () => ({
@@ -439,8 +440,8 @@ describe('route orchestration', () => {
       context: { sourceRouteLegId: 'source-leg', unresolvedIntent },
     };
     const siblings = [
-      createRouteLeg({ originDestinationId: origin.id, targetDestinationId: middle.id, type: 'driving-auto', status: 'review-required', warnings: [warning] }),
-      createRouteLeg({ originDestinationId: middle.id, targetDestinationId: target.id, type: 'driving-auto', status: 'review-required', warnings: [] }),
+      createRouteLeg({ originDestinationId: origin.id, targetDestinationId: middle.id, movement: 'drive', calculation: 'automatic', status: 'review-required', warnings: [warning] }),
+      createRouteLeg({ originDestinationId: middle.id, targetDestinationId: target.id, movement: 'drive', calculation: 'automatic', status: 'review-required', warnings: [] }),
     ];
     const calculateRoute: CalculateRoute = async ({ origin: routeOrigin, target: routeTarget }) => ({
       distanceKm: 5,
@@ -486,7 +487,7 @@ describe('route orchestration', () => {
       routeLegs: [createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       })],
       routingVehicle: resolveVehiclePreset('standard'),
       calculateRoute: calculateWithoutSections,
@@ -506,7 +507,7 @@ describe('route orchestration', () => {
     const staleLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'failed',
       distanceKm: 999,
       travelTimeHours: 99,
@@ -545,7 +546,7 @@ describe('route orchestration', () => {
     const automatic = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 600,
       travelTimeHours: 8,
@@ -558,7 +559,7 @@ describe('route orchestration', () => {
     const manual = createRouteLeg({
       originDestinationId: target.id,
       targetDestinationId: origin.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       status: 'manual',
       geometry: { type: 'LineString', coordinates: [[-79.9014, 9.3592], [-75.4794, 10.391]] },
     });

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 async function stableCanvasPixels(canvas: Locator) {
   let previousHash: string | null = null;
@@ -46,6 +46,336 @@ const parisResult = [
     context: [{ id: 'country.1', text: 'France', short_code: 'fr' }],
   },
 ];
+
+async function seedNordkappExpedition(page: Page) {
+  const timestamp = '2026-07-11T10:00:00.000Z';
+  const tripId = await page.evaluate(async () => {
+    const request = indexedDB.open('world-tour-planner');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction('trips', 'readonly');
+    const tripsRequest = transaction.objectStore('trips').getAll();
+    const trips = await new Promise<Array<{ id: string; name: string }>>((resolve, reject) => {
+      tripsRequest.onsuccess = () => resolve(tripsRequest.result);
+      tripsRequest.onerror = () => reject(tripsRequest.error);
+    });
+    db.close();
+
+    const trip = trips.find((candidate) => candidate.name === 'Nordkapp Expedition');
+    if (!trip) throw new Error('Nordkapp Expedition trip was not created.');
+    return trip.id;
+  });
+
+  const location = (placeName: string, countryName: string, countryCode: string) => ({
+    placeName,
+    regionName: '',
+    countryName,
+    countryCode,
+    sourceLabel: `${placeName}, ${countryName}`,
+    sourceProvider: 'maptiler' as const,
+  });
+  const destination = (
+    id: string,
+    name: string,
+    countryName: string,
+    countryCode: string,
+    order: number,
+    coordinates: { lat: number; lng: number },
+  ) => ({
+    id: `${tripId}:${id}`,
+    entityId: id,
+    tripId,
+    name,
+    countryRegion: countryName,
+    coordinates,
+    location: location(name, countryName, countryCode),
+    order,
+    status: 'planned',
+    priority: 'medium',
+    timing: { idealMonths: [], expectedStayDays: 2, provisionalStartDate: '', provisionalEndDate: '' },
+    why: { summary: '', highlights: '', personalRationale: '' },
+    media: [],
+    research: { notes: '', links: [], bookReferences: [] },
+    activities: { items: [] },
+    routeContext: { previousNextNotes: '', drivingNotes: '', borderShippingNotes: '', notes: '' },
+    tags: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  const hamburg = destination('hamburg', 'Hamburg', 'Germany', 'de', 0, { lat: 53.5511, lng: 9.9937 });
+  const hirtshals = destination('hirtshals', 'Hirtshals', 'Denmark', 'dk', 1, { lat: 57.5881, lng: 9.9592 });
+  const nordkapp = destination('nordkapp', 'Nordkapp', 'Norway', 'no', 2, { lat: 71.1725, lng: 25.784 });
+  const routeLegs = [
+    {
+      id: `${tripId}:hamburg-hirtshals`,
+      entityId: 'hamburg-hirtshals',
+      tripId,
+      originDestinationId: 'hamburg',
+      targetDestinationId: 'hirtshals',
+      movement: 'drive',
+      calculation: 'automatic',
+      ferryPolicy: 'allow',
+      waypoints: [],
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 520 }],
+      warnings: [],
+      status: 'ready',
+      distanceKm: 520,
+      travelTimeHours: 6.5,
+      geometry: { type: 'LineString', coordinates: [[9.9937, 53.5511], [9.9592, 57.5881]] },
+      provider: 'openrouteservice',
+      profile: 'driving-hgv',
+      routeKey: 'hamburg-hirtshals',
+      calculatedAt: timestamp,
+      notes: '',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+    {
+      id: `${tripId}:hirtshals-nordkapp`,
+      entityId: 'hirtshals-nordkapp',
+      tripId,
+      originDestinationId: 'hirtshals',
+      targetDestinationId: 'nordkapp',
+      movement: 'drive',
+      calculation: 'automatic',
+      ferryPolicy: 'require',
+      waypoints: [{
+        id: 'waypoint-bodo',
+        order: 0,
+        name: 'Bodø ferry terminal',
+        coordinates: { lat: 67.2804, lng: 14.4049 },
+        location: location('Bodø ferry terminal', 'Norway', 'no'),
+        notes: 'Required ferry connection.',
+        links: [],
+      }],
+      sections: [
+        { kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 850 },
+        { kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 2, distanceKm: 95 },
+        { kind: 'road', startGeometryIndex: 2, endGeometryIndex: 3, distanceKm: 1_250 },
+      ],
+      warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Route is much longer than expected.' }],
+      status: 'review-required',
+      distanceKm: 2_195,
+      travelTimeHours: 32,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[9.9592, 57.5881], [12.5, 65], [14.4049, 67.2804], [25.784, 71.1725]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-hgv',
+      routeKey: 'hirtshals-nordkapp-required-ferry',
+      calculatedAt: timestamp,
+      notes: 'Keep the ferry connection.',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+  ];
+
+  await page.evaluate(async ({ destinations, routeLegs }) => {
+    const request = indexedDB.open('world-tour-planner');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction(['destinations', 'routeLegs'], 'readwrite');
+    for (const record of destinations) transaction.objectStore('destinations').put(record);
+    for (const record of routeLegs) transaction.objectStore('routeLegs').put(record);
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    db.close();
+  }, { destinations: [hamburg, hirtshals, nordkapp], routeLegs });
+}
+
+test('preserves Nordkapp routing intent and calculates both legs around an ordinary map stop', async ({ baseURL, context, page }) => {
+  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
+  const cdpSession = await context.newCDPSession(page);
+  await cdpSession.send('Storage.clearDataForOrigin', { origin, storageTypes: 'indexeddb' });
+
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        features: [{
+          id: 'place-map-stop',
+          text: 'Aalborg',
+          place_name: 'Aalborg, Denmark',
+          center: [9.9217, 57.0488],
+          properties: { country_code: 'dk' },
+          context: [{ id: 'country.1', text: 'Denmark', short_code: 'dk' }],
+        }],
+      },
+    });
+  });
+  await page.route('https://demotiles.maplibre.org/style.json', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        version: 8,
+        name: 'E2E blank map',
+        sources: {},
+        layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#dce7e7' } }],
+      },
+    });
+  });
+  const calculatedCoordinatePairs: number[][][] = [];
+  await page.route('https://api.openrouteservice.org/v2/directions/**', async (route) => {
+    const body = route.request().postDataJSON() as { coordinates: number[][] };
+    calculatedCoordinatePairs.push(body.coordinates);
+    const isExceptionalRoute = body.coordinates.length === 3;
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: {
+            summary: {
+              distance: isExceptionalRoute ? 10_000_000 : 180_000,
+              duration: isExceptionalRoute ? 144_000 : 10_800,
+            },
+            ...(isExceptionalRoute
+              ? { extras: { waycategory: { values: [[1, 2, 8]] } } }
+              : {}),
+          },
+          geometry: { type: 'LineString', coordinates: body.coordinates },
+        }],
+      },
+    });
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByLabel('Search for a destination')).toBeVisible();
+  await page.getByRole('button', { name: 'New trip' }).click();
+  await page.getByLabel('Trip name').fill('Nordkapp Expedition');
+  await page.getByRole('button', { name: 'Create trip' }).click();
+  await page.getByRole('button', { name: /current trip: Nordkapp Expedition/i }).click();
+  await page.getByRole('menuitem', { name: 'Edit Nordkapp Expedition' }).click();
+  await page.getByRole('button', { name: 'Expedition truck' }).click();
+  await expect(page.getByRole('button', { name: 'Expedition truck' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Save trip' }).click();
+
+  await seedNordkappExpedition(page);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('button', { name: /current trip: Nordkapp Expedition/i })).toBeVisible();
+  await expect(page.getByLabel('Route includes a ferry')).toBeVisible();
+  await expect(page.getByLabel('1 route waypoint')).toBeVisible();
+  await expect(page.getByLabel(/Route requires review/)).toBeVisible();
+
+  await expect(page.getByRole('dialog', { name: /route settings/i })).toHaveCount(0);
+  const mapContainer = page.getByTestId('map-container');
+  await page.waitForTimeout(1_000);
+  for (let zoomStep = 0; zoomStep < 3; zoomStep += 1) {
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+    await page.waitForTimeout(200);
+  }
+  const mapBox = await mapContainer.boundingBox();
+  const hirtshalsLabel = page.getByRole('button', { name: 'Open Hirtshals stop details' });
+  const hamburgLabel = page.getByRole('button', { name: 'Open Hamburg stop details' });
+  await expect(hirtshalsLabel).toBeVisible();
+  const hirtshalsLabelBox = await hirtshalsLabel.boundingBox();
+  const hamburgLabelBox = await hamburgLabel.boundingBox();
+  const hirtshalsLabelIsAbove = await hirtshalsLabel.evaluate((element) =>
+    element.classList.contains('map-label-position-above'),
+  );
+  const hamburgLabelIsAbove = await hamburgLabel.evaluate((element) =>
+    element.classList.contains('map-label-position-above'),
+  );
+  if (!mapBox || !hirtshalsLabelBox || !hamburgLabelBox) {
+    throw new Error('Expected the map and projected route labels to have layout boxes.');
+  }
+  const projectedPoint = (
+    box: NonNullable<typeof hirtshalsLabelBox>,
+    isAbove: boolean,
+  ) => ({
+    x: box.x + box.width / 2,
+    y: isAbove ? box.y + box.height + 14 : box.y - 14,
+  });
+  const hirtshalsPoint = projectedPoint(hirtshalsLabelBox, hirtshalsLabelIsAbove);
+  const hamburgPoint = projectedPoint(hamburgLabelBox, hamburgLabelIsAbove);
+  const directionLength = Math.hypot(hamburgPoint.x - hirtshalsPoint.x, hamburgPoint.y - hirtshalsPoint.y);
+  const insertionPoint = {
+    x: hirtshalsPoint.x + ((hamburgPoint.x - hirtshalsPoint.x) / directionLength) * 120,
+    y: hirtshalsPoint.y + ((hamburgPoint.y - hirtshalsPoint.y) / directionLength) * 120,
+  };
+  const calculationCountBeforeInsertion = calculatedCoordinatePairs.length;
+  await mapContainer.evaluate((element, point) => {
+    element.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      clientX: point.clientX,
+      clientY: point.clientY,
+    }));
+  }, {
+    clientX: Math.round(insertionPoint.x),
+    clientY: Math.round(insertionPoint.y),
+  });
+  await page.getByRole('menuitem', { name: 'Add stop here' }).click();
+  const addStopDialog = page.getByRole('dialog', { name: 'Add stop from map' });
+  await expect(addStopDialog).toBeVisible();
+  await expect(addStopDialog.getByRole('heading', { name: 'Aalborg' })).toBeVisible();
+  await addStopDialog.getByRole('button', { name: 'Add stop', exact: true }).click();
+
+  await expect(page.getByRole('button', { name: 'Aalborg, Denmark' })).toBeVisible();
+  await expect.poll(() =>
+    calculatedCoordinatePairs
+      .slice(calculationCountBeforeInsertion)
+      .filter((coordinates) => coordinates.length === 2).length,
+  ).toBeGreaterThanOrEqual(2);
+  const adjacentCalculations = calculatedCoordinatePairs
+    .slice(calculationCountBeforeInsertion)
+    .filter((coordinates) => coordinates.length === 2);
+  expect(adjacentCalculations.length).toBeGreaterThanOrEqual(2);
+  expect(adjacentCalculations.every((coordinates) => coordinates.length === 2)).toBe(true);
+  const readInsertedStopLegs = () => page.evaluate(async () => {
+    const request = indexedDB.open('world-tour-planner');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction(['destinations', 'routeLegs'], 'readonly');
+    const destinationsRequest = transaction.objectStore('destinations').getAll();
+    const routeLegsRequest = transaction.objectStore('routeLegs').getAll();
+    const [destinations, routeLegs] = await Promise.all([
+      new Promise<Array<{ entityId?: string; name: string }>>((resolve, reject) => {
+        destinationsRequest.onsuccess = () => resolve(destinationsRequest.result);
+        destinationsRequest.onerror = () => reject(destinationsRequest.error);
+      }),
+      new Promise<Array<{
+        originDestinationId: string;
+        targetDestinationId: string;
+        calculation?: string;
+        status: string;
+        provider?: string;
+      }>>((resolve, reject) => {
+        routeLegsRequest.onsuccess = () => resolve(routeLegsRequest.result);
+        routeLegsRequest.onerror = () => reject(routeLegsRequest.error);
+      }),
+    ]);
+    db.close();
+    const aalborg = destinations.find((destination) => destination.name === 'Aalborg');
+    if (!aalborg?.entityId) throw new Error('Expected persisted Aalborg stop.');
+    return routeLegs.filter((leg) =>
+      leg.originDestinationId === aalborg.entityId || leg.targetDestinationId === aalborg.entityId,
+    );
+  });
+  await expect.poll(async () => (await readInsertedStopLegs()).length).toBe(2);
+  const insertedStopLegs = await readInsertedStopLegs();
+  expect(insertedStopLegs).toHaveLength(2);
+  expect(insertedStopLegs).toEqual([
+    expect.objectContaining({ calculation: 'automatic', status: 'ready', provider: 'openrouteservice' }),
+    expect.objectContaining({ calculation: 'automatic', status: 'ready', provider: 'openrouteservice' }),
+  ]);
+  await expect(page.getByRole('dialog', { name: /route settings/i })).toHaveCount(0);
+  await expect(page.getByLabel('Route includes a ferry')).toBeVisible();
+  await expect(page.getByLabel('1 route waypoint')).toBeVisible();
+  await expect(page.getByLabel(/Route requires review/)).toBeVisible();
+});
 
 test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
   const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;

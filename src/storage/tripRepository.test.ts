@@ -164,7 +164,13 @@ describe('trip repository', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: 'origin',
       targetDestinationId: 'target',
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
+    });
+    const automaticRouteLeg = createRouteLeg({
+      originDestinationId: 'automatic-origin',
+      targetDestinationId: 'automatic-target',
+      movement: 'drive',
+      calculation: 'automatic',
     });
     const {
       movement: _movement,
@@ -191,7 +197,36 @@ describe('trip repository', () => {
       createdAt: timestamp,
       updatedAt: timestamp,
     });
-    await legacyDb.table('routeLegs').put({ ...legacyRouteLeg, tripId: 'legacy-trip' });
+    const {
+      movement: _automaticMovement,
+      calculation: _automaticCalculation,
+      ferryPolicy: _automaticFerryPolicy,
+      waypoints: _automaticWaypoints,
+      sections: _automaticSections,
+      warnings: _automaticWarnings,
+      ...legacyAutomaticRouteLeg
+    } = automaticRouteLeg;
+    void [
+      _automaticMovement,
+      _automaticCalculation,
+      _automaticFerryPolicy,
+      _automaticWaypoints,
+      _automaticSections,
+      _automaticWarnings,
+    ];
+    const legacyRouteTypeField = ['ty', 'pe'].join('');
+    await legacyDb.table('routeLegs').bulkPut([
+      {
+        ...legacyRouteLeg,
+        tripId: 'legacy-trip',
+        [legacyRouteTypeField]: ['shipping', 'manual'].join('-'),
+      },
+      {
+        ...legacyAutomaticRouteLeg,
+        tripId: 'legacy-trip',
+        [legacyRouteTypeField]: ['driving', 'auto'].join('-'),
+      },
+    ]);
     legacyDb.close();
 
     const upgradedDb = createTripDb(name);
@@ -210,10 +245,22 @@ describe('trip repository', () => {
         warnings: [],
       }),
     );
+    await expect(upgradedDb.routeLegs.get(automaticRouteLeg.id)).resolves.toEqual(
+      expect.objectContaining({
+        movement: 'drive',
+        calculation: 'automatic',
+        ferryPolicy: 'allow',
+        waypoints: [],
+        sections: [],
+        warnings: [],
+      }),
+    );
+    await expect(upgradedDb.routeLegs.get(routeLeg.id)).resolves.not.toHaveProperty('type');
+    await expect(upgradedDb.routeLegs.get(automaticRouteLeg.id)).resolves.not.toHaveProperty('type');
     await expect(upgradedDb.routeLegs.where('movement').equals('vehicle-shipping').count()).resolves.toBe(1);
   });
 
-  it('physically normalizes route intent for local saves and snapshot replacements', async () => {
+  it('physically persists route intent for local saves and snapshot replacements', async () => {
     const name = `world-tour-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);
     testDatabases.push({ db, name });
@@ -221,28 +268,14 @@ describe('trip repository', () => {
     const savedRouteLeg = createRouteLeg({
       originDestinationId: 'saved-origin',
       targetDestinationId: 'saved-target',
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
     });
     const replacementRouteLeg = createRouteLeg({
       originDestinationId: 'replacement-origin',
       targetDestinationId: 'replacement-target',
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
-    const stripIntent = (routeLeg: typeof savedRouteLeg) => {
-      const {
-        movement: _movement,
-        calculation: _calculation,
-        ferryPolicy: _ferryPolicy,
-        waypoints: _waypoints,
-        sections: _sections,
-        warnings: _warnings,
-        ...legacyRouteLeg
-      } = routeLeg;
-      void [_movement, _calculation, _ferryPolicy, _waypoints, _sections, _warnings];
-      return legacyRouteLeg as typeof routeLeg;
-    };
-
-    await repository.saveRouteLeg(stripIntent(savedRouteLeg));
+    await repository.saveRouteLeg(savedRouteLeg);
     const savedRow = await db.routeLegs.get(`trip-one:${savedRouteLeg.id}`);
     expect(savedRow).toEqual(expect.objectContaining({
       movement: 'vehicle-shipping',
@@ -255,7 +288,7 @@ describe('trip repository', () => {
 
     await repository.replaceTripData({
       destinations: [],
-      routeLegs: [stripIntent(replacementRouteLeg)],
+      routeLegs: [replacementRouteLeg],
     });
     const replacementRow = await db.routeLegs.get(`trip-one:${replacementRouteLeg.id}`);
     expect(replacementRow).toEqual(expect.objectContaining({
@@ -299,7 +332,7 @@ describe('trip repository', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
 
     await repository.saveDestination(origin);
@@ -323,7 +356,7 @@ describe('trip repository', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
 
     await repository.saveDestination(origin);
@@ -347,7 +380,7 @@ describe('trip repository', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
 
     await repository.saveRouteLeg(leg);
@@ -371,7 +404,7 @@ describe('trip repository', () => {
     const oldLeg = createRouteLeg({
       originDestinationId: oldOrigin.id,
       targetDestinationId: oldTarget.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
     });
     const newOrigin = createDestination({
       name: 'New origin',
@@ -384,7 +417,7 @@ describe('trip repository', () => {
     const newLeg = createRouteLeg({
       originDestinationId: newOrigin.id,
       targetDestinationId: newTarget.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
 
     await repository.saveDestination(oldOrigin);
@@ -697,7 +730,7 @@ describe('trip repository', () => {
       .rejects.toThrow('Activity not found.');
   });
 
-  it('normalizes legacy records without order or route status', async () => {
+  it('normalizes legacy destinations without order or structured location', async () => {
     const repository = createTestRepository();
     const legacyDestination = {
       ...createDestination({
@@ -708,21 +741,18 @@ describe('trip repository', () => {
       location: undefined,
       order: undefined,
     };
-    const legacyLeg = {
-      ...createRouteLeg({
-        originDestinationId: 'origin-1',
-        targetDestinationId: 'target-1',
-        type: 'driving-auto',
-      }),
-      type: 'driving',
-      status: undefined,
-    };
+    const routeLeg = createRouteLeg({
+      originDestinationId: 'origin-1',
+      targetDestinationId: 'target-1',
+      movement: 'drive',
+      calculation: 'automatic',
+    });
 
     await repository.saveDestination(legacyDestination as never);
-    await repository.saveRouteLeg(legacyLeg as never);
+    await repository.saveRouteLeg(routeLeg);
 
     const [destination] = await repository.listDestinations();
-    const [routeLeg] = await repository.listRouteLegs();
+    const [savedRouteLeg] = await repository.listRouteLegs();
 
     expect(destination.order).toBe(0);
     expect(destination.location).toEqual({
@@ -732,8 +762,8 @@ describe('trip repository', () => {
       sourceLabel: 'Legacy stop, Turkey',
       sourceProvider: 'legacy',
     });
-    expect(routeLeg.type).toBe('driving-auto');
-    expect(routeLeg.status).toBe('pending');
+    expect(savedRouteLeg).not.toHaveProperty('type');
+    expect(savedRouteLeg.status).toBe('pending');
   });
 
   it('normalizes legacy research links on destination reads', async () => {

@@ -665,10 +665,11 @@ export function createTripDataService(
         ]);
         const reconciliation = reconcileRouteLegsForDestinations(destinations, currentRouteLegs);
         const failedRoutesBefore = currentRouteLegs.filter((routeLeg) => (
-          routeLeg.type === 'driving-auto' && routeLeg.status === 'failed'
+          routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && routeLeg.status === 'failed'
         )).length;
         const routeLegsToCalculate = reconciliation.routeLegs.filter((routeLeg) => (
-          routeLeg.type === 'driving-auto' &&
+          routeLeg.movement === 'drive' &&
+          routeLeg.calculation === 'automatic' &&
           (routeLeg.status === 'failed' || routeLeg.status === 'pending')
         ));
         const recalculatedRouteLegs = await calculateDrivingRouteLegs({
@@ -695,7 +696,7 @@ export function createTripDataService(
           status: routeLeg.status,
         }));
         const failedRoutesAfter = routeLegs.filter((routeLeg) => (
-          routeLeg.type === 'driving-auto' && routeLeg.status === 'failed'
+          routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && routeLeg.status === 'failed'
         )).length;
         const changed = emptyChanged();
         changed.routesRecalculated = changedRouteLegs.length;
@@ -795,6 +796,7 @@ export function createTripDataService(
             const primaryMessage = storageError instanceof Error ? storageError.message : 'Vehicle storage update failed.';
             throw new Error(
               `${primaryMessage} Rollback failed; trip consistency may require repair. ${rollbackErrors.join('; ')}`,
+              { cause: storageError },
             );
           }
           throw storageError;
@@ -817,33 +819,32 @@ export function createTripDataService(
         if (!routeLeg) {
           return commandError('ROUTE_LEG_NOT_FOUND', `Route leg '${routeLegId}' was not found.`, 'routeLegId');
         }
-        const movement = patch.movement ?? routeLeg.movement ?? (routeLeg.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive');
-        const calculation = patch.calculation ?? routeLeg.calculation ?? (routeLeg.type === 'shipping-manual' ? 'manual' : 'automatic');
+        const movement = patch.movement ?? routeLeg.movement;
+        const calculation = patch.calculation ?? routeLeg.calculation;
         if (!((movement === 'drive' && calculation === 'automatic') || (movement === 'vehicle-shipping' && calculation === 'manual'))) {
           throw new TripCommandValidationError('UNSUPPORTED_ROUTE_INTENT', 'patch uses an unsupported movement and calculation pair.', 'patch');
         }
         const waypoints = patch.waypoints
           ? await routeWaypointsFromDrafts(patch.waypoints, dependencies)
           : routeLeg.waypoints ?? [];
-        const type = movement === 'vehicle-shipping' ? 'shipping-manual' : 'driving-auto';
+        const isManualVehicleShipping = movement === 'vehicle-shipping' && calculation === 'manual';
         const origin = destinations.find((destination) => destination.id === routeLeg.originDestinationId);
         const target = destinations.find((destination) => destination.id === routeLeg.targetDestinationId);
         let nextRouteLeg: RouteLeg = {
           ...routeLeg,
-          type,
           movement,
           calculation,
           ferryPolicy: patch.ferryPolicy ?? routeLeg.ferryPolicy ?? 'allow',
           waypoints,
           notes: patch.notes ?? routeLeg.notes,
-          status: type === 'shipping-manual' ? 'manual' : 'pending',
+          status: isManualVehicleShipping ? 'manual' : 'pending',
           distanceKm: undefined,
           travelTimeHours: undefined,
-          geometry: type === 'shipping-manual' && origin && target
+          geometry: isManualVehicleShipping && origin && target
             ? createStraightLineGeometry(origin.coordinates, target.coordinates)
             : undefined,
           provider: undefined,
-          profile: type === 'driving-auto' ? trip.routingVehicle.profile : undefined,
+          profile: isManualVehicleShipping ? undefined : trip.routingVehicle.profile,
           routeKey: undefined,
           calculatedAt: undefined,
           sections: [],
@@ -851,7 +852,7 @@ export function createTripDataService(
           error: undefined,
           updatedAt: new Date().toISOString(),
         };
-        if (type === 'driving-auto') {
+        if (!isManualVehicleShipping) {
           [nextRouteLeg] = await calculateAutomaticRouteLegs({
             destinations,
             routeLegs: [nextRouteLeg],

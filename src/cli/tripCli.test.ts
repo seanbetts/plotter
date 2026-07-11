@@ -529,8 +529,8 @@ describe('runTripCli', () => {
       name: 'In-memory route',
       stops,
       routeLegs: [
-        { fromStopKey: 'stop-4', toStopKey: 'stop-5', type: 'shipping-manual' },
-        { fromStopKey: 'stop-15', toStopKey: 'stop-16', type: 'shipping-manual' },
+        { fromStopKey: 'stop-4', toStopKey: 'stop-5', movement: 'vehicle-shipping', calculation: 'manual' },
+        { fromStopKey: 'stop-15', toStopKey: 'stop-16', movement: 'vehicle-shipping', calculation: 'manual' },
       ],
     };
     const write = vi.fn();

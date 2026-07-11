@@ -1276,7 +1276,7 @@ export function MapCanvas({
           'line-dasharray': [
             'match',
             ['get', 'type'],
-            'shipping-manual',
+            'manual',
             ['literal', [2, 2]],
             'failed',
             ['literal', [1, 2]],

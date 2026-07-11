@@ -1,7 +1,7 @@
 import { createActivity, updateActivity } from '../domain/activities';
 import { createDestination, updateDestination } from '../domain/destinations';
 import { createFallbackResearchLink } from '../domain/researchLinks';
-import { createManualRouteLeg, createRouteLeg } from '../domain/routeLegs';
+import { createRouteLeg } from '../domain/routeLegs';
 import type { Activity, ActivityLocation, Destination, ResearchLink, RouteLeg, RouteWaypoint } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import { calculateAutomaticRouteLegs } from './routeOrchestration';
@@ -160,13 +160,11 @@ export async function materializeTripManifest(
     });
   }));
 
-  const destinationByKey = new Map(manifest.stops.map((stop, index) => [stop.key, destinations[index]]));
   const directiveByPair = new Map(manifest.routeLegs.map((directive) => [
     `${directive.fromStopKey}\u0000${directive.toStopKey}`,
     directive,
   ]));
-  const resolvedWaypoints = manifest.manifestVersion === 2
-    ? new Map(await Promise.all(manifest.routeLegs.map(async (directive, directiveIndex) => {
+  const resolvedWaypoints = new Map(await Promise.all(manifest.routeLegs.map(async (directive, directiveIndex) => {
         const waypoints = await Promise.all((directive.waypoints ?? []).map(async (waypoint, order): Promise<RouteWaypoint> => {
           const [resolved, links] = await Promise.all([
             resolveStop(
@@ -194,31 +192,16 @@ export async function materializeTripManifest(
           };
         }));
         return [`${directive.fromStopKey}\u0000${directive.toStopKey}`, waypoints] as const;
-      })))
-    : new Map<string, RouteWaypoint[]>();
+      })));
   const pendingRouteLegs = destinations.slice(0, -1).map((origin, index) => {
     const target = destinations[index + 1];
     const fromKey = manifest.stops[index].key;
     const toKey = manifest.stops[index + 1].key;
     const directive = directiveByPair.get(`${fromKey}\u0000${toKey}`);
-    if (manifest.manifestVersion === 1 && directive) {
-      const directiveOrigin = destinationByKey.get(directive.fromStopKey)!;
-      const directiveTarget = destinationByKey.get(directive.toStopKey)!;
-      return createManualRouteLeg({
-        origin: directiveOrigin.coordinates,
-        target: directiveTarget.coordinates,
-        originDestinationId: directiveOrigin.id,
-        targetDestinationId: directiveTarget.id,
-        notes: directive.notes,
-      });
-    }
-    const v2Directive = manifest.manifestVersion === 2
-      ? directive as RouteLegDirectiveDraftV2 | undefined
-      : undefined;
+    const v2Directive = directive as RouteLegDirectiveDraftV2 | undefined;
     return createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: v2Directive?.movement === 'vehicle-shipping' ? 'shipping-manual' : 'driving-auto',
       movement: v2Directive?.movement,
       calculation: v2Directive?.calculation,
       ferryPolicy: v2Directive?.ferryPolicy,
@@ -245,7 +228,9 @@ export async function materializeTripManifest(
       routeLeg.waypoints ?? []
     ).flatMap((waypoint) => waypoint.links.map((link) => link.url))),
   );
-  changed.routesRecalculated = routeLegs.filter((leg) => leg.type === 'driving-auto').length;
+  changed.routesRecalculated = routeLegs.filter((leg) => (
+    leg.movement === 'drive' && leg.calculation === 'automatic'
+  )).length;
 
   return { destinations, activities, routeLegs, routingVehicle, changed };
 }

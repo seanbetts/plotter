@@ -143,7 +143,7 @@ describe('trip command validation', () => {
         {
           fromStopKey: 'larvik',
           toStopKey: 'hirtshals',
-          type: 'shipping-manual',
+          movement: 'vehicle-shipping', calculation: 'manual',
           notes: 'Larvik-Hirtshals vehicle ferry.',
         },
       ],
@@ -151,7 +151,10 @@ describe('trip command validation', () => {
 
     expect(manifest.stops[1].activities[0].tags).toEqual(['walk', 'coast']);
     if (manifest.manifestVersion !== 1) throw new Error('Expected version 1.');
-    expect(manifest.routeLegs[0].type).toBe('shipping-manual');
+    expect(manifest.routeLegs[0]).toMatchObject({
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
+    });
   });
 
   it('requires a vehicle preset in version 2', () => {
@@ -284,7 +287,7 @@ describe('trip command validation', () => {
         manifestVersion: 1,
         name: 'Broken',
         stops: [{ key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 }],
-        routeLegs: [{ fromStopKey: 'a', toStopKey: 'missing', type: 'shipping-manual' }],
+        routeLegs: [{ fromStopKey: 'a', toStopKey: 'missing', movement: 'vehicle-shipping', calculation: 'manual' }],
       },
       message: "routeLegs[0].toStopKey must reference a stop key.",
     },
@@ -298,7 +301,7 @@ describe('trip command validation', () => {
           { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
           { key: 'c', name: 'C', place: { query: 'C' }, expectedStayDays: 1 },
         ],
-        routeLegs: [{ fromStopKey: 'a', toStopKey: 'c', type: 'shipping-manual' }],
+        routeLegs: [{ fromStopKey: 'a', toStopKey: 'c', movement: 'vehicle-shipping', calculation: 'manual' }],
       },
       message: 'routeLegs[0] must connect adjacent stops in order.',
     },
@@ -312,8 +315,8 @@ describe('trip command validation', () => {
           { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
         ],
         routeLegs: [
-          { fromStopKey: 'a', toStopKey: 'b', type: 'shipping-manual' },
-          { fromStopKey: 'a', toStopKey: 'b', type: 'shipping-manual' },
+          { fromStopKey: 'a', toStopKey: 'b', movement: 'vehicle-shipping', calculation: 'manual' },
+          { fromStopKey: 'a', toStopKey: 'b', movement: 'vehicle-shipping', calculation: 'manual' },
         ],
       },
       message: 'routeLegs[1] duplicates an existing route directive.',
@@ -327,9 +330,9 @@ describe('trip command validation', () => {
           { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
           { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
         ],
-        routeLegs: [{ fromStopKey: 'a', toStopKey: 'b', type: 'driving-auto' }],
+        routeLegs: [{ fromStopKey: 'a', toStopKey: 'b', movement: 'drive', calculation: 'manual' }],
       },
-      message: "routeLegs[0].type must be 'shipping-manual'.",
+      message: 'routeLegs[0] uses an unsupported movement and calculation pair.',
     },
     {
       name: 'app-derived stop fields',
@@ -358,7 +361,7 @@ describe('trip command validation', () => {
         routeLegs: [{
           fromStopKey: 'a',
           toStopKey: 'b',
-          type: 'shipping-manual',
+          movement: 'vehicle-shipping', calculation: 'manual',
           distanceKm: 10,
         }],
       },

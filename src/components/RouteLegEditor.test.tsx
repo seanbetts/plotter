@@ -27,8 +27,8 @@ describe('RouteLegEditor', () => {
     expect(screen.getAllByRole('option', { name: 'Cartagena, Colombia' })).toHaveLength(2);
     await user.selectOptions(screen.getByLabelText('Origin'), origin.id);
     await user.selectOptions(screen.getByLabelText('Target'), target.id);
-    await user.selectOptions(screen.getByLabelText('Leg type'), 'shipping-manual');
-    expect(screen.getByRole('option', { name: 'Vehicle shipping' })).toHaveValue('shipping-manual');
+    await user.selectOptions(screen.getByLabelText('Leg type'), 'vehicle-shipping');
+    expect(screen.getByRole('option', { name: 'Vehicle shipping' })).toHaveValue('vehicle-shipping');
     expect(screen.queryByLabelText(/waypoint/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/ferry policy/i)).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Route notes'), 'Darien Gap shipping leg.');
@@ -37,7 +37,7 @@ describe('RouteLegEditor', () => {
     expect(onCreateRouteLeg).toHaveBeenCalledWith({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       notes: 'Darien Gap shipping leg.',
     });
     expect(screen.getByLabelText('Route notes')).toHaveValue('');
@@ -112,7 +112,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 160,
       travelTimeHours: 2.25,
@@ -168,7 +168,6 @@ describe('ItineraryPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Set Istanbul to Tbilisi to Vehicle shipping' }));
 
     expect(onUpdateRouteLeg).toHaveBeenCalledWith(routeLeg.id, {
-      type: 'shipping-manual',
       movement: 'vehicle-shipping',
       calculation: 'manual',
     });
@@ -189,7 +188,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       status: 'manual',
     });
     const onUpdateRouteLeg = vi.fn();
@@ -209,7 +208,6 @@ describe('ItineraryPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Set Panama City to Cartagena to driving' }));
 
     expect(onUpdateRouteLeg).toHaveBeenCalledWith(routeLeg.id, {
-      type: 'driving-auto',
       movement: 'drive',
       calculation: 'automatic',
     });
@@ -229,7 +227,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
     });
 
@@ -267,7 +265,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 160,
       travelTimeHours: 2.25,
@@ -302,7 +300,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 315,
       travelTimeHours: 3.25,

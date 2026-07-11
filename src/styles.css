@@ -2587,7 +2587,7 @@ select {
   cursor: pointer;
 }
 
-.inline-route-leg-shipping-manual .inline-route-type {
+.inline-route-leg-vehicle-shipping .inline-route-type {
   background: var(--color-route-shipping);
 }
 

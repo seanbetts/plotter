@@ -13,7 +13,7 @@ describe('tripRouteFeatures', () => {
       ...createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
       status: 'ready' as const,
       geometry: { type: 'LineString' as const, coordinates: [[20, 10], [55, -5], [40, 30]] },
@@ -27,13 +27,13 @@ describe('tripRouteFeatures', () => {
     const shipping = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
     });
     const failed = {
       ...createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
       status: 'failed' as const,
     };
@@ -45,7 +45,7 @@ describe('tripRouteFeatures', () => {
     const pending = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
     expect(buildRenderableRouteFeatures([origin, target], [pending]).features).toEqual([]);
   });
@@ -76,7 +76,7 @@ describe('tripRouteFeatures', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       geometry,
       sections: sections as unknown as RouteLeg['sections'],
@@ -94,7 +94,7 @@ describe('tripRouteFeatures', () => {
     const leg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       geometry: { type: 'LineString', coordinates: [[20, 10], [Number.NaN, 30]] },
       sections: [],
@@ -123,7 +123,7 @@ describe('tripRouteFeatures', () => {
       ...createRouteLeg({
         originDestinationId: fiji.id,
         targetDestinationId: samoa.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
       status: 'ready' as const,
       geometry: {

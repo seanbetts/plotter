@@ -3,7 +3,7 @@ import type { Destination, RouteLeg, RouteSection } from '../domain/types';
 
 export type RouteFeatureProperties = {
   id: string;
-  type: RouteLeg['type'] | 'failed';
+  type: 'drive' | 'manual' | 'failed';
   status: RouteLeg['status'];
   kind: 'road' | 'ferry' | 'manual' | 'failed';
 };
@@ -55,13 +55,14 @@ export function unwrapLongitudeForBounds(longitude: number, bounds: TripMapBound
 
 export function routeGeometryForLeg(destinations: Destination[], leg: RouteLeg): LineString | null {
   if (
-    leg.type === 'driving-auto' &&
+    leg.movement === 'drive' &&
+    leg.calculation === 'automatic' &&
     (leg.status === 'ready' || leg.status === 'review-required') &&
     hasUsableLineString(leg.geometry)
   ) {
     return leg.geometry;
   }
-  if (leg.type === 'shipping-manual' && hasUsableLineString(leg.geometry)) {
+  if (leg.movement === 'vehicle-shipping' && leg.calculation === 'manual' && hasUsableLineString(leg.geometry)) {
     return leg.geometry;
   }
 
@@ -69,7 +70,7 @@ export function routeGeometryForLeg(destinations: Destination[], leg: RouteLeg):
   const target = findDestination(destinations, leg.targetDestinationId);
   if (!origin || !target) return null;
 
-  if (leg.type === 'shipping-manual') {
+  if (leg.movement === 'vehicle-shipping' && leg.calculation === 'manual') {
     return straightLineGeometry(origin, target);
   }
 
@@ -81,7 +82,8 @@ export function routeGeometryForLeg(destinations: Destination[], leg: RouteLeg):
 }
 
 function routeTypeForLeg(leg: RouteLeg): RouteFeatureProperties['type'] {
-  return leg.status === 'failed' ? 'failed' : leg.type;
+  if (leg.status === 'failed') return 'failed';
+  return leg.movement === 'vehicle-shipping' && leg.calculation === 'manual' ? 'manual' : 'drive';
 }
 
 function featureForGeometry(
@@ -192,7 +194,7 @@ export function buildRouteFeatures(
       const geometry = routeGeometryForLeg(destinations, routeLeg);
       if (!geometry) return [];
 
-      if (routeLeg.type === 'shipping-manual') {
+      if (routeLeg.movement === 'vehicle-shipping' && routeLeg.calculation === 'manual') {
         return [featureForGeometry(routeLeg, geometry, 'manual')];
       }
       if (routeLeg.status === 'failed') {

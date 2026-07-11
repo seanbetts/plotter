@@ -328,7 +328,7 @@ describe('supabase trip repository mappers', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 1185,
       travelTimeHours: 17.5,
@@ -469,7 +469,7 @@ describe('supabase trip repository mappers', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: destination.id,
       targetDestinationId: crypto.randomUUID(),
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
     const destinationUpsert = vi.fn(() => ({ error: null }));
     const routeLegUpsert = vi.fn(() => ({ error: null }));
@@ -1210,7 +1210,7 @@ describe('supabase trip repository mappers', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: destination.id,
       targetDestinationId: crypto.randomUUID(),
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
     const activity = createActivityModel({
       destinationId: destination.id,

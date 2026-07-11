@@ -162,7 +162,7 @@ describe('route option helpers', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: 'origin-id',
       targetDestinationId: 'target-id',
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 458.25,
       travelTimeHours: 5,
@@ -188,7 +188,7 @@ describe('route option helpers', () => {
     });
 
     expect(routeLegPatchFromRouteOption(option, '2026-07-04T12:00:00.000Z')).toEqual({
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 520,
       travelTimeHours: 6.4,
@@ -200,7 +200,7 @@ describe('route option helpers', () => {
       calculatedAt: '2026-07-04T12:00:00.000Z',
       error: undefined,
     });
-    expect(routeLeg.type).toBe('driving-auto');
+    expect(routeLeg).not.toHaveProperty('type');
   });
 
   it('rejects applying an option whose section metadata is missing', () => {

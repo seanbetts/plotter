@@ -66,13 +66,6 @@ export type StopManifestDraft = {
   activities: ActivityManifestDraft[];
 };
 
-export type RouteLegDirectiveDraftV1 = {
-  fromStopKey: string;
-  toStopKey: string;
-  type: 'shipping-manual';
-  notes?: string;
-};
-
 export type RouteWaypointDraft = {
   name: string;
   place: PlaceInput;
@@ -90,13 +83,13 @@ export type RouteLegDirectiveDraftV2 = {
   notes?: string;
 };
 
-export type RouteLegDirectiveDraft = RouteLegDirectiveDraftV1 | RouteLegDirectiveDraftV2;
+export type RouteLegDirectiveDraft = RouteLegDirectiveDraftV2;
 
 export type TripManifestDraftV1 = {
   manifestVersion: 1;
   name: string;
   stops: StopManifestDraft[];
-  routeLegs: RouteLegDirectiveDraftV1[];
+  routeLegs: RouteLegDirectiveDraftV2[];
 };
 
 export type TripManifestDraftV2 = {

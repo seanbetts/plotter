@@ -68,7 +68,8 @@ function routeGeometryMatchesCoordinates(
 
 function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg) {
   return (
-    routeLeg.type === 'driving-auto' &&
+    routeLeg.movement === 'drive' &&
+    routeLeg.calculation === 'automatic' &&
     routeLeg.status === 'ready' &&
     routeLeg.geometry &&
     routeLeg.distanceKm !== undefined &&
@@ -115,7 +116,7 @@ function refreshRouteLegForDestinationCoordinates(
   origin: Destination,
   target: Destination,
 ): RouteLeg {
-  if (routeLeg.type === 'shipping-manual') {
+  if (routeLeg.movement === 'vehicle-shipping' && routeLeg.calculation === 'manual') {
     if (!routeLeg.geometry || routeGeometryMatchesCoordinates(routeLeg, origin, target)) {
       return routeLeg;
     }
@@ -254,8 +255,8 @@ function nearestGeometryIndex(geometry: LineString, coordinates: Coordinates) {
 
 function routeIntent(routeLeg: RouteLeg): RouteIntentSnapshot {
   return {
-    movement: routeLeg.movement ?? (routeLeg.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
-    calculation: routeLeg.calculation ?? (routeLeg.type === 'shipping-manual' ? 'manual' : 'automatic'),
+    movement: routeLeg.movement,
+    calculation: routeLeg.calculation,
     ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
     waypoints: routeLeg.waypoints ?? [],
     notes: routeLeg.notes,
@@ -264,7 +265,7 @@ function routeIntent(routeLeg: RouteLeg): RouteIntentSnapshot {
 
 function isManualVehicleShipping(routeLeg: RouteLeg) {
   const intent = routeIntent(routeLeg);
-  return routeLeg.type === 'shipping-manual' || intent.movement === 'vehicle-shipping' || intent.calculation === 'manual';
+  return intent.movement === 'vehicle-shipping' && intent.calculation === 'manual';
 }
 
 function hasConstrainedIntent(intent: RouteIntentSnapshot) {
@@ -283,7 +284,6 @@ function createReplacementLeg(input: {
   return createRouteLeg({
     originDestinationId: input.origin.id,
     targetDestinationId: input.target.id,
-    type: 'driving-auto',
     movement: 'drive',
     calculation: 'automatic',
     ferryPolicy: input.ferryPolicy ?? 'allow',
@@ -457,7 +457,8 @@ export function reconcileRouteLegsForDestinations(
       createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive',
+        calculation: 'automatic',
         routeKey: createRouteKey({
           origin: origin.coordinates,
           target: target.coordinates,

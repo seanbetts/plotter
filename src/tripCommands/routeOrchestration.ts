@@ -46,8 +46,8 @@ export function createRouteResultFingerprint(
   routingVehicle: TripRoutingVehicle,
 ) {
   return JSON.stringify({
-    movement: routeLeg.movement ?? (routeLeg.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
-    calculation: routeLeg.calculation ?? (routeLeg.type === 'shipping-manual' ? 'manual' : 'automatic'),
+    movement: routeLeg.movement,
+    calculation: routeLeg.calculation,
     ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
     waypoints: [...(routeLeg.waypoints ?? [])]
       .sort((left, right) => left.order - right.order)
@@ -76,7 +76,8 @@ export function createRouteResultFingerprint(
 
 export function hasPreservableAutomaticRouteData(routeLeg: RouteLeg | RouteLegPatch): boolean {
   return Boolean(
-    routeLeg.type === 'driving-auto' &&
+    routeLeg.movement === 'drive' &&
+    routeLeg.calculation === 'automatic' &&
     routeLeg.status === 'ready' &&
     routeLeg.geometry &&
     routeLeg.distanceKm !== undefined &&
@@ -240,7 +241,7 @@ export function applyCalculatedRouteResult({
 }
 
 export function hasFinalizedAutomaticRouteResult(routeLeg: RouteLeg): boolean {
-  if (routeLeg.type !== 'driving-auto') return false;
+  if (routeLeg.movement !== 'drive' || routeLeg.calculation !== 'automatic') return false;
   if (routeLeg.status === 'ready') return hasPreservableAutomaticRouteData(routeLeg);
   if (routeLeg.status === 'failed') {
     return Boolean(
@@ -282,7 +283,8 @@ export async function calculateAutomaticRouteLegs(input: {
     const target = destinationsById.get(leg.targetDestinationId);
 
     if (
-      leg.type !== 'driving-auto' ||
+      leg.movement !== 'drive' ||
+      leg.calculation !== 'automatic' ||
       (leg.status === 'ready' && hasPreservableAutomaticRouteData(leg)) ||
       (leg.status === 'failed' && !input.retryFailed) ||
       !origin ||
@@ -346,7 +348,7 @@ export function recalculateAutomaticRouteLegsForVehicle(input: {
   const destinationsById = new Map(input.destinations.map((destination) => [destination.id, destination]));
 
   return input.routeLegs.map((routeLeg) => {
-    if (routeLeg.type !== 'driving-auto') return routeLeg;
+    if (routeLeg.movement !== 'drive' || routeLeg.calculation !== 'automatic') return routeLeg;
 
     const origin = destinationsById.get(routeLeg.originDestinationId);
     const target = destinationsById.get(routeLeg.targetDestinationId);
@@ -373,7 +375,7 @@ export async function finalizeRouteLeg(input: {
 
   if (!origin || !target) return input.routeLeg;
 
-  if (input.routeLeg.type === 'shipping-manual') {
+  if (input.routeLeg.movement === 'vehicle-shipping' && input.routeLeg.calculation === 'manual') {
     return {
       ...input.routeLeg,
       status: 'manual',

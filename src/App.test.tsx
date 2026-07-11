@@ -445,7 +445,7 @@ describe('App', () => {
     const readyRouteLeg = createRouteLeg({
       originDestinationId: balcombe.id,
       targetDestinationId: paris.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 442,
       travelTimeHours: 5.5,
@@ -558,7 +558,7 @@ describe('App', () => {
       ...createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
       status: 'ready' as const,
       distanceKm: 150,
@@ -602,8 +602,8 @@ describe('App', () => {
     const second = createDestination({ name: 'Second', coordinates: { lat: 51, lng: 2 }, order: 1 });
     const third = createDestination({ name: 'Third', coordinates: { lat: 52, lng: 3 }, order: 2 });
     const priorRouteLegs = [
-      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, type: 'driving-auto' }),
-      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, type: 'shipping-manual' }),
+      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, movement: 'drive', calculation: 'automatic' }),
+      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, movement: 'vehicle-shipping', calculation: 'manual' }),
     ];
     repositoryMock.initialDestinations = Promise.resolve([first, second, third]);
     repositoryMock.initialRouteLegs = Promise.resolve(priorRouteLegs);
@@ -646,7 +646,7 @@ describe('App', () => {
     const priorRouteLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
     repositoryMock.initialDestinations = Promise.resolve([origin, target]);
     repositoryMock.initialRouteLegs = Promise.resolve([priorRouteLeg]);
@@ -681,7 +681,7 @@ describe('App', () => {
       createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
     ]);
     repositoryMock.saveRouteLeg.mockRejectedValueOnce(new Error('route write rejected'));
@@ -812,7 +812,7 @@ describe('App', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: paris.id,
       targetDestinationId: rome.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 1420,
       travelTimeHours: 14.5,
@@ -1037,7 +1037,6 @@ describe('App', () => {
       ...createRouteLeg({
         originDestinationId: istanbul.id,
         targetDestinationId: tbilisi.id,
-        type: 'driving-auto',
         movement: 'drive',
         calculation: 'automatic',
         ferryPolicy: 'allow',
@@ -1110,7 +1109,7 @@ describe('App', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: bremen.id,
       targetDestinationId: hamburg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 125,
       travelTimeHours: 2,
@@ -1134,7 +1133,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Route intent changed'));
     expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(1);
     expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
-      expect.objectContaining({ type: 'shipping-manual', status: 'manual', notes: 'Original intent.' }),
+      expect.objectContaining({ movement: 'vehicle-shipping', calculation: 'manual', status: 'manual', notes: 'Original intent.' }),
     );
   });
 
@@ -1183,7 +1182,7 @@ describe('App', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: bremen.id,
       targetDestinationId: hirtshals.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       ferryPolicy,
       distanceKm: 700,

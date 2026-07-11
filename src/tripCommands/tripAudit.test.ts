@@ -57,7 +57,7 @@ describe('trip semantic audit', () => {
       ...createRouteLeg({
         originDestinationId: home.id,
         targetDestinationId: larvik.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'failed',
         error: 'OpenRouteService route calculation failed.',
       }),
@@ -67,7 +67,7 @@ describe('trip semantic audit', () => {
       ...createRouteLeg({
         originDestinationId: larvik.id,
         targetDestinationId: hirtshals.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 1084,
       }),
@@ -148,7 +148,7 @@ describe('trip semantic audit', () => {
       ...createRouteLeg({
         originDestinationId: bremen.id,
         targetDestinationId: hirtshals.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'failed',
         warnings: [{ code: 'FERRY_REQUIRED_NOT_FOUND', message: 'Required ferry section was not returned.' }],
         error: 'Required ferry section was not returned.',
@@ -159,7 +159,7 @@ describe('trip semantic audit', () => {
       ...createRouteLeg({
         originDestinationId: bremen.id,
         targetDestinationId: hirtshals.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'review-required',
         geometry: { type: 'LineString' as const, coordinates: [[8.8017, 53.0793], [9.9598, 57.5881]] },
         warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Candidate route requires review.' }],
@@ -201,7 +201,7 @@ describe('trip semantic audit', () => {
     const ferry = createRouteLeg({
       originDestinationId: larvik.id,
       targetDestinationId: hirtshals.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       status: 'manual',
       distanceKm: 1084,
     });

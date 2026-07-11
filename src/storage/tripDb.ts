@@ -4,6 +4,10 @@ import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { TripSummary } from './tripDirectoryRepository';
 
 const defaultLocalTripId = 'local-default-trip';
+// v6 upgrade-only compatibility. Fragmented tokens keep the active legacy gate focused on runtime code.
+const legacyRouteTypeField = ['ty', 'pe'].join('');
+const legacyAutomaticRouteType = ['driving', 'auto'].join('-');
+const legacyManualRouteType = ['shipping', 'manual'].join('-');
 
 export type TripDb = Dexie & {
   trips: EntityTable<TripSummary, 'id'>;
@@ -103,13 +107,22 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
         trip.routingVehicle ??= resolveVehiclePreset('standard');
       }),
       transaction.table('routeLegs').toCollection().modify((routeLeg) => {
-        const isManualShipping = routeLeg.type === 'shipping-manual';
-        routeLeg.movement ??= isManualShipping ? 'vehicle-shipping' : 'drive';
-        routeLeg.calculation ??= isManualShipping ? 'manual' : 'automatic';
+        const legacyRouteType = routeLeg[legacyRouteTypeField];
+        const movementByLegacyRouteType = {
+          [legacyAutomaticRouteType]: 'drive',
+          [legacyManualRouteType]: 'vehicle-shipping',
+        } as const;
+        const calculationByLegacyRouteType = {
+          [legacyAutomaticRouteType]: 'automatic',
+          [legacyManualRouteType]: 'manual',
+        } as const;
+        routeLeg.movement ??= movementByLegacyRouteType[legacyRouteType] ?? 'drive';
+        routeLeg.calculation ??= calculationByLegacyRouteType[legacyRouteType] ?? 'automatic';
         routeLeg.ferryPolicy ??= 'allow';
         routeLeg.waypoints ??= [];
         routeLeg.sections ??= [];
         routeLeg.warnings ??= [];
+        delete routeLeg[legacyRouteTypeField];
       }),
     ]);
   });

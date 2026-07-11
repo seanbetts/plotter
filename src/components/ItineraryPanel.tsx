@@ -2,7 +2,7 @@ import { Car, ChevronDown, ChevronUp, GripVertical, MapPin, Pencil, RefreshCw, S
 import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { formatDestinationLocation, formatLocationContext, formatLocationParts } from '../domain/locations';
-import type { Destination, RouteLeg, RouteLegType } from '../domain/types';
+import type { Destination, RouteLeg } from '../domain/types';
 import { formatStopAccessibleLabel, formatStopMarker } from './stopLabels';
 
 type ItineraryPanelProps = {
@@ -111,14 +111,14 @@ function isRouteLegFailed(routeLeg: RouteLeg) {
   return routeLeg.status === 'failed';
 }
 
-function nextRouteType(type: RouteLegType): RouteLegType {
-  return type === 'shipping-manual' ? 'driving-auto' : 'shipping-manual';
+function isManualVehicleShipping(routeLeg: RouteLeg) {
+  return routeLeg.movement === 'vehicle-shipping' && routeLeg.calculation === 'manual';
 }
 
-function routeModePatch(type: RouteLegType) {
-  return type === 'shipping-manual'
-    ? { type, movement: 'vehicle-shipping' as const, calculation: 'manual' as const }
-    : { type, movement: 'drive' as const, calculation: 'automatic' as const };
+function routeModePatch(routeLeg: RouteLeg) {
+  return isManualVehicleShipping(routeLeg)
+    ? { movement: 'drive' as const, calculation: 'automatic' as const }
+    : { movement: 'vehicle-shipping' as const, calculation: 'manual' as const };
 }
 
 function routeReviewLabel(routeLeg: RouteLeg) {
@@ -569,23 +569,23 @@ export function ItineraryPanel({
                   />
                 ) : null}
                 {routeLeg && nextDestination ? (
-                  <div className={`inline-route-leg inline-route-leg-${routeLeg.type}`}>
+                  <div className={`inline-route-leg ${isManualVehicleShipping(routeLeg) ? 'inline-route-leg-vehicle-shipping' : 'inline-route-leg-drive'}`}>
                     <span className="inline-route-rail" aria-hidden="true" />
                     <button
                       type="button"
                       className="inline-route-type"
                       aria-label={`Set ${destination.name} to ${nextDestination.name} to ${
-                        routeLeg.type === 'shipping-manual' ? 'driving' : 'Vehicle shipping'
+                        isManualVehicleShipping(routeLeg) ? 'driving' : 'Vehicle shipping'
                       }`}
-                      title={routeLeg.type === 'shipping-manual' ? 'Set to driving' : 'Set to Vehicle shipping'}
+                      title={isManualVehicleShipping(routeLeg) ? 'Set to driving' : 'Set to Vehicle shipping'}
                       onClick={() =>
-                        onUpdateRouteLeg(routeLeg.id, routeModePatch(nextRouteType(routeLeg.type)))
+                        onUpdateRouteLeg(routeLeg.id, routeModePatch(routeLeg))
                       }
                     >
-                      {routeLeg.type === 'shipping-manual' ? <Ship size={15} /> : <Car size={15} />}
+                      {isManualVehicleShipping(routeLeg) ? <Ship size={15} /> : <Car size={15} />}
                     </button>
                     <span className="inline-route-summary">
-                      {routeLeg.type === 'driving-auto' && onEditRouteLeg ? (
+                      {routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && onEditRouteLeg ? (
                         <button
                           type="button"
                           className="inline-route-edit"
@@ -619,7 +619,8 @@ export function ItineraryPanel({
                             title="Retry route calculation"
                             onClick={() =>
                               onUpdateRouteLeg(routeLeg.id, {
-                                type: 'driving-auto',
+                                movement: 'drive',
+                                calculation: 'automatic',
                               })
                             }
                           >

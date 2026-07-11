@@ -12,12 +12,12 @@ describe('route leg helpers', () => {
     const leg = createRouteLeg({
       originDestinationId: 'origin-1',
       targetDestinationId: 'target-1',
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
     });
 
     expect(leg.originDestinationId).toBe('origin-1');
     expect(leg.targetDestinationId).toBe('target-1');
-    expect(leg.type).toBe('shipping-manual');
+    expect(leg).not.toHaveProperty('type');
     expect(leg.status).toBe('manual');
     expect(leg.movement).toBe('vehicle-shipping');
     expect(leg.calculation).toBe('manual');
@@ -32,11 +32,11 @@ describe('route leg helpers', () => {
     const leg = createRouteLeg({
       originDestinationId: 'origin-1',
       targetDestinationId: 'target-1',
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       routeKey: 'driving-car:1,2:3,4',
     });
 
-    expect(leg.type).toBe('driving-auto');
+    expect(leg).not.toHaveProperty('type');
     expect(leg.status).toBe('pending');
     expect(leg.movement).toBe('drive');
     expect(leg.calculation).toBe('automatic');
@@ -112,7 +112,6 @@ describe('route leg helpers', () => {
     expect(leg).toMatchObject({
       originDestinationId: 'larvik',
       targetDestinationId: 'hirtshals',
-      type: 'shipping-manual',
       status: 'manual',
       movement: 'vehicle-shipping',
       calculation: 'manual',

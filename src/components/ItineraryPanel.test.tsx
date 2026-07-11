@@ -101,14 +101,14 @@ describe('ItineraryPanel', () => {
           createRouteLeg({
             originDestinationId: origin.id,
             targetDestinationId: middle.id,
-            type: 'driving-auto',
+            movement: 'drive', calculation: 'automatic',
             status: 'ready',
             travelTimeHours: 24,
           }),
           createRouteLeg({
             originDestinationId: middle.id,
             targetDestinationId: target.id,
-            type: 'driving-auto',
+            movement: 'drive', calculation: 'automatic',
             status: 'ready',
             travelTimeHours: 25.4,
           }),
@@ -141,7 +141,7 @@ describe('ItineraryPanel', () => {
     const reviewRequiredLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: middle.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'review-required',
       distanceKm: 135,
       travelTimeHours: 10,
@@ -152,7 +152,7 @@ describe('ItineraryPanel', () => {
     const ordinaryLeg = createRouteLeg({
       originDestinationId: middle.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 290,
       travelTimeHours: 3,
@@ -191,7 +191,7 @@ describe('ItineraryPanel', () => {
     const failedLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'failed',
       distanceKm: 500,
       travelTimeHours: 10,
@@ -242,14 +242,14 @@ describe('ItineraryPanel', () => {
           createRouteLeg({
             originDestinationId: origin.id,
             targetDestinationId: middle.id,
-            type: 'driving-auto',
+            movement: 'drive', calculation: 'automatic',
             status: 'ready',
             travelTimeHours: 1.9,
           }),
           createRouteLeg({
             originDestinationId: middle.id,
             targetDestinationId: target.id,
-            type: 'driving-auto',
+            movement: 'drive', calculation: 'automatic',
             status: 'ready',
             travelTimeHours: 2,
           }),
@@ -282,7 +282,7 @@ describe('ItineraryPanel', () => {
       ...createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 715,
         travelTimeHours: 7.6,
@@ -328,7 +328,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       status: 'manual',
     });
 
@@ -364,7 +364,7 @@ describe('ItineraryPanel', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
     });
 
@@ -403,7 +403,7 @@ describe('ItineraryPanel', () => {
       id: 'route-durmitor-kotor',
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'failed',
       error: 'OpenRouteService route calculation failed',
       notes: '',
@@ -434,7 +434,7 @@ describe('ItineraryPanel', () => {
     await user.click(retryButton);
 
     expect(onUpdateRouteLeg).toHaveBeenCalledWith('route-durmitor-kotor', {
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
   });
 });

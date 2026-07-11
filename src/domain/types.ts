@@ -17,7 +17,6 @@ export type DestinationLocation = {
 
 export type DestinationStatus = 'idea' | 'planned' | 'confirmed' | 'visited';
 export type Priority = 'low' | 'medium' | 'high' | 'must-do';
-export type RouteLegType = 'driving-auto' | 'shipping-manual';
 export type RouteLegStatus = 'pending' | 'calculating' | 'ready' | 'failed' | 'manual' | 'review-required';
 
 export type VehiclePreset = 'standard' | 'large-camper' | 'expedition-truck';
@@ -216,9 +215,8 @@ export type RouteLeg = {
   id: string;
   originDestinationId: string;
   targetDestinationId: string;
-  type: RouteLegType;
-  movement?: RouteMovement;
-  calculation?: RouteCalculationMode;
+  movement: RouteMovement;
+  calculation: RouteCalculationMode;
   ferryPolicy?: FerryPolicy;
   waypoints?: RouteWaypoint[];
   sections?: RouteSection[];

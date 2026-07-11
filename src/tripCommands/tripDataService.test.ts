@@ -338,8 +338,8 @@ describe('TripDataService trips and stops', () => {
       name: 'Large overland trip',
       stops,
       routeLegs: [
-        { fromStopKey: 'stop-4', toStopKey: 'stop-5', type: 'shipping-manual' as const },
-        { fromStopKey: 'stop-15', toStopKey: 'stop-16', type: 'shipping-manual' as const },
+        { fromStopKey: 'stop-4', toStopKey: 'stop-5', movement: 'vehicle-shipping', calculation: 'manual' },
+        { fromStopKey: 'stop-15', toStopKey: 'stop-16', movement: 'vehicle-shipping', calculation: 'manual' },
       ],
     };
 
@@ -497,7 +497,7 @@ describe('TripDataService trips and stops', () => {
       routingVehicle: expect.objectContaining({ preset: 'expedition-truck' }),
       profile: 'driving-hgv',
     }));
-    expect(result.routeLegs[0]).toMatchObject({ type: 'driving-auto', status: 'ready', profile: 'driving-hgv' });
+    expect(result.routeLegs[0]).toMatchObject({ movement: 'drive', calculation: 'automatic', status: 'ready', profile: 'driving-hgv' });
   });
 
   it('rejects a missing vehicle preset before reading or writing trip state', async () => {
@@ -581,7 +581,11 @@ describe('TripDataService trips and stops', () => {
       error: { code: 'COMMAND_FAILED', message: 'Second route save failed.' },
     });
     expect(updateTrip).not.toHaveBeenCalled();
-    expect(harness.trips[0]).toEqual(beforeTrip);
+    expect(harness.trips[0]).toMatchObject({
+      ...beforeTrip,
+      updatedAt: expect.any(String),
+    });
+    expect(Date.parse(harness.trips[0].updatedAt)).toBeGreaterThanOrEqual(Date.parse(beforeTrip.updatedAt));
     expect(harness.repositories.get(created.trip.id)!.routeLegs).toEqual(beforeRoutes);
   });
 
@@ -792,7 +796,7 @@ describe('TripDataService trips and stops', () => {
     const ready = createRouteLeg({
       originDestinationId: destinations[0].id,
       targetDestinationId: destinations[1].id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 100,
       travelTimeHours: 2,
@@ -812,14 +816,14 @@ describe('TripDataService trips and stops', () => {
       createRouteLeg({
         originDestinationId: destinations[1].id,
         targetDestinationId: destinations[2].id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'failed',
         error: 'OpenRouteService route calculation failed (HTTP 429)',
       }),
       createRouteLeg({
         originDestinationId: destinations[2].id,
         targetDestinationId: destinations[3].id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'failed',
         error: 'OpenRouteService route calculation failed (HTTP 429)',
       }),
@@ -827,7 +831,7 @@ describe('TripDataService trips and stops', () => {
     const staleNonAdjacentLeg = createRouteLeg({
       originDestinationId: destinations[0].id,
       targetDestinationId: destinations[3].id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
     });
     const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => {
@@ -1100,7 +1104,7 @@ describe('TripDataService trips and stops', () => {
     data.routeLegs = [createRouteLeg({
       originDestinationId: created.stops[0].id,
       targetDestinationId: created.stops[1].id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
     })];
     const before = [...data.destinations];
 

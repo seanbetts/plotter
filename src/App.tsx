@@ -886,7 +886,12 @@ function TripWorkspace({
   const openRouteAlternatives = useCallback(
     async (routeLegId: string) => {
       const routeLeg = routeLegsById.get(routeLegId);
-      if (!routeLeg || routeLeg.type !== 'driving-auto' || !activeTrip) return;
+      if (
+        !routeLeg ||
+        routeLeg.movement !== 'drive' ||
+        routeLeg.calculation !== 'automatic' ||
+        !activeTrip
+      ) return;
 
       const origin = destinationsById.get(routeLeg.originDestinationId);
       const target = destinationsById.get(routeLeg.targetDestinationId);

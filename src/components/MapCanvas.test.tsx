@@ -166,7 +166,7 @@ describe('MapCanvas', () => {
     id: 'route-1',
     originDestinationId: destination.id,
     targetDestinationId: targetDestination.id,
-    type: 'driving-auto',
+    movement: 'drive', calculation: 'automatic',
     status: 'ready',
     geometry: {
       type: 'LineString',
@@ -206,7 +206,6 @@ describe('MapCanvas', () => {
     const manualShippingLeg: RouteLeg = {
       ...routeLeg,
       id: 'route-manual-shipping',
-      type: 'shipping-manual',
       movement: 'vehicle-shipping',
       calculation: 'manual',
       status: 'manual',
@@ -214,7 +213,7 @@ describe('MapCanvas', () => {
 
     expect(buildRouteFeatures([manualShippingLeg]).features[0].properties).toMatchObject({
       kind: 'manual',
-      type: 'shipping-manual',
+      type: 'manual',
     });
   });
 
@@ -1433,7 +1432,7 @@ describe('MapCanvas', () => {
       expect.arrayContaining(['kind', 'ferry', 'manual', 'review-required']),
     );
     expect(routeLayer.paint['line-dasharray'].flat(Infinity)).toEqual(
-      expect.arrayContaining(['shipping-manual', 2, 2, 'review-required', 3, 1]),
+      expect.arrayContaining(['manual', 2, 2, 'review-required', 3, 1]),
     );
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-selected-destination-halo' }));
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-destination-points' }));
@@ -1685,7 +1684,7 @@ describe('MapCanvas', () => {
     expect(routeData.features[0]).toMatchObject({
       id: routeLeg.id,
       geometry: routeLeg.geometry,
-      properties: { type: 'driving-auto', status: 'ready' },
+      properties: { type: 'drive', status: 'ready' },
     });
   });
 

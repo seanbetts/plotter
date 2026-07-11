@@ -5,7 +5,6 @@ import type {
   RouteCalculationMode,
   RouteLeg,
   RouteLegStatus,
-  RouteLegType,
   RouteMovement,
   RouteSection,
   RouteWarning,
@@ -17,7 +16,6 @@ import { standardRoutingVehicle } from './vehiclePresets';
 type CreateRouteLegInput = {
   originDestinationId: string;
   targetDestinationId: string;
-  type: RouteLegType;
   movement?: RouteMovement;
   calculation?: RouteCalculationMode;
   ferryPolicy?: FerryPolicy;
@@ -58,8 +56,8 @@ const nowIso = () => new Date().toISOString();
 const createId = () => crypto.randomUUID();
 const defaultProfile = 'driving-car';
 
-function defaultStatusForType(type: RouteLegType): RouteLegStatus {
-  return type === 'shipping-manual' ? 'manual' : 'pending';
+function defaultStatusForIntent(movement: RouteMovement, calculation: RouteCalculationMode): RouteLegStatus {
+  return movement === 'vehicle-shipping' && calculation === 'manual' ? 'manual' : 'pending';
 }
 
 function coordinateKey(coordinates: Coordinates) {
@@ -103,7 +101,8 @@ export function createManualRouteLeg(input: CreateManualRouteLegInput): RouteLeg
   return createRouteLeg({
     originDestinationId: input.originDestinationId,
     targetDestinationId: input.targetDestinationId,
-    type: 'shipping-manual',
+    movement: 'vehicle-shipping',
+    calculation: 'manual',
     status: 'manual',
     geometry: createStraightLineGeometry(input.origin, input.target),
     notes: input.notes,
@@ -112,25 +111,25 @@ export function createManualRouteLeg(input: CreateManualRouteLegInput): RouteLeg
 
 export function createRouteLeg(input: CreateRouteLegInput): RouteLeg {
   const timestamp = nowIso();
-  const isManualShipping = input.type === 'shipping-manual';
+  const movement = input.movement ?? 'drive';
+  const calculation = input.calculation ?? 'automatic';
 
   return {
     id: createId(),
     originDestinationId: input.originDestinationId,
     targetDestinationId: input.targetDestinationId,
-    type: input.type,
-    movement: input.movement ?? (isManualShipping ? 'vehicle-shipping' : 'drive'),
-    calculation: input.calculation ?? (isManualShipping ? 'manual' : 'automatic'),
+    movement,
+    calculation,
     ferryPolicy: input.ferryPolicy ?? 'allow',
     waypoints: input.waypoints ?? [],
     sections: input.sections ?? [],
     warnings: input.warnings ?? [],
-    status: input.status ?? defaultStatusForType(input.type),
+    status: input.status ?? defaultStatusForIntent(movement, calculation),
     distanceKm: input.distanceKm,
     travelTimeHours: input.travelTimeHours,
     geometry: input.geometry,
     provider: input.provider,
-    profile: input.profile ?? (input.type === 'driving-auto' ? defaultProfile : undefined),
+    profile: input.profile ?? (movement === 'drive' && calculation === 'automatic' ? defaultProfile : undefined),
     routeKey: input.routeKey,
     calculatedAt: input.calculatedAt,
     error: input.error,

@@ -3,7 +3,7 @@ import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
 import { findBestDestinationInsertionIndex, planRouteLegReconciliation } from '../domain/routePlanner';
 import { createRouteLeg } from '../domain/routeLegs';
-import type { Activity, Coordinates, Destination, DestinationLocation, RouteLeg, RouteLegType, TripRoutingVehicle } from '../domain/types';
+import type { Activity, Coordinates, Destination, DestinationLocation, RouteCalculationMode, RouteLeg, RouteMovement, TripRoutingVehicle } from '../domain/types';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripRepository } from '../storage/tripRepository';
 import {
@@ -420,7 +420,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         async addRouteLeg(input: {
           originDestinationId: string;
           targetDestinationId: string;
-          type: RouteLegType;
+          movement?: RouteMovement;
+          calculation?: RouteCalculationMode;
           notes?: string;
         }) {
           const leg = createRouteLeg(input);
@@ -449,7 +450,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             };
             const isIncompleteReadyDrivingPatch =
               patch.status === 'ready' &&
-              mergedRouteLeg.type === 'driving-auto' &&
+              mergedRouteLeg.movement === 'drive' &&
+              mergedRouteLeg.calculation === 'automatic' &&
               !hasPreservableDrivingRouteData(patch);
             const routeLegForFinalization = isIncompleteReadyDrivingPatch
               ? {
@@ -465,7 +467,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               }
               : mergedRouteLeg;
             const pendingRouteLeg =
-              routeLegForFinalization.type === 'driving-auto' &&
+              routeLegForFinalization.movement === 'drive' &&
+              routeLegForFinalization.calculation === 'automatic' &&
               !hasPreservableDrivingRouteData(routeLegForFinalization)
               ? {
                 ...routeLegForFinalization,
@@ -682,11 +685,13 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               if (rollbackMessages.length > 0) {
                 throw new Error(
                   `Unable to save recalculated routes: ${primaryMessage}. Route rollback failed: ${rollbackMessages.join('; ')}`,
+                  { cause: caught },
                 );
               }
 
               throw new Error(
                 `Unable to save recalculated routes: ${primaryMessage}. Previous route legs were restored.`,
+                { cause: caught },
               );
             }
             if (!isActiveAction()) return;

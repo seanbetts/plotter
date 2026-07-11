@@ -47,7 +47,7 @@ describe('trip manifest materialization', () => {
       routeLegs: [{
         fromStopKey: 'larvik',
         toStopKey: 'hirtshals',
-        type: 'shipping-manual',
+        movement: 'vehicle-shipping', calculation: 'manual',
         notes: 'Vehicle ferry.',
       }],
     });
@@ -124,8 +124,8 @@ describe('trip manifest materialization', () => {
       title: 'Visit Larvik harbour',
     });
     expect(materialized.routeLegs).toMatchObject([
-      { type: 'driving-auto', status: 'ready' },
-      { type: 'shipping-manual', status: 'manual', notes: 'Vehicle ferry.' },
+      { movement: 'drive', calculation: 'automatic', status: 'ready' },
+      { movement: 'vehicle-shipping', calculation: 'manual', status: 'manual', notes: 'Vehicle ferry.' },
     ]);
   });
 

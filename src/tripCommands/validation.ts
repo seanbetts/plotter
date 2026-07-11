@@ -5,7 +5,6 @@ import type {
   ActivityManifestDraft,
   ActivityPatch,
   PlaceInput,
-  RouteLegDirectiveDraftV1,
   RouteLegDirectiveDraftV2,
   RouteLegIntentPatch,
   RouteWaypointDraft,
@@ -232,27 +231,6 @@ function validateStopManifest(input: unknown, path: string): StopManifestDraft {
   };
 }
 
-function validateRouteLegDirectiveV1(input: unknown, path: string): RouteLegDirectiveDraftV1 {
-  if (!isRecord(input)) {
-    throw new TripCommandValidationError('INVALID_ROUTE_LEG', `${path} must be an object.`, path);
-  }
-  rejectUnknownFields(input, ['fromStopKey', 'toStopKey', 'type', 'notes'], path);
-  if (input.type !== 'shipping-manual') {
-    throw new TripCommandValidationError(
-      'INVALID_ROUTE_LEG_TYPE',
-      `${path}.type must be 'shipping-manual'.`,
-      `${path}.type`,
-    );
-  }
-  const notes = optionalString(input.notes, `${path}.notes`);
-  return {
-    fromStopKey: requiredString(input.fromStopKey, 'Route start stop key', `${path}.fromStopKey`),
-    toStopKey: requiredString(input.toStopKey, 'Route end stop key', `${path}.toStopKey`),
-    type: 'shipping-manual',
-    ...(notes ? { notes } : {}),
-  };
-}
-
 function validateEnum<T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -396,9 +374,9 @@ export function validateTripManifest(input: unknown): TripManifestDraft {
     stopIndexes.set(stop.key, index);
   });
 
-  const routeLegs = input.manifestVersion === 2
-    ? (input.routeLegs ?? []).map((leg, index) => validateRouteLegDirectiveV2(leg, `routeLegs[${index}]`))
-    : (input.routeLegs ?? []).map((leg, index) => validateRouteLegDirectiveV1(leg, `routeLegs[${index}]`));
+  const routeLegs = (input.routeLegs ?? []).map((leg, index) =>
+    validateRouteLegDirectiveV2(leg, `routeLegs[${index}]`),
+  );
   const directivePairs = new Set<string>();
   routeLegs.forEach((leg, index) => {
     const path = `routeLegs[${index}]`;
@@ -439,7 +417,7 @@ export function validateTripManifest(input: unknown): TripManifestDraft {
   const name = requiredString(input.name, 'Trip name', 'name');
   return input.manifestVersion === 2
     ? { manifestVersion: 2, name, vehiclePreset: vehiclePreset!, stops, routeLegs: routeLegs as RouteLegDirectiveDraftV2[] }
-    : { manifestVersion: 1, name, stops, routeLegs: routeLegs as RouteLegDirectiveDraftV1[] };
+    : { manifestVersion: 1, name, stops, routeLegs: routeLegs as RouteLegDirectiveDraftV2[] };
 }
 
 export function validateStopDraft(input: unknown, path = 'stop'): StopDraft {

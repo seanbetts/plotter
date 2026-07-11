@@ -11,7 +11,6 @@ import type {
   Priority,
   RouteLeg,
   RouteLegStatus,
-  RouteLegType,
   RouteMovement,
   RouteCalculationMode,
   FerryPolicy,
@@ -70,9 +69,8 @@ type SupabaseRouteLegRow = {
   trip_id: string;
   origin_destination_id: string;
   target_destination_id: string;
-  type: RouteLegType;
-  movement?: RouteMovement;
-  calculation_mode?: RouteCalculationMode;
+  movement: RouteMovement;
+  calculation_mode: RouteCalculationMode;
   ferry_policy?: FerryPolicy;
   waypoints?: RouteWaypoint[];
   sections?: RouteSection[];
@@ -371,9 +369,8 @@ export function routeLegToSupabaseRow(routeLeg: RouteLeg, tripId: string): Supab
     trip_id: tripId,
     origin_destination_id: routeLeg.originDestinationId,
     target_destination_id: routeLeg.targetDestinationId,
-    type: routeLeg.type,
-    movement: routeLeg.movement ?? (routeLeg.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
-    calculation_mode: routeLeg.calculation ?? (routeLeg.type === 'shipping-manual' ? 'manual' : 'automatic'),
+    movement: routeLeg.movement,
+    calculation_mode: routeLeg.calculation,
     ferry_policy: routeLeg.ferryPolicy ?? 'allow',
     waypoints: routeLeg.waypoints ?? [],
     sections: routeLeg.sections ?? [],
@@ -398,9 +395,8 @@ export function routeLegFromSupabaseRow(row: SupabaseRouteLegRow): RouteLeg {
     id: row.id,
     originDestinationId: row.origin_destination_id,
     targetDestinationId: row.target_destination_id,
-    type: row.type,
-    movement: row.movement ?? (row.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
-    calculation: row.calculation_mode ?? (row.type === 'shipping-manual' ? 'manual' : 'automatic'),
+    movement: row.movement,
+    calculation: row.calculation_mode,
     ferryPolicy: row.ferry_policy ?? 'allow',
     waypoints: row.waypoints ?? [],
     sections: row.sections ?? [],

@@ -269,7 +269,7 @@ describe('useTripData', () => {
         id: routeLeg.id,
         originDestinationId,
         targetDestinationId,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
       },
     ]);
@@ -324,7 +324,7 @@ describe('useTripData', () => {
     });
     expect(result.current.routeLegs).toMatchObject([
       {
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 123.4,
         travelTimeHours: 2.5,
@@ -381,7 +381,7 @@ describe('useTripData', () => {
 
     await act(async () => {
       await result.current.updateRouteLeg(routeLeg.id, {
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 140,
         travelTimeHours: 3.1,
@@ -398,7 +398,7 @@ describe('useTripData', () => {
     expect(calculateRoute).not.toHaveBeenCalled();
     expect(result.current.routeLegs[0]).toMatchObject({
       id: routeLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -474,7 +474,7 @@ describe('useTripData', () => {
 
     await act(async () => {
       await result.current.updateRouteLeg(routeLeg.id, {
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 140,
         travelTimeHours: 3.1,
@@ -490,7 +490,7 @@ describe('useTripData', () => {
     expect(calculateRoute).toHaveBeenCalledTimes(1);
     expect(result.current.routeLegs[0]).toMatchObject({
       id: routeLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 141.2,
       travelTimeHours: 3.2,
@@ -525,7 +525,7 @@ describe('useTripData', () => {
     const routeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 123.4,
       travelTimeHours: 2.5,
@@ -654,7 +654,7 @@ describe('useTripData', () => {
 
     await act(async () => {
       await result.current.updateRouteLeg(routeLeg.id, {
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 140,
         travelTimeHours: 3.1,
@@ -671,7 +671,7 @@ describe('useTripData', () => {
 
     await act(async () => {
       await result.current.updateRouteLeg(routeLeg.id, {
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 144,
         travelTimeHours: 3.5,
@@ -686,7 +686,7 @@ describe('useTripData', () => {
     expect(calculateRoute).toHaveBeenCalledTimes(1);
     expect(result.current.routeLegs[0]).toMatchObject({
       id: routeLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 143.7,
       travelTimeHours: 3.4,
@@ -769,7 +769,7 @@ describe('useTripData', () => {
 
     await act(async () => {
       await result.current.updateRouteLeg(routeLeg.id, {
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 140,
         travelTimeHours: 3.1,
@@ -800,7 +800,7 @@ describe('useTripData', () => {
     expect(calculateRoute).toHaveBeenCalledTimes(1);
     expect(result.current.routeLegs[0]).toMatchObject({
       id: routeLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 146.9,
       travelTimeHours: 3.7,
@@ -884,7 +884,7 @@ describe('useTripData', () => {
 
     await act(async () => {
       await result.current.updateRouteLeg(routeLeg.id, {
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 140,
         travelTimeHours: 3.1,
@@ -900,7 +900,7 @@ describe('useTripData', () => {
     expect(calculateRoute).toHaveBeenCalledTimes(1);
     expect(result.current.routeLegs[0]).toMatchObject({
       id: routeLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 145.8,
       travelTimeHours: 3.6,
@@ -970,7 +970,7 @@ describe('useTripData', () => {
 
     await act(async () => {
       await result.current.updateRouteLeg(routeLeg.id, {
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'ready',
         distanceKm: 140,
         travelTimeHours: 3.1,
@@ -986,7 +986,7 @@ describe('useTripData', () => {
     expect(calculateRoute).toHaveBeenCalledTimes(1);
     expect(result.current.routeLegs[0]).toMatchObject({
       id: routeLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'failed',
       distanceKm: undefined,
       travelTimeHours: undefined,
@@ -1163,17 +1163,17 @@ describe('useTripData', () => {
     const firstToSecond = createRouteLeg({
       originDestinationId: first.id,
       targetDestinationId: second.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
     const secondToThird = createRouteLeg({
       originDestinationId: second.id,
       targetDestinationId: third.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
     const staleFirstToThird = createRouteLeg({
       originDestinationId: first.id,
       targetDestinationId: third.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
     const listRouteLegs = vi
       .fn()
@@ -1240,7 +1240,7 @@ describe('useTripData', () => {
   it('rejects splitting manual vehicle shipping before saving', async () => {
     const origin = createDestination({ name: 'Singapore', coordinates: { lat: 1, lng: 1 }, order: 0 });
     const target = createDestination({ name: 'Perth', coordinates: { lat: 1, lng: 9 }, order: 1 });
-    const shipping = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id, type: 'shipping-manual' });
+    const shipping = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id, movement: 'vehicle-shipping', calculation: 'manual' });
     const saveDestination = vi.fn(async () => {});
     const repository = createMemoryRepository(Promise.resolve([origin, target]), {
       listRouteLegs: async () => [shipping],
@@ -1335,13 +1335,13 @@ describe('useTripData', () => {
       {
         originDestinationId: third.id,
         targetDestinationId: first.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
       },
       {
         originDestinationId: first.id,
         targetDestinationId: second.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
       },
     ]);
@@ -1359,7 +1359,7 @@ describe('useTripData', () => {
     const shipping = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
     });
     const saveDestination = vi.fn(async () => {});
     const repository = createMemoryRepository(Promise.resolve([origin, target, inserted]), {
@@ -1400,14 +1400,14 @@ describe('useTripData', () => {
 
     await act(async () => {
       await result.current.updateRouteLeg(routeLeg.id, {
-        type: 'shipping-manual',
+        movement: 'vehicle-shipping', calculation: 'manual',
         notes: 'Ship around the Darien Gap.',
       });
     });
 
     expect(result.current.routeLegs[0]).toMatchObject({
       id: routeLeg.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       status: 'manual',
       notes: 'Ship around the Darien Gap.',
       geometry: {
@@ -1435,7 +1435,7 @@ describe('useTripData', () => {
       ...createRouteLeg({
         originDestinationId: origin.id,
         targetDestinationId: target.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
       }),
       status: 'ready' as const,
       distanceKm: 150,
@@ -1487,11 +1487,12 @@ describe('useTripData', () => {
     const second = createDestination({ name: 'Second', coordinates: { lat: 51, lng: 2 }, order: 1 });
     const third = createDestination({ name: 'Third', coordinates: { lat: 52, lng: 3 }, order: 2 });
     const priorRouteLegs = [
-      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, type: 'driving-auto' }),
-      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, type: 'shipping-manual' }),
+      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, movement: 'drive', calculation: 'automatic' }),
+      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, movement: 'vehicle-shipping', calculation: 'manual' }),
     ];
     let saveCall = 0;
-    const saveRouteLeg = vi.fn(async (_routeLeg: RouteLeg) => {
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => {
+      void routeLeg;
       saveCall += 1;
       if (saveCall === 2) throw new Error('second route write failed');
     });
@@ -1526,11 +1527,12 @@ describe('useTripData', () => {
     const second = createDestination({ name: 'Second', coordinates: { lat: 51, lng: 2 }, order: 1 });
     const third = createDestination({ name: 'Third', coordinates: { lat: 52, lng: 3 }, order: 2 });
     const priorRouteLegs = [
-      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, type: 'driving-auto' }),
-      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, type: 'driving-auto' }),
+      createRouteLeg({ originDestinationId: first.id, targetDestinationId: second.id, movement: 'drive', calculation: 'automatic' }),
+      createRouteLeg({ originDestinationId: second.id, targetDestinationId: third.id, movement: 'drive', calculation: 'automatic' }),
     ];
     let saveCall = 0;
-    const saveRouteLeg = vi.fn(async (_routeLeg: RouteLeg) => {
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => {
+      void routeLeg;
       saveCall += 1;
       if (saveCall === 2) throw new Error('new route write failed');
       if (saveCall === 3) throw new Error('old route restore failed');
@@ -1592,7 +1594,7 @@ describe('useTripData', () => {
     const failedLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'failed',
       error: 'Load failed',
     });
@@ -1620,7 +1622,7 @@ describe('useTripData', () => {
 
     let retryPromise!: Promise<void>;
     await act(async () => {
-      retryPromise = result.current.updateRouteLeg(failedLeg.id, { type: 'driving-auto' });
+      retryPromise = result.current.updateRouteLeg(failedLeg.id, { movement: 'drive', calculation: 'automatic' });
       await Promise.resolve();
     });
 
@@ -2114,7 +2116,7 @@ function createReadyRouteLeg(
   return createRouteLeg({
     originDestinationId: origin.id,
     targetDestinationId: target.id,
-    type: 'driving-auto',
+    movement: 'drive', calculation: 'automatic',
     status: 'ready',
     distanceKm: 125,
     travelTimeHours: 2,

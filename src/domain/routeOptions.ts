@@ -99,7 +99,8 @@ export function routeLegPatchFromRouteOption(
   }
 
   return {
-    type: 'driving-auto',
+    movement: 'drive',
+    calculation: 'automatic',
     status: 'ready',
     distanceKm: option.distanceKm,
     travelTimeHours: option.travelTimeHours,

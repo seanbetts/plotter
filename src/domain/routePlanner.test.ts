@@ -18,7 +18,7 @@ describe('route planner helpers', () => {
     const bremenToKristiansand = createRouteLeg({
       originDestinationId: bremen.id,
       targetDestinationId: kristiansand.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
 
     const result = planRouteLegReconciliation({
@@ -41,7 +41,7 @@ describe('route planner helpers', () => {
     const constrainedReadyLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       ferryPolicy: 'require',
       waypoints: [
@@ -85,7 +85,7 @@ describe('route planner helpers', () => {
     const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
     const waypoint = { id: 'only', order: 0, name: 'Only once', coordinates: { lat: 0, lng: 3 }, location: origin.location, notes: '', links: [] };
     const source = createRouteLeg({
-      originDestinationId: origin.id, targetDestinationId: target.id, type: 'driving-auto', status: 'ready',
+      originDestinationId: origin.id, targetDestinationId: target.id, movement: 'drive', calculation: 'automatic', status: 'ready',
       ferryPolicy: 'avoid', waypoints: [waypoint], geometry: { type: 'LineString', coordinates: Array.from({ length: 11 }, (_, lng) => [lng, 0]) },
       distanceKm: 10, travelTimeHours: 1, provider: 'test', profile: 'driving-car', routeKey: 'ready', calculatedAt: '2026-07-11T00:00:00.000Z',
     });
@@ -107,7 +107,7 @@ describe('route planner helpers', () => {
     const source = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       waypoints,
       geometry: { type: 'LineString', coordinates: Array.from({ length: 11 }, (_, lng) => [lng, 0]) },
@@ -138,7 +138,7 @@ describe('route planner helpers', () => {
     const source = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       ferryPolicy: 'require',
       sections: [{ kind: 'ferry', startGeometryIndex: 90, endGeometryIndex: 100, distanceKm: 10 }],
@@ -175,7 +175,7 @@ describe('route planner helpers', () => {
       notes: 'Use the overnight ferry.',
     };
     const source = createRouteLeg({
-      originDestinationId: origin.id, targetDestinationId: target.id, type: 'driving-auto',
+      originDestinationId: origin.id, targetDestinationId: target.id,
       ...unresolvedIntent,
     });
 
@@ -332,13 +332,13 @@ describe('route planner helpers', () => {
       {
         originDestinationId: london.id,
         targetDestinationId: paris.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
       },
       {
         originDestinationId: paris.id,
         targetDestinationId: istanbul.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
       },
     ]);
@@ -358,7 +358,7 @@ describe('route planner helpers', () => {
     const shippingLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       notes: 'Ship the truck across here.',
     });
 
@@ -382,7 +382,7 @@ describe('route planner helpers', () => {
     const shippingLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'shipping-manual',
+      movement: 'vehicle-shipping', calculation: 'manual',
       geometry: {
         type: 'LineString',
         coordinates: [
@@ -413,7 +413,7 @@ describe('route planner helpers', () => {
     const selectedAlternativeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -451,7 +451,7 @@ describe('route planner helpers', () => {
     const selectedAlternativeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -493,7 +493,7 @@ describe('route planner helpers', () => {
     const selectedAlternativeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -516,7 +516,7 @@ describe('route planner helpers', () => {
     expect(result.routeLegs).toMatchObject([
       {
         id: selectedAlternativeLeg.id,
-        type: 'driving-auto',
+        movement: 'drive', calculation: 'automatic',
         status: 'pending',
         distanceKm: undefined,
         travelTimeHours: undefined,
@@ -548,7 +548,7 @@ describe('route planner helpers', () => {
     const selectedAlternativeLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -570,7 +570,7 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs[0]).toMatchObject({
       id: selectedAlternativeLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
       geometry: undefined,
       distanceKm: undefined,
@@ -597,7 +597,7 @@ describe('route planner helpers', () => {
     const incompleteLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -611,7 +611,7 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs[0]).toMatchObject({
       id: incompleteLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
       geometry: undefined,
       distanceKm: undefined,
@@ -637,7 +637,7 @@ describe('route planner helpers', () => {
     const erroredLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -660,7 +660,7 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs[0]).toMatchObject({
       id: erroredLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
       geometry: undefined,
       distanceKm: undefined,
@@ -686,7 +686,7 @@ describe('route planner helpers', () => {
     const cyclingLeg = createRouteLeg({
       originDestinationId: origin.id,
       targetDestinationId: target.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'ready',
       distanceKm: 140,
       travelTimeHours: 3.1,
@@ -708,7 +708,7 @@ describe('route planner helpers', () => {
 
     expect(result.routeLegs[0]).toMatchObject({
       id: cyclingLeg.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
       status: 'pending',
       geometry: undefined,
       distanceKm: undefined,
@@ -740,7 +740,7 @@ describe('route planner helpers', () => {
     const oldLeg = createRouteLeg({
       originDestinationId: first.id,
       targetDestinationId: second.id,
-      type: 'driving-auto',
+      movement: 'drive', calculation: 'automatic',
     });
 
     const result = reconcileRouteLegsForDestinations([first, third, second], [oldLeg]);
