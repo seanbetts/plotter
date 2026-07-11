@@ -70,8 +70,40 @@ function matchingAnchor(input: {
   anchor?: RoutingAnchor;
   anchors?: RoutingAnchors;
   profile: TripRoutingVehicle['profile'];
+  canonicalCoordinates: Coordinates;
 }) {
-  return input.anchors?.[input.profile] ?? (input.anchor?.profile === input.profile ? input.anchor : undefined);
+  const isValid = (anchor: RoutingAnchor | undefined): anchor is RoutingAnchor => {
+    if (
+      !anchor ||
+      anchor.profile !== input.profile ||
+      anchor.provider !== 'openrouteservice' ||
+      !Number.isFinite(anchor.originalCoordinates?.lat) ||
+      !Number.isFinite(anchor.originalCoordinates?.lng) ||
+      !Number.isFinite(anchor.coordinates?.lat) ||
+      !Number.isFinite(anchor.coordinates?.lng) ||
+      !Number.isFinite(anchor.snapDistanceKm) ||
+      anchor.snapDistanceKm < 0 ||
+      anchor.snapDistanceKm > endpointRadiusKm
+    ) {
+      return false;
+    }
+
+    const originalCoordinateDistanceKm = coordinateDistanceKm(
+      anchor.originalCoordinates,
+      input.canonicalCoordinates,
+    );
+    const anchorDistanceKm = coordinateDistanceKm(input.canonicalCoordinates, anchor.coordinates);
+    return (
+      Number.isFinite(originalCoordinateDistanceKm) &&
+      originalCoordinateDistanceKm <= snapToleranceKm &&
+      Number.isFinite(anchorDistanceKm) &&
+      anchorDistanceKm <= endpointRadiusKm
+    );
+  };
+
+  const mappedAnchor = input.anchors?.[input.profile];
+  if (isValid(mappedAnchor)) return mappedAnchor;
+  return isValid(input.anchor) ? input.anchor : undefined;
 }
 
 function routeRequestInput(input: RecoveryInput) {
@@ -90,11 +122,21 @@ function routeRequestInput(input: RecoveryInput) {
 }
 
 function originAnchorFor(input: RecoveryInput, profile: TripRoutingVehicle['profile']) {
-  return matchingAnchor({ anchor: input.originAnchor, anchors: input.originAnchors, profile });
+  return matchingAnchor({
+    anchor: input.originAnchor,
+    anchors: input.originAnchors,
+    profile,
+    canonicalCoordinates: input.origin,
+  });
 }
 
 function targetAnchorFor(input: RecoveryInput, profile: TripRoutingVehicle['profile']) {
-  return matchingAnchor({ anchor: input.targetAnchor, anchors: input.targetAnchors, profile });
+  return matchingAnchor({
+    anchor: input.targetAnchor,
+    anchors: input.targetAnchors,
+    profile,
+    canonicalCoordinates: input.target,
+  });
 }
 
 function savedAnchorsFor(input: RecoveryInput, profile: TripRoutingVehicle['profile']) {

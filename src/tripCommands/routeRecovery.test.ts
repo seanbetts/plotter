@@ -509,6 +509,54 @@ describe('route recovery', () => {
     expect(result.endpointAnchors).toEqual({});
   });
 
+  it.each([
+    {
+      name: 'embedded profile mismatch',
+      anchor: { ...savedAnchor('driving-hgv', alta, altaAnchorCoordinates), profile: 'driving-car' } as RoutingAnchor,
+    },
+    {
+      name: 'stale original coordinates',
+      anchor: savedAnchor('driving-hgv', { lat: alta.lat - 0.01, lng: alta.lng }, altaAnchorCoordinates),
+    },
+    {
+      name: 'coordinates outside the recovery radius',
+      anchor: { ...savedAnchor('driving-hgv', alta, { lat: alta.lat + 0.03, lng: alta.lng }), snapDistanceKm: 1.25 },
+    },
+    {
+      name: 'reported snap distance outside the recovery radius',
+      anchor: { ...savedAnchor('driving-hgv', alta, altaAnchorCoordinates), snapDistanceKm: 2.01 },
+    },
+    {
+      name: 'nonfinite coordinates',
+      anchor: { ...savedAnchor('driving-hgv', alta, altaAnchorCoordinates), coordinates: { lat: Number.NaN, lng: alta.lng } },
+    },
+    {
+      name: 'nonfinite snap distance',
+      anchor: { ...savedAnchor('driving-hgv', alta, altaAnchorCoordinates), snapDistanceKm: Number.POSITIVE_INFINITY },
+    },
+    {
+      name: 'non-ORS provider',
+      anchor: { ...savedAnchor('driving-hgv', alta, altaAnchorCoordinates), provider: 'other' } as unknown as RoutingAnchor,
+    },
+  ])('ignores a saved anchor with $name before the provider request', async ({ anchor }) => {
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => (
+      routeFor({ origin: request.origin, target: request.target, profile: request.profile })
+    ));
+
+    const result = await calculateRouteWithRecovery({
+      ...expeditionInput,
+      targetAnchors: { 'driving-hgv': anchor },
+    }, calculate);
+
+    expect(calculate).toHaveBeenCalledTimes(1);
+    expect(calculate).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving-hgv',
+      target: alta,
+    }));
+    expect(result.warnings).toEqual([]);
+    expect(result.endpointAnchors).toEqual({});
+  });
+
   it('does not fall back from car failures to HGV', async () => {
     const calculate = vi.fn().mockRejectedValue(
       orsError({ status: 404, code: 2009, profile: 'driving-car' }),

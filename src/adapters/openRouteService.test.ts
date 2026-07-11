@@ -1,12 +1,23 @@
 import type { LineString } from 'geojson';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRouteLeg } from '../domain/routeLegs';
+import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
 import type { RouteWaypoint, RoutingAnchor } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import {
   calculateOpenRouteServiceRoute,
   calculateOpenRouteServiceRouteOptions,
 } from './openRouteService';
+
+vi.mock('./openRouteServiceScheduler', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./openRouteServiceScheduler')>();
+  return {
+    ...actual,
+    openRouteServiceDirectionsScheduler: actual.createOpenRouteServiceScheduler({
+      maxRequests: Number.MAX_SAFE_INTEGER,
+      sleep: async () => {},
+    }),
+  };
+});
 
 describe('OpenRouteService adapter', () => {
   const origin = { lat: 51.5072, lng: -0.1276 };
@@ -27,6 +38,25 @@ describe('OpenRouteService adapter', () => {
     notes: '',
     links: [],
   };
+
+  const providerAlternativesResponse = () => ({
+    ok: true,
+    json: async () => ({
+      type: 'FeatureCollection',
+      features: [0, 1, 2].map((index) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [origin.lng, origin.lat],
+            [origin.lng + (index + 1) * 0.01, origin.lat + (index + 1) * 0.01],
+            [target.lng, target.lat],
+          ],
+        },
+        properties: { summary: { distance: 615_000 + index * 1_000, duration: 29_700 + index * 60 } },
+      })),
+    }),
+  });
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -715,6 +745,8 @@ describe('OpenRouteService adapter', () => {
   it('keeps the current recovered route available when provider option requests fail', async () => {
     const canonicalTarget = target;
     const anchoredTarget = { lat: target.lat + 0.01, lng: target.lng };
+    const routingVehicle = resolveVehiclePreset('expedition-truck');
+    const currentRouteKey = createRouteKey({ origin, target: canonicalTarget, routingVehicle });
     const geometry: LineString = {
       type: 'LineString',
       coordinates: [
@@ -741,7 +773,7 @@ describe('OpenRouteService adapter', () => {
       geometry,
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'old-recovered-key',
+      routeKey: currentRouteKey,
       sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
       calculatedAt: '2026-07-11T08:00:00.000Z',
       warnings: [{
@@ -758,7 +790,7 @@ describe('OpenRouteService adapter', () => {
       apiKey: 'ors-key',
       origin,
       target: canonicalTarget,
-      routingVehicle: resolveVehiclePreset('expedition-truck'),
+      routingVehicle,
       currentRouteLeg,
       targetAnchors: { 'driving-car': targetAnchor },
     });
@@ -777,11 +809,17 @@ describe('OpenRouteService adapter', () => {
       ],
       endpointAnchors: { target: targetAnchor },
     });
-    expect(options[0].routeKey).toBe('old-recovered-key');
-    expect(options[0].id).toContain('old-recovered-key');
+    expect(options[0].routeKey).toBe(currentRouteKey);
+    expect(options[0].id).toMatch(/^profile-fallback:/);
   });
 
   it('does not attach unrelated destination anchors to a normal current route option', async () => {
+    const currentRouteKey = createRouteKey({
+      origin,
+      target,
+      variant: 'alternative-1',
+      providerOptions: { avoidFeatures: ['highways'] },
+    });
     const unrelatedTargetAnchor: RoutingAnchor = {
       profile: 'driving-car',
       coordinates: { lat: target.lat + 0.01, lng: target.lng },
@@ -802,7 +840,7 @@ describe('OpenRouteService adapter', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'normal-current-key',
+      routeKey: currentRouteKey,
       sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
       calculatedAt: '2026-07-11T08:00:00.000Z',
     });
@@ -820,11 +858,12 @@ describe('OpenRouteService adapter', () => {
     expect(options[0]).toMatchObject({
       source: 'recommended',
       endpointAnchors: {},
-      routeKey: 'normal-current-key',
+      routeKey: currentRouteKey,
     });
   });
 
   it('excludes an adjusted current route when its anchor does not verify the geometry and canonical stop', async () => {
+    const currentRouteKey = createRouteKey({ origin, target, variant: 'adjusted-endpoint' });
     const unrelatedTargetAnchor: RoutingAnchor = {
       profile: 'driving-car',
       coordinates: { lat: target.lat + 0.02, lng: target.lng },
@@ -845,7 +884,7 @@ describe('OpenRouteService adapter', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'unverifiable-adjusted-key',
+      routeKey: currentRouteKey,
       sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
       calculatedAt: '2026-07-11T08:00:00.000Z',
       warnings: [{
@@ -853,24 +892,7 @@ describe('OpenRouteService adapter', () => {
         message: 'Route target uses a routing point 1.1 km from the stop.',
       }],
     });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        type: 'FeatureCollection',
-        features: [0, 1, 2].map((index) => ({
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: [
-              [origin.lng, origin.lat],
-              [origin.lng + index * 0.01, origin.lat + index * 0.01],
-              [target.lng, target.lat],
-            ],
-          },
-          properties: { summary: { distance: 615_000 + index * 1_000, duration: 29_700 + index * 60 } },
-        })),
-      }),
-    }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(providerAlternativesResponse()));
 
     const options = await calculateOpenRouteServiceRouteOptions({
       apiKey: 'ors-key',
@@ -881,8 +903,89 @@ describe('OpenRouteService adapter', () => {
     });
 
     expect(options).toHaveLength(3);
-    expect(options).not.toContainEqual(expect.objectContaining({ routeKey: 'unverifiable-adjusted-key' }));
+    expect(options).not.toContainEqual(expect.objectContaining({ routeKey: currentRouteKey }));
     expect(options).not.toContainEqual(expect.objectContaining({ source: 'adjusted-endpoint' }));
+  });
+
+  it.each([
+    {
+      name: 'bogus route key',
+      routeKey: 'not-json',
+      waypoints: [] as RouteWaypoint[],
+      ferryPolicy: 'allow' as const,
+    },
+    {
+      name: 'old origin, target, vehicle, waypoint, and ferry intent',
+      routeKey: createRouteKey({
+        origin: { lat: origin.lat - 1, lng: origin.lng },
+        target: { lat: target.lat - 1, lng: target.lng },
+        routingVehicle: resolveVehiclePreset('large-camper'),
+        waypoints: [],
+        ferryPolicy: 'allow',
+      }),
+      waypoints: [hirtshals],
+      ferryPolicy: 'avoid' as const,
+    },
+  ])('excludes a current route with $name', async ({ routeKey, waypoints, ferryPolicy }) => {
+    const currentRouteLeg = createRouteLeg({
+      originDestinationId: 'origin-id',
+      targetDestinationId: 'target-id',
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 615,
+      travelTimeHours: 8.25,
+      geometry: { type: 'LineString', coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey,
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
+      calculatedAt: '2026-07-11T08:00:00.000Z',
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(providerAlternativesResponse()));
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin,
+      target,
+      waypoints,
+      ferryPolicy,
+      currentRouteLeg,
+    });
+
+    expect(options).toHaveLength(3);
+    expect(options).not.toContainEqual(expect.objectContaining({ routeKey }));
+  });
+
+  it('rejects fallback provenance on a normal driving-car current route', async () => {
+    const currentRouteKey = createRouteKey({ origin, target });
+    const currentRouteLeg = createRouteLeg({
+      originDestinationId: 'origin-id',
+      targetDestinationId: 'target-id',
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 615,
+      travelTimeHours: 8.25,
+      geometry: { type: 'LineString', coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: currentRouteKey,
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
+      calculatedAt: '2026-07-11T08:00:00.000Z',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated.',
+      }],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(providerAlternativesResponse()));
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin,
+      target,
+      currentRouteLeg,
+    });
+
+    expect(options).toHaveLength(3);
+    expect(options).not.toContainEqual(expect.objectContaining({ source: 'profile-fallback' }));
+    expect(options).not.toContainEqual(expect.objectContaining({ routeKey: currentRouteKey }));
   });
 
   it('rejects malformed current recovered routes from selectable options', async () => {

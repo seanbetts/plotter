@@ -10,6 +10,7 @@ import type {
   TripRoutingVehicle,
   VehicleRestrictions,
 } from '../domain/types';
+import { createRouteKey } from '../domain/routeLegs';
 import {
   dedupeRouteOptions,
   ensureUniqueRouteOptionIds,
@@ -556,6 +557,74 @@ function providerOptionsForRecoverySource(
     : {};
 }
 
+function currentRouteProfileMatchesRequestedIntent(input: {
+  actualProfile: OpenRouteServiceProfile;
+  requestedProfile: OpenRouteServiceProfile;
+  warnings: RouteWarning[];
+}) {
+  const hasFallbackProvenance = input.warnings.some(
+    (warning) => warning.code === 'VEHICLE_PROFILE_FALLBACK',
+  );
+  if (hasFallbackProvenance) {
+    return input.requestedProfile === 'driving-hgv' && input.actualProfile === 'driving-car';
+  }
+
+  return input.actualProfile === input.requestedProfile;
+}
+
+function currentRouteKeyMatchesRequestedIntent(input: {
+  routeKey: string;
+  actualProfile: OpenRouteServiceProfile;
+  requestedProfile: OpenRouteServiceProfile;
+  origin: Coordinates;
+  target: Coordinates;
+  routingVehicle: TripRoutingVehicle;
+  waypoints: RouteWaypoint[];
+  ferryPolicy: FerryPolicy;
+}) {
+  try {
+    const parsed = JSON.parse(input.routeKey) as {
+      variant?: unknown;
+      providerOptions?: unknown;
+    };
+    if (parsed.variant !== undefined && parsed.variant !== null && typeof parsed.variant !== 'string') {
+      return false;
+    }
+    if (
+      parsed.providerOptions !== undefined &&
+      (
+        !parsed.providerOptions ||
+        typeof parsed.providerOptions !== 'object' ||
+        Array.isArray(parsed.providerOptions)
+      )
+    ) {
+      return false;
+    }
+
+    const keyInput = {
+      origin: input.origin,
+      target: input.target,
+      routingVehicle: input.routingVehicle,
+      waypoints: [...input.waypoints]
+        .sort((left, right) => left.order - right.order)
+        .map((waypoint) => waypoint.coordinates),
+      ferryPolicy: input.ferryPolicy,
+      variant: typeof parsed.variant === 'string' ? parsed.variant : undefined,
+      providerOptions: (parsed.providerOptions ?? {}) as Record<string, unknown>,
+    };
+    const requestedProfileKey = createRouteKey(keyInput);
+    if (input.routeKey === requestedProfileKey) return true;
+
+    return (
+      input.requestedProfile === 'driving-hgv' &&
+      input.actualProfile === 'driving-car' &&
+      input.routeKey === createRouteKey({ ...keyInput, profile: input.actualProfile })
+    );
+  } catch {
+    return false;
+  }
+}
+
 function routeOptionFromRecoveredRoute(input: {
   route: RecoveredRoute;
   origin: Coordinates;
@@ -598,6 +667,10 @@ function routeOptionFromCurrentRoute({
   currentRouteLeg,
   origin,
   target,
+  profile,
+  routingVehicle,
+  waypoints,
+  ferryPolicy,
   originAnchors,
   targetAnchors,
 }: ResolvedCalculateRouteOptionsInput) {
@@ -621,6 +694,25 @@ function routeOptionFromCurrentRoute({
 
   const currentProfile = currentRouteLeg.profile;
   const warnings = currentRouteLeg.warnings ?? [];
+  if (
+    !currentRouteProfileMatchesRequestedIntent({
+      actualProfile: currentProfile,
+      requestedProfile: profile,
+      warnings,
+    }) ||
+    !currentRouteKeyMatchesRequestedIntent({
+      routeKey: currentRouteLeg.routeKey,
+      actualProfile: currentProfile,
+      requestedProfile: profile,
+      origin,
+      target,
+      routingVehicle,
+      waypoints,
+      ferryPolicy,
+    })
+  ) {
+    return null;
+  }
   const hasAdjustedAnchorProvenance = warnings.some((warning) => warning.code === 'ROUTING_ANCHOR_ADJUSTED');
   const endpointAnchors: RouteOptionEndpointAnchors = {};
   if (hasAdjustedAnchorProvenance) {
