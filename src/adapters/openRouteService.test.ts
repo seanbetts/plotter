@@ -1,11 +1,32 @@
 import type { LineString } from 'geojson';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { RouteWaypoint } from '../domain/types';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import {
   calculateOpenRouteServiceRoute,
   calculateOpenRouteServiceRouteOptions,
 } from './openRouteService';
 
 describe('OpenRouteService adapter', () => {
+  const origin = { lat: 51.5072, lng: -0.1276 };
+  const target = { lat: 57.5948, lng: 9.9796 };
+  const hirtshals: RouteWaypoint = {
+    id: 'hirtshals',
+    order: 0,
+    name: 'Hirtshals',
+    coordinates: { lat: 57.5948, lng: 9.9796 },
+    location: {
+      placeName: 'Hirtshals',
+      regionName: 'North Jutland',
+      countryName: 'Denmark',
+      countryCode: 'DK',
+      sourceLabel: 'Hirtshals, Denmark',
+      sourceProvider: 'legacy',
+    },
+    notes: '',
+    links: [],
+  };
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -57,6 +78,7 @@ describe('OpenRouteService adapter', () => {
             [-0.1276, 51.5072],
             [2.3522, 48.8566],
           ],
+          extra_info: ['waycategory'],
         }),
       },
     );
@@ -66,7 +88,105 @@ describe('OpenRouteService adapter', () => {
       geometry,
       provider: 'openrouteservice',
       profile: 'driving-car',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 458.25 }],
     });
+  });
+
+  it('sends HGV restrictions, ordered coordinates and waycategory', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [[-0.1276, 51.5072], [9.9796, 57.5948], [10.7522, 59.9139]],
+          },
+          properties: { summary: { distance: 1_200_000, duration: 72_000 } },
+        }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await calculateOpenRouteServiceRoute({
+      apiKey: 'key',
+      origin,
+      target: { lat: 59.9139, lng: 10.7522 },
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+      ferryPolicy: 'require',
+      waypoints: [hirtshals],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openrouteservice.org/v2/directions/driving-hgv/geojson',
+      expect.objectContaining({
+        body: JSON.stringify({
+          coordinates: [
+            [-0.1276, 51.5072],
+            [9.9796, 57.5948],
+            [10.7522, 59.9139],
+          ],
+          extra_info: ['waycategory'],
+          options: {
+            vehicle_type: 'hgv',
+            profile_params: {
+              restrictions: { length: 9, width: 2.55, height: 3.8, weight: 15, axleload: 7.5 },
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('maps waycategory 8 to a ferry section and fills road ranges', async () => {
+    const geometry: LineString = {
+      type: 'LineString',
+      coordinates: Array.from({ length: 12 }, (_, index) => [index * 0.242997, 0]),
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry,
+          properties: {
+            summary: { distance: 297_220, duration: 18_000 },
+            extras: { waycategory: { values: [[0, 4, 1], [4, 9, 8], [9, 11, 1]] } },
+          },
+        }],
+      }),
+    }));
+
+    const route = await calculateOpenRouteServiceRoute({ apiKey: 'key', origin, target });
+
+    expect(route.sections).toEqual([
+      { kind: 'road', startGeometryIndex: 0, endGeometryIndex: 4, distanceKm: 108.1 },
+      { kind: 'ferry', startGeometryIndex: 4, endGeometryIndex: 9, distanceKm: 135.1 },
+      { kind: 'road', startGeometryIndex: 9, endGeometryIndex: 11, distanceKm: 54 },
+    ]);
+  });
+
+  it('rejects malformed waycategory ranges safely', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[0, 0], [1, 0]] },
+          properties: {
+            summary: { distance: 111_195, duration: 3_600 },
+            extras: { waycategory: { values: [[0, 4, 8]] } },
+          },
+        }],
+      }),
+    }));
+
+    await expect(
+      calculateOpenRouteServiceRoute({ apiKey: 'key', origin, target }),
+    ).rejects.toThrow('OpenRouteService returned an invalid route');
   });
 
   it('requires an API key before making a request', async () => {
@@ -207,6 +327,7 @@ describe('OpenRouteService adapter', () => {
             share_factor: 0.6,
             weight_factor: 2,
           },
+          extra_info: ['waycategory'],
         }),
       }),
     );
@@ -302,6 +423,7 @@ describe('OpenRouteService adapter', () => {
           options: {
             avoid_features: ['highways'],
           },
+          extra_info: ['waycategory'],
         }),
       }),
     );
@@ -407,6 +529,7 @@ describe('OpenRouteService adapter', () => {
           options: {
             avoid_features: ['highways'],
           },
+          extra_info: ['waycategory'],
         }),
       }),
     );
@@ -429,5 +552,50 @@ describe('OpenRouteService adapter', () => {
       }),
     ).rejects.toThrow('OpenRouteService API key is required');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('makes route options inherit HGV, waypoint and required-ferry intent', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [[-0.1276, 51.5072], [9.9796, 57.5948], [10.7522, 59.9139]],
+            },
+            properties: {
+              summary: { distance: 1_200_000, duration: 72_000 },
+              extras: { waycategory: { values: [[0, 1, 1], [1, 2, 8]] } },
+            },
+          }],
+        }),
+      })
+      .mockResolvedValue({ ok: true, json: async () => ({ type: 'FeatureCollection', features: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'key',
+      origin,
+      target: { lat: 59.9139, lng: 10.7522 },
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+      ferryPolicy: 'require',
+      waypoints: [hirtshals],
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://api.openrouteservice.org/v2/directions/driving-hgv/geojson',
+      expect.objectContaining({
+        body: expect.stringContaining('"coordinates":[[-0.1276,51.5072],[9.9796,57.5948],[10.7522,59.9139]]'),
+      }),
+    );
+    expect(fetchMock.mock.calls.map(([, request]) => request.body)).not.toContainEqual(
+      expect.stringContaining('"avoid_features":["ferries"]'),
+    );
+    expect(options[0]?.sections).toContainEqual(expect.objectContaining({ kind: 'ferry' }));
   });
 });

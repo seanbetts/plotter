@@ -1,5 +1,5 @@
 import type { LineString } from 'geojson';
-import type { Coordinates, RouteLeg } from './types';
+import type { Coordinates, RouteLeg, RouteSection } from './types';
 
 export type RouteOptionSource = 'recommended' | 'provider-alternative' | 'avoid-feature';
 export type RouteAvoidFeature = 'highways' | 'ferries' | 'tollways';
@@ -11,6 +11,7 @@ export type RouteOption = {
   distanceKm: number;
   travelTimeHours: number;
   geometry: LineString;
+  sections?: RouteSection[];
   provider: string;
   profile: string;
   routeKey: string;
@@ -58,6 +59,7 @@ export function routeOptionFromCalculation(input: RouteOptionFromCalculationInpu
     distanceKm: input.distanceKm,
     travelTimeHours: input.travelTimeHours,
     geometry: input.geometry,
+    sections: input.sections,
     provider: input.provider,
     profile: input.profile,
     routeKey: createRouteOptionKey({
@@ -101,6 +103,7 @@ export function routeLegPatchFromRouteOption(
     provider: option.provider,
     profile: option.profile,
     routeKey: option.routeKey,
+    sections: option.sections ?? [],
     calculatedAt,
     error: undefined,
   };

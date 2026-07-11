@@ -1,6 +1,7 @@
 import type { LineString } from 'geojson';
 import { describe, expect, it } from 'vitest';
 import { createRouteLeg } from './routeLegs';
+import type { RouteSection } from './types';
 import {
   createRouteOptionKey,
   dedupeRouteOptions,
@@ -26,6 +27,10 @@ describe('route option helpers', () => {
       [2.3522, 48.8566],
     ],
   };
+  const sections: RouteSection[] = [
+    { kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 220 },
+    { kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 2, distanceKm: 238.25 },
+  ];
 
   it('creates stable route option keys from coordinates, profile, and variant', () => {
     expect(
@@ -48,6 +53,7 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'recommended',
@@ -60,6 +66,7 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'driving-car:-0.12760,51.50720:2.35220,48.85660:recommended',
@@ -76,6 +83,7 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'recommended',
@@ -89,6 +97,7 @@ describe('route option helpers', () => {
       distanceKm: 458.26,
       travelTimeHours: 5.01,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'alternative-1',
@@ -102,6 +111,7 @@ describe('route option helpers', () => {
       distanceKm: 520,
       travelTimeHours: 6.4,
       geometry: avoidHighwaysGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'avoid:highways',
@@ -123,6 +133,7 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'recommended',
@@ -136,6 +147,7 @@ describe('route option helpers', () => {
       distanceKm: 459,
       travelTimeHours: 5.1,
       geometry: avoidHighwaysGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'recommended',
@@ -155,6 +167,7 @@ describe('route option helpers', () => {
       distanceKm: 458.25,
       travelTimeHours: 5,
       geometry: directGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'old-key',
@@ -168,6 +181,7 @@ describe('route option helpers', () => {
       distanceKm: 520,
       travelTimeHours: 6.4,
       geometry: avoidHighwaysGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       variant: 'avoid:highways',
@@ -179,6 +193,7 @@ describe('route option helpers', () => {
       distanceKm: 520,
       travelTimeHours: 6.4,
       geometry: avoidHighwaysGeometry,
+      sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: option.routeKey,

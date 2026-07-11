@@ -1,19 +1,30 @@
 import type { FeatureCollection, LineString } from 'geojson';
-import type { Coordinates } from '../domain/types';
+import type {
+  Coordinates,
+  FerryPolicy,
+  RouteSection,
+  RouteWaypoint,
+  TripRoutingVehicle,
+  VehicleRestrictions,
+} from '../domain/types';
 import {
   dedupeRouteOptions,
   routeOptionFromCalculation,
   type RouteAvoidFeature,
   type RouteOption,
 } from '../domain/routeOptions';
+import { standardRoutingVehicle } from '../domain/vehiclePresets';
 
-type OpenRouteServiceProfile = 'driving-car';
+type OpenRouteServiceProfile = TripRoutingVehicle['profile'];
 
 type CalculateRouteInput = {
   apiKey: string;
   origin: Coordinates;
   target: Coordinates;
   profile?: OpenRouteServiceProfile;
+  routingVehicle?: TripRoutingVehicle;
+  waypoints?: Array<Pick<RouteWaypoint, 'coordinates'>>;
+  ferryPolicy?: FerryPolicy;
 };
 
 type CalculatedRoute = {
@@ -22,12 +33,18 @@ type CalculatedRoute = {
   geometry: LineString;
   provider: 'openrouteservice';
   profile: OpenRouteServiceProfile;
+  sections: RouteSection[];
 };
 
 type OpenRouteServiceFeatureProperties = {
   summary?: {
     distance?: number;
     duration?: number;
+  };
+  extras?: {
+    waycategory?: {
+      values?: unknown;
+    };
   };
 };
 
@@ -40,7 +57,6 @@ class OpenRouteServiceRouteCalculationError extends Error {
 }
 
 const provider = 'openrouteservice';
-const defaultProfile: OpenRouteServiceProfile = 'driving-car';
 const endpointBaseUrl = 'https://api.openrouteservice.org/v2/directions';
 const maxRouteOptions = 3;
 const supplementalAvoidFeatures: Array<{ feature: RouteAvoidFeature; label: string }> = [
@@ -51,6 +67,36 @@ const supplementalAvoidFeatures: Array<{ feature: RouteAvoidFeature; label: stri
 
 function toLngLat(coordinates: Coordinates) {
   return [coordinates.lng, coordinates.lat];
+}
+
+function toOrsRestrictions(restrictions: VehicleRestrictions) {
+  return Object.fromEntries(
+    Object.entries(restrictions).map(([key, value]) => [key === 'axleLoad' ? 'axleload' : key, value]),
+  );
+}
+
+function buildRoutingOptions(
+  vehicle: TripRoutingVehicle,
+  ferryPolicy: FerryPolicy,
+  additionalAvoidFeature?: RouteAvoidFeature,
+) {
+  const options: Record<string, unknown> = {};
+  const avoidFeatures = new Set<RouteAvoidFeature>();
+
+  if (ferryPolicy === 'avoid') avoidFeatures.add('ferries');
+  if (additionalAvoidFeature) avoidFeatures.add(additionalAvoidFeature);
+  if (avoidFeatures.size > 0) options.avoid_features = [...avoidFeatures];
+
+  if (vehicle.profile === 'driving-hgv') {
+    options.vehicle_type = vehicle.vehicleType;
+    options.profile_params = { restrictions: toOrsRestrictions(vehicle.restrictions) };
+  }
+
+  return Object.keys(options).length > 0 ? options : undefined;
+}
+
+function buildCoordinates(origin: Coordinates, waypoints: Array<Pick<RouteWaypoint, 'coordinates'>>, target: Coordinates) {
+  return [origin, ...waypoints.map((waypoint) => waypoint.coordinates), target].map(toLngLat);
 }
 
 function requireApiKey(apiKey: string) {
@@ -70,8 +116,117 @@ function isLineString(geometry: unknown): geometry is LineString {
     'type' in geometry &&
     geometry.type === 'LineString' &&
     'coordinates' in geometry &&
-    Array.isArray(geometry.coordinates)
+    Array.isArray(geometry.coordinates) &&
+    geometry.coordinates.length >= 2
   );
+}
+
+function degreesToRadians(degrees: number) {
+  return (degrees * Math.PI) / 180;
+}
+
+function coordinatePairDistanceKm(left: number[], right: number[]) {
+  const [leftLng, leftLat] = left;
+  const [rightLng, rightLat] = right;
+  if (
+    typeof leftLng !== 'number' || typeof leftLat !== 'number' ||
+    typeof rightLng !== 'number' || typeof rightLat !== 'number'
+  ) {
+    throw new Error('OpenRouteService returned an invalid route');
+  }
+
+  const earthRadiusKm = 6371;
+  const latDelta = degreesToRadians(rightLat - leftLat);
+  const lngDelta = degreesToRadians(rightLng - leftLng);
+  const leftLatitude = degreesToRadians(leftLat);
+  const rightLatitude = degreesToRadians(rightLat);
+  const haversine =
+    Math.sin(latDelta / 2) ** 2 +
+    Math.cos(leftLatitude) * Math.cos(rightLatitude) * Math.sin(lngDelta / 2) ** 2;
+
+  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function sectionDistanceKm(geometry: LineString, startGeometryIndex: number, endGeometryIndex: number) {
+  let distanceKm = 0;
+  for (let index = startGeometryIndex; index < endGeometryIndex; index += 1) {
+    distanceKm += coordinatePairDistanceKm(geometry.coordinates[index], geometry.coordinates[index + 1]);
+  }
+  return Math.round(distanceKm * 10) / 10;
+}
+
+function parseWaycategoryRanges(values: unknown, lastGeometryIndex: number) {
+  if (!Array.isArray(values)) {
+    throw new Error('OpenRouteService returned an invalid route');
+  }
+
+  let previousEnd = -1;
+  return values.map((value) => {
+    if (!Array.isArray(value) || value.length !== 3) {
+      throw new Error('OpenRouteService returned an invalid route');
+    }
+
+    const [startGeometryIndex, endGeometryIndex, category] = value;
+    if (
+      !Number.isInteger(startGeometryIndex) ||
+      !Number.isInteger(endGeometryIndex) ||
+      typeof category !== 'number' ||
+      startGeometryIndex < 0 ||
+      startGeometryIndex >= endGeometryIndex ||
+      endGeometryIndex > lastGeometryIndex ||
+      startGeometryIndex < previousEnd
+    ) {
+      throw new Error('OpenRouteService returned an invalid route');
+    }
+
+    previousEnd = endGeometryIndex;
+    return { startGeometryIndex, endGeometryIndex, category };
+  });
+}
+
+function parseRouteSections(
+  geometry: LineString,
+  distanceKm: number,
+  waycategory: { values?: unknown } | undefined,
+): RouteSection[] {
+  const lastGeometryIndex = geometry.coordinates.length - 1;
+  if (!waycategory) {
+    return [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: lastGeometryIndex, distanceKm }];
+  }
+
+  const ferryRanges = parseWaycategoryRanges(waycategory.values, lastGeometryIndex)
+    .filter((range) => range.category === 8);
+  const sections: RouteSection[] = [];
+  let nextRoadStart = 0;
+
+  for (const ferryRange of ferryRanges) {
+    if (nextRoadStart < ferryRange.startGeometryIndex) {
+      sections.push({
+        kind: 'road',
+        startGeometryIndex: nextRoadStart,
+        endGeometryIndex: ferryRange.startGeometryIndex,
+        distanceKm: sectionDistanceKm(geometry, nextRoadStart, ferryRange.startGeometryIndex),
+      });
+    }
+    sections.push({
+      kind: 'ferry',
+      startGeometryIndex: ferryRange.startGeometryIndex,
+      endGeometryIndex: ferryRange.endGeometryIndex,
+      distanceKm: sectionDistanceKm(geometry, ferryRange.startGeometryIndex, ferryRange.endGeometryIndex),
+    });
+    nextRoadStart = ferryRange.endGeometryIndex;
+  }
+
+  if (nextRoadStart < lastGeometryIndex) {
+    sections.push({
+      kind: 'road',
+      startGeometryIndex: nextRoadStart,
+      endGeometryIndex: lastGeometryIndex,
+      distanceKm: sectionDistanceKm(geometry, nextRoadStart, lastGeometryIndex),
+    });
+  }
+
+  return sections;
 }
 
 function parseRouteFeature(feature: OpenRouteServiceFeatureCollection['features'][number]) {
@@ -82,10 +237,13 @@ function parseRouteFeature(feature: OpenRouteServiceFeatureCollection['features'
     throw new Error('OpenRouteService returned an invalid route');
   }
 
+  const distanceKm = summary.distance / 1000;
+
   return {
-    distanceKm: summary.distance / 1000,
+    distanceKm,
     travelTimeHours: summary.duration / 3600,
     geometry,
+    sections: parseRouteSections(geometry, distanceKm, feature.properties?.extras?.waycategory),
   };
 }
 
@@ -128,19 +286,30 @@ async function postDirections({
   return (await response.json()) as OpenRouteServiceFeatureCollection;
 }
 
+export function calculateOpenRouteServiceRoute(
+  input: CalculateRouteInput & { profile: 'driving-car'; routingVehicle?: undefined },
+): Promise<CalculatedRoute & { profile: 'driving-car' }>;
+export function calculateOpenRouteServiceRoute(input: CalculateRouteInput): Promise<CalculatedRoute>;
 export async function calculateOpenRouteServiceRoute({
   apiKey,
   origin,
   target,
-  profile = defaultProfile,
+  routingVehicle = standardRoutingVehicle,
+  waypoints = [],
+  ferryPolicy = 'allow',
 }: CalculateRouteInput): Promise<CalculatedRoute> {
   const trimmedApiKey = requireApiKey(apiKey);
+  const resolvedVehicle = routingVehicle;
   const parsedRoute = parseRouteResponse(
     await postDirections({
       apiKey: trimmedApiKey,
-      profile,
+      profile: resolvedVehicle.profile,
       body: {
-        coordinates: [toLngLat(origin), toLngLat(target)],
+        coordinates: buildCoordinates(origin, waypoints, target),
+        extra_info: ['waycategory'],
+        ...(buildRoutingOptions(resolvedVehicle, ferryPolicy)
+          ? { options: buildRoutingOptions(resolvedVehicle, ferryPolicy) }
+          : {}),
       },
     }),
   );
@@ -148,7 +317,7 @@ export async function calculateOpenRouteServiceRoute({
   return {
     ...parsedRoute,
     provider,
-    profile,
+    profile: resolvedVehicle.profile,
   };
 }
 
@@ -157,17 +326,24 @@ async function calculateProviderAlternativeOptions({
   origin,
   target,
   profile,
+  routingVehicle,
+  waypoints,
+  ferryPolicy,
 }: Required<CalculateRouteInput>): Promise<RouteOption[]> {
   const data = await postDirections({
     apiKey,
     profile,
     body: {
-      coordinates: [toLngLat(origin), toLngLat(target)],
+      coordinates: buildCoordinates(origin, waypoints, target),
       alternative_routes: {
         target_count: maxRouteOptions,
         share_factor: 0.6,
         weight_factor: 2,
       },
+      extra_info: ['waycategory'],
+      ...(buildRoutingOptions(routingVehicle, ferryPolicy)
+        ? { options: buildRoutingOptions(routingVehicle, ferryPolicy) }
+        : {}),
     },
   });
 
@@ -184,6 +360,7 @@ async function calculateProviderAlternativeOptions({
       distanceKm: route.distanceKm,
       travelTimeHours: route.travelTimeHours,
       geometry: route.geometry,
+      sections: route.sections,
       provider,
       profile,
       variant: isRecommended ? 'recommended' : `alternative-${index}`,
@@ -196,6 +373,9 @@ async function calculateAvoidFeatureOption({
   origin,
   target,
   profile,
+  routingVehicle,
+  waypoints,
+  ferryPolicy,
   feature,
   label,
 }: Required<CalculateRouteInput> & { feature: RouteAvoidFeature; label: string }) {
@@ -203,10 +383,9 @@ async function calculateAvoidFeatureOption({
     apiKey,
     profile,
     body: {
-      coordinates: [toLngLat(origin), toLngLat(target)],
-      options: {
-        avoid_features: [feature],
-      },
+      coordinates: buildCoordinates(origin, waypoints, target),
+      options: buildRoutingOptions(routingVehicle, ferryPolicy, feature),
+      extra_info: ['waycategory'],
     },
   });
   const route = parseRouteResponse(data);
@@ -220,6 +399,7 @@ async function calculateAvoidFeatureOption({
     distanceKm: route.distanceKm,
     travelTimeHours: route.travelTimeHours,
     geometry: route.geometry,
+    sections: route.sections,
     provider,
     profile,
     variant: `avoid:${feature}`,
@@ -230,9 +410,12 @@ export async function calculateOpenRouteServiceRouteOptions({
   apiKey,
   origin,
   target,
-  profile = defaultProfile,
+  routingVehicle = standardRoutingVehicle,
+  waypoints = [],
+  ferryPolicy = 'allow',
 }: CalculateRouteInput): Promise<RouteOption[]> {
   const trimmedApiKey = requireApiKey(apiKey);
+  const resolvedVehicle = routingVehicle;
   const options: RouteOption[] = [];
 
   try {
@@ -241,7 +424,10 @@ export async function calculateOpenRouteServiceRouteOptions({
         apiKey: trimmedApiKey,
         origin,
         target,
-        profile,
+        profile: resolvedVehicle.profile,
+        routingVehicle: resolvedVehicle,
+        waypoints,
+        ferryPolicy,
       })),
     );
   } catch (error) {
@@ -253,6 +439,7 @@ export async function calculateOpenRouteServiceRouteOptions({
   }
 
   for (const supplemental of supplementalAvoidFeatures) {
+    if (supplemental.feature === 'ferries' && ferryPolicy === 'require') continue;
     if (dedupeRouteOptions(options).length >= maxRouteOptions) break;
 
     try {
@@ -261,7 +448,10 @@ export async function calculateOpenRouteServiceRouteOptions({
           apiKey: trimmedApiKey,
           origin,
           target,
-          profile,
+          profile: resolvedVehicle.profile,
+          routingVehicle: resolvedVehicle,
+          waypoints,
+          ferryPolicy,
           ...supplemental,
         }),
       );
