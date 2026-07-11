@@ -257,10 +257,20 @@ describe('ItineraryPanel', () => {
     );
 
     expect(within(screen.getByLabelText('Itinerary summary')).getByText('0 hrs travel')).toBeInTheDocument();
-    expect(screen.getByLabelText('Route failed: Required ferry section was not returned.')).toHaveAttribute(
+    const failureIcon = screen.getByRole('img', {
+      name: 'Route failed: Required ferry section was not returned.',
+    });
+    const retryButton = screen.getByRole('button', { name: 'Retry Dover to Calais route calculation' });
+    const failureGroup = failureIcon.parentElement;
+
+    expect(failureIcon).toHaveAttribute(
       'title',
       'Route failed: Required ferry section was not returned.',
     );
+    expect(failureGroup).toHaveClass('inline-route-failure');
+    expect(Array.from(failureGroup?.children ?? [])).toEqual([failureIcon, retryButton]);
+    expect(within(failureGroup as HTMLElement).queryByText('failed')).not.toBeInTheDocument();
+    expect(failureIcon).toHaveClass('inline-route-failure-icon');
   });
 
   it('pluralises inline route hours at two displayed hours and above', () => {
@@ -350,9 +360,12 @@ describe('ItineraryPanel', () => {
     );
 
     const editButton = screen.getByRole('button', { name: 'Edit route from Bilbao to Porto' });
+    const routeTypeButton = screen.getByRole('button', { name: 'Set Bilbao to Porto to Vehicle shipping' });
 
     expect(editButton).toHaveAttribute('title', 'Edit route');
     expect(editButton).not.toHaveTextContent('Edit');
+    expect(editButton.parentElement).toHaveClass('inline-route-leg');
+    expect(editButton.nextElementSibling).toBe(routeTypeButton);
 
     await user.click(editButton);
 
@@ -473,7 +486,7 @@ describe('ItineraryPanel', () => {
       name: 'Retry Durmitor to Kotor route calculation',
     });
 
-    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.queryByText('failed')).not.toBeInTheDocument();
     expect(retryButton).toHaveAttribute('title', 'Retry route calculation');
 
     await user.click(retryButton);

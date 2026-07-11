@@ -346,13 +346,19 @@ describe('itinerary panel styles', () => {
 describe('inline route connector styles', () => {
   it('keeps route rows compact and visually secondary between stops', () => {
     expect(styles).toMatch(
-      /\.inline-route-leg\s*{[^}]*grid-template-columns:\s*30px 1px minmax\(0,\s*1fr\);[^}]*gap:\s*10px;[^}]*min-height:\s*calc\(42px \+ var\(--stop-list-gap,\s*8px\)\);[^}]*margin-bottom:\s*calc\(0px - var\(--stop-list-gap,\s*8px\)\);[^}]*padding:\s*4px 36px 4px 36px;/s,
+      /\.inline-route-leg\s*{[^}]*grid-template-columns:\s*28px 28px 1px minmax\(0,\s*1fr\);[^}]*gap:\s*6px;[^}]*min-height:\s*calc\(42px \+ var\(--stop-list-gap,\s*8px\)\);[^}]*margin-bottom:\s*calc\(0px - var\(--stop-list-gap,\s*8px\)\);[^}]*padding:\s*4px 6px;/s,
     );
-    expect(styles).toMatch(/\.inline-route-rail\s*{[^}]*height:\s*30px;/s);
-    expect(styles).toMatch(/\.inline-route-type\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
+    expect(styles).toMatch(
+      /\.inline-route-edit\s*{[^}]*grid-column:\s*1;[^}]*width:\s*28px;[^}]*height:\s*28px;[^}]*border:\s*1px solid var\(--border-danger\);[^}]*color:\s*var\(--color-danger\);[^}]*background:\s*var\(--surface-danger-subtle\);/s,
+    );
+    expect(styles).toMatch(/\.inline-route-type\s*{[^}]*grid-column:\s*2;[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
+    expect(styles).toMatch(/\.inline-route-rail\s*{[^}]*grid-column:\s*3;[^}]*height:\s*30px;/s);
+    expect(styles).toMatch(/\.inline-route-summary\s*{[^}]*grid-column:\s*4;/s);
     expect(styles).toMatch(
       /\.inline-route-metrics\s*{[^}]*display:\s*flex;[^}]*gap:\s*6px;[^}]*min-width:\s*0;/s,
     );
+    expect(styles).toMatch(/\.inline-route-failure\s*{[^}]*display:\s*flex;[^}]*gap:\s*6px;/s);
+    expect(styles).toMatch(/\.inline-route-failure-icon\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
     expect(styles).toMatch(/\.inline-route-metric \+ \.inline-route-metric::before\s*{[^}]*content:\s*"·";/s);
     expect(styles).toMatch(
       /\.inline-route-characteristics\s*{[^}]*display:\s*flex;[^}]*margin-left:\s*auto;[^}]*gap:\s*6px;/s,

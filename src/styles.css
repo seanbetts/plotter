@@ -2552,18 +2552,18 @@ select {
 
 .inline-route-leg {
   display: grid;
-  grid-template-columns: 30px 1px minmax(0, 1fr);
+  grid-template-columns: 28px 28px 1px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   min-height: calc(42px + var(--stop-list-gap, 8px));
   margin-bottom: calc(0px - var(--stop-list-gap, 8px));
-  padding: 4px 36px 4px 36px;
+  padding: 4px 6px;
   color: var(--text-muted);
   font-size: 0.76rem;
 }
 
 .inline-route-rail {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   justify-self: center;
   width: 1px;
@@ -2573,7 +2573,7 @@ select {
 
 .inline-route-type {
   display: grid;
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 1;
   justify-self: center;
   width: 28px;
@@ -2592,7 +2592,9 @@ select {
 }
 
 .inline-route-type:hover,
-.inline-route-type:focus-visible {
+.inline-route-type:focus-visible,
+.inline-route-edit:hover,
+.inline-route-edit:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
@@ -2603,7 +2605,7 @@ select {
 
 .inline-route-summary {
   display: flex;
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 1;
   align-items: center;
   gap: 6px;
@@ -2612,23 +2614,18 @@ select {
 
 .inline-route-edit {
   display: grid;
+  grid-column: 1;
+  grid-row: 1;
   flex: 0 0 auto;
+  justify-self: center;
   place-items: center;
   width: 28px;
   height: 28px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-danger);
   border-radius: var(--radius-control);
-  color: var(--text-soft);
-  background: var(--surface-control);
+  color: var(--color-danger);
+  background: var(--surface-danger-subtle);
   cursor: pointer;
-}
-
-.inline-route-edit:hover,
-.inline-route-edit:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: 2px;
-  color: var(--color-text);
-  background: var(--surface-control-hover);
 }
 
 .inline-route-edit svg {
@@ -2649,6 +2646,13 @@ select {
 
 .inline-route-metrics.is-failed-route {
   gap: 7px;
+}
+
+.inline-route-failure {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
 }
 
 .inline-route-spinner {
@@ -2689,6 +2693,11 @@ select {
   background: var(--surface-danger-subtle);
 }
 
+.inline-route-failure-icon {
+  width: 28px;
+  height: 28px;
+}
+
 .inline-route-indicator svg {
   display: block;
 }
@@ -2696,7 +2705,6 @@ select {
 .inline-route-retry {
   display: grid;
   flex: 0 0 auto;
-  margin-left: auto;
   place-items: center;
   width: 28px;
   height: 28px;

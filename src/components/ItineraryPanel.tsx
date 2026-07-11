@@ -570,7 +570,17 @@ export function ItineraryPanel({
                 ) : null}
                 {routeLeg && nextDestination ? (
                   <div className={`inline-route-leg ${isManualVehicleShipping(routeLeg) ? 'inline-route-leg-vehicle-shipping' : 'inline-route-leg-drive'}`}>
-                    <span className="inline-route-rail" aria-hidden="true" />
+                    {routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && onEditRouteLeg ? (
+                      <button
+                        type="button"
+                        className="inline-route-edit"
+                        aria-label={`Edit route from ${destination.name} to ${nextDestination.name}`}
+                        title="Edit route"
+                        onClick={() => onEditRouteLeg(routeLeg.id)}
+                      >
+                        <Pencil size={15} aria-hidden="true" />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="inline-route-type"
@@ -584,18 +594,8 @@ export function ItineraryPanel({
                     >
                       {isManualVehicleShipping(routeLeg) ? <Ship size={15} /> : <Car size={15} />}
                     </button>
+                    <span className="inline-route-rail" aria-hidden="true" />
                     <span className="inline-route-summary">
-                      {routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && onEditRouteLeg ? (
-                        <button
-                          type="button"
-                          className="inline-route-edit"
-                          aria-label={`Edit route from ${destination.name} to ${nextDestination.name}`}
-                          title="Edit route"
-                          onClick={() => onEditRouteLeg(routeLeg.id)}
-                        >
-                          <Pencil size={15} aria-hidden="true" />
-                        </button>
-                      ) : null}
                       <span
                         className={`inline-route-metrics ${isCalculatingRoute ? 'is-calculating-route' : ''} ${
                           isFailedRoute ? 'is-failed-route' : ''
@@ -608,43 +608,56 @@ export function ItineraryPanel({
                             aria-label={`Calculating ${destination.name} to ${nextDestination.name} route`}
                           />
                         ) : null}
-                        {formatLegDistance(routeLeg) ? (
-                          <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
-                        ) : null}
                         {isFailedRoute ? (
-                          <button
-                            type="button"
-                            className="inline-route-retry"
-                            aria-label={`Retry ${destination.name} to ${nextDestination.name} route calculation`}
-                            title="Retry route calculation"
-                            onClick={() =>
-                              onUpdateRouteLeg(routeLeg.id, {
-                                movement: 'drive',
-                                calculation: 'automatic',
-                              })
-                            }
-                          >
-                            <RefreshCw size={15} aria-hidden="true" />
-                          </button>
-                        ) : null}
-                        {formatLegTime(routeLeg) ? (
-                          <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
-                        ) : null}
-                        {routeWaypointCount > 0 ? (
-                          <span className="inline-route-indicator" role="img" aria-label={routeWaypointLabel} title={routeWaypointLabel}>
-                            <MapPin size={14} aria-hidden="true" />
+                          <span className="inline-route-failure">
+                            <span
+                              className="inline-route-indicator is-warning inline-route-failure-icon"
+                              role="img"
+                              aria-label={failureLabel}
+                              title={failureLabel}
+                            >
+                              <TriangleAlert size={15} aria-hidden="true" />
+                            </span>
+                            <button
+                              type="button"
+                              className="inline-route-retry"
+                              aria-label={`Retry ${destination.name} to ${nextDestination.name} route calculation`}
+                              title="Retry route calculation"
+                              onClick={() =>
+                                onUpdateRouteLeg(routeLeg.id, {
+                                  movement: 'drive',
+                                  calculation: 'automatic',
+                                })
+                              }
+                            >
+                              <RefreshCw size={15} aria-hidden="true" />
+                            </button>
                           </span>
-                        ) : null}
-                        {routeLeg.status === 'review-required' || routeLeg.status === 'failed' ? (
-                          <span
-                            className="inline-route-indicator is-warning"
-                            role="img"
-                            aria-label={routeLeg.status === 'failed' ? failureLabel : reviewLabel}
-                            title={routeLeg.status === 'failed' ? failureLabel : reviewLabel}
-                          >
-                            <TriangleAlert size={14} aria-hidden="true" />
-                          </span>
-                        ) : null}
+                        ) : (
+                          <>
+                            {formatLegDistance(routeLeg) ? (
+                              <span className="inline-route-metric">{formatLegDistance(routeLeg)}</span>
+                            ) : null}
+                            {formatLegTime(routeLeg) ? (
+                              <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
+                            ) : null}
+                            {routeWaypointCount > 0 ? (
+                              <span className="inline-route-indicator" role="img" aria-label={routeWaypointLabel} title={routeWaypointLabel}>
+                                <MapPin size={14} aria-hidden="true" />
+                              </span>
+                            ) : null}
+                            {routeLeg.status === 'review-required' ? (
+                              <span
+                                className="inline-route-indicator is-warning"
+                                role="img"
+                                aria-label={reviewLabel}
+                                title={reviewLabel}
+                              >
+                                <TriangleAlert size={14} aria-hidden="true" />
+                              </span>
+                            ) : null}
+                          </>
+                        )}
                         {hasFerrySection || borderCrossingLabel ? (
                           <span className="inline-route-characteristics">
                             {hasFerrySection ? (
