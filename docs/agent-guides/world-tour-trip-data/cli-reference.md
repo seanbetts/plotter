@@ -12,6 +12,8 @@ npm run trip -- create --input ./trip-manifest.json --dry-run --summary --pretty
 npm run trip -- audit --trip-id <id> --pretty
 npm run trip -- recalculate-failed-routes --trip-id <id> --summary --pretty
 npm run trip -- rename --trip-id <id> --name "North Coast 500 Trip"
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck
+npm run trip -- update-route-leg --trip-id trip-1 --route-leg-id leg-1 --input /tmp/route-intent.json
 npm run trip -- delete --trip-id <id> --dry-run
 npm run trip -- delete --trip-id <id> --yes
 ```
@@ -67,12 +69,13 @@ Trip draft:
 }
 ```
 
-Full trip manifest for an agent-authored new trip:
+Manifest V1 remains readable for existing files and resolves the `standard` preset. Use manifest V2 for every new agent-authored trip. V2 requires `vehiclePreset`, creates every ordinary adjacent automatic leg, and overlays only exceptional directives from `routeLegs`:
 
 ```json
 {
-  "manifestVersion": 1,
+  "manifestVersion": 2,
   "name": "Nordkapp summer loop",
+  "vehiclePreset": "expedition-truck",
   "stops": [
     {
       "key": "larvik",
@@ -110,33 +113,81 @@ Full trip manifest for an agent-authored new trip:
       ]
     }
   ],
-  "routeLegs": []
+  "routeLegs": [
+    {
+      "fromStopKey": "larvik",
+      "toStopKey": "hirtshals",
+      "ferryPolicy": "require",
+      "waypoints": [
+        {
+          "name": "Hirtshals ferry terminal",
+          "place": { "query": "Hirtshals ferry terminal, Denmark" },
+          "links": []
+        }
+      ],
+      "notes": "Use the approved Hirtshals crossing."
+    }
+  ]
 }
 ```
 
-The app calculates the ordinary ferry-inclusive Larvik-Hirtshals route automatically.
+The app calculates every omitted ordinary adjacent route automatically. The directive above exists only because the approved plan materially requires the Hirtshals ferry and terminal waypoint.
 
 Requirements:
 
-- `manifestVersion` is `1`.
+- `manifestVersion` is `2` and `vehiclePreset` is `standard`, `large-camper`, or `expedition-truck`.
 - Stop `key` values are unique and route directives connect adjacent keys in canonical order.
 - Every stop has an explicit positive integer `expectedStayDays`; use `1` for departure and return anchors.
 - Omitted `tags`, `links`, `activities`, and `routeLegs` become empty arrays.
 - Use sourced coordinates for short or ambiguous names such as `A`, named viewpoints, trailheads, and ferry terminals. A specific query is otherwise sufficient.
-- Omit route directives for ordinary adjacent driving legs, including normal ferry, tunnel, bridge, and vehicle-shuttle crossings.
-- Use `shipping-manual` only for an approved genuine route discontinuity or independent vehicle-shipping transfer that automatic driving routing cannot represent.
-- Do not author IDs, normalized `location` or address metadata, route geometry, distance, duration, provider fields, route keys, timestamps, or Supabase rows.
+- Omit route directives for ordinary adjacent `drive` + `automatic` legs, including normal ferry, tunnel, bridge, and vehicle-shuttle crossings; `allow` and empty waypoints are implicit.
+- Add ordered waypoints only when a named place materially shapes a route. Add `ferryPolicy: "avoid"` or `"require"` only when ferry intent is material.
+- Use `movement: "vehicle-shipping"` plus `calculation: "manual"` only for an approved genuine discontinuity or independent vehicle-shipping transfer.
+- Do not author IDs, normalized location/address metadata, or the app-derived route fields listed below.
 
-Use an explicit directive only for an approved discontinuity that cannot be represented by automatic driving routing:
+Use this manifest directive only for an approved discontinuity that cannot be represented by automatic driving routing:
 
 ```json
 {
   "fromStopKey": "vehicle-shipping-origin",
   "toStopKey": "vehicle-shipping-destination",
-  "type": "shipping-manual",
+  "movement": "vehicle-shipping",
+  "calculation": "manual",
   "notes": "Approved vehicle-shipping transfer around a physical route discontinuity."
 }
 ```
+
+Existing-trip route-intent patch:
+
+```json
+{
+  "movement": "drive",
+  "calculation": "automatic",
+  "ferryPolicy": "require",
+  "waypoints": [
+    {
+      "name": "Hirtshals ferry terminal",
+      "place": { "query": "Hirtshals ferry terminal, Denmark" },
+      "notes": "Check in early.",
+      "links": []
+    }
+  ],
+  "notes": "Use the approved crossing."
+}
+```
+
+Writable route-intent fields are exactly `movement`, `calculation`, `ferryPolicy`, ordered `waypoints`, and `notes`. A waypoint draft may contain `name`, `place.query` and/or `place.coordinates`, `notes`, and `links`.
+
+App-derived route fields are exactly `type`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, and `error`. Never put them in a manifest directive or `update-route-leg` input.
+
+For an approved new trip, perform one create and one audit:
+
+```bash
+npm run trip -- create --input /tmp/trip-manifest.json --summary --pretty
+npm run trip -- audit --trip-id <trip-id> --pretty
+```
+
+For an existing trip, use the exact commands shown in the Commands section after reading the trip to obtain its route-leg IDs.
 
 Stop draft:
 
@@ -232,7 +283,9 @@ Failure envelope:
 
 `--summary` keeps `ok`, `summary`, `changed`, and `counts` while omitting full stop/activity/route payloads.
 
-For full creation and route recovery, counts include stops, activities, links, total route legs, ready/manual/failed route legs, and audit errors/warnings. Audit issues remain visible. A semantic error returns `TRIP_AUDIT_FAILED` with the complete report at `error.details.audit` and does not persist a trip.
+For full creation and route recovery, counts include stops, activities, links, total route legs, ready/manual/failed/review-required route legs, the vehicle preset, and audit errors/warnings. Audit issues remain visible. Structural validation and activity-distance outliers block persistence.
+
+Automatic route-provider failure does not roll back an otherwise valid manifest. The app persists the trip and approved intent, marks or retains the affected leg as failed or review-required, and reports exact diagnostics through `audit`. Do not replan, change stops, weaken ferry intent, remove waypoints, switch to manual routing, or author substitute geometry. Retry persisted failed automatic legs with `recalculate-failed-routes`, then audit again.
 
 Audit issues include structured location context for implicated entities. Activity outliers include `destination` and `activity`; failed or implausible driving legs include `origin` and `target`. Each context contains the entity `id`, display `name`, resolved `coordinates`, `resolvedLabel`, and `sourceProvider` when available. Inspect these fields before reaching for source-code inspection or a custom route diagnostic.
 
