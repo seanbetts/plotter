@@ -14,8 +14,9 @@ import {
   type RouteOption,
 } from '../domain/routeOptions';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
+import { openRouteServiceDirectionsScheduler } from './openRouteServiceScheduler';
 
-type OpenRouteServiceProfile = TripRoutingVehicle['profile'];
+export type OpenRouteServiceProfile = TripRoutingVehicle['profile'];
 
 type CalculateRouteInput = {
   apiKey: string;
@@ -50,10 +51,36 @@ type OpenRouteServiceFeatureProperties = {
 
 type OpenRouteServiceFeatureCollection = FeatureCollection<LineString, OpenRouteServiceFeatureProperties>;
 
-class OpenRouteServiceRouteCalculationError extends Error {
-  constructor(public readonly status?: number) {
-    super(`OpenRouteService route calculation failed${status ? ` (HTTP ${status})` : ''}`);
+export class OpenRouteServiceError extends Error {
+  readonly name = 'OpenRouteServiceError';
+  readonly status: number;
+  readonly code?: number;
+  readonly providerMessage: string;
+  readonly coordinateIndex?: number;
+  readonly profile: OpenRouteServiceProfile;
+  readonly retryAfterMs?: number;
+
+  constructor(details: {
+    status: number;
+    code?: number;
+    providerMessage: string;
+    coordinateIndex?: number;
+    profile: OpenRouteServiceProfile;
+    retryAfterMs?: number;
+  }) {
+    super(`OpenRouteService route calculation failed (HTTP ${details.status}): ${details.providerMessage}`);
+    this.status = details.status;
+    this.code = details.code;
+    this.providerMessage = details.providerMessage;
+    this.coordinateIndex = details.coordinateIndex;
+    this.profile = details.profile;
+    this.retryAfterMs = details.retryAfterMs;
+    Object.setPrototypeOf(this, new.target.prototype);
   }
+}
+
+export function isOpenRouteServiceError(error: unknown): error is OpenRouteServiceError {
+  return error instanceof OpenRouteServiceError;
 }
 
 const provider = 'openrouteservice';
@@ -257,8 +284,76 @@ function parseRouteResponse(data: OpenRouteServiceFeatureCollection): Omit<Calcu
   return parseRouteFeature(feature);
 }
 
+function parseRetryAfterMilliseconds(retryAfter: string | null, currentTime: number) {
+  if (!retryAfter) {
+    return undefined;
+  }
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000);
+  }
+
+  const retryAt = Date.parse(retryAfter);
+  if (!Number.isNaN(retryAt)) {
+    return Math.max(retryAt - currentTime, 0);
+  }
+
+  return undefined;
+}
+
+function parseCoordinateIndex(providerMessage: string) {
+  const match = providerMessage.match(/specified coordinate (\d+)/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+async function readOpenRouteServiceErrorDetails(response: Response | { json?: () => Promise<unknown>; text?: () => Promise<string>; headers?: Headers; status: number }) {
+  let bodyText = '';
+
+  if (typeof response.text === 'function') {
+    try {
+      bodyText = await response.text();
+    } catch {
+      bodyText = '';
+    }
+  }
+
+  let parsedBody: unknown;
+  if (bodyText) {
+    try {
+      parsedBody = JSON.parse(bodyText);
+    } catch {
+      parsedBody = undefined;
+    }
+  } else if (typeof response.json === 'function') {
+    try {
+      parsedBody = await response.json();
+      bodyText = typeof parsedBody === 'string' ? parsedBody : JSON.stringify(parsedBody);
+    } catch {
+      parsedBody = undefined;
+    }
+  }
+
+  const parsedError = typeof parsedBody === 'object' && parsedBody !== null
+    ? ('error' in parsedBody && typeof parsedBody.error === 'object' && parsedBody.error !== null ? parsedBody.error : parsedBody)
+    : undefined;
+  const providerMessage = typeof parsedError === 'object' && parsedError !== null && 'message' in parsedError && typeof parsedError.message === 'string'
+    ? parsedError.message
+    : bodyText.trim() || `OpenRouteService request failed with HTTP ${response.status}.`;
+  const code = typeof parsedError === 'object' && parsedError !== null && 'code' in parsedError && typeof parsedError.code === 'number'
+    ? parsedError.code
+    : undefined;
+
+  return {
+    code,
+    providerMessage,
+    coordinateIndex: parseCoordinateIndex(providerMessage),
+    retryAfterMs: parseRetryAfterMilliseconds(response.headers?.get('Retry-After') ?? null, Date.now()),
+  };
+}
+
 function isAuthFailure(error: unknown) {
-  return error instanceof OpenRouteServiceRouteCalculationError && (error.status === 401 || error.status === 403);
+  return isOpenRouteServiceError(error) && (error.status === 401 || error.status === 403);
 }
 
 async function postDirections({
@@ -270,20 +365,27 @@ async function postDirections({
   profile: OpenRouteServiceProfile;
   body: Record<string, unknown>;
 }) {
-  const response = await fetch(`${endpointBaseUrl}/${profile}/geojson`, {
-    method: 'POST',
-    headers: {
-      Authorization: apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
+  return openRouteServiceDirectionsScheduler.schedule(async () => {
+    const response = await fetch(`${endpointBaseUrl}/${profile}/geojson`, {
+      method: 'POST',
+      headers: {
+        Authorization: apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorDetails = await readOpenRouteServiceErrorDetails(response);
+      throw new OpenRouteServiceError({
+        status: response.status,
+        profile,
+        ...errorDetails,
+      });
+    }
+
+    return (await response.json()) as OpenRouteServiceFeatureCollection;
   });
-
-  if (!response.ok) {
-    throw new OpenRouteServiceRouteCalculationError(response.status);
-  }
-
-  return (await response.json()) as OpenRouteServiceFeatureCollection;
 }
 
 export function calculateOpenRouteServiceRoute(

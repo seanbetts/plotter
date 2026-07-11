@@ -270,41 +270,72 @@ describe('OpenRouteService adapter', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects non-OK responses', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 403,
-        text: async () => 'Forbidden',
-      }),
-    );
+  it('preserves structured provider errors for unroutable coordinates', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: 2010,
+        message: 'Could not find routable point within a radius of 350.0 meters of specified coordinate 1: 23.2 70.0.',
+      },
+    }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
 
     await expect(
-      calculateOpenRouteServiceRoute({
-        apiKey: 'ors-key',
-        origin: { lat: 51.5072, lng: -0.1276 },
-        target: { lat: 48.8566, lng: 2.3522 },
-      }),
-    ).rejects.toThrow('OpenRouteService route calculation failed');
+      calculateOpenRouteServiceRoute({ apiKey: 'key', origin, target }),
+    ).rejects.toMatchObject({
+      name: 'OpenRouteServiceError',
+      status: 404,
+      code: 2010,
+      coordinateIndex: 1,
+      profile: 'driving-car',
+      providerMessage: 'Could not find routable point within a radius of 350.0 meters of specified coordinate 1: 23.2 70.0.',
+    });
   });
 
-  it('includes the HTTP status in route calculation failures', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 429,
-      }),
-    );
+  it('preserves retry-after details for rate-limited responses', async () => {
+    const rateLimitedResponse = new Response(JSON.stringify({
+      error: {
+        code: 3099,
+        message: 'Rate limit exceeded.',
+      },
+    }), {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        'Retry-After': '2',
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(rateLimitedResponse.clone())
+      .mockResolvedValueOnce(rateLimitedResponse.clone()));
 
     await expect(
-      calculateOpenRouteServiceRoute({
-        apiKey: 'ors-key',
-        origin: { lat: 51.5072, lng: -0.1276 },
-        target: { lat: 48.8566, lng: 2.3522 },
-      }),
-    ).rejects.toThrow('OpenRouteService route calculation failed (HTTP 429)');
+      calculateOpenRouteServiceRoute({ apiKey: 'key', origin, target }),
+    ).rejects.toMatchObject({
+      name: 'OpenRouteServiceError',
+      status: 429,
+      code: 3099,
+      retryAfterMs: 2_000,
+      profile: 'driving-car',
+    });
+  });
+
+  it('keeps malformed provider bodies readable in route calculation failures', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('<html>Provider unavailable</html>', {
+      status: 503,
+      headers: { 'Content-Type': 'text/html' },
+    })));
+
+    await expect(
+      calculateOpenRouteServiceRoute({ apiKey: 'key', origin, target }),
+    ).rejects.toMatchObject({
+      name: 'OpenRouteServiceError',
+      status: 503,
+      providerMessage: '<html>Provider unavailable</html>',
+      profile: 'driving-car',
+    });
   });
 
   it('rejects malformed GeoJSON route responses', async () => {
