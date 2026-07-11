@@ -6,6 +6,7 @@ import { resolveVehiclePreset } from './vehiclePresets';
 import {
   createRouteOptionKey,
   dedupeRouteOptions,
+  ensureUniqueRouteOptionIds,
   routeLegPatchFromRouteOption,
   routeOptionFromCalculation,
 } from './routeOptions';
@@ -301,6 +302,80 @@ describe('route option helpers', () => {
     expect(dedupeRouteOptions([recommended, duplicateRouteKey])).toEqual([recommended]);
     expect(duplicateRouteKey.geometry).not.toEqual(recommended.geometry);
     expect(duplicateRouteKey.routeKey).toBe(recommended.routeKey);
+  });
+
+  it('assigns stable unique ids only to route options whose ids collide', () => {
+    const firstFallback = routeOptionFromCalculation({
+      id: 'profile-fallback',
+      label: 'Car-profile fallback',
+      source: 'profile-fallback',
+      origin,
+      target,
+      distanceKm: 458.25,
+      travelTimeHours: 5,
+      geometry: directGeometry,
+      sections,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routingVehicle: expeditionTruck,
+      providerOptions: { fallbackFromProfile: 'driving-hgv' },
+      variant: 'profile-fallback:current',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated for this route.',
+      }],
+    });
+    const secondFallback = routeOptionFromCalculation({
+      id: 'profile-fallback',
+      label: 'Car-profile fallback',
+      source: 'profile-fallback',
+      origin,
+      target,
+      distanceKm: 520,
+      travelTimeHours: 6.2,
+      geometry: avoidHighwaysGeometry,
+      sections,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routingVehicle: expeditionTruck,
+      providerOptions: { fallbackFromProfile: 'driving-hgv' },
+      variant: 'profile-fallback:recovered',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'Truck dimensions were not validated for this route.',
+      }],
+    });
+    const recommended = routeOptionFromCalculation({
+      id: 'recommended',
+      label: 'Recommended',
+      source: 'recommended',
+      origin,
+      target,
+      distanceKm: 460,
+      travelTimeHours: 5.1,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-0.1276, 51.5072],
+          [0.8, 50.1],
+          [2.3522, 48.8566],
+        ],
+      },
+      sections,
+      provider: 'openrouteservice',
+      profile: 'driving-hgv',
+      routingVehicle: expeditionTruck,
+      variant: 'recommended',
+    });
+
+    const normalized = ensureUniqueRouteOptionIds([firstFallback, secondFallback, recommended]);
+    const repeated = ensureUniqueRouteOptionIds([firstFallback, secondFallback, recommended]);
+
+    expect(new Set(normalized.map((option) => option.id)).size).toBe(3);
+    expect(normalized[0].id).not.toBe(normalized[1].id);
+    expect(normalized[0].id).toBe(repeated[0].id);
+    expect(normalized[1].id).toBe(repeated[1].id);
+    expect(normalized[2]).toBe(recommended);
   });
 
   it('creates a route-leg patch from the selected option', () => {

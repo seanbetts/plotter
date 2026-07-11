@@ -80,3 +80,75 @@ Result: passed, `62` files / `905` tests. Vitest emitted repeated Node `localSto
 - No functional concerns for Task 6.
 - I did not implement itinerary-row warning behavior; Task 7 owns that.
 - The working tree had pre-existing unrelated edits in `.superpowers/sdd/task-1-report.md` and `.superpowers/sdd/task-4-report.md`; I left them unstaged.
+
+## Review Fix Addendum
+
+### RED/GREEN
+
+RED:
+
+```bash
+npm test -- src/domain/routeOptions.test.ts src/adapters/openRouteService.test.ts src/App.test.tsx
+```
+
+Expected failures confirmed before implementation: duplicate `profile-fallback` ids selected the first matching option, current recovered routes recomputed `routeKey`, malformed persisted recovered routes could be offered, and async option results could publish after the route intent changed.
+
+GREEN:
+
+```bash
+npm test -- src/domain/routeOptions.test.ts src/adapters/openRouteService.test.ts src/App.test.tsx
+```
+
+Result: passed, `3` files / `94` tests.
+
+Broader focused Task 6 verification:
+
+```bash
+npm test -- src/domain/routeOptions.test.ts src/adapters/openRouteService.test.ts src/components/RouteAlternativesPanel.test.tsx src/App.test.tsx src/hooks/useTripData.test.tsx
+```
+
+Result: passed, `5` files / `153` tests.
+
+### Option and Dedupe Behavior
+
+- Every displayed/selectable route option is normalized through `ensureUniqueRouteOptionIds`, which keeps the first option's id stable and appends a stable route-key component only to later colliding ids.
+- Recovered options now derive stable ids from their persisted/generated `routeKey`, so multiple adjusted-endpoint or profile-fallback geometries can coexist and selection maps back to the exact option.
+- `routeOptionFromCurrentRoute` now preserves the persisted `routeKey`, warnings, endpoint anchors, source identity, actual provider, actual profile, and route geometry instead of rebuilding identity.
+- Current-route normalization now rejects incomplete persisted recovered routes unless they have an existing `routeKey`, the ORS provider, a supported profile, finite metrics, non-empty sections, and valid renderable LineString geometry.
+- Dedupe still prefers recovery provenance over identical less-informative geometry; unique id normalization happens after dedupe so provenance is not discarded to repair collisions.
+
+### Stale and Atomic Persistence Evidence
+
+- App coverage verifies that selecting the second of two duplicate-source fallback options persists that exact option's `routeKey`.
+- Async option loading rechecks the current route fingerprint before publishing options. If route intent changes while loading, the panel reports `Route intent changed. Recalculate route options.` and does not show stale options.
+- The existing confirm-time fingerprint guard remains in place for route and endpoint-anchor persistence, so stale saves continue to be blocked atomically.
+
+### Build and Full Suite
+
+```bash
+npm run build
+```
+
+Result: passed. Vite emitted the existing large chunk warning.
+
+```bash
+npm test
+```
+
+Result: passed, `62` files / `909` tests. Vitest emitted repeated Node `localStorage` experimental warnings; they did not affect the pass result.
+
+### Review Fix Files
+
+- `src/domain/routeOptions.ts`
+- `src/domain/routeOptions.test.ts`
+- `src/adapters/openRouteService.ts`
+- `src/adapters/openRouteService.test.ts`
+- `src/App.tsx`
+- `src/App.test.tsx`
+- `.superpowers/sdd/task-6-report.md`
+
+### Concerns
+
+- No functional concerns for the review fixes.
+- I did not implement itinerary-row warning behavior; Task 7 still owns that.
+- Pre-existing unrelated edits in `.superpowers/sdd/task-1-report.md` and `.superpowers/sdd/task-4-report.md` remain unstaged.

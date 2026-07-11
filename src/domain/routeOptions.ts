@@ -127,6 +127,22 @@ function routeOptionInformationRank(option: RouteOption) {
   );
 }
 
+function stableIdComponent(value: string) {
+  if (/^[A-Za-z0-9._:-]+$/.test(value) && value.length <= 96) return value;
+
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `r${(hash >>> 0).toString(36)}`;
+}
+
+export function stableRouteOptionId(baseId: string, routeKey: string) {
+  return `${baseId}:${stableIdComponent(routeKey)}`;
+}
+
 export function createRouteOptionKey({
   origin,
   target,
@@ -204,6 +220,24 @@ export function dedupeRouteOptions(options: RouteOption[]) {
   }
 
   return dedupedOptions;
+}
+
+export function ensureUniqueRouteOptionIds(options: RouteOption[]) {
+  const idCounts = new Map<string, number>();
+  for (const option of options) {
+    idCounts.set(option.id, (idCounts.get(option.id) ?? 0) + 1);
+  }
+
+  const usedIds = new Set<string>();
+
+  return options.map((option, index) => {
+    const hasCollision = (idCounts.get(option.id) ?? 0) > 1;
+    const baseId = hasCollision ? stableRouteOptionId(option.id, option.routeKey) : option.id;
+    const id = usedIds.has(baseId) ? `${baseId}:${index}` : baseId;
+    usedIds.add(id);
+
+    return id === option.id ? option : { ...option, id };
+  });
 }
 
 export function routeLegPatchFromRouteOption(

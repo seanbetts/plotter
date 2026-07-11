@@ -12,7 +12,9 @@ import type {
 } from '../domain/types';
 import {
   dedupeRouteOptions,
+  ensureUniqueRouteOptionIds,
   routeOptionFromCalculation,
+  stableRouteOptionId,
   type RouteAvoidFeature,
   type RouteOption,
   type RouteOptionEndpointAnchors,
@@ -165,7 +167,12 @@ function isLineString(geometry: unknown): geometry is LineString {
     geometry.type === 'LineString' &&
     'coordinates' in geometry &&
     Array.isArray(geometry.coordinates) &&
-    geometry.coordinates.length >= 2
+    geometry.coordinates.length >= 2 &&
+    geometry.coordinates.every((coordinate) =>
+      Array.isArray(coordinate) &&
+      coordinate.length >= 2 &&
+      Number.isFinite(coordinate[0]) &&
+      Number.isFinite(coordinate[1]))
   );
 }
 
@@ -565,7 +572,7 @@ function routeOptionFromRecoveredRoute(input: {
 }) {
   const source = routeOptionSourceFromWarnings(input.route.warnings, input.route.endpointAnchors);
 
-  return routeOptionFromCalculation({
+  const option = routeOptionFromCalculation({
     id: source,
     label: labelForRecoverySource(source),
     source,
@@ -585,15 +592,15 @@ function routeOptionFromRecoveredRoute(input: {
     warnings: input.route.warnings,
     endpointAnchors: input.route.endpointAnchors,
   });
+
+  return {
+    ...option,
+    id: stableRouteOptionId(source, option.routeKey),
+  };
 }
 
 function routeOptionFromCurrentRoute({
   currentRouteLeg,
-  origin,
-  target,
-  routingVehicle,
-  waypoints,
-  ferryPolicy,
   originAnchors,
   targetAnchors,
 }: ResolvedCalculateRouteOptionsInput) {
@@ -601,11 +608,16 @@ function routeOptionFromCurrentRoute({
     !currentRouteLeg ||
     currentRouteLeg.status !== 'ready' ||
     !currentRouteLeg.geometry ||
+    !isLineString(currentRouteLeg.geometry) ||
     currentRouteLeg.distanceKm === undefined ||
     currentRouteLeg.travelTimeHours === undefined ||
-    !currentRouteLeg.provider ||
+    !Number.isFinite(currentRouteLeg.distanceKm) ||
+    !Number.isFinite(currentRouteLeg.travelTimeHours) ||
+    currentRouteLeg.provider !== provider ||
     !isSupportedProfile(currentRouteLeg.profile) ||
-    !Array.isArray(currentRouteLeg.sections)
+    !currentRouteLeg.routeKey ||
+    !Array.isArray(currentRouteLeg.sections) ||
+    currentRouteLeg.sections.length === 0
   ) {
     return null;
   }
@@ -617,26 +629,20 @@ function routeOptionFromCurrentRoute({
   const warnings = currentRouteLeg.warnings ?? [];
   const source = routeOptionSourceFromWarnings(warnings, endpointAnchors);
 
-  return routeOptionFromCalculation({
-    id: source,
+  return {
+    id: stableRouteOptionId(source, currentRouteLeg.routeKey),
     label: labelForRecoverySource(source),
     source,
-    origin,
-    target,
     distanceKm: currentRouteLeg.distanceKm,
     travelTimeHours: currentRouteLeg.travelTimeHours,
     geometry: currentRouteLeg.geometry,
     sections: currentRouteLeg.sections,
     provider: currentRouteLeg.provider,
     profile: currentRouteLeg.profile,
-    routingVehicle,
-    waypoints: waypoints.map((waypoint) => waypoint.coordinates),
-    ferryPolicy,
-    providerOptions: providerOptionsForRecoverySource(source, currentRouteLeg.profile, routingVehicle.profile),
-    variant: source,
+    routeKey: currentRouteLeg.routeKey,
     warnings,
     endpointAnchors,
-  });
+  };
 }
 
 async function calculateRecoveredRouteOption(
@@ -772,11 +778,11 @@ export async function calculateOpenRouteServiceRouteOptions({
           throw recoveryError;
         }
       }
-      return dedupeRouteOptions(options).slice(0, maxRouteOptions);
+      return ensureUniqueRouteOptionIds(dedupeRouteOptions(options)).slice(0, maxRouteOptions);
     }
 
     if (currentOption) {
-      return dedupeRouteOptions(options).slice(0, maxRouteOptions);
+      return ensureUniqueRouteOptionIds(dedupeRouteOptions(options)).slice(0, maxRouteOptions);
     }
 
     // The alternatives endpoint can fail for long routes; supported supplementals still get a chance below.
@@ -808,5 +814,5 @@ export async function calculateOpenRouteServiceRouteOptions({
     }
   }
 
-  return dedupeRouteOptions(options).slice(0, maxRouteOptions);
+  return ensureUniqueRouteOptionIds(dedupeRouteOptions(options)).slice(0, maxRouteOptions);
 }

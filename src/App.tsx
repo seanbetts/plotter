@@ -19,7 +19,7 @@ import { TripSelector } from './components/TripSelector';
 import { buildTagSuggestions } from './components/tagEditorModel';
 import { withRoutingAnchor } from './domain/destinations';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
-import type { RouteOption } from './domain/routeOptions';
+import { ensureUniqueRouteOptionIds, type RouteOption } from './domain/routeOptions';
 import type {
   Activity,
   ActivityLocation,
@@ -361,6 +361,8 @@ function TripWorkspace({
   const [routeAlternativesState, setRouteAlternativesState] = useState<RouteAlternativesState | null>(null);
   const selectedDestinationIdRef = useRef<string | null>(null);
   const selectedActivityIdRef = useRef<string | null>(null);
+  const routeLegsRef = useRef(routeLegs);
+  const activeRoutingVehicleRef = useRef(activeTrip?.routingVehicle ?? null);
   const activityPanelRef = useRef<HTMLElement | null>(null);
   const rollupLoadSequenceRef = useRef(0);
   const pendingMapStopRequestIdRef = useRef(0);
@@ -594,6 +596,14 @@ function TripWorkspace({
   useEffect(() => {
     selectedActivityIdRef.current = selectedActivityId;
   }, [selectedActivityId]);
+
+  useEffect(() => {
+    routeLegsRef.current = routeLegs;
+  }, [routeLegs]);
+
+  useEffect(() => {
+    activeRoutingVehicleRef.current = activeTrip?.routingVehicle ?? null;
+  }, [activeTrip?.routingVehicle]);
 
   useEffect(() => {
     writeStorageValue(getBrowserStorage(), stopsPanelCollapsedStorageKey, String(isStopsPanelCollapsed));
@@ -881,6 +891,20 @@ function TripWorkspace({
     [deleteDestination, isInteractionLocked],
   );
 
+  const isRouteAlternativesFingerprintCurrent = useCallback((
+    routeLegId: string,
+    expectedFingerprint: string,
+  ) => {
+    const currentRouteLeg = routeLegsRef.current.find((candidate) => candidate.id === routeLegId);
+    const currentRoutingVehicle = activeRoutingVehicleRef.current;
+
+    return Boolean(
+      currentRouteLeg &&
+      currentRoutingVehicle &&
+      createRouteResultFingerprint(currentRouteLeg, currentRoutingVehicle) === expectedFingerprint,
+    );
+  }, []);
+
   const openRouteAlternatives = useCallback(
     async (routeLegId: string) => {
       const routeLeg = routeLegsById.get(routeLegId);
@@ -906,7 +930,7 @@ function TripWorkspace({
       });
 
       try {
-        const options = await calculateOpenRouteServiceRouteOptions({
+        const options = ensureUniqueRouteOptionIds(await calculateOpenRouteServiceRouteOptions({
           apiKey: openRouteServiceApiKey,
           origin: origin.coordinates,
           target: target.coordinates,
@@ -916,17 +940,27 @@ function TripWorkspace({
           currentRouteLeg: routeLeg,
           originAnchors: origin.routingAnchors,
           targetAnchors: target.routingAnchors,
-        });
+        }));
 
         setRouteAlternativesState((current) =>
-          current?.routeLegId === routeLegId
+          current?.routeLegId === routeLegId &&
+          current.expectedFingerprint === expectedFingerprint
             ? {
                 routeLegId,
                 expectedFingerprint,
-                status: options.length > 0 ? 'ready' : 'empty',
-                options,
-                selectedOptionId: options[0]?.id ?? null,
-                error: null,
+                ...(isRouteAlternativesFingerprintCurrent(routeLegId, expectedFingerprint)
+                  ? {
+                    status: options.length > 0 ? 'ready' as const : 'empty' as const,
+                    options,
+                    selectedOptionId: options[0]?.id ?? null,
+                    error: null,
+                  }
+                  : {
+                    status: 'error' as const,
+                    options: [],
+                    selectedOptionId: null,
+                    error: 'Route intent changed. Recalculate route options.',
+                  }),
               }
             : current,
         );
@@ -944,7 +978,7 @@ function TripWorkspace({
         );
       }
     },
-    [activeTrip, destinationsById, routeLegsById],
+    [activeTrip, destinationsById, isRouteAlternativesFingerprintCurrent, routeLegsById],
   );
 
   const closeRouteAlternatives = useCallback(() => {

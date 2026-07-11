@@ -1246,6 +1246,81 @@ describe('App', () => {
     );
   });
 
+  it('saves the exact selected fallback option when duplicate source ids are returned', async () => {
+    const user = userEvent.setup();
+    const olderdalen = createDestination({
+      name: 'Olderdalen',
+      coordinates: { lat: 69.6041, lng: 20.5326 },
+      order: 0,
+    });
+    const alta = createDestination({
+      name: 'Alta',
+      coordinates: { lat: 69.96887, lng: 23.27165 },
+      order: 1,
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: olderdalen.id,
+      targetDestinationId: alta.id,
+      movement: 'drive',
+      calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 390,
+      travelTimeHours: 6,
+      geometry: { type: 'LineString', coordinates: [[20.5326, 69.6041], [23.27165, 69.96887]] },
+      provider: 'openrouteservice',
+      profile: 'driving-hgv',
+      routeKey: 'strict-hgv-key',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+    });
+    const firstFallback: RouteOption = {
+      id: 'profile-fallback',
+      label: 'Car-profile fallback',
+      source: 'profile-fallback',
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: { type: 'LineString', coordinates: [[20.5326, 69.6041], [23.27165, 69.98334]] },
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'first-fallback-key',
+      warnings: [{ code: 'VEHICLE_PROFILE_FALLBACK', message: 'Truck dimensions were not validated.' }],
+      endpointAnchors: {},
+    };
+    const secondFallback: RouteOption = {
+      ...firstFallback,
+      distanceKm: 402,
+      travelTimeHours: 6.1,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[20.5326, 69.6041], [22.1, 69.8], [23.27165, 69.98334]],
+      },
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 402 }],
+      routeKey: 'second-fallback-key',
+    };
+    vi.mocked(calculateOpenRouteServiceRouteOptions).mockResolvedValueOnce([firstFallback, secondFallback]);
+    repositoryMock.initialDestinations = Promise.resolve([olderdalen, alta]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+    mockTripWorkspace({
+      activeTrip: { ...tripsMock[0], routingVehicle: resolveVehiclePreset('expedition-truck') },
+    } as Partial<ReturnType<typeof useTripWorkspace>>);
+
+    render(<App />);
+    await waitForTripReady();
+    await user.click(await screen.findByRole('button', { name: 'Edit route from Olderdalen to Alta' }));
+    await user.click(await screen.findByRole('radio', { name: 'Car-profile fallback 250 mi 6.1 hr' }));
+    await user.click(screen.getByRole('button', { name: 'Use selected route' }));
+
+    await waitFor(() =>
+      expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          routeKey: 'second-fallback-key',
+          distanceKm: 402,
+          travelTimeHours: 6.1,
+        }),
+      ),
+    );
+  });
+
   it('does not save a stale alternative after route intent changes while the picker is open', async () => {
     const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
     const hamburg = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
@@ -1306,6 +1381,60 @@ describe('App', () => {
     expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
       expect.objectContaining({ movement: 'vehicle-shipping', calculation: 'manual', status: 'manual', notes: 'Original intent.' }),
     );
+  });
+
+  it('does not publish stale route options when route intent changes while options are loading', async () => {
+    const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const hamburg = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createRouteLeg({
+      originDestinationId: bremen.id,
+      targetDestinationId: hamburg.id,
+      movement: 'drive', calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 125,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'original-route',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+      notes: 'Original intent.',
+    });
+    const optionsLoad = createDeferred<RouteOption[]>();
+    vi.mocked(calculateOpenRouteServiceRouteOptions).mockReturnValueOnce(optionsLoad.promise);
+    repositoryMock.initialDestinations = Promise.resolve([bremen, hamburg]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit route from Bremen to Hamburg' }));
+    expect(screen.getByRole('status', { name: 'Calculating route options' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Set Bremen to Hamburg to Vehicle shipping' }));
+    await waitFor(() => expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      optionsLoad.resolve([{
+        id: 'adjusted-endpoint',
+        label: 'Adjusted endpoint',
+        source: 'adjusted-endpoint',
+        distanceKm: 126,
+        travelTimeHours: 2.1,
+        geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.01, 53.56]] },
+        sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 126 }],
+        provider: 'openrouteservice',
+        profile: 'driving-car',
+        routeKey: 'adjusted-route',
+        warnings: [{
+          code: 'ROUTING_ANCHOR_ADJUSTED',
+          message: 'Route target uses a routing point 1.2 km from the stop.',
+        }],
+        endpointAnchors: {},
+      }]);
+      await optionsLoad.promise;
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Route intent changed');
+    expect(screen.queryByText('Adjusted endpoint')).not.toBeInTheDocument();
   });
 
   it.each([

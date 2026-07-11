@@ -740,18 +740,14 @@ describe('OpenRouteService adapter', () => {
       provider: 'openrouteservice',
       profile: 'driving-car',
       routeKey: 'old-recovered-key',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
       calculatedAt: '2026-07-11T08:00:00.000Z',
       warnings: [{
         code: 'VEHICLE_PROFILE_FALLBACK',
         message: 'OpenRouteService could not calculate this leg with the requested vehicle profile, so driving-car was used.',
       }],
     });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      error: { code: 3001, message: 'Provider unavailable.' },
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    })));
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('provider unavailable')));
 
     const options = await calculateOpenRouteServiceRouteOptions({
       apiKey: 'ors-key',
@@ -773,6 +769,63 @@ describe('OpenRouteService adapter', () => {
       warnings: [expect.objectContaining({ code: 'VEHICLE_PROFILE_FALLBACK' })],
       endpointAnchors: { target: targetAnchor },
     });
+    expect(options[0].routeKey).toBe('old-recovered-key');
+    expect(options[0].id).toContain('old-recovered-key');
+  });
+
+  it('rejects malformed current recovered routes from selectable options', async () => {
+    const validGeometry: LineString = {
+      type: 'LineString',
+      coordinates: [
+        [origin.lng, origin.lat],
+        [target.lng, target.lat],
+      ],
+    };
+    const currentRouteLeg = createRouteLeg({
+      originDestinationId: 'origin-id',
+      targetDestinationId: 'target-id',
+      movement: 'drive',
+      calculation: 'automatic',
+      status: 'ready',
+      distanceKm: 615,
+      travelTimeHours: 8.25,
+      geometry: validGeometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'valid-recovered-key',
+      sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 615 }],
+      calculatedAt: '2026-07-11T08:00:00.000Z',
+      warnings: [{
+        code: 'VEHICLE_PROFILE_FALLBACK',
+        message: 'OpenRouteService could not calculate this leg with the requested vehicle profile, so driving-car was used.',
+      }],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 3001, message: 'Provider unavailable.' },
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    const options = await calculateOpenRouteServiceRouteOptions({
+      apiKey: 'ors-key',
+      origin,
+      target,
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+      currentRouteLeg: {
+        ...currentRouteLeg,
+        routeKey: undefined,
+        provider: 'manual-cache',
+        geometry: { type: 'LineString', coordinates: [[origin.lng, origin.lat], [Number.NaN, target.lat]] },
+      },
+    });
+
+    expect(options).not.toContainEqual(expect.objectContaining({
+      source: 'profile-fallback',
+    }));
+    expect(options).not.toContainEqual(expect.objectContaining({
+      routeKey: 'valid-recovered-key',
+    }));
   });
 
   it('uses endpoint recovery when the primary alternatives request cannot snap an endpoint', async () => {
@@ -890,6 +943,7 @@ describe('OpenRouteService adapter', () => {
       profile: 'driving-car',
       warnings: [expect.objectContaining({ code: 'VEHICLE_PROFILE_FALLBACK' })],
     });
+    expect(options[0].id).toMatch(/^profile-fallback:/);
   });
 
   it('requires an API key before route options requests', async () => {
