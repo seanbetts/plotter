@@ -187,6 +187,30 @@ describe('useTripData', () => {
     ['missing distance', { distanceKm: undefined }],
     ['missing geometry', { geometry: undefined }],
     ['a stale route key', { routeKey: 'stale-route-key' }],
+    ['a non-LineString geometry type', {
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]],
+      } as unknown as RouteLeg['geometry'],
+    }],
+    ['fewer than two geometry coordinate pairs', {
+      geometry: {
+        type: 'LineString',
+        coordinates: [[8.8017, 53.0793]],
+      } as RouteLeg['geometry'],
+    }],
+    ['a non-finite interior geometry coordinate', {
+      geometry: {
+        type: 'LineString',
+        coordinates: [[8.8017, 53.0793], [Number.NaN, 53.3], [10.0013, 53.5502]],
+      } as RouteLeg['geometry'],
+    }],
+    ['an out-of-bounds interior geometry coordinate', {
+      geometry: {
+        type: 'LineString',
+        coordinates: [[8.8017, 53.0793], [181, 53.3], [10.0013, 53.5502]],
+      } as RouteLeg['geometry'],
+    }],
   ])('recalculates a same-profile ready route with %s during load', async (_label, patch) => {
     const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
     const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
@@ -224,6 +248,11 @@ describe('useTripData', () => {
     ['a non-ORS provider', { provider: 'other-provider' as RoutingAnchor['provider'] }],
     ['a non-finite snap distance', { snapDistanceKm: Number.NaN }],
     ['an over-radius snap distance', { snapDistanceKm: 2.01 }],
+    ['a far coordinate with a fake in-radius distance', {
+      coordinates: { lat: 70.96887, lng: 23.27165 },
+      snapDistanceKm: 1,
+    }],
+    ['a claimed distance inconsistent with its coordinate', { snapDistanceKm: 0.5 }],
   ])('recalculates adjusted ready geometry backed by %s during load', async (_label, anchorPatch) => {
     const origin = createDestination({ name: 'Balcombe', coordinates: { lat: 51.0573, lng: -0.1349 }, order: 0 });
     const targetCoordinates = { lat: 69.96887, lng: 23.27165 };

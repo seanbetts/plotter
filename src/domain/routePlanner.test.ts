@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { LineString } from 'geojson';
 import { createDestination, updateDestination } from './destinations';
 import { createRouteKey, createRouteLeg } from './routeLegs';
 import { resolveVehiclePreset } from './vehiclePresets';
@@ -563,6 +564,11 @@ describe('route planner helpers', () => {
     ['a non-ORS provider', { provider: 'other-provider' as 'openrouteservice' }],
     ['a non-finite snap distance', { snapDistanceKm: Number.NaN }],
     ['an over-radius snap distance', { snapDistanceKm: 2.01 }],
+    ['a far coordinate with a fake in-radius distance', {
+      coordinates: { lat: 70.96887, lng: 23.27165 },
+      snapDistanceKm: 1,
+    }],
+    ['a claimed distance inconsistent with its coordinate', { snapDistanceKm: 0.5 }],
   ])('invalidates recovered geometry backed by %s', (_label, anchorPatch) => {
     const origin = createDestination({
       name: 'Balcombe',
@@ -906,6 +912,64 @@ describe('route planner helpers', () => {
       profile: 'driving-car',
       calculatedAt: undefined,
       error: undefined,
+    });
+  });
+
+  it.each([
+    ['a non-LineString type', {
+      type: 'Polygon',
+      coordinates: [[19.0342, 43.1306], [18.7712, 42.4247]],
+    }],
+    ['fewer than two coordinate pairs', {
+      type: 'LineString',
+      coordinates: [[19.0342, 43.1306]],
+    }],
+    ['a non-finite interior coordinate', {
+      type: 'LineString',
+      coordinates: [[19.0342, 43.1306], [Number.POSITIVE_INFINITY, 42.8], [18.7712, 42.4247]],
+    }],
+    ['an interior value that is not a coordinate pair', {
+      type: 'LineString',
+      coordinates: [[19.0342, 43.1306], [18.9, 42.9, 100], [18.7712, 42.4247]],
+    }],
+    ['an out-of-bounds interior coordinate', {
+      type: 'LineString',
+      coordinates: [[19.0342, 43.1306], [181, 42.8], [18.7712, 42.4247]],
+    }],
+  ])('marks ready driving route geometry with %s pending', (_label, geometry) => {
+    const origin = createDestination({
+      name: 'Durmitor',
+      coordinates: { lat: 43.1306, lng: 19.0342 },
+      order: 0,
+    });
+    const target = createDestination({
+      name: 'Kotor',
+      coordinates: { lat: 42.4247, lng: 18.7712 },
+      order: 1,
+    });
+    const malformedLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 140,
+      travelTimeHours: 3.1,
+      geometry: geometry as LineString,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
+      calculatedAt: '2026-07-04T12:00:00.000Z',
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, target], [malformedLeg]);
+
+    expect(result.routeLegs[0]).toMatchObject({
+      id: malformedLeg.id,
+      status: 'pending',
+      geometry: undefined,
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      provider: undefined,
+      calculatedAt: undefined,
     });
   });
 

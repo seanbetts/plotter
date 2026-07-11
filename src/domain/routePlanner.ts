@@ -28,6 +28,7 @@ function routePairKey(originDestinationId: string, targetDestinationId: string) 
 const createTimestamp = () => new Date().toISOString();
 const drivingGeometryEndpointTolerance = 0.001;
 const recoveredAnchorRadiusKm = 2;
+const recoveredAnchorDistanceToleranceKm = 0.05;
 
 function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
@@ -50,15 +51,41 @@ function coordinateMatches(value: number | undefined, expected: number, toleranc
   return value !== undefined && Math.abs(value - expected) <= tolerance;
 }
 
+function isValidRouteCoordinatePair(value: unknown): value is [number, number] {
+  if (!Array.isArray(value) || value.length !== 2) return false;
+  const [lng, lat] = value;
+  return (
+    typeof lng === 'number' &&
+    typeof lat === 'number' &&
+    Number.isFinite(lng) &&
+    Number.isFinite(lat) &&
+    lng >= -180 &&
+    lng <= 180 &&
+    lat >= -90 &&
+    lat <= 90
+  );
+}
+
+function isValidLineStringGeometry(geometry: unknown): geometry is LineString {
+  if (!geometry || typeof geometry !== 'object') return false;
+  const candidate = geometry as { type?: unknown; coordinates?: unknown };
+  return (
+    candidate.type === 'LineString' &&
+    Array.isArray(candidate.coordinates) &&
+    candidate.coordinates.length >= 2 &&
+    candidate.coordinates.every(isValidRouteCoordinatePair)
+  );
+}
+
 function routeGeometryMatchesCoordinates(
   routeLeg: RouteLeg,
   origin: Destination,
   target: Destination,
   tolerance = 0,
 ) {
-  const coordinates = routeLeg.geometry?.coordinates;
-  const firstCoordinate = coordinates?.[0];
-  const lastCoordinate = coordinates?.at(-1);
+  if (!isValidLineStringGeometry(routeLeg.geometry)) return false;
+  const firstCoordinate = routeLeg.geometry.coordinates[0];
+  const lastCoordinate = routeLeg.geometry.coordinates.at(-1);
 
   return (
     coordinateMatches(firstCoordinate?.[0], origin.coordinates.lng, tolerance) &&
@@ -86,7 +113,7 @@ function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg, routing
     routeLeg.movement === 'drive' &&
     routeLeg.calculation === 'automatic' &&
     routeLeg.status === 'ready' &&
-    routeLeg.geometry &&
+    isValidLineStringGeometry(routeLeg.geometry) &&
     routeLeg.distanceKm !== undefined &&
     routeLeg.travelTimeHours !== undefined &&
     routeLeg.provider &&
@@ -134,9 +161,9 @@ function routeGeometryMatchesCurrentEndpoints(
   origin: Destination,
   target: Destination,
 ) {
-  const coordinates = routeLeg.geometry?.coordinates;
-  const firstCoordinate = coordinates?.[0];
-  const lastCoordinate = coordinates?.at(-1);
+  if (!isValidLineStringGeometry(routeLeg.geometry)) return false;
+  const firstCoordinate = routeLeg.geometry.coordinates[0];
+  const lastCoordinate = routeLeg.geometry.coordinates.at(-1);
   const hasAdjustedAnchorProvenance = routeHasWarning(routeLeg, 'ROUTING_ANCHOR_ADJUSTED');
   const profile = routeLeg.profile === 'driving-car' || routeLeg.profile === 'driving-hgv'
     ? routeLeg.profile
@@ -152,21 +179,31 @@ function routeGeometryMatchesCurrentEndpoints(
     if (!hasAdjustedAnchorProvenance || !profile) return false;
 
     const anchor = destination.routingAnchors[profile];
-    return Boolean(
-      anchor &&
-      anchor.profile === profile &&
-      anchor.provider === 'openrouteservice' &&
-      Number.isFinite(anchor.originalCoordinates.lat) &&
-      Number.isFinite(anchor.originalCoordinates.lng) &&
-      Number.isFinite(anchor.coordinates.lat) &&
-      Number.isFinite(anchor.coordinates.lng) &&
-      Number.isFinite(anchor.snapDistanceKm) &&
-      anchor.snapDistanceKm >= 0 &&
-      anchor.snapDistanceKm <= recoveredAnchorRadiusKm &&
-      coordinateMatches(anchor.originalCoordinates.lng, destination.coordinates.lng) &&
-      coordinateMatches(anchor.originalCoordinates.lat, destination.coordinates.lat) &&
-      coordinateMatches(coordinate?.[0], anchor.coordinates.lng, drivingGeometryEndpointTolerance) &&
-      coordinateMatches(coordinate?.[1], anchor.coordinates.lat, drivingGeometryEndpointTolerance),
+    if (
+      !anchor ||
+      anchor.profile !== profile ||
+      anchor.provider !== 'openrouteservice' ||
+      !Number.isFinite(anchor.originalCoordinates.lat) ||
+      !Number.isFinite(anchor.originalCoordinates.lng) ||
+      !Number.isFinite(anchor.coordinates.lat) ||
+      !Number.isFinite(anchor.coordinates.lng) ||
+      !Number.isFinite(anchor.snapDistanceKm) ||
+      anchor.snapDistanceKm < 0 ||
+      anchor.snapDistanceKm > recoveredAnchorRadiusKm ||
+      !coordinateMatches(anchor.originalCoordinates.lng, destination.coordinates.lng) ||
+      !coordinateMatches(anchor.originalCoordinates.lat, destination.coordinates.lat) ||
+      !coordinateMatches(coordinate?.[0], anchor.coordinates.lng, drivingGeometryEndpointTolerance) ||
+      !coordinateMatches(coordinate?.[1], anchor.coordinates.lat, drivingGeometryEndpointTolerance)
+    ) return false;
+
+    const actualSnapDistanceKm = coordinateDistanceKm(
+      destination.coordinates,
+      anchor.coordinates,
+    );
+    return (
+      Number.isFinite(actualSnapDistanceKm) &&
+      actualSnapDistanceKm <= recoveredAnchorRadiusKm &&
+      Math.abs(actualSnapDistanceKm - anchor.snapDistanceKm) <= recoveredAnchorDistanceToleranceKm
     );
   };
 
