@@ -128,6 +128,7 @@ function normalizeDestination(destination: Destination, index = 0): Destination 
   return {
     ...destination,
     countryRegion: destination.countryRegion ?? destination.location?.countryName ?? '',
+    routingAnchors: destination.routingAnchors ?? {},
     location:
       destination.location ??
       createLegacyLocation({

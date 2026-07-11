@@ -908,6 +908,35 @@ describe('trip repository', () => {
     ]);
   });
 
+  it('normalizes omitted routing anchors on reads from an already-current local database', async () => {
+    const name = `plotter-test-${crypto.randomUUID()}`;
+    const db = createTripDb(name);
+    testDatabases.push({ db, name });
+    const repository = createTripRepository(db, 'local-default-trip');
+    const destination = createDestination({
+      name: 'Current partial stop',
+      coordinates: { lat: 45.4642, lng: 9.19 },
+    });
+    const { routingAnchors: _routingAnchors, ...destinationWithoutAnchors } = destination as typeof destination & {
+      routingAnchors?: unknown;
+    };
+    void _routingAnchors;
+
+    await db.destinations.put({
+      ...destinationWithoutAnchors,
+      id: `local-default-trip:${destination.id}`,
+      entityId: destination.id,
+      tripId: 'local-default-trip',
+    } as never);
+
+    await expect(repository.listDestinations()).resolves.toEqual([
+      expect.objectContaining({
+        id: destination.id,
+        routingAnchors: {},
+      }),
+    ]);
+  });
+
   it('creates, lists, updates, reorders, and deletes activities for a destination', async () => {
     const repository = createTestRepository();
     const destination = createDestination({
