@@ -98,9 +98,20 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
     activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
     activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
   }).upgrade(async (transaction) => {
-    await transaction.table('trips').toCollection().modify((trip) => {
-      trip.routingVehicle ??= resolveVehiclePreset('standard');
-    });
+    await Promise.all([
+      transaction.table('trips').toCollection().modify((trip) => {
+        trip.routingVehicle ??= resolveVehiclePreset('standard');
+      }),
+      transaction.table('routeLegs').toCollection().modify((routeLeg) => {
+        const isManualShipping = routeLeg.type === 'shipping-manual';
+        routeLeg.movement ??= isManualShipping ? 'vehicle-shipping' : 'drive';
+        routeLeg.calculation ??= isManualShipping ? 'manual' : 'automatic';
+        routeLeg.ferryPolicy ??= 'allow';
+        routeLeg.waypoints ??= [];
+        routeLeg.sections ??= [];
+        routeLeg.warnings ??= [];
+      }),
+    ]);
   });
 
   return db;

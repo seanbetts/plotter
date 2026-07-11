@@ -12,6 +12,7 @@ import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
 import { createRouteLeg } from './domain/routeLegs';
 import type { Activity, ActivityLocation, Destination, MediaItem, MediaRollupItem, RouteLeg } from './domain/types';
+import { standardRoutingVehicle } from './domain/vehiclePresets';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { downloadTripMap } from './map/tripMapExport';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
@@ -186,6 +187,7 @@ const tripsMock = [
     id: 'trip-one',
     name: 'World tour',
     description: '',
+    routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-01T10:00:00.000Z',
     updatedAt: '2026-07-01T10:00:00.000Z',
   },
@@ -193,6 +195,7 @@ const tripsMock = [
     id: 'trip-two',
     name: 'Japan winter',
     description: '',
+    routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-02T10:00:00.000Z',
     updatedAt: '2026-07-02T10:00:00.000Z',
   },

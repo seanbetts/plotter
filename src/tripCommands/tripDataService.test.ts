@@ -6,6 +6,7 @@ import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import { createDestination } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
+import { standardRoutingVehicle } from '../domain/vehiclePresets';
 
 function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
   const trips: TripSummary[] = [];
@@ -198,6 +199,7 @@ function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
           id: crypto.randomUUID(),
           name: input.name,
           description: '',
+          routingVehicle: input.routingVehicle ?? standardRoutingVehicle,
           createdAt: timestamp,
           updatedAt: timestamp,
         };
@@ -241,6 +243,7 @@ describe('TripDataService trips and stops', () => {
       id: 'bulk-trip-id',
       name,
       description: '',
+      routingVehicle: standardRoutingVehicle,
       createdAt: '2026-07-10T12:00:00.000Z',
       updatedAt: '2026-07-10T12:00:00.000Z',
     }));
@@ -540,6 +543,7 @@ describe('TripDataService trips and stops', () => {
           id: 'trip-1',
           name: 'Nordkapp',
           description: '',
+          routingVehicle: standardRoutingVehicle,
           createdAt: '',
           updatedAt: '',
         }]),

@@ -157,6 +157,117 @@ describe('trip repository', () => {
     await expect(repository.listDestinations()).resolves.toEqual([legacyDestination]);
   });
 
+  it('physically canonicalizes trip vehicles and legacy route intent during the v6 upgrade', async () => {
+    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const legacyDb = new Dexie(name);
+    const timestamp = '2026-07-10T12:00:00.000Z';
+    const routeLeg = createRouteLeg({
+      originDestinationId: 'origin',
+      targetDestinationId: 'target',
+      type: 'shipping-manual',
+    });
+    const {
+      movement: _movement,
+      calculation: _calculation,
+      ferryPolicy: _ferryPolicy,
+      waypoints: _waypoints,
+      sections: _sections,
+      warnings: _warnings,
+      ...legacyRouteLeg
+    } = routeLeg;
+    void [_movement, _calculation, _ferryPolicy, _waypoints, _sections, _warnings];
+
+    legacyDb.version(5).stores({
+      trips: 'id, name, updatedAt, createdAt',
+      destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
+      routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, type, status, routeKey, updatedAt',
+      activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
+      activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
+    });
+    await legacyDb.table('trips').put({
+      id: 'legacy-trip',
+      name: 'Legacy trip',
+      description: '',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await legacyDb.table('routeLegs').put({ ...legacyRouteLeg, tripId: 'legacy-trip' });
+    legacyDb.close();
+
+    const upgradedDb = createTripDb(name);
+    testDatabases.push({ db: upgradedDb, name });
+
+    await expect(upgradedDb.trips.get('legacy-trip')).resolves.toEqual(
+      expect.objectContaining({ routingVehicle: resolveVehiclePreset('standard') }),
+    );
+    await expect(upgradedDb.routeLegs.get(routeLeg.id)).resolves.toEqual(
+      expect.objectContaining({
+        movement: 'vehicle-shipping',
+        calculation: 'manual',
+        ferryPolicy: 'allow',
+        waypoints: [],
+        sections: [],
+        warnings: [],
+      }),
+    );
+    await expect(upgradedDb.routeLegs.where('movement').equals('vehicle-shipping').count()).resolves.toBe(1);
+  });
+
+  it('physically normalizes route intent for local saves and snapshot replacements', async () => {
+    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const db = createTripDb(name);
+    testDatabases.push({ db, name });
+    const repository = createTripRepository(db, 'trip-one');
+    const savedRouteLeg = createRouteLeg({
+      originDestinationId: 'saved-origin',
+      targetDestinationId: 'saved-target',
+      type: 'shipping-manual',
+    });
+    const replacementRouteLeg = createRouteLeg({
+      originDestinationId: 'replacement-origin',
+      targetDestinationId: 'replacement-target',
+      type: 'driving-auto',
+    });
+    const stripIntent = (routeLeg: typeof savedRouteLeg) => {
+      const {
+        movement: _movement,
+        calculation: _calculation,
+        ferryPolicy: _ferryPolicy,
+        waypoints: _waypoints,
+        sections: _sections,
+        warnings: _warnings,
+        ...legacyRouteLeg
+      } = routeLeg;
+      void [_movement, _calculation, _ferryPolicy, _waypoints, _sections, _warnings];
+      return legacyRouteLeg as typeof routeLeg;
+    };
+
+    await repository.saveRouteLeg(stripIntent(savedRouteLeg));
+    const savedRow = await db.routeLegs.get(`trip-one:${savedRouteLeg.id}`);
+    expect(savedRow).toEqual(expect.objectContaining({
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
+      ferryPolicy: 'allow',
+      waypoints: [],
+      sections: [],
+      warnings: [],
+    }));
+
+    await repository.replaceTripData({
+      destinations: [],
+      routeLegs: [stripIntent(replacementRouteLeg)],
+    });
+    const replacementRow = await db.routeLegs.get(`trip-one:${replacementRouteLeg.id}`);
+    expect(replacementRow).toEqual(expect.objectContaining({
+      movement: 'drive',
+      calculation: 'automatic',
+      ferryPolicy: 'allow',
+      waypoints: [],
+      sections: [],
+      warnings: [],
+    }));
+  });
+
   it('creates, lists, updates, and deletes destinations', async () => {
     const repository = createTestRepository();
     const destination = createDestination({

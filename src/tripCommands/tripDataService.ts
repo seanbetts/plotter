@@ -3,6 +3,7 @@ import { createDestination, updateDestination } from '../domain/destinations';
 import { createFallbackResearchLink, normalizeResearchLinkUrl, reorderResearchLinks, sortResearchLinks } from '../domain/researchLinks';
 import { reconcileRouteLegsForDestinations } from '../domain/routePlanner';
 import type { Activity, Destination, ResearchLink, RouteLeg } from '../domain/types';
+import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import {
@@ -666,6 +667,7 @@ export function createTripDataService(
                 id: 'dry-run-trip',
                 name: manifest.name,
                 description: '',
+                routingVehicle: standardRoutingVehicle,
                 createdAt: '',
                 updatedAt: '',
               },
@@ -729,6 +731,7 @@ export function createTripDataService(
               id: 'dry-run-trip',
               name,
               description: '',
+              routingVehicle: standardRoutingVehicle,
               createdAt: '',
               updatedAt: '',
             },

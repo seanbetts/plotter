@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
+import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import {
   createAppTripRepository,
   createAppTripStorage,
@@ -92,6 +93,7 @@ describe('app repository bootstrap', () => {
         id: 'trip-1',
         name: 'World tour',
         description: '',
+        routingVehicle: standardRoutingVehicle,
         createdAt: '2026-07-01T10:00:00.000Z',
         updatedAt: '2026-07-01T10:00:00.000Z',
       }]),

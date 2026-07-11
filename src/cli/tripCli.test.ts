@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
+import { standardRoutingVehicle } from '../domain/vehiclePresets';
+import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import { createTripDataService } from '../tripCommands/tripDataService';
 import { parseTripCliArgs, runTripCli, runTripProgram } from './trip';
@@ -403,7 +405,7 @@ describe('runTripCli', () => {
   });
 
   it('creates and audits a large manifest in two CLI calls with in-memory dependencies', async () => {
-    const trips: Array<{ id: string; name: string; description: string; createdAt: string; updatedAt: string }> = [];
+    const trips: TripSummary[] = [];
     const state = {
       destinations: [] as Destination[],
       activities: [] as Activity[],
@@ -435,6 +437,7 @@ describe('runTripCli', () => {
         id: 'trip-in-memory',
         name,
         description: '',
+        routingVehicle: standardRoutingVehicle,
         createdAt: '2026-07-10T12:00:00.000Z',
         updatedAt: '2026-07-10T12:00:00.000Z',
       };

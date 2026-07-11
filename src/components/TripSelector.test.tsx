@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import { TripSelector } from './TripSelector';
 
@@ -9,6 +10,7 @@ const trips: TripSummary[] = [
     id: 'trip-one',
     name: 'World tour',
     description: '',
+    routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-01T10:00:00.000Z',
     updatedAt: '2026-07-01T10:00:00.000Z',
   },
@@ -16,6 +18,7 @@ const trips: TripSummary[] = [
     id: 'trip-two',
     name: 'Japan winter',
     description: '',
+    routingVehicle: standardRoutingVehicle,
     createdAt: '2026-07-02T10:00:00.000Z',
     updatedAt: '2026-07-02T10:00:00.000Z',
   },

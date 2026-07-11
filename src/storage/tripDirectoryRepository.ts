@@ -9,7 +9,7 @@ export type TripSummary = {
   description: string;
   createdAt: string;
   updatedAt: string;
-  routingVehicle?: TripRoutingVehicle;
+  routingVehicle: TripRoutingVehicle;
 };
 
 export type TripDirectoryRepository = {

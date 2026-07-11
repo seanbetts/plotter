@@ -678,7 +678,7 @@ export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): T
     },
 
     async saveRouteLeg(routeLeg: RouteLeg): Promise<void> {
-      await db.routeLegs.put(storeRouteLeg(routeLeg, tripId));
+      await db.routeLegs.put(storeRouteLeg(normalizeRouteLeg(routeLeg), tripId));
     },
 
     async deleteRouteLeg(routeLegId: string): Promise<void> {
@@ -706,7 +706,9 @@ export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): T
         await db.destinations.bulkPut(snapshot.destinations.map((destination, index) =>
           storeDestination(normalizeDestination(destination, index), tripId),
         ));
-        await db.routeLegs.bulkPut(snapshot.routeLegs.map((routeLeg) => storeRouteLeg(routeLeg, tripId)));
+        await db.routeLegs.bulkPut(snapshot.routeLegs.map((routeLeg) =>
+          storeRouteLeg(normalizeRouteLeg(routeLeg), tripId),
+        ));
         if (snapshot.activities) {
           await db.activities.bulkPut(snapshot.activities.map((activity) => storeActivity(activity, tripId)));
         }
