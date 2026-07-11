@@ -112,3 +112,124 @@ Result: 62 files / 883 tests passed.
 ## Concerns
 
 - `npm run build` was attempted. Task 5 type errors were fixed, but the build still stops on an unrelated existing fixture in `src/components/MapCanvas.test.tsx` that constructs a `Destination` without `routingAnchors`. I did not edit that file because it is outside the Task 5 ownership set.
+
+## Review Fix Wave - 2026-07-11
+
+### RED
+
+- Read `.superpowers/sdd/task-5-review-findings.md` and converted each risky edge into focused tests before finishing production fixes.
+- Initial review-fix focused run failed as expected:
+  - 7 `routeRecovery` failures for coordinate-index endpoint policy, full radiuses arrays, waypoint-index propagation, opposite saved anchor preservation, and car-anchor reuse after HGV fallback.
+  - 1 `routeOrchestration` failure proving `endpointAnchors` could leak onto a `RouteLeg`.
+  - 2 `tripDataService` rollback failures proving recovered anchors/routes could persist independently.
+  - 1 `useTripData` rollback failure proving hook route writes could leave recovered anchors behind.
+- Added extra propagation guardrails for car endpoint recovery exhaustion, HGV endpoint recovery followed by quota failure, and unrelated ORS 404 errors.
+
+### GREEN
+
+- `src/tripCommands/routeRecovery.ts`
+  - Recovery now honors `OpenRouteServiceError.coordinateIndex` across `[origin, ...waypoints, target]`.
+  - Only coordinate index `0` or final target index is eligible for endpoint recovery.
+  - Endpoint retry `radiuses` now matches the full coordinate array, uses `2000` only at the failed endpoint, and uses strict `350` elsewhere.
+  - Opposite endpoint saved anchors are preserved during endpoint recovery.
+  - Recovery input accepts full origin/target anchor maps so HGV-to-car fallback can reuse saved car anchors.
+  - Recovery-only anchor maps are stripped before provider requests.
+- `src/tripCommands/routeOrchestration.ts`
+  - `endpointAnchors` is destructured away before route data is spread onto `RouteLeg`.
+  - `calculateAutomaticRouteLegs` passes full anchor maps and returns destination anchor updates with route legs.
+  - `reconcileAndSaveRouteLegs` now persists changed destination refs before route writes instead of dropping anchor updates.
+- `src/tripCommands/tripDataService.ts`
+  - Failed-route recalculation and route-edit recalculation now use rollback-safe sequential logical batches.
+  - A route write failure restores prior destinations and routes; an anchor write failure does not persist the route.
+  - Mutation paths save only destination objects whose references changed.
+- `src/hooks/useTripData.ts`
+  - Route edit and vehicle recalculation now use the same sequential rollback-safe route/destination batch shape.
+  - Reconcile persistence saves only changed destination refs.
+- `src/components/MapCanvas.test.tsx`
+  - Feature-caused `Destination` fixture build failure fixed with `routingAnchors: {}`.
+
+### Exact Policy Coverage
+
+1. Requested profile with saved anchors:
+   - Covered by saved-anchor tests that reuse only profile-matching anchors and avoid rediscovery.
+2. Same profile with 2 km endpoint radius after ORS 2010:
+   - Covered for origin and target failures with waypoints.
+   - Covered for waypoint-index 2010 propagation without endpoint fallback.
+   - Covered for opposite saved anchor preservation and full radiuses array alignment.
+3. `driving-car` after HGV 2009 or exhausted HGV 2010:
+   - Covered by HGV 2009 fallback test.
+   - Covered by HGV 2010 test that tries HGV endpoint recovery before car fallback and car endpoint recovery.
+   - Covered by existing car-anchor reuse after HGV fallback.
+4. `driving-car` with 2 km radius after car 2010:
+   - Covered by car endpoint recovery and car endpoint recovery exhaustion tests.
+5. No fallback for car, 401, 403, persistent 429, 5xx, or unrelated errors:
+   - Covered by auth/quota/server/unrelated propagation table.
+   - Covered by persistent HGV endpoint-recovery quota failure.
+   - Covered by car endpoint recovery failure and car 2009 no-HGV-fallback tests.
+
+### Production Caller Audit
+
+Rechecked all production `calculateAutomaticRouteLegs` callers:
+
+- `src/tripCommands/tripManifest.ts`
+  - `calculatePreparedTripManifestRoutes` consumes the returned destination/route batch and materializes it into one replacement snapshot.
+- `src/tripCommands/routeOrchestration.ts`
+  - `finalizeRouteLeg` still intentionally returns only the route leg for single-leg finalization.
+  - `reconcileAndSaveRouteLegs` now saves changed destination anchor refs as well as route legs.
+- `src/tripCommands/tripDataService.ts`
+  - `planRouteLegs`, `saveStopsAndRouteLegs`, `recalculateFailedRoutes`, `setVehicle`, and `updateRouteLeg` all consume batch destination/route output.
+  - Failed-route recalculation and route edits now persist through rollback-safe logical batches.
+- `src/hooks/useTripData.ts`
+  - `reconcilePersistedRouteLegs`, `updateRouteLeg`, and `recalculateForVehicle` all consume batch destination/route output.
+  - Route edit and vehicle recalculation write destination anchor updates and routes through sequential rollback-safe batches.
+
+### Atomicity Evidence
+
+- `tripDataService.recalculateFailedRoutes`: route write failure after recovered anchor persistence restores prior destinations and routes.
+- `tripDataService.updateRouteLeg`: anchor write failure rejects before route persistence, leaving previous route legs intact.
+- `useTripData.updateRouteLeg`: route write failure after recovered anchor persistence restores prior destinations and route leg state.
+- Existing snapshot rollback tests continue to cover stop mutation writes; tests were adjusted to respect the new changed-reference-only destination write contract.
+- `endpointAnchors` cannot persist to `RouteLeg`; regression assertion checks the calculated route leg has no `endpointAnchors` property.
+
+### Commands And Results
+
+```bash
+npm test -- src/tripCommands/routeRecovery.test.ts src/tripCommands/routeOrchestration.test.ts src/tripCommands/tripManifest.test.ts src/tripCommands/tripDataService.test.ts src/hooks/useTripData.test.tsx src/adapters/openRouteService.test.ts
+```
+
+Result: 6 files / 171 tests passed.
+
+```bash
+npm run build
+```
+
+Result: passed (`tsc -b` and `vite build`). Vite emitted only the existing large chunk warning.
+
+```bash
+npm test
+```
+
+Result: 62 files / 894 tests passed. Node emitted the existing localStorage experimental warnings.
+
+### Files Changed In Fix Wave
+
+- `.superpowers/sdd/task-5-report.md`
+- `src/adapters/openRouteService.ts`
+- `src/components/MapCanvas.test.tsx`
+- `src/hooks/useTripData.ts`
+- `src/hooks/useTripData.test.tsx`
+- `src/tripCommands/routeOrchestration.ts`
+- `src/tripCommands/routeOrchestration.test.ts`
+- `src/tripCommands/routeRecovery.ts`
+- `src/tripCommands/routeRecovery.test.ts`
+- `src/tripCommands/tripDataService.ts`
+- `src/tripCommands/tripDataService.test.ts`
+
+### Self-Review
+
+- The earlier build concern is superseded: `npm run build` now passes after the allowed `MapCanvas.test.tsx` fixture fix.
+- Provider mechanics remain in `openRouteService`; recovery order and fallback policy live in `routeRecovery`.
+- No UI or route-option provenance was added.
+- Auth/quota errors are still propagated and are not converted into fallback routes.
+- Unrelated modified reports from Tasks 1 and 4 remain unstaged and outside this fix commit.
+- No remaining concerns.

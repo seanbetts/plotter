@@ -999,6 +999,139 @@ describe('TripDataService trips and stops', () => {
     });
   });
 
+  it('rolls back recovered anchors when failed-route route persistence fails', async () => {
+    const altaAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: { lat: 69.96887, lng: 23.27165 },
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const calculateRoute = vi.fn<NonNullable<TripDataServiceDependencies['calculateRoute']>>(async ({ origin, target }) => ({
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: { type: 'LineString' as const, coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+    }));
+    let failRouteWrite = true;
+    const harness = createHarness({
+      calculateRoute,
+      saveRouteLeg: async (_routeLeg, persist) => {
+        if (failRouteWrite) {
+          failRouteWrite = false;
+          throw new Error('route write failed');
+        }
+        await persist();
+      },
+    });
+    const created = await harness.service.createTrip({
+      name: 'Alta retry rollback',
+      stops: [
+        { name: 'Olderdalen', place: { coordinates: { lat: 69.6041, lng: 20.5326 } } },
+        { name: 'Alta', place: { coordinates: altaAnchor.originalCoordinates } },
+      ],
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const data = harness.repositories.get(created.trip.id)!;
+    data.routeLegs[0] = {
+      ...data.routeLegs[0],
+      status: 'failed',
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: undefined,
+      error: 'retry me',
+    };
+    const priorDestinations = structuredClone(data.destinations);
+    calculateRoute.mockResolvedValueOnce({
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [[20.5326, 69.6041], [altaAnchor.coordinates.lng, altaAnchor.coordinates.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+      warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED' as const, message: 'Alta uses a routing point 1.6 km from the stop.' }],
+      endpointAnchors: { target: altaAnchor },
+    } as Awaited<ReturnType<NonNullable<TripDataServiceDependencies['calculateRoute']>>>);
+
+    const result = await harness.service.recalculateFailedRoutes({ tripId: created.trip.id });
+
+    expect(result).toMatchObject({ ok: false, error: { message: expect.stringContaining('route write failed') } });
+    expect(data.destinations).toEqual(priorDestinations);
+  });
+
+  it('does not persist a recovered route when route-edit anchor persistence fails', async () => {
+    const altaAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: { lat: 69.96887, lng: 23.27165 },
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const calculateRoute = vi.fn<NonNullable<TripDataServiceDependencies['calculateRoute']>>(async ({ origin, target }) => ({
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: { type: 'LineString' as const, coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+    }));
+    const harness = createHarness({
+      calculateRoute,
+      saveDestination: async () => {
+        throw new Error('anchor write failed');
+      },
+    });
+    const created = await harness.service.createTrip({
+      name: 'Alta edit rollback',
+      stops: [
+        { name: 'Olderdalen', place: { coordinates: { lat: 69.6041, lng: 20.5326 } } },
+        { name: 'Alta', place: { coordinates: altaAnchor.originalCoordinates } },
+      ],
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const data = harness.repositories.get(created.trip.id)!;
+    data.routeLegs[0] = {
+      ...data.routeLegs[0],
+      status: 'failed',
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      geometry: undefined,
+      error: 'retry me',
+    };
+    const priorRouteLegs = structuredClone(data.routeLegs);
+    calculateRoute.mockResolvedValueOnce({
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [[20.5326, 69.6041], [altaAnchor.coordinates.lng, altaAnchor.coordinates.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+      warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED' as const, message: 'Alta uses a routing point 1.6 km from the stop.' }],
+      endpointAnchors: { target: altaAnchor },
+    } as Awaited<ReturnType<NonNullable<TripDataServiceDependencies['calculateRoute']>>>);
+
+    const result = await harness.service.updateRouteLeg({
+      tripId: created.trip.id,
+      routeLegId: data.routeLegs[0].id,
+      patch: { movement: 'drive', calculation: 'automatic' },
+    }, { yes: true });
+
+    expect(result).toMatchObject({ ok: false, error: { message: expect.stringContaining('anchor write failed') } });
+    expect(data.routeLegs).toEqual(priorRouteLegs);
+  });
+
   it('restores the complete stop and route snapshot when a route write fails after stop persistence', async () => {
     let failRouteWrite = false;
     const harness = createHarness({

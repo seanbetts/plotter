@@ -27,6 +27,7 @@ void assertCalculateRouteContract;
 
 function createRepository(routeLegs: RouteLeg[] = []) {
   return {
+    saveDestination: vi.fn(async () => {}),
     saveRouteLeg: vi.fn(async (routeLeg: RouteLeg) => {
       const index = routeLegs.findIndex((existing) => existing.id === routeLeg.id);
       if (index === -1) routeLegs.push(routeLeg);
@@ -90,6 +91,7 @@ describe('route orchestration', () => {
       travelTimeHours: 5.4,
       warnings: [expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED' })],
     });
+    expect(result.routeLegs[0]).not.toHaveProperty('endpointAnchors');
     expect(result.destinations[0]).toBe(origin);
     expect(result.destinations[1].routingAnchors['driving-car']).toEqual(altaAnchor);
     expect(result.destinations[1]).toMatchObject({

@@ -1,5 +1,5 @@
-import { isOpenRouteServiceError } from '../adapters/openRouteService';
-import type { Coordinates, RouteWarning, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
+import { isOpenRouteServiceError, type OpenRouteServiceError } from '../adapters/openRouteService';
+import type { Coordinates, RouteWarning, RoutingAnchor, RoutingAnchors, TripRoutingVehicle } from '../domain/types';
 import type { CalculatedRoute, CalculateRouteInput } from './routeOrchestration';
 
 export type RecoveredRoute = CalculatedRoute & {
@@ -8,7 +8,7 @@ export type RecoveredRoute = CalculatedRoute & {
 };
 
 export type ProviderRouteRequest = CalculateRouteInput & {
-  radiuses?: [number, number];
+  radiuses?: number[];
 };
 
 export type CalculateProviderRoute = (
@@ -18,12 +18,15 @@ export type CalculateProviderRoute = (
 type RecoveryInput = CalculateRouteInput & {
   originAnchor?: RoutingAnchor;
   targetAnchor?: RoutingAnchor;
+  originAnchors?: RoutingAnchors;
+  targetAnchors?: RoutingAnchors;
 };
 
 type EndpointName = 'origin' | 'target';
 
 const endpointRadiusMeters = 2000;
 const endpointRadiusKm = endpointRadiusMeters / 1000;
+const strictEndpointRadiusMeters = 350;
 const snapToleranceKm = 0.001;
 
 function degreesToRadians(degrees: number) {
@@ -51,17 +54,43 @@ function coordinateFromPair(pair: number[]): Coordinates {
   return { lat, lng };
 }
 
-function matchingAnchor(anchor: RoutingAnchor | undefined, profile: TripRoutingVehicle['profile']) {
-  return anchor?.profile === profile ? anchor : undefined;
+function matchingAnchor(input: {
+  anchor?: RoutingAnchor;
+  anchors?: RoutingAnchors;
+  profile: TripRoutingVehicle['profile'];
+}) {
+  return input.anchors?.[input.profile] ?? (input.anchor?.profile === input.profile ? input.anchor : undefined);
+}
+
+function routeRequestInput(input: RecoveryInput) {
+  const {
+    originAnchor,
+    targetAnchor,
+    originAnchors,
+    targetAnchors,
+    ...routeInput
+  } = input;
+  void originAnchor;
+  void targetAnchor;
+  void originAnchors;
+  void targetAnchors;
+  return routeInput;
+}
+
+function originAnchorFor(input: RecoveryInput, profile: TripRoutingVehicle['profile']) {
+  return matchingAnchor({ anchor: input.originAnchor, anchors: input.originAnchors, profile });
+}
+
+function targetAnchorFor(input: RecoveryInput, profile: TripRoutingVehicle['profile']) {
+  return matchingAnchor({ anchor: input.targetAnchor, anchors: input.targetAnchors, profile });
 }
 
 function requestWithSavedAnchors(input: RecoveryInput, profile: TripRoutingVehicle['profile']): ProviderRouteRequest {
-  const { originAnchor: savedOriginAnchor, targetAnchor: savedTargetAnchor, ...routeInput } = input;
-  const originAnchor = matchingAnchor(savedOriginAnchor, profile);
-  const targetAnchor = matchingAnchor(savedTargetAnchor, profile);
+  const originAnchor = originAnchorFor(input, profile);
+  const targetAnchor = targetAnchorFor(input, profile);
 
   return {
-    ...routeInput,
+    ...routeRequestInput(input),
     profile,
     routingVehicle: vehicleForProfile(input.routingVehicle, profile),
     origin: originAnchor?.coordinates ?? input.origin,
@@ -69,17 +98,26 @@ function requestWithSavedAnchors(input: RecoveryInput, profile: TripRoutingVehic
   };
 }
 
-function requestWithEndpointRadius(input: RecoveryInput, profile: TripRoutingVehicle['profile']): ProviderRouteRequest {
-  const { originAnchor, targetAnchor, ...routeInput } = input;
-  void originAnchor;
-  void targetAnchor;
+function requestWithEndpointRadius(
+  input: RecoveryInput,
+  profile: TripRoutingVehicle['profile'],
+  coordinateIndex: number,
+): ProviderRouteRequest {
+  const targetIndex = input.waypoints.length + 1;
+  const originAnchor = coordinateIndex === 0 ? undefined : originAnchorFor(input, profile);
+  const targetAnchor = coordinateIndex === targetIndex ? undefined : targetAnchorFor(input, profile);
+  const radiuses = Array.from(
+    { length: input.waypoints.length + 2 },
+    (_, index) => index === coordinateIndex ? endpointRadiusMeters : strictEndpointRadiusMeters,
+  );
+
   return {
-    ...routeInput,
+    ...routeRequestInput(input),
     profile,
     routingVehicle: vehicleForProfile(input.routingVehicle, profile),
-    origin: input.origin,
-    target: input.target,
-    radiuses: [endpointRadiusMeters, endpointRadiusMeters],
+    origin: originAnchor?.coordinates ?? input.origin,
+    target: targetAnchor?.coordinates ?? input.target,
+    radiuses,
   };
 }
 
@@ -116,8 +154,16 @@ function asRecoveredRoute(
   };
 }
 
-function isEndpointRecoveryError(error: unknown) {
+function isEndpointRecoveryError(error: unknown): error is OpenRouteServiceError & { status: 404; code: 2010 } {
   return isOpenRouteServiceError(error) && error.status === 404 && error.code === 2010;
+}
+
+function endpointRecoveryIndex(error: unknown, input: RecoveryInput) {
+  if (!isEndpointRecoveryError(error)) return null;
+  const targetIndex = input.waypoints.length + 1;
+  if (error.coordinateIndex === 0) return 0;
+  if (error.coordinateIndex === targetIndex) return targetIndex;
+  return null;
 }
 
 function isDisconnectedRouteError(error: unknown) {
@@ -167,27 +213,33 @@ async function calculateWithEndpointRecovery(
   input: RecoveryInput,
   calculate: CalculateProviderRoute,
   profile: TripRoutingVehicle['profile'],
+  coordinateIndex: number,
 ) {
-  const route = await calculate(requestWithEndpointRadius(input, profile));
+  const route = await calculate(requestWithEndpointRadius(input, profile, coordinateIndex));
   const firstCoordinate = route.geometry.coordinates.at(0);
   const lastCoordinate = route.geometry.coordinates.at(-1);
   if (!firstCoordinate || !lastCoordinate) {
     throw new Error('Route calculation returned invalid endpoint geometry');
   }
+  const targetIndex = input.waypoints.length + 1;
+  const endpoint = coordinateIndex === 0 ? 'origin' : 'target';
+  const endpointAnchor = endpoint === 'origin'
+    ? anchorFromGeometryEndpoint({
+        endpoint,
+        originalCoordinates: input.origin,
+        snappedCoordinates: coordinateFromPair(firstCoordinate),
+        profile: route.profile,
+      })
+    : anchorFromGeometryEndpoint({
+        endpoint,
+        originalCoordinates: input.target,
+        snappedCoordinates: coordinateFromPair(lastCoordinate),
+        profile: route.profile,
+      });
 
   const endpointAnchors = {
-    origin: anchorFromGeometryEndpoint({
-      endpoint: 'origin',
-      originalCoordinates: input.origin,
-      snappedCoordinates: coordinateFromPair(firstCoordinate),
-      profile: route.profile,
-    }),
-    target: anchorFromGeometryEndpoint({
-      endpoint: 'target',
-      originalCoordinates: input.target,
-      snappedCoordinates: coordinateFromPair(lastCoordinate),
-      profile: route.profile,
-    }),
+    ...(coordinateIndex === 0 ? { origin: endpointAnchor } : {}),
+    ...(coordinateIndex === targetIndex ? { target: endpointAnchor } : {}),
   };
 
   return asRecoveredRoute(route, anchorWarning(endpointAnchors), endpointAnchors);
@@ -201,8 +253,9 @@ async function calculateDrivingCarFallback(
     const route = await calculate(requestWithSavedAnchors(input, 'driving-car'));
     return asRecoveredRoute(route, [vehicleFallbackWarning()]);
   } catch (carError) {
-    if (!isEndpointRecoveryError(carError)) throw carError;
-    const route = await calculateWithEndpointRecovery(input, calculate, 'driving-car');
+    const carEndpointIndex = endpointRecoveryIndex(carError, input);
+    if (carEndpointIndex === null) throw carError;
+    const route = await calculateWithEndpointRecovery(input, calculate, 'driving-car', carEndpointIndex);
     return {
       ...route,
       warnings: [vehicleFallbackWarning(), ...route.warnings],
@@ -218,13 +271,14 @@ export async function calculateRouteWithRecovery(
     const route = await calculate(requestWithSavedAnchors(input, input.profile));
     return asRecoveredRoute(route);
   } catch (initialError) {
-    if (isEndpointRecoveryError(initialError)) {
+    const initialEndpointIndex = endpointRecoveryIndex(initialError, input);
+    if (initialEndpointIndex !== null) {
       try {
-        return await calculateWithEndpointRecovery(input, calculate, input.profile);
+        return await calculateWithEndpointRecovery(input, calculate, input.profile, initialEndpointIndex);
       } catch (sameProfileRecoveryError) {
         if (
           input.profile === 'driving-hgv' &&
-          (isEndpointRecoveryError(sameProfileRecoveryError) || isDisconnectedRouteError(sameProfileRecoveryError))
+          (endpointRecoveryIndex(sameProfileRecoveryError, input) !== null || isDisconnectedRouteError(sameProfileRecoveryError))
         ) {
           return calculateDrivingCarFallback(input, calculate);
         }

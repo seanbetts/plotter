@@ -126,6 +126,7 @@ describe('MapCanvas', () => {
     name: 'Cappadocia',
     countryRegion: 'Turkey',
     coordinates: { lat: 38.6431, lng: 34.8289 },
+    routingAnchors: {},
     location: {
       placeName: 'Cappadocia',
       regionName: '',

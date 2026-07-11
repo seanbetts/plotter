@@ -46,6 +46,7 @@ export type AutomaticRouteCalculationBatch = {
 };
 
 export type RouteLegPersistence = {
+  saveDestination(destination: Destination): Promise<void>;
   saveRouteLeg(routeLeg: RouteLeg): Promise<void>;
   deleteRouteLeg(routeLegId: string): Promise<void>;
 };
@@ -244,10 +245,15 @@ export function applyCalculatedRouteResult({
   const reviewRequired = preserveUnresolvedReview || warnings.some(
     (warning) => !informationalWarningCodes.has(warning.code),
   );
+  const {
+    warnings: _recoveryWarnings,
+    endpointAnchors: _endpointAnchors,
+    ...calculatedRoute
+  } = route as CalculatedRoute & Partial<Pick<RecoveredRoute, 'warnings' | 'endpointAnchors'>>;
 
   return {
     ...clearedLeg,
-    ...route,
+    ...calculatedRoute,
     status: reviewRequired ? 'review-required' : 'ready',
     distanceKm: reviewRequired ? undefined : route.distanceKm,
     travelTimeHours: reviewRequired ? undefined : route.travelTimeHours,
@@ -342,8 +348,8 @@ export async function calculateAutomaticRouteLegs(input: {
         routingVehicle: input.routingVehicle,
         waypoints,
         ferryPolicy,
-        originAnchor: origin.routingAnchors[input.routingVehicle.profile],
-        targetAnchor: target.routingAnchors[input.routingVehicle.profile],
+        originAnchors: origin.routingAnchors,
+        targetAnchors: target.routingAnchors,
       }, input.calculateRoute);
       const anchoredOrigin = applyEndpointAnchor(origin, route.endpointAnchors.origin);
       const anchoredTarget = applyEndpointAnchor(target, route.endpointAnchors.target);
@@ -473,11 +479,20 @@ export async function reconcileAndSaveRouteLegs(input: {
     calculateRoute: input.calculateRoute,
   });
   const nextRouteLegs = calculation.routeLegs;
+  const currentDestinationsById = new Map(input.destinations.map((destination) => [destination.id, destination]));
+  const destinationsToSave = calculation.destinations.filter((destination) => (
+    currentDestinationsById.get(destination.id) !== destination
+  ));
 
-  await Promise.all([
-    ...reconciliation.removedRouteLegIds.map((routeLegId) => input.repository.deleteRouteLeg(routeLegId)),
-    ...nextRouteLegs.map((routeLeg) => input.repository.saveRouteLeg(routeLeg)),
-  ]);
+  for (const destination of destinationsToSave) {
+    await input.repository.saveDestination(destination);
+  }
+  for (const routeLegId of reconciliation.removedRouteLegIds) {
+    await input.repository.deleteRouteLeg(routeLegId);
+  }
+  for (const routeLeg of nextRouteLegs) {
+    await input.repository.saveRouteLeg(routeLeg);
+  }
 
   return nextRouteLegs;
 }

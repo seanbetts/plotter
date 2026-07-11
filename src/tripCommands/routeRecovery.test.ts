@@ -44,13 +44,15 @@ function orsError(input: {
   status: number;
   code?: number;
   profile: TripRoutingVehicle['profile'];
+  coordinateIndex?: number;
 }) {
   return new OpenRouteServiceError({
     status: input.status,
     code: input.code,
     profile: input.profile,
+    coordinateIndex: input.coordinateIndex,
     providerMessage: input.code === 2010
-      ? 'Could not find routable point within a radius of 350.0 meters of specified coordinate 1.'
+      ? `Could not find routable point within a radius of 350.0 meters of specified coordinate ${input.coordinateIndex ?? 1}.`
       : input.code === 2009
         ? 'Route could not be found between locations.'
         : 'Provider failure.',
@@ -91,6 +93,7 @@ function savedAnchor(profile: TripRoutingVehicle['profile'], originalCoordinates
 
 describe('route recovery', () => {
   it.each([
+    { status: 404, code: 3001 },
     { status: 401, code: undefined },
     { status: 403, code: undefined },
     { status: 429, code: 3099 },
@@ -105,7 +108,7 @@ describe('route recovery', () => {
 
   it('recovers a car endpoint with a 2 km radius and returns a target anchor warning', async () => {
     const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
-      if (!request.radiuses) throw orsError({ status: 404, code: 2010, profile: 'driving-car' });
+      if (!request.radiuses) throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: 1 });
       return routeFor({ origin: request.origin, target: altaAnchorCoordinates, profile: request.profile });
     });
 
@@ -120,7 +123,7 @@ describe('route recovery', () => {
 
     expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
       profile: 'driving-car',
-      radiuses: [2000, 2000],
+      radiuses: [350, 2000],
     }));
     expect(result.warnings).toEqual([
       expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED' }),
@@ -137,7 +140,7 @@ describe('route recovery', () => {
   it('rejects endpoint recovery when the provider snaps beyond the 2 km endpoint radius', async () => {
     const beyondRadius = { lat: 70.1, lng: 23.27165 };
     const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
-      if (!request.radiuses) throw orsError({ status: 404, code: 2010, profile: 'driving-car' });
+      if (!request.radiuses) throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: 1 });
       return routeFor({ origin: request.origin, target: beyondRadius, profile: request.profile });
     });
 
@@ -149,6 +152,29 @@ describe('route recovery', () => {
       waypoints: [],
       ferryPolicy: 'allow',
     }, calculate)).rejects.toThrow(/2 km endpoint radius/);
+  });
+
+  it('does not fall back from a car endpoint recovery failure', async () => {
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      if (!request.radiuses) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: 1 });
+      }
+      throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: 1 });
+    });
+
+    await expect(calculateRouteWithRecovery({
+      origin: balcombe,
+      target: alta,
+      profile: 'driving-car',
+      routingVehicle: carVehicle,
+      waypoints: [],
+      ferryPolicy: 'allow',
+    }, calculate)).rejects.toMatchObject({ code: 2010, profile: 'driving-car' });
+    expect(calculate).toHaveBeenCalledTimes(2);
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      profile: 'driving-car',
+      radiuses: [350, 2000],
+    }));
   });
 
   it('falls back from HGV 2009 to driving-car while preserving waypoints and ferry policy', async () => {
@@ -172,8 +198,9 @@ describe('route recovery', () => {
 
   it('tries HGV endpoint recovery before car fallback and car endpoint recovery for HGV 2010', async () => {
     const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
-      if (request.profile === 'driving-hgv') throw orsError({ status: 404, code: 2010, profile: 'driving-hgv' });
-      if (!request.radiuses) throw orsError({ status: 404, code: 2010, profile: 'driving-car' });
+      const targetIndex = request.waypoints.length + 1;
+      if (request.profile === 'driving-hgv') throw orsError({ status: 404, code: 2010, profile: 'driving-hgv', coordinateIndex: targetIndex });
+      if (!request.radiuses) throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: targetIndex });
       return routeFor({ origin: request.origin, target: altaAnchorCoordinates, profile: request.profile });
     });
 
@@ -181,15 +208,139 @@ describe('route recovery', () => {
 
     expect(calculate).toHaveBeenNthCalledWith(1, expect.objectContaining({ profile: 'driving-hgv' }));
     expect(vi.mocked(calculate).mock.calls[0][0]).not.toHaveProperty('radiuses');
-    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({ profile: 'driving-hgv', radiuses: [2000, 2000] }));
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({ profile: 'driving-hgv', radiuses: [350, 350, 2000] }));
     expect(calculate).toHaveBeenNthCalledWith(3, expect.objectContaining({ profile: 'driving-car' }));
     expect(vi.mocked(calculate).mock.calls[2][0]).not.toHaveProperty('radiuses');
-    expect(calculate).toHaveBeenNthCalledWith(4, expect.objectContaining({ profile: 'driving-car', radiuses: [2000, 2000] }));
+    expect(calculate).toHaveBeenNthCalledWith(4, expect.objectContaining({ profile: 'driving-car', radiuses: [350, 350, 2000] }));
     expect(result.warnings.map((warning) => warning.code)).toEqual([
       'VEHICLE_PROFILE_FALLBACK',
       'ROUTING_ANCHOR_ADJUSTED',
     ]);
     expect(result.endpointAnchors.target).toMatchObject({ profile: 'driving-car' });
+  });
+
+  it('does not fall back to driving-car when HGV endpoint recovery hits quota', async () => {
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      const targetIndex = request.waypoints.length + 1;
+      if (!request.radiuses) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-hgv', coordinateIndex: targetIndex });
+      }
+      throw orsError({ status: 429, code: 3099, profile: 'driving-hgv' });
+    });
+
+    await expect(calculateRouteWithRecovery(expeditionInput, calculate)).rejects.toMatchObject({ status: 429 });
+    expect(calculate).toHaveBeenCalledTimes(2);
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      profile: 'driving-hgv',
+      radiuses: [350, 350, 2000],
+    }));
+  });
+
+  it.each([
+    {
+      name: 'origin',
+      coordinateIndex: 0,
+      expectedRadiuses: [2000, 350, 350],
+      snappedOrigin: { lat: 51.0718, lng: -0.1349 },
+      snappedTarget: alta,
+    },
+    {
+      name: 'target',
+      coordinateIndex: 2,
+      expectedRadiuses: [350, 350, 2000],
+      snappedOrigin: balcombe,
+      snappedTarget: altaAnchorCoordinates,
+    },
+  ])('aligns endpoint recovery radiuses for a $name 2010 with waypoints', async ({
+    coordinateIndex,
+    expectedRadiuses,
+    snappedOrigin,
+    snappedTarget,
+  }) => {
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      if (!request.radiuses) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex });
+      }
+      return routeFor({ origin: snappedOrigin, target: snappedTarget, profile: request.profile });
+    });
+
+    await calculateRouteWithRecovery({
+      origin: balcombe,
+      target: alta,
+      profile: 'driving-car',
+      routingVehicle: carVehicle,
+      waypoints,
+      ferryPolicy: 'require',
+    }, calculate);
+
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      radiuses: expectedRadiuses,
+      waypoints,
+      ferryPolicy: 'require',
+    }));
+  });
+
+  it('does not recover a waypoint-index 2010 as an endpoint failure', async () => {
+    const calculate = vi.fn().mockRejectedValue(
+      orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: 1 }),
+    );
+
+    await expect(calculateRouteWithRecovery({
+      origin: balcombe,
+      target: alta,
+      profile: 'driving-car',
+      routingVehicle: carVehicle,
+      waypoints,
+      ferryPolicy: 'allow',
+    }, calculate)).rejects.toMatchObject({ code: 2010, coordinateIndex: 1 });
+    expect(calculate).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the opposite saved anchor during endpoint recovery', async () => {
+    const originAnchor = savedAnchor('driving-car', balcombe, { lat: 51.06, lng: -0.13 });
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      if (!request.radiuses) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: 2 });
+      }
+      return routeFor({ origin: request.origin, target: altaAnchorCoordinates, profile: request.profile });
+    });
+
+    await calculateRouteWithRecovery({
+      origin: balcombe,
+      target: alta,
+      profile: 'driving-car',
+      routingVehicle: carVehicle,
+      waypoints,
+      ferryPolicy: 'allow',
+      originAnchors: { 'driving-car': originAnchor },
+    }, calculate);
+
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      origin: originAnchor.coordinates,
+      target: alta,
+      radiuses: [350, 350, 2000],
+    }));
+  });
+
+  it('reuses an existing car anchor after HGV falls back to driving-car', async () => {
+    const carTargetAnchor = savedAnchor('driving-car', alta, altaAnchorCoordinates);
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      if (request.profile === 'driving-hgv') {
+        throw orsError({ status: 404, code: 2009, profile: 'driving-hgv' });
+      }
+      return routeFor({ origin: request.origin, target: request.target, profile: request.profile });
+    });
+
+    await calculateRouteWithRecovery({
+      ...expeditionInput,
+      targetAnchors: { 'driving-car': carTargetAnchor },
+    }, calculate);
+
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      profile: 'driving-car',
+      target: carTargetAnchor.coordinates,
+    }));
+    expect(vi.mocked(calculate).mock.calls[1][0]).not.toHaveProperty('radiuses');
   });
 
   it('uses only saved anchors matching the requested profile and avoids rediscovery', async () => {
@@ -201,8 +352,8 @@ describe('route recovery', () => {
 
     const result = await calculateRouteWithRecovery({
       ...expeditionInput,
-      originAnchor: carOriginAnchor,
-      targetAnchor: hgvTargetAnchor,
+      originAnchors: { 'driving-car': carOriginAnchor },
+      targetAnchors: { 'driving-hgv': hgvTargetAnchor },
     }, calculate);
 
     expect(calculate).toHaveBeenCalledTimes(1);

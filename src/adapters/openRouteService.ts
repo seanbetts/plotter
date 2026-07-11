@@ -26,7 +26,7 @@ type CalculateRouteInput = {
   routingVehicle?: TripRoutingVehicle;
   waypoints?: Array<Pick<RouteWaypoint, 'coordinates'>>;
   ferryPolicy?: FerryPolicy;
-  radiuses?: [number, number];
+  radiuses?: number[];
 };
 
 type ResolvedCalculateRouteInput = Omit<Required<CalculateRouteInput>, 'radiuses'> & Pick<CalculateRouteInput, 'radiuses'>;

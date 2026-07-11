@@ -472,6 +472,69 @@ function countRouteLegChanges(currentRouteLegs: RouteLeg[], nextRouteLegs: Route
   }).length;
 }
 
+function changedDestinationsByReference(currentDestinations: Destination[], nextDestinations: Destination[]) {
+  const currentById = new Map(currentDestinations.map((destination) => [destination.id, destination]));
+  return nextDestinations.filter((destination) => currentById.get(destination.id) !== destination);
+}
+
+async function persistRouteCalculationBatch(input: {
+  repository: TripRepository;
+  priorDestinations: Destination[];
+  priorRouteLegs: RouteLeg[];
+  destinationsToSave: Destination[];
+  routeLegsToSave: RouteLeg[];
+  routeLegIdsToDelete?: string[];
+  failurePrefix: string;
+}) {
+  try {
+    for (const destination of input.destinationsToSave) {
+      await input.repository.saveDestination(destination);
+    }
+    for (const routeLegId of input.routeLegIdsToDelete ?? []) {
+      await input.repository.deleteRouteLeg(routeLegId);
+    }
+    for (const routeLeg of input.routeLegsToSave) {
+      await input.repository.saveRouteLeg(routeLeg);
+    }
+  } catch (caught) {
+    const primaryMessage = caught instanceof Error ? caught.message : 'Unknown trip storage error';
+    const priorRouteIds = new Set(input.priorRouteLegs.map((routeLeg) => routeLeg.id));
+    const rollbackFailures: string[] = [];
+    for (const routeLeg of input.routeLegsToSave) {
+      if (priorRouteIds.has(routeLeg.id)) continue;
+      try {
+        await input.repository.deleteRouteLeg(routeLeg.id);
+      } catch (rollbackError) {
+        rollbackFailures.push(
+          `route ${routeLeg.id} removal: ${rollbackError instanceof Error ? rollbackError.message : 'Unknown rollback error'}`,
+        );
+      }
+    }
+    for (const destination of input.priorDestinations) {
+      try {
+        await input.repository.saveDestination(destination);
+      } catch (rollbackError) {
+        rollbackFailures.push(
+          `destination ${destination.id}: ${rollbackError instanceof Error ? rollbackError.message : 'Unknown rollback error'}`,
+        );
+      }
+    }
+    for (const routeLeg of input.priorRouteLegs) {
+      try {
+        await input.repository.saveRouteLeg(routeLeg);
+      } catch (rollbackError) {
+        rollbackFailures.push(
+          `route ${routeLeg.id}: ${rollbackError instanceof Error ? rollbackError.message : 'Unknown rollback error'}`,
+        );
+      }
+    }
+    const rollbackMessage = rollbackFailures.length > 0
+      ? `Rollback consistency failures: ${rollbackFailures.join('; ')}`
+      : 'Previous destination and route snapshots were restored.';
+    throw new Error(`${input.failurePrefix}: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
+  }
+}
+
 async function saveStopsAndRouteLegs(input: {
   repository: TripRepository;
   applyRecipe: (currentDestinations: Destination[]) => Destination[] | Promise<Destination[]>;
@@ -499,6 +562,7 @@ async function saveStopsAndRouteLegs(input: {
   });
   const calculatedDestinations = calculation.destinations;
   const routeLegs = calculation.routeLegs;
+  const destinationsToSave = changedDestinationsByReference(priorDestinations, calculatedDestinations);
   const nextDestinationIds = new Set(calculatedDestinations.map(({ id }) => id));
   const nextRouteIds = new Set(routeLegs.map(({ id }) => id));
   const removedDestinationIds = priorDestinations
@@ -512,7 +576,7 @@ async function saveStopsAndRouteLegs(input: {
       };
 
   try {
-    for (const destination of calculatedDestinations) await input.repository.saveDestination(destination);
+    for (const destination of destinationsToSave) await input.repository.saveDestination(destination);
     for (const routeLeg of currentRouteLegs) {
       if (!nextRouteIds.has(routeLeg.id)) await input.repository.deleteRouteLeg(routeLeg.id);
     }
@@ -738,12 +802,16 @@ export function createTripDataService(
         const changedRouteLegs = recalculatedRouteLegs.filter((routeLeg, index) => (
           routeLeg !== routeLegsToCalculate[index]
         ));
-        const destinationsToSave = calculation.destinations.filter((destination, index) => destination !== destinations[index]);
-        await Promise.all([
-          ...reconciliation.removedRouteLegIds.map((routeLegId) => repository.deleteRouteLeg(routeLegId)),
-          ...destinationsToSave.map((destination) => repository.saveDestination(destination)),
-          ...changedRouteLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)),
-        ]);
+        const destinationsToSave = changedDestinationsByReference(destinations, calculation.destinations);
+        await persistRouteCalculationBatch({
+          repository,
+          priorDestinations: structuredClone(destinations),
+          priorRouteLegs: structuredClone(currentRouteLegs),
+          destinationsToSave,
+          routeLegsToSave: changedRouteLegs,
+          routeLegIdsToDelete: reconciliation.removedRouteLegIds,
+          failurePrefix: 'Unable to persist recalculated routes',
+        });
 
         const routeLegs = reconciliation.routeLegs.map((routeLeg) => recalculatedById.get(routeLeg.id) ?? routeLeg);
         const destinationsById = new Map(destinations.map((destination) => [destination.id, destination]));
@@ -818,7 +886,7 @@ export function createTripDataService(
         const priorTrip = structuredClone(trip);
         const priorDestinations = structuredClone(destinations);
         const priorRouteLegs = structuredClone(currentRouteLegs);
-        const destinationsToSave = calculation.destinations.filter((destination, index) => destination !== destinations[index]);
+        const destinationsToSave = changedDestinationsByReference(destinations, calculation.destinations);
         let metadataUpdateAttempted = false;
         try {
           for (const destination of destinationsToSave) {
@@ -939,15 +1007,19 @@ export function createTripDataService(
             retryFailed: true,
           });
           [nextRouteLeg] = calculation.routeLegs;
-          destinationsToSave = calculation.destinations.filter((destination, index) => destination !== destinations[index]);
+          destinationsToSave = changedDestinationsByReference(destinations, calculation.destinations);
         }
         const changed = emptyChanged();
         changed.routesRecalculated = 1;
         if (!options?.dryRun) {
-          await Promise.all([
-            ...destinationsToSave.map((destination) => repository.saveDestination(destination)),
-            repository.saveRouteLeg(nextRouteLeg),
-          ]);
+          await persistRouteCalculationBatch({
+            repository,
+            priorDestinations: structuredClone(destinations),
+            priorRouteLegs: structuredClone(routeLegs),
+            destinationsToSave,
+            routeLegsToSave: [nextRouteLeg],
+            failurePrefix: 'Unable to persist route update',
+          });
         }
         return commandSuccess(
           `${options?.dryRun ? 'Would update' : 'Updated'} route leg ${routeLegId}.`,

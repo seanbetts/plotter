@@ -1673,6 +1673,66 @@ describe('useTripData', () => {
     expect(result.current.routeLegs[0].status).toBe('ready');
   });
 
+  it('rolls back recovered destination anchors when hook route persistence fails', async () => {
+    const origin = createDestination({ name: 'Olderdalen', coordinates: { lat: 69.6041, lng: 20.5326 }, order: 0 });
+    const target = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 }, order: 1 });
+    const altaAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: target.coordinates,
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const routeLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive',
+      calculation: 'automatic',
+      status: 'failed',
+      error: 'retry me',
+    });
+    let storedDestinations = [origin, target];
+    let storedRouteLeg = routeLeg;
+    let failRouteWrite = true;
+    const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
+      listDestinations: async () => storedDestinations,
+      listRouteLegs: async () => [storedRouteLeg],
+      saveDestination: async (destination) => {
+        storedDestinations = storedDestinations.map((candidate) => candidate.id === destination.id ? destination : candidate);
+      },
+      saveRouteLeg: async (nextRouteLeg) => {
+        if (failRouteWrite) {
+          failRouteWrite = false;
+          throw new Error('route write failed');
+        }
+        storedRouteLeg = nextRouteLeg;
+      },
+    });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 361,
+      travelTimeHours: 5.4,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [[origin.coordinates.lng, origin.coordinates.lat], [altaAnchor.coordinates.lng, altaAnchor.coordinates.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 361 }],
+      warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED' as const, message: 'Alta uses a routing point 1.6 km from the stop.' }],
+      endpointAnchors: { target: altaAnchor },
+    }));
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await expect(act(async () => {
+      await result.current.updateRouteLeg(routeLeg.id, { movement: 'drive', calculation: 'automatic' });
+    })).rejects.toThrow(/route write failed/);
+
+    expect(storedDestinations).toEqual([origin, target]);
+    expect(storedRouteLeg).toBe(routeLeg);
+  });
+
   it('shows a failed route leg as pending while an explicit retry is in flight', async () => {
     const origin = createDestination({
       name: 'Ghent',
@@ -2105,8 +2165,8 @@ describe('useTripData', () => {
       listRouteLegs: async () => structuredClone([priorLeg]),
       saveDestination: async () => {
         saveCount += 1;
-        if (saveCount === 2) throw new Error('destination write failed');
-        if (saveCount === 3) throw new Error('destination rollback failed');
+        if (saveCount === 1) throw new Error('destination write failed');
+        if (saveCount === 2) throw new Error('destination rollback failed');
       },
     });
     const { result } = renderHook(() => useTripData(repository));
