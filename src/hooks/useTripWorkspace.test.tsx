@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import { selectedTripStorageKey } from '../storage/appRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
@@ -10,6 +11,7 @@ function createTrip(name: string, id: string = crypto.randomUUID()): TripSummary
     id,
     name,
     description: '',
+    routingVehicle: resolveVehiclePreset('standard'),
     createdAt: '2026-07-03T10:00:00.000Z',
     updatedAt: '2026-07-03T10:00:00.000Z',
   };

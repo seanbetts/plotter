@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { TripRoutingVehicle, VehiclePreset } from '../domain/types';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { TripDb } from './tripDb';
 
 export type TripSummary = {
@@ -7,12 +9,13 @@ export type TripSummary = {
   description: string;
   createdAt: string;
   updatedAt: string;
+  routingVehicle?: TripRoutingVehicle;
 };
 
 export type TripDirectoryRepository = {
   listTrips(): Promise<TripSummary[]>;
-  createTrip(input: { name: string }): Promise<TripSummary>;
-  updateTrip(tripId: string, patch: { name?: string; description?: string }): Promise<TripSummary>;
+  createTrip(input: { name: string; routingVehicle?: TripRoutingVehicle }): Promise<TripSummary>;
+  updateTrip(tripId: string, patch: { name?: string; description?: string; routingVehicle?: TripRoutingVehicle }): Promise<TripSummary>;
   deleteTrip(tripId: string): Promise<void>;
 };
 
@@ -21,6 +24,10 @@ type SupabaseTripRow = {
   owner_user_id: string;
   name: string;
   description: string | null;
+  vehicle_preset?: VehiclePreset;
+  vehicle_profile?: TripRoutingVehicle['profile'];
+  vehicle_type?: TripRoutingVehicle['vehicleType'] | null;
+  vehicle_restrictions?: TripRoutingVehicle['restrictions'];
   created_at: string;
   updated_at: string;
 };
@@ -58,12 +65,30 @@ function assertSupabaseWriteSucceeded(response: SupabaseWriteResponse, fallbackM
 }
 
 function tripFromSupabaseRow(row: SupabaseTripRow): TripSummary {
+  const defaultVehicle = resolveVehiclePreset('standard');
   return {
     id: row.id,
     name: row.name,
     description: row.description ?? '',
+    routingVehicle: {
+      preset: row.vehicle_preset ?? defaultVehicle.preset,
+      profile: row.vehicle_profile ?? defaultVehicle.profile,
+      ...(row.vehicle_type ? { vehicleType: row.vehicle_type } : {}),
+      restrictions: row.vehicle_restrictions ?? defaultVehicle.restrictions,
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+const tripColumns = 'id, owner_user_id, name, description, vehicle_preset, vehicle_profile, vehicle_type, vehicle_restrictions, created_at, updated_at';
+
+function routingVehicleToSupabaseColumns(routingVehicle: TripRoutingVehicle) {
+  return {
+    vehicle_preset: routingVehicle.preset,
+    vehicle_profile: routingVehicle.profile,
+    vehicle_type: routingVehicle.vehicleType ?? null,
+    vehicle_restrictions: routingVehicle.restrictions,
   };
 }
 
@@ -79,7 +104,7 @@ export function createSupabaseTripDirectoryRepository(
       const rows = assertNoSupabaseError<SupabaseTripRow[]>(
         await supabase
           .from('trips')
-          .select('id, owner_user_id, name, description, created_at, updated_at')
+          .select(tripColumns)
           .order('updated_at', { ascending: false })
           .order('created_at', { ascending: false }),
         'Unable to load trips.',
@@ -95,6 +120,7 @@ export function createSupabaseTripDirectoryRepository(
         throw new Error(userResponse.error?.message || 'Sign in before creating a trip.');
       }
 
+      const routingVehicle = input.routingVehicle ?? resolveVehiclePreset('standard');
       const row = assertNoSupabaseError<SupabaseTripRow>(
         await supabase
           .from('trips')
@@ -102,8 +128,9 @@ export function createSupabaseTripDirectoryRepository(
             owner_user_id: user.id,
             name: input.name,
             description: '',
+            ...routingVehicleToSupabaseColumns(routingVehicle),
           })
-          .select('id, owner_user_id, name, description, created_at, updated_at')
+          .select(tripColumns)
           .single(),
         'Unable to create trip.',
       );
@@ -112,12 +139,16 @@ export function createSupabaseTripDirectoryRepository(
     },
 
     async updateTrip(tripId, patch) {
+      const { routingVehicle, ...tripPatch } = patch;
       const row = assertNoSupabaseError<SupabaseTripRow>(
         await supabase
           .from('trips')
-          .update(patch)
+          .update({
+            ...tripPatch,
+            ...(routingVehicle ? routingVehicleToSupabaseColumns(routingVehicle) : {}),
+          })
           .eq('id', tripId)
-          .select('id, owner_user_id, name, description, created_at, updated_at')
+          .select(tripColumns)
           .single(),
         'Unable to update trip.',
       );
@@ -173,6 +204,7 @@ export function createLocalTripDirectoryRepository(db: TripDb): TripDirectoryRep
         id: crypto.randomUUID(),
         name: input.name,
         description: '',
+        routingVehicle: input.routingVehicle ?? resolveVehiclePreset('standard'),
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -191,6 +223,7 @@ export function createLocalTripDirectoryRepository(db: TripDb): TripDirectoryRep
         ...existing,
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.routingVehicle !== undefined ? { routingVehicle: patch.routingVehicle } : {}),
         updatedAt: createTimestamp(),
       };
 

@@ -12,6 +12,12 @@ import type {
   RouteLeg,
   RouteLegStatus,
   RouteLegType,
+  RouteMovement,
+  RouteCalculationMode,
+  FerryPolicy,
+  RouteWaypoint,
+  RouteSection,
+  RouteWarning,
 } from '../domain/types';
 import { sortResearchLinks } from '../domain/researchLinks';
 import { mediaImageVariants } from '../media/imageOptimization';
@@ -65,6 +71,12 @@ type SupabaseRouteLegRow = {
   origin_destination_id: string;
   target_destination_id: string;
   type: RouteLegType;
+  movement?: RouteMovement;
+  calculation_mode?: RouteCalculationMode;
+  ferry_policy?: FerryPolicy;
+  waypoints?: RouteWaypoint[];
+  sections?: RouteSection[];
+  warnings?: RouteWarning[];
   status: RouteLegStatus;
   distance_km: number | null;
   travel_time_hours: number | null;
@@ -360,6 +372,12 @@ export function routeLegToSupabaseRow(routeLeg: RouteLeg, tripId: string): Supab
     origin_destination_id: routeLeg.originDestinationId,
     target_destination_id: routeLeg.targetDestinationId,
     type: routeLeg.type,
+    movement: routeLeg.movement ?? (routeLeg.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
+    calculation_mode: routeLeg.calculation ?? (routeLeg.type === 'shipping-manual' ? 'manual' : 'automatic'),
+    ferry_policy: routeLeg.ferryPolicy ?? 'allow',
+    waypoints: routeLeg.waypoints ?? [],
+    sections: routeLeg.sections ?? [],
+    warnings: routeLeg.warnings ?? [],
     status: routeLeg.status,
     distance_km: routeLeg.distanceKm ?? null,
     travel_time_hours: routeLeg.travelTimeHours ?? null,
@@ -381,6 +399,12 @@ export function routeLegFromSupabaseRow(row: SupabaseRouteLegRow): RouteLeg {
     originDestinationId: row.origin_destination_id,
     targetDestinationId: row.target_destination_id,
     type: row.type,
+    movement: row.movement ?? (row.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
+    calculation: row.calculation_mode ?? (row.type === 'shipping-manual' ? 'manual' : 'automatic'),
+    ferryPolicy: row.ferry_policy ?? 'allow',
+    waypoints: row.waypoints ?? [],
+    sections: row.sections ?? [],
+    warnings: row.warnings ?? [],
     status: row.status,
     distanceKm: row.distance_km ?? undefined,
     travelTimeHours: row.travel_time_hours ?? undefined,

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg } from '../domain/routeLegs';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import { createTripDb } from './tripDb';
 import { createLocalTripDirectoryRepository } from './tripDirectoryRepository';
 import { createTripRepository } from './tripRepository';
@@ -89,6 +90,22 @@ describe('trip repository', () => {
 
     await directory.deleteTrip(trip.id);
     await expect(directory.listTrips()).resolves.toEqual([]);
+  });
+
+  it('defaults a new local trip to standard', async () => {
+    const name = `world-tour-test-${crypto.randomUUID()}`;
+    const db = createTripDb(name);
+    testDatabases.push({ db, name });
+    const directory = createLocalTripDirectoryRepository(db);
+
+    const trip = await directory.createTrip({ name: 'Manual trip' });
+
+    expect(trip.routingVehicle).toEqual(resolveVehiclePreset('standard'));
+
+    const updated = await directory.updateTrip(trip.id, {
+      routingVehicle: resolveVehiclePreset('large-camper'),
+    });
+    expect(updated.routingVehicle).toEqual(resolveVehiclePreset('large-camper'));
   });
 
   it('deletes local trip contents when deleting a trip', async () => {

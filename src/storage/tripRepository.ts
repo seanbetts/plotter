@@ -163,6 +163,12 @@ function normalizeRouteLeg(routeLeg: LegacyRouteLeg): RouteLeg {
     ...routeLeg,
     type,
     status: routeLeg.status ?? (type === 'shipping-manual' ? 'manual' : 'pending'),
+    movement: routeLeg.movement ?? (type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
+    calculation: routeLeg.calculation ?? (type === 'shipping-manual' ? 'manual' : 'automatic'),
+    ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+    waypoints: routeLeg.waypoints ?? [],
+    sections: routeLeg.sections ?? [],
+    warnings: routeLeg.warnings ?? [],
     profile: routeLeg.profile ?? (type === 'driving-auto' ? 'driving-car' : undefined),
   };
 }

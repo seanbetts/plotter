@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type { Activity, ActivityMediaRecord, Destination, RouteLeg } from '../domain/types';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { TripSummary } from './tripDirectoryRepository';
 
 const defaultLocalTripId = 'local-default-trip';
@@ -88,6 +89,18 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
       transaction.table('activities').toCollection().modify({ tripId: defaultLocalTripId }),
       transaction.table('activityMedia').toCollection().modify({ tripId: defaultLocalTripId }),
     ]);
+  });
+
+  db.version(6).stores({
+    trips: 'id, name, updatedAt, createdAt',
+    destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
+    routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, movement, calculation, status, routeKey, updatedAt',
+    activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
+    activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
+  }).upgrade(async (transaction) => {
+    await transaction.table('trips').toCollection().modify((trip) => {
+      trip.routingVehicle ??= resolveVehiclePreset('standard');
+    });
   });
 
   return db;

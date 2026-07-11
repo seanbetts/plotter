@@ -3,6 +3,7 @@ import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
 import type { Activity } from '../domain/types';
+import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import { mediaImageVariants } from '../media/imageOptimization';
 import {
   activityFromSupabaseRow,
@@ -35,6 +36,10 @@ describe('supabase trip directory repository', () => {
         owner_user_id: crypto.randomUUID(),
         name: 'Japan',
         description: 'Cherry blossom route',
+        vehicle_preset: 'large-camper',
+        vehicle_profile: 'driving-hgv',
+        vehicle_type: 'hgv',
+        vehicle_restrictions: resolveVehiclePreset('large-camper').restrictions,
         created_at: '2026-07-01T12:00:00.000Z',
         updated_at: '2026-07-02T12:00:00.000Z',
       },
@@ -58,6 +63,7 @@ describe('supabase trip directory repository', () => {
         id: rows[0].id,
         name: 'Japan',
         description: 'Cherry blossom route',
+        routingVehicle: resolveVehiclePreset('large-camper'),
         createdAt: '2026-07-01T12:00:00.000Z',
         updatedAt: '2026-07-02T12:00:00.000Z',
       },
@@ -73,6 +79,10 @@ describe('supabase trip directory repository', () => {
       owner_user_id: userId,
       name: 'South America',
       description: '',
+      vehicle_preset: 'expedition-truck',
+      vehicle_profile: 'driving-hgv',
+      vehicle_type: 'hgv',
+      vehicle_restrictions: resolveVehiclePreset('expedition-truck').restrictions,
       created_at: '2026-07-03T12:00:00.000Z',
       updated_at: '2026-07-03T12:00:00.000Z',
     };
@@ -89,14 +99,22 @@ describe('supabase trip directory repository', () => {
     };
     const repository = createSupabaseTripDirectoryRepository(supabase as never);
 
-    await expect(repository.createTrip({ name: 'South America' })).resolves.toMatchObject({
+    await expect(repository.createTrip({
+      name: 'South America',
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+    })).resolves.toMatchObject({
       id: row.id,
       name: 'South America',
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
     });
     expect(insert).toHaveBeenCalledWith({
       owner_user_id: userId,
       name: 'South America',
       description: '',
+      vehicle_preset: 'expedition-truck',
+      vehicle_profile: 'driving-hgv',
+      vehicle_type: 'hgv',
+      vehicle_restrictions: resolveVehiclePreset('expedition-truck').restrictions,
     });
   });
 
@@ -107,6 +125,10 @@ describe('supabase trip directory repository', () => {
       owner_user_id: crypto.randomUUID(),
       name: 'Renamed trip',
       description: 'Updated',
+      vehicle_preset: 'large-camper',
+      vehicle_profile: 'driving-hgv',
+      vehicle_type: 'hgv',
+      vehicle_restrictions: resolveVehiclePreset('large-camper').restrictions,
       created_at: '2026-07-01T12:00:00.000Z',
       updated_at: '2026-07-03T12:00:00.000Z',
     };
@@ -124,12 +146,21 @@ describe('supabase trip directory repository', () => {
     await expect(repository.updateTrip(tripId, {
       name: 'Renamed trip',
       description: 'Updated',
+      routingVehicle: resolveVehiclePreset('large-camper'),
     })).resolves.toMatchObject({
       id: tripId,
       name: 'Renamed trip',
       description: 'Updated',
+      routingVehicle: resolveVehiclePreset('large-camper'),
     });
-    expect(update).toHaveBeenCalledWith({ name: 'Renamed trip', description: 'Updated' });
+    expect(update).toHaveBeenCalledWith({
+      name: 'Renamed trip',
+      description: 'Updated',
+      vehicle_preset: 'large-camper',
+      vehicle_profile: 'driving-hgv',
+      vehicle_type: 'hgv',
+      vehicle_restrictions: resolveVehiclePreset('large-camper').restrictions,
+    });
     expect(eq).toHaveBeenCalledWith('id', tripId);
   });
 
@@ -284,7 +315,7 @@ describe('supabase trip repository mappers', () => {
     });
   });
 
-  it('maps route legs to and from Supabase rows', () => {
+  it('round-trips route intent through Supabase mapping', () => {
     const origin = createDestination({
       name: 'Oslo',
       coordinates: { lat: 59.9139, lng: 10.7522 },
@@ -306,8 +337,20 @@ describe('supabase trip repository mappers', () => {
       profile: 'driving-car',
       routeKey: 'route-key',
       calculatedAt: '2026-06-29T12:00:00.000Z',
+      ferryPolicy: 'require',
+      waypoints: [{
+        id: 'waypoint-1',
+        order: 0,
+        name: 'Trondheim',
+        coordinates: { lat: 63.4305, lng: 10.3951 },
+        location: origin.location,
+        notes: 'Pause in Trondheim.',
+        links: [],
+      }],
+      sections: [{ kind: 'ferry', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 8 }],
+      warnings: [{ code: 'FERRY_REQUIRED_NOT_FOUND', message: 'Ferry crossing required.' }],
     });
-    const tripId = crypto.randomUUID();
+    const tripId = 'trip-1';
 
     const row = routeLegToSupabaseRow(routeLeg, tripId);
 
@@ -319,6 +362,12 @@ describe('supabase trip repository mappers', () => {
       distance_km: 1185,
       travel_time_hours: 17.5,
       route_key: 'route-key',
+      movement: 'drive',
+      calculation_mode: 'automatic',
+      ferry_policy: 'require',
+      waypoints: routeLeg.waypoints,
+      sections: routeLeg.sections,
+      warnings: routeLeg.warnings,
     });
     expect(routeLegFromSupabaseRow(row)).toEqual(routeLeg);
   });
