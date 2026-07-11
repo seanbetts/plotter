@@ -166,10 +166,15 @@ export async function materializeTripManifest(
     directive,
   ]));
   const resolvedWaypoints = manifest.manifestVersion === 2
-    ? new Map(await Promise.all(manifest.routeLegs.map(async (directive) => {
+    ? new Map(await Promise.all(manifest.routeLegs.map(async (directive, directiveIndex) => {
         const waypoints = await Promise.all((directive.waypoints ?? []).map(async (waypoint, order): Promise<RouteWaypoint> => {
           const [resolved, links] = await Promise.all([
-            resolveStop(waypoint.place, waypoint.name, dependencies.resolvePlace, `routeLegs.waypoints[${order}].place`),
+            resolveStop(
+              waypoint.place,
+              waypoint.name,
+              dependencies.resolvePlace,
+              `routeLegs[${directiveIndex}].waypoints[${order}].place`,
+            ),
             enrichLinks(waypoint.links, dependencies.enrichLink),
           ]);
           return {
@@ -236,6 +241,9 @@ export async function materializeTripManifest(
   changed.linksAdded.push(
     ...destinations.flatMap((destination) => destination.research.links.map((link) => link.url)),
     ...activities.flatMap((activity) => activity.links.map((link) => link.url)),
+    ...routeLegs.flatMap((routeLeg) => (
+      routeLeg.waypoints ?? []
+    ).flatMap((waypoint) => waypoint.links.map((link) => link.url))),
   );
   changed.routesRecalculated = routeLegs.filter((leg) => leg.type === 'driving-auto').length;
 

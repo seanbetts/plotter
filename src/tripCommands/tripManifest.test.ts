@@ -199,10 +199,33 @@ describe('trip manifest materialization', () => {
       movement: 'drive', calculation: 'automatic', ferryPolicy: 'require', notes: 'Take the ferry.', status: 'ready',
       waypoints: [{ name: 'Hirtshals ferry terminal', notes: 'Check in early.', links: [{ url: 'https://example.com/ferry' }] }],
     });
+    expect(materialized.changed.linksAdded).toContain('https://example.com/ferry');
     expect(calculateRoute).toHaveBeenNthCalledWith(2, expect.objectContaining({
       routingVehicle: expect.objectContaining({ preset: 'expedition-truck' }),
       ferryPolicy: 'require',
       waypoints: [expect.objectContaining({ name: 'Hirtshals ferry terminal' })],
     }));
+  });
+
+  it('reports the directive and waypoint index when a waypoint place cannot resolve', async () => {
+    const manifest = validateTripManifest({
+      manifestVersion: 2,
+      name: 'Bad waypoint',
+      vehiclePreset: 'standard',
+      stops: [
+        { key: 'a', name: 'A', place: { coordinates: { lat: 50, lng: 0 } }, expectedStayDays: 1 },
+        { key: 'b', name: 'B', place: { coordinates: { lat: 51, lng: 1 } }, expectedStayDays: 1 },
+      ],
+      routeLegs: [{
+        fromStopKey: 'a',
+        toStopKey: 'b',
+        waypoints: [{ name: 'Unresolved', place: { query: 'Unresolved place' }, links: [] }],
+      }],
+    });
+
+    await expect(materializeTripManifest(manifest, {})).rejects.toMatchObject({
+      code: 'PLACE_RESOLVER_REQUIRED',
+      path: 'routeLegs[0].waypoints[0].place',
+    });
   });
 });

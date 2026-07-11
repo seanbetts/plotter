@@ -319,6 +319,13 @@ function validateRouteLegDirectiveV2(input: unknown, path: string): RouteLegDire
 }
 
 export function validateVehiclePreset(input: unknown, path = 'preset') {
+  if (input === undefined) {
+    throw new TripCommandValidationError(
+      'VEHICLE_PRESET_REQUIRED',
+      'Vehicle preset is required.',
+      path,
+    );
+  }
   return validateEnum(input, ['standard', 'large-camper', 'expedition-truck'], path, 'INVALID_VEHICLE_PRESET')!;
 }
 

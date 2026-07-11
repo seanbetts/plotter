@@ -718,6 +718,11 @@ export function createTripDataService(
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
         const preset = validateVehiclePreset(input.preset, 'preset');
         const trip = await findTripSummary(dependencies.directory, tripId);
+        const confirmation = ensureConfirmed(
+          options,
+          'Changing trip vehicle requires --yes or --dry-run.',
+        );
+        if (confirmation) return confirmation;
         const repository = dependencies.createTripRepository(trip.id);
         const [destinations, currentRouteLegs] = await Promise.all([
           repository.listDestinations(),
@@ -740,21 +745,60 @@ export function createTripDataService(
         changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, routeLegs);
         const nextTrip = { ...trip, routingVehicle };
 
-        if (!options?.dryRun) {
-          const persistedTrip = await dependencies.directory.updateTrip(trip.id, { routingVehicle });
-          await Promise.all(routeLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)));
-          return commandSuccess(`Set vehicle for ${trip.name} to ${preset}.`, {
-            trip: persistedTrip,
+        if (options?.dryRun) {
+          return commandSuccess(`Would set vehicle for ${trip.name} to ${preset}.`, {
+            trip: nextTrip,
             routeLegs,
             changed,
           });
         }
 
-        return commandSuccess(`Would set vehicle for ${trip.name} to ${preset}.`, {
-          trip: nextTrip,
-          routeLegs,
-          changed,
-        });
+        const priorTrip = structuredClone(trip);
+        const priorRouteLegs = structuredClone(currentRouteLegs);
+        let metadataUpdateAttempted = false;
+        try {
+          for (const routeLeg of routeLegs) {
+            await repository.saveRouteLeg(routeLeg);
+          }
+          metadataUpdateAttempted = true;
+          const persistedTrip = await dependencies.directory.updateTrip(trip.id, { routingVehicle });
+          return commandSuccess(`Set vehicle for ${trip.name} to ${preset}.`, {
+            trip: persistedTrip,
+            routeLegs,
+            changed,
+          });
+        } catch (storageError) {
+          const rollbackErrors: string[] = [];
+          for (const priorRouteLeg of priorRouteLegs) {
+            try {
+              await repository.saveRouteLeg(priorRouteLeg);
+            } catch (rollbackError) {
+              rollbackErrors.push(
+                `route leg ${priorRouteLeg.id}: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback failure'}`,
+              );
+            }
+          }
+          if (metadataUpdateAttempted) {
+            try {
+              await dependencies.directory.updateTrip(trip.id, {
+                name: priorTrip.name,
+                description: priorTrip.description,
+                routingVehicle: priorTrip.routingVehicle,
+              });
+            } catch (rollbackError) {
+              rollbackErrors.push(
+                `trip vehicle: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback failure'}`,
+              );
+            }
+          }
+          if (rollbackErrors.length > 0) {
+            const primaryMessage = storageError instanceof Error ? storageError.message : 'Vehicle storage update failed.';
+            throw new Error(
+              `${primaryMessage} Rollback failed; trip consistency may require repair. ${rollbackErrors.join('; ')}`,
+            );
+          }
+          throw storageError;
+        }
       });
     },
 
