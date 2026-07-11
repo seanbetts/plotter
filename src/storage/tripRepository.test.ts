@@ -952,6 +952,26 @@ describe('trip repository', () => {
     expect(await repository.listActivities(destination.id)).toEqual([]);
   });
 
+  it('batch deletes destinations and cascaded activity media in one local transaction', async () => {
+    const repository = createTestRepository();
+    const first = createDestination({ name: 'First', coordinates: { lat: 1, lng: 1 } });
+    const second = createDestination({ name: 'Second', coordinates: { lat: 2, lng: 2 } });
+    await repository.saveDestination(first);
+    await repository.saveDestination(second);
+    const activity = await repository.createActivity({ destinationId: first.id, title: 'Protected media' });
+    await repository.uploadActivityMedia({
+      destinationId: first.id,
+      activityId: activity.id,
+      file: new File(['image'], 'activity.jpg', { type: 'image/jpeg' }),
+    });
+
+    await repository.deleteDestinations!([first.id]);
+
+    expect((await repository.listDestinations()).map(({ id }) => id)).toEqual([second.id]);
+    expect(await repository.listActivities(first.id)).toEqual([]);
+    expect(await repository.listActivityMedia(activity.id)).toEqual([]);
+  });
+
   it('rejects creating an activity for a missing destination', async () => {
     const repository = createTestRepository();
 

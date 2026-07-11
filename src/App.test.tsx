@@ -104,9 +104,18 @@ const repositoryMock = vi.hoisted(() => {
     routeLegs: [] as RouteLeg[],
     initialDestinations: Promise.resolve([] as Destination[]),
     initialRouteLegs: Promise.resolve([] as RouteLeg[]),
-    listDestinations: vi.fn(async () => repository.initialDestinations),
+    destinationsLoaded: false,
+    routeLegsLoaded: false,
+    listDestinations: vi.fn(async () => {
+      if (!repository.destinationsLoaded) {
+        repository.destinations = structuredClone(await repository.initialDestinations);
+        repository.destinationsLoaded = true;
+      }
+      return repository.destinations;
+    }),
     saveDestination: vi.fn(async (destination: Destination) => {
-      repository.destinations.push(destination);
+      const index = repository.destinations.findIndex(({ id }) => id === destination.id);
+      if (index === -1) repository.destinations.push(destination); else repository.destinations[index] = destination;
     }),
     deleteDestination: vi.fn(async (destinationId: string) => {
       repository.destinations = repository.destinations.filter((destination) => destination.id !== destinationId);
@@ -148,9 +157,16 @@ const repositoryMock = vi.hoisted(() => {
     })),
     deleteActivity: vi.fn(async (): Promise<void> => undefined),
     reorderActivities: vi.fn(async (): Promise<Activity[]> => []),
-    listRouteLegs: vi.fn(async () => repository.initialRouteLegs),
+    listRouteLegs: vi.fn(async () => {
+      if (!repository.routeLegsLoaded) {
+        repository.routeLegs = structuredClone(await repository.initialRouteLegs);
+        repository.routeLegsLoaded = true;
+      }
+      return repository.routeLegs;
+    }),
     saveRouteLeg: vi.fn(async (routeLeg: RouteLeg) => {
-      repository.routeLegs.push(routeLeg);
+      const index = repository.routeLegs.findIndex(({ id }) => id === routeLeg.id);
+      if (index === -1) repository.routeLegs.push(routeLeg); else repository.routeLegs[index] = routeLeg;
     }),
     deleteRouteLeg: vi.fn(async (routeLegId: string) => {
       repository.routeLegs = repository.routeLegs.filter((routeLeg) => routeLeg.id !== routeLegId);
@@ -319,11 +335,20 @@ describe('App', () => {
     repositoryMock.routeLegs = [];
     repositoryMock.initialDestinations = Promise.resolve([]);
     repositoryMock.initialRouteLegs = Promise.resolve([]);
+    repositoryMock.destinationsLoaded = false;
+    repositoryMock.routeLegsLoaded = false;
     repositoryMock.listDestinations.mockClear();
-    repositoryMock.listDestinations.mockImplementation(async () => repositoryMock.initialDestinations);
+    repositoryMock.listDestinations.mockImplementation(async () => {
+      if (!repositoryMock.destinationsLoaded) {
+        repositoryMock.destinations = structuredClone(await repositoryMock.initialDestinations);
+        repositoryMock.destinationsLoaded = true;
+      }
+      return repositoryMock.destinations;
+    });
     repositoryMock.saveDestination.mockClear();
     repositoryMock.saveDestination.mockImplementation(async (destination: Destination) => {
-      repositoryMock.destinations.push(destination);
+      const index = repositoryMock.destinations.findIndex(({ id }) => id === destination.id);
+      if (index === -1) repositoryMock.destinations.push(destination); else repositoryMock.destinations[index] = destination;
     });
     repositoryMock.deleteDestination.mockClear();
     repositoryMock.listActivities.mockClear();
@@ -341,7 +366,13 @@ describe('App', () => {
     repositoryMock.reorderActivities.mockClear();
     repositoryMock.reorderActivities.mockImplementation(async () => []);
     repositoryMock.listRouteLegs.mockClear();
-    repositoryMock.listRouteLegs.mockImplementation(async () => repositoryMock.initialRouteLegs);
+    repositoryMock.listRouteLegs.mockImplementation(async () => {
+      if (!repositoryMock.routeLegsLoaded) {
+        repositoryMock.routeLegs = structuredClone(await repositoryMock.initialRouteLegs);
+        repositoryMock.routeLegsLoaded = true;
+      }
+      return repositoryMock.routeLegs;
+    });
     repositoryMock.saveRouteLeg.mockClear();
     repositoryMock.deleteRouteLeg.mockClear();
     repositoryMock.replaceTripData.mockClear();

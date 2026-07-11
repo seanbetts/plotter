@@ -16,6 +16,8 @@ export type TripRepository = {
   listDestinations(): Promise<Destination[]>;
   saveDestination(destination: Destination): Promise<void>;
   deleteDestination(destinationId: string): Promise<void>;
+  deleteDestinations?(destinationIds: string[]): Promise<void>;
+  prepareDestinationDeletion?(destinationIds: string[]): Promise<() => Promise<void>>;
   listActivities(destinationId: string): Promise<Activity[]>;
   createActivity(input: {
     destinationId: string;
@@ -204,6 +206,24 @@ async function createLocalMediaUrl(file: File) {
 }
 
 export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): TripRepository {
+  async function deleteDestinations(destinationIds: string[]): Promise<void> {
+    const requestedIds = new Set(destinationIds);
+    if (requestedIds.size === 0) return;
+    await db.transaction('rw', db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
+      const attachedActivities = (await db.activities.where('tripId').equals(tripId).toArray())
+        .filter((activity) => requestedIds.has(activity.destinationId));
+      const attachedActivityMedia = (await db.activityMedia.where('tripId').equals(tripId).toArray())
+        .filter((mediaItem) => requestedIds.has(mediaItem.destinationId));
+      const attachedLegs = (await db.routeLegs.where('tripId').equals(tripId).toArray()).filter(
+        (leg) => requestedIds.has(leg.originDestinationId) || requestedIds.has(leg.targetDestinationId),
+      );
+      await db.destinations.bulkDelete([...requestedIds].map((id) => localTripKey(tripId, id)));
+      await db.activities.bulkDelete(attachedActivities.map((activity) => activity.id));
+      await db.activityMedia.bulkDelete(attachedActivityMedia.map((mediaItem) => mediaItem.id));
+      await db.routeLegs.bulkDelete(attachedLegs.map((leg) => leg.id));
+    });
+  }
+
   return {
     async listDestinations(): Promise<Destination[]> {
       const destinations = await db.destinations.where('tripId').equals(tripId).toArray();
@@ -218,29 +238,12 @@ export function createTripRepository(db: TripDb, tripId = defaultLocalTripId): T
     },
 
     async deleteDestination(destinationId: string): Promise<void> {
-      await db.transaction('rw', db.destinations, db.routeLegs, db.activities, db.activityMedia, async () => {
-        const destination = await db.destinations.get(localTripKey(tripId, destinationId));
-        if (destination?.tripId !== tripId) return;
+      await deleteDestinations([destinationId]);
+    },
 
-        const attachedActivities = await db.activities
-          .where('[tripId+destinationId]')
-          .equals([tripId, destinationId])
-          .toArray();
-        const attachedActivityMedia = await db.activityMedia
-          .where('[tripId+destinationId]')
-          .equals([tripId, destinationId])
-          .toArray();
-        const attachedLegs = (await db.routeLegs.where('tripId').equals(tripId).toArray()).filter(
-          (leg) =>
-            leg.originDestinationId === destinationId ||
-            leg.targetDestinationId === destinationId,
-        );
-
-        await db.destinations.delete(localTripKey(tripId, destinationId));
-        await db.activities.bulkDelete(attachedActivities.map((activity) => activity.id));
-        await db.activityMedia.bulkDelete(attachedActivityMedia.map((mediaItem) => mediaItem.id));
-        await db.routeLegs.bulkDelete(attachedLegs.map((leg) => leg.id));
-      });
+    deleteDestinations,
+    async prepareDestinationDeletion(destinationIds) {
+      return () => deleteDestinations(destinationIds);
     },
 
     async listActivities(destinationId: string): Promise<Activity[]> {

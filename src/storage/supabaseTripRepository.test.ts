@@ -633,6 +633,35 @@ describe('supabase trip repository mappers', () => {
     expect(calls).toEqual(['destination', 'storage:trip-media', 'storage:archive-media']);
   });
 
+  it('batch deletes destination rows in one statement before best-effort storage cleanup', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationIds = [crypto.randomUUID(), crypto.randomUUID()];
+    const mediaIn = vi.fn(async () => ({
+      data: [{ bucket_id: 'trip-media', object_path: 'one.webp' }], error: null,
+    }));
+    const mediaEq = vi.fn(() => ({ in: mediaIn }));
+    const deleteIn = vi.fn(async () => ({ error: null }));
+    const deleteEq = vi.fn(() => ({ in: deleteIn }));
+    const remove = vi.fn(async () => ({ data: [], error: new Error('cleanup failed') }));
+    const supabase = {
+      storage: { from: vi.fn(() => ({ remove })) },
+      from: vi.fn((table: string) => {
+        if (table === 'media_assets') return { select: vi.fn(() => ({ eq: mediaEq })) };
+        if (table === 'destinations') return { delete: vi.fn(() => ({ eq: deleteEq })) };
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    };
+    const repository = createSupabaseTripRepository(supabase as never, tripId);
+
+    await expect(repository.deleteDestinations!(destinationIds)).resolves.toBeUndefined();
+
+    expect(mediaEq).toHaveBeenCalledWith('trip_id', tripId);
+    expect(mediaIn).toHaveBeenCalledWith('destination_id', destinationIds);
+    expect(deleteEq).toHaveBeenCalledWith('trip_id', tripId);
+    expect(deleteIn).toHaveBeenCalledWith('id', destinationIds);
+    expect(remove).toHaveBeenCalledWith(['one.webp']);
+  });
+
   it('lists activities for a destination ordered by activity order and creation time', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();

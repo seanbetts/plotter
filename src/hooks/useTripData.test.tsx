@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
-import type { RouteLeg } from '../domain/types';
+import type { Destination, RouteLeg } from '../domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
@@ -2007,7 +2007,7 @@ describe('useTripData', () => {
     let storedRoutes = [priorLeg];
     let failNextRouteSave = true;
     const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
-      listDestinations: async () => structuredClone(storedDestinations),
+      listDestinations: async () => structuredClone([...storedDestinations].sort((left, right) => left.order - right.order)),
       listRouteLegs: async () => structuredClone(storedRoutes),
       saveDestination: async (destination) => {
         const index = storedDestinations.findIndex(({ id }) => id === destination.id);
@@ -2059,6 +2059,89 @@ describe('useTripData', () => {
 
     expect(result.current.destinations).toEqual([origin, target]);
     expect(result.current.routeLegs).toEqual([priorLeg]);
+  });
+
+  it('retains two concurrent inserts by applying each queued recipe to the fresh snapshot', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 1 });
+    const storedDestinations = [origin, target];
+    let storedRoutes: RouteLeg[] = [];
+    const firstProvider = createDeferred({
+      distanceKm: 5, travelTimeHours: 1,
+      geometry: { type: 'LineString' as const, coordinates: [[0, 0], [5, 0]] },
+      provider: 'test', profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 5 }],
+    });
+    let calculationCount = 0;
+    const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
+      listDestinations: async () => structuredClone([...storedDestinations].sort((left, right) => left.order - right.order)),
+      listRouteLegs: async () => structuredClone(storedRoutes),
+      saveDestination: async (destination) => {
+        const index = storedDestinations.findIndex(({ id }) => id === destination.id);
+        if (index === -1) storedDestinations.push(destination); else storedDestinations[index] = destination;
+      },
+      saveRouteLeg: async (routeLeg) => {
+        const index = storedRoutes.findIndex(({ id }) => id === routeLeg.id);
+        if (index === -1) storedRoutes.push(routeLeg); else storedRoutes[index] = routeLeg;
+      },
+      deleteRouteLeg: async (id) => { storedRoutes = storedRoutes.filter((routeLeg) => routeLeg.id !== id); },
+    });
+    const calculateRoute = vi.fn(async ({ origin: routeOrigin, target: routeTarget }) => {
+      calculationCount += 1;
+      if (calculationCount === 1) return firstProvider.promise;
+      return {
+        distanceKm: 5, travelTimeHours: 1,
+        geometry: { type: 'LineString' as const, coordinates: [[routeOrigin.lng, routeOrigin.lat], [routeTarget.lng, routeTarget.lat]] },
+        provider: 'test', profile: 'driving-car' as const,
+        sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 5 }],
+      };
+    });
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let first!: Promise<Destination>;
+    let second!: Promise<Destination>;
+    await act(async () => {
+      first = result.current.addDestination({ name: 'First insert', coordinates: { lat: 0, lng: 4 } });
+      await waitFor(() => expect(calculateRoute).toHaveBeenCalledTimes(1));
+      second = result.current.addDestination({ name: 'Second insert', coordinates: { lat: 0, lng: 6 } });
+      firstProvider.resolve();
+      await Promise.all([first, second]);
+    });
+
+    expect([...storedDestinations].sort((left, right) => left.order - right.order).map(({ name }) => name))
+      .toEqual(['Origin', 'First insert', 'Second insert', 'Target']);
+    expect(result.current.destinations.map(({ name }) => name)).toEqual(['Origin', 'First insert', 'Second insert', 'Target']);
+  });
+
+  it('does not run destructive destination cascade when replacement route persistence fails', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const removed = createDestination({ name: 'Removed', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const routes = [
+      createRouteLeg({ originDestinationId: origin.id, targetDestinationId: removed.id }),
+      createRouteLeg({ originDestinationId: removed.id, targetDestinationId: target.id }),
+    ];
+    const dependentRecords = { activities: ['activity-1'], activityMedia: ['media-1'] };
+    const deleteDestination = vi.fn(async () => {
+      dependentRecords.activities = [];
+      dependentRecords.activityMedia = [];
+    });
+    const repository = createMemoryRepository(Promise.resolve([origin, removed, target]), {
+      listDestinations: async () => [origin, removed, target],
+      listRouteLegs: async () => routes,
+      saveRouteLeg: async () => { throw new Error('replacement route failed'); },
+      deleteDestination,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.deleteDestination(removed.id)).rejects.toThrow('replacement route failed');
+    });
+
+    expect(deleteDestination).not.toHaveBeenCalled();
+    expect(dependentRecords).toEqual({ activities: ['activity-1'], activityMedia: ['media-1'] });
   });
 
   it('removes attached route legs from state when deleting a destination', async () => {

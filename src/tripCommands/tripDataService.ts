@@ -481,8 +481,8 @@ function countRouteLegChanges(currentRouteLegs: RouteLeg[], nextRouteLegs: Route
 
 async function saveStopsAndRouteLegs(input: {
   repository: TripRepository;
-  nextDestinations: Destination[];
-  routingVehicle: TripSummary['routingVehicle'];
+  applyRecipe: (currentDestinations: Destination[]) => Destination[] | Promise<Destination[]>;
+  getRoutingVehicle: () => Promise<TripSummary['routingVehicle']>;
   calculateRoute?: CalculateRoute;
 }) {
   const [loadedDestinations, loadedRouteLegs] = await Promise.all([
@@ -491,25 +491,33 @@ async function saveStopsAndRouteLegs(input: {
   ]);
   const priorDestinations = structuredClone(loadedDestinations);
   const currentRouteLegs = structuredClone(loadedRouteLegs);
+  const nextDestinations = await input.applyRecipe(priorDestinations);
+  const routingVehicle = await input.getRoutingVehicle();
   const planned = planRouteLegReconciliation({
-    destinations: input.nextDestinations,
+    destinations: nextDestinations,
     currentRouteLegs,
-    routingVehicle: input.routingVehicle,
+    routingVehicle,
   });
   const routeLegs = await calculateAutomaticRouteLegs({
-    destinations: input.nextDestinations,
+    destinations: nextDestinations,
     routeLegs: planned.routeLegs,
-    routingVehicle: input.routingVehicle,
+    routingVehicle,
     calculateRoute: input.calculateRoute,
   });
-  const nextDestinationIds = new Set(input.nextDestinations.map(({ id }) => id));
+  const nextDestinationIds = new Set(nextDestinations.map(({ id }) => id));
   const nextRouteIds = new Set(routeLegs.map(({ id }) => id));
+  const removedDestinationIds = priorDestinations
+    .filter(({ id }) => !nextDestinationIds.has(id))
+    .map(({ id }) => id);
+  const commitDestinationDeletion = input.repository.prepareDestinationDeletion
+    ? await input.repository.prepareDestinationDeletion(removedDestinationIds)
+    : async () => {
+        if (input.repository.deleteDestinations) await input.repository.deleteDestinations(removedDestinationIds);
+        else for (const destinationId of removedDestinationIds) await input.repository.deleteDestination(destinationId);
+      };
 
   try {
-    for (const destination of input.nextDestinations) await input.repository.saveDestination(destination);
-    for (const destination of priorDestinations) {
-      if (!nextDestinationIds.has(destination.id)) await input.repository.deleteDestination(destination.id);
-    }
+    for (const destination of nextDestinations) await input.repository.saveDestination(destination);
     for (const routeLeg of currentRouteLegs) {
       if (!nextRouteIds.has(routeLeg.id)) await input.repository.deleteRouteLeg(routeLeg.id);
     }
@@ -519,7 +527,7 @@ async function saveStopsAndRouteLegs(input: {
     const priorDestinationIds = new Set(priorDestinations.map(({ id }) => id));
     const priorRouteIds = new Set(currentRouteLegs.map(({ id }) => id));
     const rollbackOperations: Array<{ label: string; operation: () => Promise<void> }> = [
-      ...input.nextDestinations.filter(({ id }) => !priorDestinationIds.has(id)).map(({ id }) => ({
+      ...nextDestinations.filter(({ id }) => !priorDestinationIds.has(id)).map(({ id }) => ({
         label: `destination ${id} removal`, operation: () => input.repository.deleteDestination(id),
       })),
       ...priorDestinations.map((destination) => ({
@@ -543,8 +551,10 @@ async function saveStopsAndRouteLegs(input: {
       : 'Previous destination and route snapshots were restored.';
     throw new Error(`Unable to persist trip snapshot: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
   }
+  await commitDestinationDeletion();
 
   return {
+    destinations: nextDestinations,
     routeLegs,
     routesRecalculated: countRouteLegChanges(currentRouteLegs, routeLegs),
   };
@@ -702,6 +712,7 @@ export function createTripDataService(
     async recalculateFailedRoutes(input) {
       return withCommandHandling(async () => {
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        return enqueueTripMutation(tripId, async () => {
         const trip = await findTripSummary(dependencies.directory, tripId);
         const repository = dependencies.createTripRepository(trip.id);
         const [destinations, currentRouteLegs] = await Promise.all([
@@ -761,12 +772,14 @@ export function createTripDataService(
             changed,
           },
         );
+        });
       });
     },
 
     async setVehicle(input, options) {
       return withCommandHandling(async () => {
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        return enqueueTripMutation(tripId, async () => {
         const preset = validateVehiclePreset(input.preset, 'preset');
         const trip = await findTripSummary(dependencies.directory, tripId);
         const confirmation = ensureConfirmed(
@@ -851,6 +864,7 @@ export function createTripDataService(
           }
           throw storageError;
         }
+        });
       });
     },
 
@@ -859,9 +873,9 @@ export function createTripDataService(
         const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
         const routeLegId = trimRequiredString(input.routeLegId, 'Route leg id', 'routeLegId');
         const patch = validateRouteLegIntentPatch(input.patch);
+        return enqueueTripMutation(tripId, async () => {
         const trip = await findTripSummary(dependencies.directory, tripId);
         const repository = dependencies.createTripRepository(trip.id);
-        return enqueueTripMutation(trip.id, async () => {
         const [destinations, routeLegs] = await Promise.all([
           repository.listDestinations(),
           repository.listRouteLegs(),
@@ -1173,14 +1187,14 @@ export function createTripDataService(
 
         const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          nextDestinations: nextStops,
-          routingVehicle: trip.routingVehicle,
+          applyRecipe: () => nextStops,
+          getRoutingVehicle: async () => (await findTripSummary(dependencies.directory, tripId)).routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         }));
 
         changed.routesRecalculated = saved.routesRecalculated;
         return commandSuccess(`Replaced stops for trip ${tripId}.`, {
-          stops: nextStops,
+          stops: saved.destinations,
           routeLegs: saved.routeLegs,
           changed,
         });
@@ -1247,15 +1261,29 @@ export function createTripDataService(
 
         const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          nextDestinations: nextStops,
-          routingVehicle: trip.routingVehicle,
+          applyRecipe: (freshStops) => {
+            let freshInsertionIndex = freshStops.length;
+            if (input.afterStopId) {
+              const index = freshStops.findIndex(({ id }) => id === input.afterStopId);
+              if (index === -1) throw new Error('Stop not found.');
+              freshInsertionIndex = index + 1;
+            } else if (input.beforeStopId) {
+              const index = freshStops.findIndex(({ id }) => id === input.beforeStopId);
+              if (index === -1) throw new Error('Stop not found.');
+              freshInsertionIndex = index;
+            }
+            return normalizeOrderedDestinations([
+              ...freshStops.slice(0, freshInsertionIndex), insertedStop, ...freshStops.slice(freshInsertionIndex),
+            ]);
+          },
+          getRoutingVehicle: async () => (await findTripSummary(dependencies.directory, tripId)).routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         }));
         changed.routesRecalculated = saved.routesRecalculated;
 
         return commandSuccess(`Inserted ${insertedStop.name}.`, {
           stop: insertedStop,
-          stops: nextStops,
+          stops: saved.destinations,
           routeLegs: saved.routeLegs,
           changed,
         });
@@ -1296,14 +1324,20 @@ export function createTripDataService(
 
         const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          nextDestinations: nextStops,
-          routingVehicle: trip.routingVehicle,
+          applyRecipe: async (freshStops) => {
+            const freshStop = freshStops.find(({ id }) => id === stopId);
+            if (!freshStop) throw new Error('Stop not found.');
+            const freshUpdatedStop = await updateDestinationFromPatch(freshStop, patch, dependencies);
+            return freshStops.map((candidate) => candidate.id === stopId ? freshUpdatedStop : candidate);
+          },
+          getRoutingVehicle: async () => (await findTripSummary(dependencies.directory, tripId)).routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         }));
         changed.routesRecalculated = saved.routesRecalculated;
 
-        return commandSuccess(`Updated ${updatedStop.name}.`, {
-          stop: updatedStop,
+        const savedStop = saved.destinations.find(({ id }) => id === stopId)!;
+        return commandSuccess(`Updated ${savedStop.name}.`, {
+          stop: savedStop,
           routeLegs: saved.routeLegs,
           changed,
         });
@@ -1346,8 +1380,10 @@ export function createTripDataService(
 
         const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          nextDestinations: nextStops,
-          routingVehicle: trip.routingVehicle,
+          applyRecipe: (freshStops) => normalizeOrderedDestinations(
+            freshStops.filter((candidate) => candidate.id !== stopId),
+          ),
+          getRoutingVehicle: async () => (await findTripSummary(dependencies.directory, tripId)).routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         }));
         changed.routesRecalculated = saved.routesRecalculated;
@@ -1402,14 +1438,21 @@ export function createTripDataService(
 
         const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          nextDestinations: nextStops,
-          routingVehicle: trip.routingVehicle,
+          applyRecipe: (freshStops) => {
+            const freshById = new Map(freshStops.map((stop) => [stop.id, stop]));
+            const freshRequestedIds = new Set(orderedIds);
+            return normalizeOrderedDestinations([
+              ...orderedIds.map((id) => freshById.get(id)).filter((stop): stop is Destination => Boolean(stop)),
+              ...freshStops.filter((stop) => !freshRequestedIds.has(stop.id)),
+            ]);
+          },
+          getRoutingVehicle: async () => (await findTripSummary(dependencies.directory, tripId)).routingVehicle,
           calculateRoute: dependencies.calculateRoute,
         }));
         changed.routesRecalculated = saved.routesRecalculated;
 
         return commandSuccess('Reordered stops.', {
-          stops: nextStops,
+          stops: saved.destinations,
           routeLegs: saved.routeLegs,
           changed,
         });

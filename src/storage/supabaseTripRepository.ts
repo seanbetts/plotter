@@ -451,6 +451,44 @@ export function createSupabaseTripRepository(
   tripId: string,
   options: SupabaseTripRepositoryOptions = {},
 ): TripRepository {
+  async function prepareDestinationDeletion(destinationIds: string[]) {
+    const uniqueIds = [...new Set(destinationIds)];
+    if (uniqueIds.length === 0) return async () => undefined;
+    const mediaRows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
+      await supabase
+        .from('media_assets')
+        .select('*')
+        .eq('trip_id', tripId)
+        .in('destination_id', uniqueIds),
+      'Unable to load destination media.',
+    );
+    const objectPathsByBucketId = new Map<string, string[]>();
+    for (const row of mediaRows) {
+      objectPathsByBucketId.set(row.bucket_id, [
+        ...(objectPathsByBucketId.get(row.bucket_id) ?? []),
+        row.object_path,
+      ]);
+    }
+    return async () => {
+      assertSupabaseWriteSucceeded(
+        await supabase
+          .from('destinations')
+          .delete()
+          .eq('trip_id', tripId)
+          .in('id', uniqueIds),
+        'Unable to delete destinations.',
+      );
+      for (const [bucketId, objectPaths] of objectPathsByBucketId) {
+        await removeStorageObjectsBestEffort(bucketId, objectPaths);
+      }
+    };
+  }
+
+  async function deleteDestinations(destinationIds: string[]) {
+    const commit = await prepareDestinationDeletion(destinationIds);
+    await commit();
+  }
+
   async function listExistingDestinationMediaSortOrders(tripId: string, destinationId: string) {
     return assertNoSupabaseError<Pick<SupabaseMediaAssetRow, 'sort_order'>[]>(
       await supabase
@@ -883,6 +921,9 @@ export function createSupabaseTripRepository(
         await removeStorageObjectsBestEffort(bucketId, objectPaths);
       }
     },
+
+    deleteDestinations,
+    prepareDestinationDeletion,
 
     async listActivities(destinationId) {
       return listTripActivities(tripId, destinationId);

@@ -198,10 +198,10 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   }, [repositoryToken, startReload]);
 
   const reconcilePersistedRouteLegs = useCallback(
-    (nextDestinations: Destination[]) => {
+    (applyRecipe: (currentDestinations: Destination[]) => Destination[]) => {
       const generation = repositoryToken;
       return enqueueRouteLegMutations([], async () => {
-        if (!isActiveGeneration(generation)) return routeLegsRef.current;
+        if (!isActiveGeneration(generation)) return { destinations: destinationsRef.current, routeLegs: routeLegsRef.current };
 
         const [loadedDestinations, loadedRouteLegs] = await Promise.all([
           repository.listDestinations(),
@@ -209,7 +209,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         ]);
         const priorDestinations = structuredClone(loadedDestinations);
         const persistedRouteLegs = structuredClone(loadedRouteLegs);
-        if (!isActiveGeneration(generation)) return routeLegsRef.current;
+        if (!isActiveGeneration(generation)) return { destinations: destinationsRef.current, routeLegs: routeLegsRef.current };
+        const nextDestinations = applyRecipe(priorDestinations);
         const currentVehicle = routingVehicleRef.current;
         const planned = planRouteLegReconciliation({
           destinations: nextDestinations,
@@ -224,12 +225,18 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         });
         const nextDestinationIds = new Set(nextDestinations.map(({ id }) => id));
         const nextRouteLegIds = new Set(nextRouteLegs.map(({ id }) => id));
+        const removedDestinationIds = priorDestinations
+          .filter(({ id }) => !nextDestinationIds.has(id))
+          .map(({ id }) => id);
+        const commitDestinationDeletion = repository.prepareDestinationDeletion
+          ? await repository.prepareDestinationDeletion(removedDestinationIds)
+          : async () => {
+              if (repository.deleteDestinations) await repository.deleteDestinations(removedDestinationIds);
+              else for (const destinationId of removedDestinationIds) await repository.deleteDestination(destinationId);
+            };
 
         try {
           for (const destination of nextDestinations) await repository.saveDestination(destination);
-          for (const destination of priorDestinations) {
-            if (!nextDestinationIds.has(destination.id)) await repository.deleteDestination(destination.id);
-          }
           for (const routeLeg of persistedRouteLegs) {
             if (!nextRouteLegIds.has(routeLeg.id)) await repository.deleteRouteLeg(routeLeg.id);
           }
@@ -263,7 +270,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             : 'Previous destination and route snapshots were restored.';
           throw new Error(`Unable to persist trip snapshot: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
         }
-        return nextRouteLegs;
+        await commitDestinationDeletion();
+        return { destinations: nextDestinations, routeLegs: nextRouteLegs };
       });
     },
     [calculateRoute, enqueueRouteLegMutations, isActiveGeneration, repository, repositoryToken],
@@ -291,32 +299,26 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
       return {
         async addDestination(input: AddDestinationInput) {
-          const insertionIndex = findBestDestinationInsertionIndex(
-            destinationsRef.current,
-            input.coordinates,
-          );
           const destination = createDestination({
             ...input,
-            order: insertionIndex,
+            order: 0,
+          });
+          if (!isActiveAction()) return destination;
+          const persisted = await reconcilePersistedRouteLegs((currentDestinations) => {
+            const insertionIndex = findBestDestinationInsertionIndex(currentDestinations, input.coordinates);
+            const nextDestinations = [...currentDestinations];
+            nextDestinations.splice(insertionIndex, 0, destination);
+            return nextDestinations.map((nextDestination, order) =>
+              nextDestination.order === order ? nextDestination : patchDestination(nextDestination, { order }));
           });
           if (!isActiveAction()) return destination;
 
-          const nextDestinations = [...destinationsRef.current];
-          nextDestinations.splice(insertionIndex, 0, destination);
-          const orderedDestinations = nextDestinations.map((nextDestination, order) =>
-            nextDestination.order === order
-              ? nextDestination
-              : patchDestination(nextDestination, { order }),
-          );
-          const nextRouteLegs = await reconcilePersistedRouteLegs(orderedDestinations);
-          if (!isActiveAction()) return destination;
-
-          replaceDestinations(orderedDestinations);
+          replaceDestinations(persisted.destinations);
           updateActivitiesByDestinationId((current) => ({
             ...current,
             [destination.id]: current[destination.id] ?? [],
           }));
-          replaceRouteLegs(nextRouteLegs);
+          replaceRouteLegs(persisted.routeLegs);
           return destination;
         },
 
@@ -328,33 +330,34 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             (destination) => destination.id === destinationId,
           );
           if (!existing) return;
-          const updated = patchDestination(existing, patch);
           if (!isActiveAction()) return;
 
-          const nextDestinations = destinationsRef.current.map((destination) =>
-            destination.id === destinationId ? updated : destination,
-          );
-          const nextRouteLegs = await reconcilePersistedRouteLegs(nextDestinations);
+          const persisted = await reconcilePersistedRouteLegs((currentDestinations) =>
+            currentDestinations.map((destination) => destination.id === destinationId
+              ? patchDestination(destination, patch)
+              : destination));
           if (!isActiveAction()) return;
 
-          replaceDestinations(nextDestinations);
-          replaceRouteLegs(nextRouteLegs);
+          replaceDestinations(persisted.destinations);
+          replaceRouteLegs(persisted.routeLegs);
         },
 
         async deleteDestination(destinationId: string) {
           if (!isActiveAction()) return;
 
-          const nextDestinations = destinationsRef.current.filter((destination) => destination.id !== destinationId);
-          const nextRouteLegs = await reconcilePersistedRouteLegs(nextDestinations);
+          const persisted = await reconcilePersistedRouteLegs((currentDestinations) =>
+            currentDestinations
+              .filter((destination) => destination.id !== destinationId)
+              .map((destination, order) => destination.order === order ? destination : patchDestination(destination, { order })));
           if (!isActiveAction()) return;
 
-          replaceDestinations(nextDestinations);
+          replaceDestinations(persisted.destinations);
           updateActivitiesByDestinationId((current) => {
             const remaining = { ...current };
             delete remaining[destinationId];
             return remaining;
           });
-          replaceRouteLegs(nextRouteLegs);
+          replaceRouteLegs(persisted.routeLegs);
         },
 
         async reorderDestinations(destinationIds: string[]) {
@@ -381,9 +384,16 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           });
           replaceDestinations(orderedDestinations);
           replaceRouteLegs(optimisticPlan.routeLegs);
-          let nextRouteLegs: RouteLeg[];
+          let persisted: { destinations: Destination[]; routeLegs: RouteLeg[] };
           try {
-            nextRouteLegs = await reconcilePersistedRouteLegs(orderedDestinations);
+            persisted = await reconcilePersistedRouteLegs((freshDestinations) => {
+              const freshById = new Map(freshDestinations.map((destination) => [destination.id, destination]));
+              const freshRequestedIds = new Set(destinationIds);
+              return [
+                ...destinationIds.map((destinationId) => freshById.get(destinationId)).filter((destination): destination is Destination => Boolean(destination)),
+                ...freshDestinations.filter((destination) => !freshRequestedIds.has(destination.id)),
+              ].map((destination, order) => patchDestination(destination, { order }));
+            });
           } catch (caught) {
             if (isActiveAction()) {
               replaceDestinations(priorDestinations);
@@ -393,7 +403,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           }
           if (!isActiveAction()) return;
 
-          replaceRouteLegs(nextRouteLegs);
+          replaceDestinations(persisted.destinations);
+          replaceRouteLegs(persisted.routeLegs);
         },
 
         async addRouteLeg(input: {
