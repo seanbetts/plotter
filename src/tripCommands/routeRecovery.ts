@@ -29,6 +29,18 @@ const endpointRadiusKm = endpointRadiusMeters / 1000;
 const strictEndpointRadiusMeters = 350;
 const snapToleranceKm = 0.001;
 
+class EndpointRecoveryRejectedError extends Error {
+  readonly name = 'EndpointRecoveryRejectedError';
+
+  constructor(readonly details: {
+    endpoint: EndpointName;
+    profile: TripRoutingVehicle['profile'];
+    snapDistanceKm: number;
+  }) {
+    super(`Recovered route ${details.endpoint} is outside the 2 km endpoint radius.`);
+  }
+}
+
 function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
 }
@@ -170,6 +182,10 @@ function isDisconnectedRouteError(error: unknown) {
   return isOpenRouteServiceError(error) && error.status === 404 && error.code === 2009;
 }
 
+function isEndpointRecoveryRejectedError(error: unknown): error is EndpointRecoveryRejectedError {
+  return error instanceof EndpointRecoveryRejectedError;
+}
+
 function anchorWarning(endpointAnchors: RecoveredRoute['endpointAnchors']): RouteWarning[] {
   const adjustedAnchors = Object.entries(endpointAnchors) as Array<[EndpointName, RoutingAnchor | undefined]>;
   return adjustedAnchors
@@ -195,7 +211,11 @@ function anchorFromGeometryEndpoint(input: {
 }): RoutingAnchor | undefined {
   const snapDistanceKm = coordinateDistanceKm(input.originalCoordinates, input.snappedCoordinates);
   if (snapDistanceKm > endpointRadiusKm) {
-    throw new Error(`Recovered route ${input.endpoint} is outside the 2 km endpoint radius.`);
+    throw new EndpointRecoveryRejectedError({
+      endpoint: input.endpoint,
+      profile: input.profile,
+      snapDistanceKm,
+    });
   }
   if (snapDistanceKm <= snapToleranceKm) return undefined;
 
@@ -278,7 +298,11 @@ export async function calculateRouteWithRecovery(
       } catch (sameProfileRecoveryError) {
         if (
           input.profile === 'driving-hgv' &&
-          (endpointRecoveryIndex(sameProfileRecoveryError, input) !== null || isDisconnectedRouteError(sameProfileRecoveryError))
+          (
+            endpointRecoveryIndex(sameProfileRecoveryError, input) !== null ||
+            isDisconnectedRouteError(sameProfileRecoveryError) ||
+            isEndpointRecoveryRejectedError(sameProfileRecoveryError)
+          )
         ) {
           return calculateDrivingCarFallback(input, calculate);
         }

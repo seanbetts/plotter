@@ -219,6 +219,68 @@ describe('route recovery', () => {
     expect(result.endpointAnchors.target).toMatchObject({ profile: 'driving-car' });
   });
 
+  it('falls back to car when HGV endpoint recovery snaps beyond the 2 km guard', async () => {
+    const hgvBeyondRadius = { lat: 70.1, lng: 23.27165 };
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      const targetIndex = request.waypoints.length + 1;
+      if (request.profile === 'driving-hgv' && !request.radiuses) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-hgv', coordinateIndex: targetIndex });
+      }
+      if (request.profile === 'driving-hgv') {
+        return routeFor({ origin: request.origin, target: hgvBeyondRadius, profile: request.profile });
+      }
+      if (!request.radiuses) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: targetIndex });
+      }
+      return routeFor({ origin: request.origin, target: altaAnchorCoordinates, profile: request.profile });
+    });
+
+    const result = await calculateRouteWithRecovery(expeditionInput, calculate);
+
+    expect(calculate).toHaveBeenCalledTimes(4);
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      profile: 'driving-hgv',
+      radiuses: [350, 350, 2000],
+    }));
+    expect(calculate).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      profile: 'driving-car',
+      waypoints,
+      ferryPolicy: 'require',
+    }));
+    expect(vi.mocked(calculate).mock.calls[2][0]).not.toHaveProperty('radiuses');
+    expect(calculate).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      profile: 'driving-car',
+      radiuses: [350, 350, 2000],
+    }));
+    expect(result.profile).toBe('driving-car');
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'VEHICLE_PROFILE_FALLBACK',
+      'ROUTING_ANCHOR_ADJUSTED',
+    ]);
+    expect(result.endpointAnchors.target).toMatchObject({
+      profile: 'driving-car',
+      coordinates: altaAnchorCoordinates,
+      originalCoordinates: alta,
+    });
+  });
+
+  it('propagates unrelated local errors from HGV endpoint recovery', async () => {
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      const targetIndex = request.waypoints.length + 1;
+      if (!request.radiuses) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-hgv', coordinateIndex: targetIndex });
+      }
+      return {
+        ...routeFor({ origin: request.origin, target: request.target, profile: request.profile }),
+        geometry: { type: 'LineString' as const, coordinates: [] },
+      };
+    });
+
+    await expect(calculateRouteWithRecovery(expeditionInput, calculate))
+      .rejects.toThrow('Route calculation returned invalid endpoint geometry');
+    expect(calculate).toHaveBeenCalledTimes(2);
+  });
+
   it('does not fall back to driving-car when HGV endpoint recovery hits quota', async () => {
     const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
       const targetIndex = request.waypoints.length + 1;

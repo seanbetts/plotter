@@ -233,3 +233,64 @@ Result: 62 files / 894 tests passed. Node emitted the existing localStorage expe
 - Auth/quota errors are still propagated and are not converted into fallback routes.
 - Unrelated modified reports from Tasks 1 and 4 remain unstaged and outside this fix commit.
 - No remaining concerns.
+
+## Final HGV Exhaustion Fix - 2026-07-11
+
+### RED
+
+- Added `src/tripCommands/routeRecovery.test.ts` regression before production changes:
+  - HGV exact request returns ORS 2010.
+  - HGV radius retry returns provider geometry whose recovered endpoint is beyond the local 2 km guard.
+  - Recovery must treat that as exhausted HGV endpoint recovery, continue to car exact, then car radius after car ORS 2010, and return a car route with `VEHICLE_PROFILE_FALLBACK` plus the car endpoint anchor warning.
+- Added a companion local-error guard proving unrelated local errors from HGV endpoint recovery still propagate.
+- RED command:
+
+```bash
+npm test -- src/tripCommands/routeRecovery.test.ts
+```
+
+RED result: 1 failed / 19 passed. Failure was the expected terminal local error: `Recovered route target is outside the 2 km endpoint radius.`
+
+### GREEN
+
+- Added an internal typed `EndpointRecoveryRejectedError` in `src/tripCommands/routeRecovery.ts`.
+- The >2 km local endpoint guard now throws that typed signal instead of an indistinguishable generic error.
+- `calculateRouteWithRecovery` treats that signal as exhausted same-profile recovery only when the requested profile is `driving-hgv`, then continues to the existing car fallback path.
+- Car-profile radius recovery still fails terminally when its anchor is beyond 2 km, because the typed signal is not caught for `driving-car`.
+- Unrelated local/provider errors still propagate; only ORS 2010, ORS 2009, and the typed HGV endpoint-rejected signal trigger HGV-to-car fallback.
+
+### Commands And Results
+
+```bash
+npm test -- src/tripCommands/routeRecovery.test.ts
+```
+
+Result: 1 file / 20 tests passed.
+
+```bash
+npm test -- src/tripCommands/routeRecovery.test.ts src/tripCommands/routeOrchestration.test.ts src/tripCommands/tripManifest.test.ts src/tripCommands/tripDataService.test.ts src/hooks/useTripData.test.tsx src/adapters/openRouteService.test.ts
+```
+
+Result: 6 files / 173 tests passed.
+
+```bash
+npm run build
+```
+
+Result: passed (`tsc -b` and `vite build`). Vite emitted only the existing large chunk warning.
+
+```bash
+npm test
+```
+
+Result: 62 files / 896 tests passed. Node emitted the existing localStorage experimental warnings.
+
+### Self-Review
+
+- The new signal is internal to `routeRecovery` and does not change adapter/provider mechanics.
+- The HGV fallback branch remains gated by `input.profile === 'driving-hgv'`, preserving the no car-to-HGV fallback rule.
+- The existing car >2 km terminal test remains green.
+- The new unrelated local-error test prevents broad catching of local failures.
+- No UI/provenance behavior was added.
+- Unrelated modified reports from Tasks 1 and 4 remain unstaged and outside this fix commit.
+- No remaining concerns.
