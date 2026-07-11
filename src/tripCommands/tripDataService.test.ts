@@ -177,7 +177,7 @@ function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
           },
         }),
   }));
-  const calculateRoute = vi.fn(async ({ origin, target }: { origin: { lat: number; lng: number }; target: { lat: number; lng: number } }) => ({
+  const calculateRoute = vi.fn(async ({ origin, target, profile = 'driving-car' }: { origin: { lat: number; lng: number }; target: { lat: number; lng: number }; profile?: 'driving-car' | 'driving-hgv' }) => ({
     distanceKm: 10,
     travelTimeHours: 1,
     geometry: {
@@ -185,7 +185,7 @@ function createHarness(overrides?: { enrichLink?: LinkEnricher }) {
       coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]],
     },
     provider: 'test',
-    profile: 'driving-car' as const,
+    profile,
     sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 10 }],
   }));
 
@@ -240,11 +240,11 @@ describe('TripDataService trips and stops', () => {
       createActivity,
       updateActivity,
     } as unknown as TripRepository;
-    const createTrip = vi.fn(async ({ name }: { name: string }) => ({
+    const createTrip = vi.fn(async ({ name, routingVehicle = standardRoutingVehicle }: { name: string; routingVehicle?: TripSummary['routingVehicle'] }) => ({
       id: 'bulk-trip-id',
       name,
       description: '',
-      routingVehicle: standardRoutingVehicle,
+      routingVehicle,
       createdAt: '2026-07-10T12:00:00.000Z',
       updatedAt: '2026-07-10T12:00:00.000Z',
     }));
@@ -428,6 +428,128 @@ describe('TripDataService trips and stops', () => {
     expect(harness.createTrip).not.toHaveBeenCalled();
     expect(harness.replaceTripData).not.toHaveBeenCalled();
   });
+
+  it('persists a valid version 2 manifest when route calculation fails', async () => {
+    const harness = createBulkManifestHarness();
+    harness.calculateRoute.mockRejectedValueOnce(new Error('Provider unavailable.'));
+    const manifest = {
+      manifestVersion: 2 as const,
+      name: 'Resilient trip',
+      vehiclePreset: 'large-camper' as const,
+      stops: harness.manifest.stops.slice(0, 2),
+      routeLegs: [],
+    };
+
+    const result = await harness.service.createTrip(manifest);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(harness.createTrip).toHaveBeenCalledWith({
+      name: 'Resilient trip',
+      routingVehicle: expect.objectContaining({ preset: 'large-camper' }),
+    });
+    expect(harness.replaceTripData).toHaveBeenCalledTimes(1);
+    expect(result.trip.routingVehicle.preset).toBe('large-camper');
+    expect(result.routeLegs).toEqual([expect.objectContaining({ status: 'failed', error: 'Provider unavailable.' })]);
+    expect(result.audit?.issues).toEqual([expect.objectContaining({ code: 'FAILED_ROUTE_LEG' })]);
+  });
+
+  it('changes the complete trip vehicle and recalculates automatic route legs', async () => {
+    const { service, trips, calculateRoute } = createHarness();
+    const created = await service.createTrip({
+      name: 'Vehicle trip',
+      stops: [
+        { name: 'A', place: { coordinates: { lat: 50, lng: 0 } } },
+        { name: 'B', place: { coordinates: { lat: 51, lng: 1 } } },
+      ],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+    calculateRoute.mockClear();
+
+    const result = await service.setVehicle({ tripId: created.trip.id, preset: 'expedition-truck' }, { yes: true });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(trips[0].routingVehicle).toEqual({
+      preset: 'expedition-truck',
+      profile: 'driving-hgv',
+      vehicleType: 'hgv',
+      restrictions: { length: 9, width: 2.55, height: 3.8, weight: 15, axleLoad: 7.5 },
+    });
+    expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
+      routingVehicle: expect.objectContaining({ preset: 'expedition-truck' }),
+      profile: 'driving-hgv',
+    }));
+    expect(result.routeLegs[0]).toMatchObject({ type: 'driving-auto', status: 'ready', profile: 'driving-hgv' });
+  });
+
+  it('updates only route intent and resolves ordered waypoint drafts', async () => {
+    const { service, repositories, calculateRoute, resolvePlace } = createHarness();
+    const created = await service.createTrip({
+      name: 'Intent trip',
+      stops: [
+        { name: 'A', place: { coordinates: { lat: 50, lng: 0 } } },
+        { name: 'B', place: { coordinates: { lat: 51, lng: 1 } } },
+      ],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+    const routeLegId = created.routeLegs[0].id;
+    calculateRoute.mockClear();
+    resolvePlace.mockClear();
+
+    const result = await service.updateRouteLeg({
+      tripId: created.trip.id,
+      routeLegId,
+      patch: {
+        ferryPolicy: 'require',
+        notes: 'Use the booked crossing.',
+        waypoints: [
+          { name: 'First ferry terminal', place: { coordinates: { lat: 50.2, lng: 0.2 } }, links: [] },
+          { name: 'Second ferry terminal', place: { coordinates: { lat: 50.8, lng: 0.8 } }, links: [] },
+        ],
+      },
+    }, { dryRun: true });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.routeLeg).toMatchObject({
+      id: routeLegId,
+      movement: 'drive',
+      calculation: 'automatic',
+      ferryPolicy: 'require',
+      notes: 'Use the booked crossing.',
+      waypoints: [
+        { order: 0, name: 'First ferry terminal' },
+        { order: 1, name: 'Second ferry terminal' },
+      ],
+    });
+    expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
+      ferryPolicy: 'require',
+      waypoints: [
+        expect.objectContaining({ order: 0, name: 'First ferry terminal' }),
+        expect.objectContaining({ order: 1, name: 'Second ferry terminal' }),
+      ],
+    }));
+    expect(resolvePlace).toHaveBeenCalledTimes(2);
+    expect(repositories.get(created.trip.id)?.routeLegs[0].ferryPolicy).toBe('allow');
+  });
+
+  it.each(['geometry', 'distanceKm', 'travelTimeHours', 'provider', 'profile', 'routeKey', 'calculatedAt', 'status', 'sections', 'warnings', 'error', 'type']) (
+    'rejects the derived route field %s',
+    async (field) => {
+      const { service } = createHarness();
+      const result = await service.updateRouteLeg({
+        tripId: 'trip-1',
+        routeLegId: 'leg-1',
+        patch: { [field]: 'authored' },
+      }, { dryRun: true });
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'FIELD_NOT_ALLOWED', path: `patch.${field}` },
+      });
+    },
+  );
 
   it('audits persisted trip activities with the same semantic rules', async () => {
     const { service } = createHarness();

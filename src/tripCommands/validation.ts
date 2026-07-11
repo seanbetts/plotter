@@ -5,7 +5,10 @@ import type {
   ActivityManifestDraft,
   ActivityPatch,
   PlaceInput,
-  RouteLegDirectiveDraft,
+  RouteLegDirectiveDraftV1,
+  RouteLegDirectiveDraftV2,
+  RouteLegIntentPatch,
+  RouteWaypointDraft,
   StopDraft,
   StopManifestDraft,
   StopPatch,
@@ -229,7 +232,7 @@ function validateStopManifest(input: unknown, path: string): StopManifestDraft {
   };
 }
 
-function validateRouteLegDirective(input: unknown, path: string): RouteLegDirectiveDraft {
+function validateRouteLegDirectiveV1(input: unknown, path: string): RouteLegDirectiveDraftV1 {
   if (!isRecord(input)) {
     throw new TripCommandValidationError('INVALID_ROUTE_LEG', `${path} must be an object.`, path);
   }
@@ -250,17 +253,124 @@ function validateRouteLegDirective(input: unknown, path: string): RouteLegDirect
   };
 }
 
+function validateEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  path: string,
+  code: string,
+): T | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !allowed.includes(value as T)) {
+    throw new TripCommandValidationError(code, `${path} must be one of: ${allowed.join(', ')}.`, path);
+  }
+  return value as T;
+}
+
+function validateRouteWaypointDraft(input: unknown, path: string): RouteWaypointDraft {
+  if (!isRecord(input)) {
+    throw new TripCommandValidationError('INVALID_ROUTE_WAYPOINT', `${path} must be an object.`, path);
+  }
+  rejectUnknownFields(input, ['name', 'place', 'notes', 'links'], path);
+  const place = validateManifestPlace(input.place, `${path}.place`, true);
+  if (!place) {
+    throw new TripCommandValidationError('INVALID_ROUTE_WAYPOINT', `${path} is invalid.`, path);
+  }
+  const notes = optionalString(input.notes, `${path}.notes`);
+  return {
+    name: requiredString(input.name, 'Waypoint name', `${path}.name`),
+    place,
+    ...(notes ? { notes } : {}),
+    links: optionalUrlArray(input.links, `${path}.links`) ?? [],
+  };
+}
+
+function validateRouteLegDirectiveV2(input: unknown, path: string): RouteLegDirectiveDraftV2 {
+  if (!isRecord(input)) {
+    throw new TripCommandValidationError('INVALID_ROUTE_LEG', `${path} must be an object.`, path);
+  }
+  rejectUnknownFields(
+    input,
+    ['fromStopKey', 'toStopKey', 'movement', 'calculation', 'ferryPolicy', 'waypoints', 'notes'],
+    path,
+  );
+  const movement = validateEnum(input.movement, ['drive', 'vehicle-shipping'], `${path}.movement`, 'INVALID_ROUTE_MOVEMENT') ?? 'drive';
+  const calculation = validateEnum(input.calculation, ['automatic', 'manual'], `${path}.calculation`, 'INVALID_ROUTE_CALCULATION') ?? 'automatic';
+  if (!((movement === 'drive' && calculation === 'automatic') || (movement === 'vehicle-shipping' && calculation === 'manual'))) {
+    throw new TripCommandValidationError(
+      'UNSUPPORTED_ROUTE_INTENT',
+      `${path} uses an unsupported movement and calculation pair.`,
+      path,
+    );
+  }
+  if (input.waypoints !== undefined && !Array.isArray(input.waypoints)) {
+    throw new TripCommandValidationError('INVALID_ROUTE_WAYPOINT_ARRAY', `${path}.waypoints must be an array.`, `${path}.waypoints`);
+  }
+  const ferryPolicy = validateEnum(input.ferryPolicy, ['allow', 'avoid', 'require'], `${path}.ferryPolicy`, 'INVALID_FERRY_POLICY') ?? 'allow';
+  const notes = optionalString(input.notes, `${path}.notes`);
+  return {
+    fromStopKey: requiredString(input.fromStopKey, 'Route start stop key', `${path}.fromStopKey`),
+    toStopKey: requiredString(input.toStopKey, 'Route end stop key', `${path}.toStopKey`),
+    movement,
+    calculation,
+    ferryPolicy,
+    waypoints: (input.waypoints ?? []).map((waypoint, index) => validateRouteWaypointDraft(waypoint, `${path}.waypoints[${index}]`)),
+    ...(notes ? { notes } : {}),
+  };
+}
+
+export function validateVehiclePreset(input: unknown, path = 'preset') {
+  return validateEnum(input, ['standard', 'large-camper', 'expedition-truck'], path, 'INVALID_VEHICLE_PRESET')!;
+}
+
+export function validateRouteLegIntentPatch(input: unknown, path = 'patch'): RouteLegIntentPatch {
+  if (!isRecord(input)) {
+    throw new TripCommandValidationError('INVALID_ROUTE_LEG_PATCH', `${path} must be an object.`, path);
+  }
+  rejectUnknownFields(input, ['movement', 'calculation', 'ferryPolicy', 'waypoints', 'notes'], path);
+  if (Object.keys(input).length === 0) {
+    throw new TripCommandValidationError('EMPTY_ROUTE_LEG_PATCH', 'Route leg patch must include at least one field.', path);
+  }
+  if (input.waypoints !== undefined && !Array.isArray(input.waypoints)) {
+    throw new TripCommandValidationError('INVALID_ROUTE_WAYPOINT_ARRAY', `${path}.waypoints must be an array.`, `${path}.waypoints`);
+  }
+  const movement = validateEnum(input.movement, ['drive', 'vehicle-shipping'], `${path}.movement`, 'INVALID_ROUTE_MOVEMENT');
+  const calculation = validateEnum(input.calculation, ['automatic', 'manual'], `${path}.calculation`, 'INVALID_ROUTE_CALCULATION');
+  const ferryPolicy = validateEnum(input.ferryPolicy, ['allow', 'avoid', 'require'], `${path}.ferryPolicy`, 'INVALID_FERRY_POLICY');
+  const notes = optionalClearableString(input.notes, `${path}.notes`);
+  return {
+    ...(movement ? { movement } : {}),
+    ...(calculation ? { calculation } : {}),
+    ...(ferryPolicy ? { ferryPolicy } : {}),
+    ...(input.waypoints ? {
+      waypoints: input.waypoints.map((waypoint, index) => validateRouteWaypointDraft(waypoint, `${path}.waypoints[${index}]`)),
+    } : {}),
+    ...(notes !== undefined ? { notes } : {}),
+  };
+}
+
 export function validateTripManifest(input: unknown): TripManifestDraft {
   if (!isRecord(input)) {
     throw new TripCommandValidationError('INVALID_TRIP_MANIFEST', 'Trip manifest must be an object.');
   }
-  rejectUnknownFields(input, ['manifestVersion', 'name', 'stops', 'routeLegs'], '');
-  if (input.manifestVersion !== 1) {
+  if (input.manifestVersion !== 1 && input.manifestVersion !== 2) {
     throw new TripCommandValidationError(
       'UNSUPPORTED_MANIFEST_VERSION',
-      'manifestVersion must be 1.',
+      'manifestVersion must be 1 or 2.',
       'manifestVersion',
     );
+  }
+  rejectUnknownFields(
+    input,
+    input.manifestVersion === 2
+      ? ['manifestVersion', 'name', 'vehiclePreset', 'stops', 'routeLegs']
+      : ['manifestVersion', 'name', 'stops', 'routeLegs'],
+    '',
+  );
+  const vehiclePreset = input.manifestVersion === 2
+    ? validateEnum(input.vehiclePreset, ['standard', 'large-camper', 'expedition-truck'], 'vehiclePreset', 'INVALID_VEHICLE_PRESET')
+    : undefined;
+  if (input.manifestVersion === 2 && !vehiclePreset) {
+    throw new TripCommandValidationError('VEHICLE_PRESET_REQUIRED', 'vehiclePreset is required.', 'vehiclePreset');
   }
   if (!Array.isArray(input.stops)) {
     throw new TripCommandValidationError('INVALID_STOP_ARRAY', 'stops must be an array.', 'stops');
@@ -279,9 +389,9 @@ export function validateTripManifest(input: unknown): TripManifestDraft {
     stopIndexes.set(stop.key, index);
   });
 
-  const routeLegs = (input.routeLegs ?? []).map((leg, index) => (
-    validateRouteLegDirective(leg, `routeLegs[${index}]`)
-  ));
+  const routeLegs = input.manifestVersion === 2
+    ? (input.routeLegs ?? []).map((leg, index) => validateRouteLegDirectiveV2(leg, `routeLegs[${index}]`))
+    : (input.routeLegs ?? []).map((leg, index) => validateRouteLegDirectiveV1(leg, `routeLegs[${index}]`));
   const directivePairs = new Set<string>();
   routeLegs.forEach((leg, index) => {
     const path = `routeLegs[${index}]`;
@@ -319,12 +429,10 @@ export function validateTripManifest(input: unknown): TripManifestDraft {
     directivePairs.add(pair);
   });
 
-  return {
-    manifestVersion: 1,
-    name: requiredString(input.name, 'Trip name', 'name'),
-    stops,
-    routeLegs,
-  };
+  const name = requiredString(input.name, 'Trip name', 'name');
+  return input.manifestVersion === 2
+    ? { manifestVersion: 2, name, vehiclePreset: vehiclePreset!, stops, routeLegs: routeLegs as RouteLegDirectiveDraftV2[] }
+    : { manifestVersion: 1, name, stops, routeLegs: routeLegs as RouteLegDirectiveDraftV1[] };
 }
 
 export function validateStopDraft(input: unknown, path = 'stop'): StopDraft {

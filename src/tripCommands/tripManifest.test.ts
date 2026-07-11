@@ -128,4 +128,81 @@ describe('trip manifest materialization', () => {
       { type: 'shipping-manual', status: 'manual', notes: 'Vehicle ferry.' },
     ]);
   });
+
+  it('materializes version 2 defaults and exceptional automatic route intent with its vehicle', async () => {
+    const manifest = validateTripManifest({
+      manifestVersion: 2,
+      name: 'Nordkapp',
+      vehiclePreset: 'expedition-truck',
+      stops: [
+        { key: 'home', name: 'Home', place: { query: 'Home' }, expectedStayDays: 1 },
+        { key: 'bremen', name: 'Bremen', place: { query: 'Bremen' }, expectedStayDays: 1 },
+        { key: 'kristiansand', name: 'Kristiansand', place: { query: 'Kristiansand' }, expectedStayDays: 1 },
+      ],
+      routeLegs: [{
+        fromStopKey: 'bremen',
+        toStopKey: 'kristiansand',
+        ferryPolicy: 'require',
+        notes: 'Take the ferry.',
+        waypoints: [{
+          name: 'Hirtshals ferry terminal',
+          place: { query: 'Hirtshals ferry terminal' },
+          notes: 'Check in early.',
+          links: ['https://example.com/ferry'],
+        }],
+      }],
+    });
+    const resolvePlace = vi.fn(async ({ fallbackName, profile }) => ({
+      coordinates: fallbackName === 'Home'
+        ? { lat: 51, lng: 0 }
+        : fallbackName === 'Bremen'
+          ? { lat: 53, lng: 8 }
+          : fallbackName === 'Kristiansand'
+            ? { lat: 58, lng: 8 }
+            : { lat: 57.59, lng: 9.96 },
+      ...(profile === 'stop' ? {
+        location: {
+          placeName: fallbackName,
+          regionName: '',
+          countryName: 'Test country',
+          sourceLabel: fallbackName,
+          sourceProvider: 'legacy' as const,
+        },
+      } : {}),
+    }));
+    const enrichLink = vi.fn(async (url: string, sortOrder: number) => ({
+      id: `link-${sortOrder}`,
+      url,
+      title: 'Ferry',
+      domain: 'example.com',
+      sortOrder,
+    }));
+    const calculateRoute = vi.fn(async ({ origin, target, profile, ferryPolicy }) => ({
+      distanceKm: 100,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString' as const, coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]] },
+      provider: 'test',
+      profile,
+      sections: ferryPolicy === 'require'
+        ? [{ kind: 'ferry' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 100 }]
+        : [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 100 }],
+    }));
+
+    const materialized = await materializeTripManifest(manifest, { resolvePlace, enrichLink, calculateRoute });
+
+    expect(materialized.routingVehicle.preset).toBe('expedition-truck');
+    expect(materialized.routeLegs).toHaveLength(2);
+    expect(materialized.routeLegs[0]).toMatchObject({
+      movement: 'drive', calculation: 'automatic', ferryPolicy: 'allow', waypoints: [], status: 'ready',
+    });
+    expect(materialized.routeLegs[1]).toMatchObject({
+      movement: 'drive', calculation: 'automatic', ferryPolicy: 'require', notes: 'Take the ferry.', status: 'ready',
+      waypoints: [{ name: 'Hirtshals ferry terminal', notes: 'Check in early.', links: [{ url: 'https://example.com/ferry' }] }],
+    });
+    expect(calculateRoute).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      routingVehicle: expect.objectContaining({ preset: 'expedition-truck' }),
+      ferryPolicy: 'require',
+      waypoints: [expect.objectContaining({ name: 'Hirtshals ferry terminal' })],
+    }));
+  });
 });

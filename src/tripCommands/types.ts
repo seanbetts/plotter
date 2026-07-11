@@ -4,9 +4,12 @@ import type {
   Coordinates,
   FerryPolicy,
   ResearchLink,
+  RouteCalculationMode,
+  RouteMovement,
   RouteSection,
   RouteWaypoint,
   TripRoutingVehicle,
+  VehiclePreset,
 } from '../domain/types';
 import type { TripRepository } from '../storage/tripRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
@@ -63,18 +66,55 @@ export type StopManifestDraft = {
   activities: ActivityManifestDraft[];
 };
 
-export type RouteLegDirectiveDraft = {
+export type RouteLegDirectiveDraftV1 = {
   fromStopKey: string;
   toStopKey: string;
   type: 'shipping-manual';
   notes?: string;
 };
 
-export type TripManifestDraft = {
+export type RouteWaypointDraft = {
+  name: string;
+  place: PlaceInput;
+  notes?: string;
+  links: string[];
+};
+
+export type RouteLegDirectiveDraftV2 = {
+  fromStopKey: string;
+  toStopKey: string;
+  movement?: RouteMovement;
+  calculation?: RouteCalculationMode;
+  ferryPolicy?: FerryPolicy;
+  waypoints?: RouteWaypointDraft[];
+  notes?: string;
+};
+
+export type RouteLegDirectiveDraft = RouteLegDirectiveDraftV1 | RouteLegDirectiveDraftV2;
+
+export type TripManifestDraftV1 = {
   manifestVersion: 1;
   name: string;
   stops: StopManifestDraft[];
-  routeLegs: RouteLegDirectiveDraft[];
+  routeLegs: RouteLegDirectiveDraftV1[];
+};
+
+export type TripManifestDraftV2 = {
+  manifestVersion: 2;
+  name: string;
+  vehiclePreset: VehiclePreset;
+  stops: StopManifestDraft[];
+  routeLegs: RouteLegDirectiveDraftV2[];
+};
+
+export type TripManifestDraft = TripManifestDraftV1 | TripManifestDraftV2;
+
+export type RouteLegIntentPatch = {
+  movement?: RouteMovement;
+  calculation?: RouteCalculationMode;
+  ferryPolicy?: FerryPolicy;
+  waypoints?: RouteWaypointDraft[];
+  notes?: string;
 };
 
 export type CommandError = {

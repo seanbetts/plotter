@@ -1,13 +1,16 @@
 import { createActivity as createDomainActivity, reorderActivities as reorderActivityModels, updateActivity as updateDomainActivity } from '../domain/activities';
 import { createDestination, updateDestination } from '../domain/destinations';
 import { createFallbackResearchLink, normalizeResearchLinkUrl, reorderResearchLinks, sortResearchLinks } from '../domain/researchLinks';
+import { createStraightLineGeometry } from '../domain/routeLegs';
 import { planRouteLegReconciliation, reconcileRouteLegsForDestinations } from '../domain/routePlanner';
-import type { Activity, Destination, ResearchLink, RouteLeg } from '../domain/types';
-import { standardRoutingVehicle } from '../domain/vehiclePresets';
+import type { Activity, Destination, ResearchLink, RouteLeg, RouteWaypoint, VehiclePreset } from '../domain/types';
+import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import {
   calculateDrivingRouteLegs,
+  calculateAutomaticRouteLegs,
+  recalculateAutomaticRouteLegsForVehicle,
   reconcileAndSaveRouteLegs,
   type CalculateRoute,
 } from './routeOrchestration';
@@ -26,10 +29,12 @@ import {
   TripCommandValidationError,
   validateActivityDraft,
   validateActivityPatch,
+  validateRouteLegIntentPatch,
   validateStopDraft,
   validateStopPatch,
   validateTripManifest,
   validateUrlInput,
+  validateVehiclePreset,
 } from './validation';
 
 export type CommandOptions = {
@@ -51,6 +56,15 @@ export type TripDataService = {
       targetName: string;
       status: RouteLeg['status'];
     }>;
+    changed: ChangedSummary;
+  }>>;
+  setVehicle(input: { tripId: string; preset: VehiclePreset }, options?: CommandOptions): Promise<CommandResult<{
+    trip: TripSummary;
+    routeLegs: RouteLeg[];
+    changed: ChangedSummary;
+  }>>;
+  updateRouteLeg(input: { tripId: string; routeLegId: string; patch: unknown }, options?: CommandOptions): Promise<CommandResult<{
+    routeLeg: RouteLeg;
     changed: ChangedSummary;
   }>>;
   createTrip(input: { name: string; stops?: unknown[] } | TripManifestDraft, options?: CommandOptions): Promise<CommandResult<{ trip: TripSummary; stops: Destination[]; activities: Activity[]; routeLegs: RouteLeg[]; changed: ChangedSummary; audit?: TripAuditReport }>>;
@@ -110,6 +124,14 @@ function commandSuccess<T extends object>(summary: string, payload: T): CommandR
     ok: true,
     summary,
     ...payload,
+  };
+}
+
+function reportFromIssues(issues: TripAuditReport['issues']): TripAuditReport {
+  return {
+    errors: issues.filter((issue) => issue.severity === 'error').length,
+    warnings: issues.filter((issue) => issue.severity === 'warning').length,
+    issues,
   };
 }
 
@@ -282,6 +304,39 @@ async function resolveActivityLocation(
   }
 
   return fallbackActivityLocation(draft.title, draft.place.coordinates);
+}
+
+async function routeWaypointsFromDrafts(
+  drafts: NonNullable<ReturnType<typeof validateRouteLegIntentPatch>['waypoints']>,
+  dependencies: TripDataServiceDependencies,
+): Promise<RouteWaypoint[]> {
+  return Promise.all(drafts.map(async (draft, order) => {
+    const resolved = dependencies.resolvePlace
+      ? await dependencies.resolvePlace({ place: draft.place, profile: 'stop', fallbackName: draft.name })
+      : draft.place.coordinates
+        ? { coordinates: draft.place.coordinates }
+        : (() => { throw new TripCommandValidationError('PLACE_RESOLVER_REQUIRED', 'A place resolver is required when coordinates are omitted.', `patch.waypoints[${order}].place`); })();
+    const links = await Promise.all(draft.links.map((url, sortOrder) => (
+      dependencies.enrichLink
+        ? dependencies.enrichLink(url, sortOrder)
+        : Promise.resolve(createFallbackResearchLink(url, { sortOrder }))
+    )));
+    return {
+      id: crypto.randomUUID(),
+      order,
+      name: draft.name,
+      coordinates: resolved.coordinates,
+      location: resolved.location ?? {
+        placeName: draft.name,
+        regionName: '',
+        countryName: '',
+        sourceLabel: draft.name,
+        sourceProvider: 'legacy',
+      },
+      notes: draft.notes ?? '',
+      links,
+    };
+  }));
 }
 
 async function destinationFromDraft(
@@ -658,6 +713,121 @@ export function createTripDataService(
       });
     },
 
+    async setVehicle(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        const preset = validateVehiclePreset(input.preset, 'preset');
+        const trip = await findTripSummary(dependencies.directory, tripId);
+        const repository = dependencies.createTripRepository(trip.id);
+        const [destinations, currentRouteLegs] = await Promise.all([
+          repository.listDestinations(),
+          repository.listRouteLegs(),
+        ]);
+        const routingVehicle = resolveVehiclePreset(preset);
+        const invalidatedRouteLegs = recalculateAutomaticRouteLegsForVehicle({
+          destinations,
+          routeLegs: currentRouteLegs,
+          routingVehicle,
+        });
+        const routeLegs = await calculateAutomaticRouteLegs({
+          destinations,
+          routeLegs: invalidatedRouteLegs,
+          routingVehicle,
+          calculateRoute: dependencies.calculateRoute,
+          retryFailed: true,
+        });
+        const changed = emptyChanged();
+        changed.routesRecalculated = countRouteLegChanges(currentRouteLegs, routeLegs);
+        const nextTrip = { ...trip, routingVehicle };
+
+        if (!options?.dryRun) {
+          const persistedTrip = await dependencies.directory.updateTrip(trip.id, { routingVehicle });
+          await Promise.all(routeLegs.map((routeLeg) => repository.saveRouteLeg(routeLeg)));
+          return commandSuccess(`Set vehicle for ${trip.name} to ${preset}.`, {
+            trip: persistedTrip,
+            routeLegs,
+            changed,
+          });
+        }
+
+        return commandSuccess(`Would set vehicle for ${trip.name} to ${preset}.`, {
+          trip: nextTrip,
+          routeLegs,
+          changed,
+        });
+      });
+    },
+
+    async updateRouteLeg(input, options) {
+      return withCommandHandling(async () => {
+        const tripId = trimRequiredString(input.tripId, 'Trip id', 'tripId');
+        const routeLegId = trimRequiredString(input.routeLegId, 'Route leg id', 'routeLegId');
+        const patch = validateRouteLegIntentPatch(input.patch);
+        const trip = await findTripSummary(dependencies.directory, tripId);
+        const repository = dependencies.createTripRepository(trip.id);
+        const [destinations, routeLegs] = await Promise.all([
+          repository.listDestinations(),
+          repository.listRouteLegs(),
+        ]);
+        const routeLeg = routeLegs.find((candidate) => candidate.id === routeLegId);
+        if (!routeLeg) {
+          return commandError('ROUTE_LEG_NOT_FOUND', `Route leg '${routeLegId}' was not found.`, 'routeLegId');
+        }
+        const movement = patch.movement ?? routeLeg.movement ?? (routeLeg.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive');
+        const calculation = patch.calculation ?? routeLeg.calculation ?? (routeLeg.type === 'shipping-manual' ? 'manual' : 'automatic');
+        if (!((movement === 'drive' && calculation === 'automatic') || (movement === 'vehicle-shipping' && calculation === 'manual'))) {
+          throw new TripCommandValidationError('UNSUPPORTED_ROUTE_INTENT', 'patch uses an unsupported movement and calculation pair.', 'patch');
+        }
+        const waypoints = patch.waypoints
+          ? await routeWaypointsFromDrafts(patch.waypoints, dependencies)
+          : routeLeg.waypoints ?? [];
+        const type = movement === 'vehicle-shipping' ? 'shipping-manual' : 'driving-auto';
+        const origin = destinations.find((destination) => destination.id === routeLeg.originDestinationId);
+        const target = destinations.find((destination) => destination.id === routeLeg.targetDestinationId);
+        let nextRouteLeg: RouteLeg = {
+          ...routeLeg,
+          type,
+          movement,
+          calculation,
+          ferryPolicy: patch.ferryPolicy ?? routeLeg.ferryPolicy ?? 'allow',
+          waypoints,
+          notes: patch.notes ?? routeLeg.notes,
+          status: type === 'shipping-manual' ? 'manual' : 'pending',
+          distanceKm: undefined,
+          travelTimeHours: undefined,
+          geometry: type === 'shipping-manual' && origin && target
+            ? createStraightLineGeometry(origin.coordinates, target.coordinates)
+            : undefined,
+          provider: undefined,
+          profile: type === 'driving-auto' ? trip.routingVehicle.profile : undefined,
+          routeKey: undefined,
+          calculatedAt: undefined,
+          sections: [],
+          warnings: [],
+          error: undefined,
+          updatedAt: new Date().toISOString(),
+        };
+        if (type === 'driving-auto') {
+          [nextRouteLeg] = await calculateAutomaticRouteLegs({
+            destinations,
+            routeLegs: [nextRouteLeg],
+            routingVehicle: trip.routingVehicle,
+            calculateRoute: dependencies.calculateRoute,
+            retryFailed: true,
+          });
+        }
+        const changed = emptyChanged();
+        changed.routesRecalculated = 1;
+        if (!options?.dryRun) {
+          await repository.saveRouteLeg(nextRouteLeg);
+        }
+        return commandSuccess(
+          `${options?.dryRun ? 'Would update' : 'Updated'} route leg ${routeLegId}.`,
+          { routeLeg: nextRouteLeg, changed },
+        );
+      });
+    },
+
     async createTrip(input, options) {
       return withCommandHandling(async () => {
         if ('manifestVersion' in input) {
@@ -668,12 +838,13 @@ export function createTripDataService(
             activities: materialized.activities,
             routeLegs: materialized.routeLegs,
           });
-          if (audit.errors > 0) {
+          const blockingIssues = audit.issues.filter((issue) => issue.code === 'ACTIVITY_DISTANCE_OUTLIER');
+          if (blockingIssues.length > 0) {
             return commandError(
               'TRIP_AUDIT_FAILED',
               'Trip manifest has semantic audit errors.',
               'manifest',
-              { audit },
+              { audit: reportFromIssues(blockingIssues) },
             );
           }
 
@@ -683,7 +854,7 @@ export function createTripDataService(
                 id: 'dry-run-trip',
                 name: manifest.name,
                 description: '',
-                routingVehicle: standardRoutingVehicle,
+                routingVehicle: materialized.routingVehicle,
                 createdAt: '',
                 updatedAt: '',
               },
@@ -695,7 +866,10 @@ export function createTripDataService(
             });
           }
 
-          const trip = await dependencies.directory.createTrip({ name: manifest.name });
+          const trip = await dependencies.directory.createTrip({
+            name: manifest.name,
+            routingVehicle: materialized.routingVehicle,
+          });
           const repository = dependencies.createTripRepository(trip.id);
           try {
             await repository.replaceTripData({

@@ -150,7 +150,63 @@ describe('trip command validation', () => {
     });
 
     expect(manifest.stops[1].activities[0].tags).toEqual(['walk', 'coast']);
+    if (manifest.manifestVersion !== 1) throw new Error('Expected version 1.');
     expect(manifest.routeLegs[0].type).toBe('shipping-manual');
+  });
+
+  it('requires a vehicle preset in version 2', () => {
+    expect(() => validateTripManifest({
+      manifestVersion: 2,
+      name: 'Trip',
+      stops: [],
+      routeLegs: [],
+    })).toThrowError(expect.objectContaining({
+      code: 'VEHICLE_PRESET_REQUIRED',
+      path: 'vehiclePreset',
+    }));
+  });
+
+  it('accepts one exceptional automatic directive', () => {
+    const manifest = validateTripManifest({
+      manifestVersion: 2,
+      name: 'Nordkapp',
+      vehiclePreset: 'expedition-truck',
+      stops: [
+        { key: 'bremen', name: 'Bremen', place: { query: 'Bremen, Germany' }, expectedStayDays: 1 },
+        { key: 'kristiansand', name: 'Kristiansand', place: { query: 'Kristiansand, Norway' }, expectedStayDays: 1 },
+      ],
+      routeLegs: [{
+        fromStopKey: 'bremen',
+        toStopKey: 'kristiansand',
+        ferryPolicy: 'require',
+        waypoints: [{
+          name: 'Hirtshals ferry terminal',
+          place: { query: 'Hirtshals ferry terminal, Denmark' },
+          links: [],
+        }],
+      }],
+    });
+
+    expect(manifest.manifestVersion).toBe(2);
+    if (manifest.manifestVersion !== 2) throw new Error('Expected version 2.');
+    expect(manifest.vehiclePreset).toBe('expedition-truck');
+    expect(manifest.routeLegs[0]).toMatchObject({
+      movement: 'drive', calculation: 'automatic', ferryPolicy: 'require',
+      waypoints: [{ name: 'Hirtshals ferry terminal', links: [] }],
+    });
+  });
+
+  it('rejects unsupported route movement and calculation pairs in version 2', () => {
+    expect(() => validateTripManifest({
+      manifestVersion: 2,
+      name: 'Broken',
+      vehiclePreset: 'standard',
+      stops: [
+        { key: 'a', name: 'A', place: { query: 'A' }, expectedStayDays: 1 },
+        { key: 'b', name: 'B', place: { query: 'B' }, expectedStayDays: 1 },
+      ],
+      routeLegs: [{ fromStopKey: 'a', toStopKey: 'b', movement: 'drive', calculation: 'manual' }],
+    })).toThrowError(expect.objectContaining({ code: 'UNSUPPORTED_ROUTE_INTENT', path: 'routeLegs[0]' }));
   });
 
   it('defaults optional manifest collections to empty arrays', () => {
@@ -174,8 +230,8 @@ describe('trip command validation', () => {
   it.each([
     {
       name: 'an unsupported manifest version',
-      input: { manifestVersion: 2, name: 'Broken', stops: [] },
-      message: 'manifestVersion must be 1.',
+      input: { manifestVersion: 3, name: 'Broken', stops: [] },
+      message: 'manifestVersion must be 1 or 2.',
     },
     {
       name: 'a missing expected stay',
