@@ -159,17 +159,17 @@ function requestWithSavedAnchors(input: RecoveryInput, profile: TripRoutingVehic
   };
 }
 
-function requestWithEndpointRadius(
+function requestWithEndpointRadii(
   input: RecoveryInput,
   profile: TripRoutingVehicle['profile'],
-  coordinateIndex: number,
+  widenedEndpointIndices: ReadonlySet<number>,
 ): ProviderRouteRequest {
   const targetIndex = input.waypoints.length + 1;
-  const originAnchor = coordinateIndex === 0 ? undefined : originAnchorFor(input, profile);
-  const targetAnchor = coordinateIndex === targetIndex ? undefined : targetAnchorFor(input, profile);
+  const originAnchor = widenedEndpointIndices.has(0) ? undefined : originAnchorFor(input, profile);
+  const targetAnchor = widenedEndpointIndices.has(targetIndex) ? undefined : targetAnchorFor(input, profile);
   const radiuses = Array.from(
     { length: input.waypoints.length + 2 },
-    (_, index) => index === coordinateIndex ? endpointRadiusMeters : strictEndpointRadiusMeters,
+    (_, index) => widenedEndpointIndices.has(index) ? endpointRadiusMeters : strictEndpointRadiusMeters,
   );
 
   return {
@@ -284,40 +284,57 @@ async function calculateWithEndpointRecovery(
   profile: TripRoutingVehicle['profile'],
   coordinateIndex: number,
 ) {
-  const route = await calculate(requestWithEndpointRadius(input, profile, coordinateIndex));
-  const firstCoordinate = route.geometry.coordinates.at(0);
-  const lastCoordinate = route.geometry.coordinates.at(-1);
-  if (!firstCoordinate || !lastCoordinate) {
-    throw new Error('Route calculation returned invalid endpoint geometry');
-  }
   const targetIndex = input.waypoints.length + 1;
-  const endpoint = coordinateIndex === 0 ? 'origin' : 'target';
-  const endpointAnchor = endpoint === 'origin'
-    ? anchorFromGeometryEndpoint({
-        endpoint,
-        originalCoordinates: input.origin,
-        snappedCoordinates: coordinateFromPair(firstCoordinate),
-        profile: route.profile,
-      })
-    : anchorFromGeometryEndpoint({
-        endpoint,
-        originalCoordinates: input.target,
-        snappedCoordinates: coordinateFromPair(lastCoordinate),
-        profile: route.profile,
-      });
+  const widenedEndpointIndices = new Set([coordinateIndex]);
 
-  const endpointAnchors: RecoveredRoute['endpointAnchors'] = {
-    ...(coordinateIndex === 0 ? { origin: endpointAnchor } : {}),
-    ...(coordinateIndex === targetIndex ? { target: endpointAnchor } : {}),
-  };
-  const savedAnchors = savedAnchorsFor(input, profile);
-  const usedAnchors: RecoveredRoute['endpointAnchors'] = {
-    ...(coordinateIndex === 0 ? {} : { origin: savedAnchors.origin }),
-    ...(coordinateIndex === targetIndex ? {} : { target: savedAnchors.target }),
-    ...endpointAnchors,
-  };
+  while (true) {
+    try {
+      const route = await calculate(requestWithEndpointRadii(input, profile, widenedEndpointIndices));
+      const firstCoordinate = route.geometry.coordinates.at(0);
+      const lastCoordinate = route.geometry.coordinates.at(-1);
+      if (!firstCoordinate || !lastCoordinate) {
+        throw new Error('Route calculation returned invalid endpoint geometry');
+      }
 
-  return asRecoveredRoute(route, anchorWarning(usedAnchors), endpointAnchors);
+      const originAnchor = widenedEndpointIndices.has(0)
+        ? anchorFromGeometryEndpoint({
+            endpoint: 'origin',
+            originalCoordinates: input.origin,
+            snappedCoordinates: coordinateFromPair(firstCoordinate),
+            profile: route.profile,
+          })
+        : undefined;
+      const targetAnchor = widenedEndpointIndices.has(targetIndex)
+        ? anchorFromGeometryEndpoint({
+            endpoint: 'target',
+            originalCoordinates: input.target,
+            snappedCoordinates: coordinateFromPair(lastCoordinate),
+            profile: route.profile,
+          })
+        : undefined;
+      const endpointAnchors: RecoveredRoute['endpointAnchors'] = {
+        ...(originAnchor ? { origin: originAnchor } : {}),
+        ...(targetAnchor ? { target: targetAnchor } : {}),
+      };
+      const savedAnchors = savedAnchorsFor(input, profile);
+      const usedAnchors: RecoveredRoute['endpointAnchors'] = {
+        origin: widenedEndpointIndices.has(0) ? originAnchor : savedAnchors.origin,
+        target: widenedEndpointIndices.has(targetIndex) ? targetAnchor : savedAnchors.target,
+      };
+      const recoveredRoute = asRecoveredRoute(route);
+
+      return asRecoveredRoute(recoveredRoute, [
+        ...recoveredRoute.warnings,
+        ...anchorWarning(usedAnchors),
+      ], endpointAnchors);
+    } catch (error) {
+      const nextEndpointIndex = endpointRecoveryIndex(error, input);
+      if (nextEndpointIndex === null || widenedEndpointIndices.has(nextEndpointIndex)) {
+        throw error;
+      }
+      widenedEndpointIndices.add(nextEndpointIndex);
+    }
+  }
 }
 
 async function calculateDrivingCarFallback(

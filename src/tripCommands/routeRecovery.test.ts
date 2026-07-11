@@ -11,6 +11,7 @@ import {
 const alta = { lat: 69.96887, lng: 23.27165 };
 const altaAnchorCoordinates = { lat: 69.98334, lng: 23.27165 };
 const balcombe = { lat: 51.0573, lng: -0.1349 };
+const balcombeAnchorCoordinates = { lat: 51.0718, lng: -0.1349 };
 const hirtshals = { lat: 57.5948, lng: 9.9796 };
 
 const expeditionVehicle = resolveVehiclePreset('expedition-truck');
@@ -135,6 +136,223 @@ describe('route recovery', () => {
       provider: 'openrouteservice',
     });
     expect(result.endpointAnchors.target?.snapDistanceKm).toBeCloseTo(1.61, 2);
+  });
+
+  it.each([
+    {
+      order: 'origin then target',
+      firstCoordinateIndex: 0,
+      secondCoordinateIndex: 2,
+      firstRecoveryRadiuses: [2000, 350, 350],
+    },
+    {
+      order: 'target then origin',
+      firstCoordinateIndex: 2,
+      secondCoordinateIndex: 0,
+      firstRecoveryRadiuses: [350, 350, 2000],
+    },
+  ])('recovers both car endpoints in $order order before succeeding', async ({
+    firstCoordinateIndex,
+    secondCoordinateIndex,
+    firstRecoveryRadiuses,
+  }) => {
+    let attempt = 0;
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw orsError({
+          status: 404,
+          code: 2010,
+          profile: 'driving-car',
+          coordinateIndex: firstCoordinateIndex,
+        });
+      }
+      if (attempt === 2) {
+        throw orsError({
+          status: 404,
+          code: 2010,
+          profile: 'driving-car',
+          coordinateIndex: secondCoordinateIndex,
+        });
+      }
+      return routeFor({
+        origin: balcombeAnchorCoordinates,
+        target: altaAnchorCoordinates,
+        profile: request.profile,
+      });
+    });
+
+    const result = await calculateRouteWithRecovery({
+      origin: balcombe,
+      target: alta,
+      profile: 'driving-car',
+      routingVehicle: carVehicle,
+      waypoints,
+      ferryPolicy: 'require',
+    }, calculate);
+
+    expect(calculate).toHaveBeenCalledTimes(3);
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      profile: 'driving-car',
+      radiuses: firstRecoveryRadiuses,
+      waypoints,
+      ferryPolicy: 'require',
+    }));
+    expect(calculate).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      profile: 'driving-car',
+      radiuses: [2000, 350, 2000],
+      waypoints,
+      ferryPolicy: 'require',
+    }));
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('origin') }),
+      expect.objectContaining({ code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('target') }),
+    ]);
+    expect(result.endpointAnchors).toEqual({
+      origin: expect.objectContaining({
+        profile: 'driving-car',
+        coordinates: balcombeAnchorCoordinates,
+        originalCoordinates: balcombe,
+      }),
+      target: expect.objectContaining({
+        profile: 'driving-car',
+        coordinates: altaAnchorCoordinates,
+        originalCoordinates: alta,
+      }),
+    });
+  });
+
+  it('recovers both HGV endpoints without falling back to driving-car', async () => {
+    let attempt = 0;
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-hgv', coordinateIndex: 2 });
+      }
+      if (attempt === 2) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-hgv', coordinateIndex: 0 });
+      }
+      return routeFor({
+        origin: balcombeAnchorCoordinates,
+        target: altaAnchorCoordinates,
+        profile: request.profile,
+      });
+    });
+
+    const result = await calculateRouteWithRecovery(expeditionInput, calculate);
+
+    expect(calculate).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(calculate).mock.calls.map(([request]) => request.profile)).toEqual([
+      'driving-hgv',
+      'driving-hgv',
+      'driving-hgv',
+    ]);
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      radiuses: [350, 350, 2000],
+    }));
+    expect(calculate).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      radiuses: [2000, 350, 2000],
+    }));
+    expect(result.profile).toBe('driving-hgv');
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'ROUTING_ANCHOR_ADJUSTED',
+      'ROUTING_ANCHOR_ADJUSTED',
+    ]);
+    expect(result.endpointAnchors).toEqual({
+      origin: expect.objectContaining({ profile: 'driving-hgv', coordinates: balcombeAnchorCoordinates }),
+      target: expect.objectContaining({ profile: 'driving-hgv', coordinates: altaAnchorCoordinates }),
+    });
+  });
+
+  it('exhausts dual-endpoint HGV recovery before car dual-endpoint recovery', async () => {
+    let attempt = 0;
+    const calculate: CalculateProviderRoute = vi.fn(async (request: ProviderRouteRequest) => {
+      attempt += 1;
+      const errors = [
+        { profile: 'driving-hgv' as const, coordinateIndex: 0 },
+        { profile: 'driving-hgv' as const, coordinateIndex: 2 },
+        { profile: 'driving-hgv' as const, coordinateIndex: 2 },
+        { profile: 'driving-car' as const, coordinateIndex: 2 },
+        { profile: 'driving-car' as const, coordinateIndex: 0 },
+      ];
+      const error = errors[attempt - 1];
+      if (error) {
+        throw orsError({ status: 404, code: 2010, ...error });
+      }
+      return routeFor({
+        origin: balcombeAnchorCoordinates,
+        target: altaAnchorCoordinates,
+        profile: request.profile,
+      });
+    });
+
+    const result = await calculateRouteWithRecovery(expeditionInput, calculate);
+
+    expect(calculate).toHaveBeenCalledTimes(6);
+    expect(vi.mocked(calculate).mock.calls.map(([request]) => ({
+      profile: request.profile,
+      radiuses: request.radiuses,
+    }))).toEqual([
+      { profile: 'driving-hgv', radiuses: undefined },
+      { profile: 'driving-hgv', radiuses: [2000, 350, 350] },
+      { profile: 'driving-hgv', radiuses: [2000, 350, 2000] },
+      { profile: 'driving-car', radiuses: undefined },
+      { profile: 'driving-car', radiuses: [350, 350, 2000] },
+      { profile: 'driving-car', radiuses: [2000, 350, 2000] },
+    ]);
+    expect(result.profile).toBe('driving-car');
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      'VEHICLE_PROFILE_FALLBACK',
+      'ROUTING_ANCHOR_ADJUSTED',
+      'ROUTING_ANCHOR_ADJUSTED',
+    ]);
+    expect(result.endpointAnchors).toEqual({
+      origin: expect.objectContaining({ profile: 'driving-car', coordinates: balcombeAnchorCoordinates }),
+      target: expect.objectContaining({ profile: 'driving-car', coordinates: altaAnchorCoordinates }),
+    });
+  });
+
+  it('stops when ORS repeats a 2010 for an already widened car endpoint', async () => {
+    const calculate = vi.fn().mockRejectedValue(
+      orsError({ status: 404, code: 2010, profile: 'driving-car', coordinateIndex: 0 }),
+    );
+
+    await expect(calculateRouteWithRecovery({
+      origin: balcombe,
+      target: alta,
+      profile: 'driving-car',
+      routingVehicle: carVehicle,
+      waypoints,
+      ferryPolicy: 'allow',
+    }, calculate)).rejects.toMatchObject({
+      code: 2010,
+      coordinateIndex: 0,
+      profile: 'driving-car',
+    });
+    expect(calculate).toHaveBeenCalledTimes(2);
+    expect(calculate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      radiuses: [2000, 350, 350],
+    }));
+  });
+
+  it('propagates an HGV provider failure after both endpoints are widened', async () => {
+    let attempt = 0;
+    const calculate: CalculateProviderRoute = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-hgv', coordinateIndex: 0 });
+      }
+      if (attempt === 2) {
+        throw orsError({ status: 404, code: 2010, profile: 'driving-hgv', coordinateIndex: 2 });
+      }
+      throw orsError({ status: 503, profile: 'driving-hgv' });
+    });
+
+    await expect(calculateRouteWithRecovery(expeditionInput, calculate)).rejects.toMatchObject({
+      status: 503,
+      profile: 'driving-hgv',
+    });
+    expect(calculate).toHaveBeenCalledTimes(3);
   });
 
   it('rejects endpoint recovery when the provider snaps beyond the 2 km endpoint radius', async () => {

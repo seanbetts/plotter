@@ -114,6 +114,67 @@ describe('route orchestration', () => {
     expect(result.destinations[1].updatedAt >= alta.updatedAt).toBe(true);
   });
 
+  it('persists both geometry-derived endpoint anchors after sequential 2010 recovery', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 51, lng: 0 } });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 52, lng: 1 } });
+    const snappedOrigin = { lat: 51.01, lng: 0 };
+    const snappedTarget = { lat: 52.01, lng: 1 };
+    let attempt = 0;
+    const calculateRoute: CalculateRoute = vi.fn(async (request) => {
+      attempt += 1;
+      if (attempt <= 2) {
+        throw new OpenRouteServiceError({
+          status: 404,
+          code: 2010,
+          coordinateIndex: attempt === 1 ? 0 : 1,
+          profile: 'driving-car',
+          providerMessage: `Endpoint ${attempt} was outside the strict radius.`,
+        });
+      }
+      return {
+        distanceKm: 160,
+        travelTimeHours: 2.5,
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: [
+            [snappedOrigin.lng, snappedOrigin.lat],
+            [snappedTarget.lng, snappedTarget.lat],
+          ],
+        },
+        provider: 'openrouteservice',
+        profile: request.profile,
+        sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 160 }],
+      };
+    });
+
+    const result = await calculateAutomaticRouteLegs({
+      destinations: [origin, target],
+      routeLegs: [createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id })],
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute,
+    });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(3);
+    expect(calculateRoute).toHaveBeenNthCalledWith(2, expect.objectContaining({ radiuses: [2000, 350] }));
+    expect(calculateRoute).toHaveBeenNthCalledWith(3, expect.objectContaining({ radiuses: [2000, 2000] }));
+    expect(result.destinations[0].routingAnchors['driving-car']).toMatchObject({
+      coordinates: snappedOrigin,
+      originalCoordinates: origin.coordinates,
+    });
+    expect(result.destinations[1].routingAnchors['driving-car']).toMatchObject({
+      coordinates: snappedTarget,
+      originalCoordinates: target.coordinates,
+    });
+    expect(result.routeLegs[0]).toMatchObject({
+      status: 'ready',
+      warnings: [
+        { code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('origin') },
+        { code: 'ROUTING_ANCHOR_ADJUSTED', message: expect.stringContaining('target') },
+      ],
+      providerDiagnostic: undefined,
+    });
+  });
+
   it('recovers Alta at 1.609 km and reuses its anchor on the outbound leg', async () => {
     const olderdalen = createDestination({ name: 'Olderdalen', coordinates: { lat: 69.6041, lng: 20.5326 } });
     const alta = createDestination({ name: 'Alta', coordinates: { lat: 69.96887, lng: 23.27165 } });
@@ -717,7 +778,7 @@ describe('route orchestration', () => {
     const routingVehicle = requestedProfile === 'driving-hgv'
       ? resolveVehiclePreset('expedition-truck')
       : resolveVehiclePreset('standard');
-    const calculateRoute: CalculateRoute = async (request) => {
+    const calculateRoute: CalculateRoute = vi.fn(async (request) => {
       throw new OpenRouteServiceError({
         status: 404,
         code,
@@ -725,7 +786,7 @@ describe('route orchestration', () => {
         coordinateIndex: code === 2010 ? 1 : undefined,
         profile: code === 2009 && request.profile === 'driving-hgv' ? 'driving-hgv' : actualProfile,
       });
-    };
+    });
 
     const result = await calculateAutomaticRouteLegs({
       destinations: [origin, target],
@@ -741,10 +802,12 @@ describe('route orchestration', () => {
         httpStatus: 404,
         code,
         providerMessage: `ORS ${code} remained stable.`,
+        ...(code === 2010 ? { coordinateIndex: 1 } : {}),
         requestedProfile,
         actualProfile,
       },
     });
+    expect(calculateRoute).toHaveBeenCalledTimes(2);
   });
 
   it.each([401, 503])('persists stable ORS HTTP %i diagnostics without fabricating absent fields', async (status) => {
