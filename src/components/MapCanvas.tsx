@@ -5,8 +5,7 @@ import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactP
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Activity, Coordinates, Destination, RouteLeg } from '../domain/types';
 import { calmBasemapStyle, mapLabelFontStack, mapStyleUrl, readMapLayerColors } from '../map/mapPresentation';
-import { buildRenderableRouteFeatures } from '../map/tripRouteFeatures';
-import type { RouteFeatureProperties } from '../map/tripRouteFeatures';
+import { routeGeometryForLeg } from '../map/tripRouteFeatures';
 import { formatStopMarker } from './stopLabels';
 
 export type MapAddStopRequest = {
@@ -47,6 +46,15 @@ type ActivityFeatureProperties = {
 type CityFeatureProperties = {
   id: string;
   name: string;
+};
+
+type RouteFeatureKind = 'road' | 'ferry' | 'manual' | 'failed';
+
+export type RouteFeatureProperties = {
+  id: string;
+  type: RouteLeg['type'] | 'failed';
+  status: RouteLeg['status'];
+  kind: RouteFeatureKind;
 };
 
 type ProjectedDestinationLabel = {
@@ -745,6 +753,93 @@ function setSourceData(map: maplibregl.Map, sourceId: string, data: FeatureColle
   getGeoJsonSource(map, sourceId)?.setData(data);
 }
 
+function hasUsableRouteGeometry(routeLeg: RouteLeg): routeLeg is RouteLeg & { geometry: LineString } {
+  return routeLeg.geometry?.type === 'LineString' && routeLeg.geometry.coordinates.length >= 2;
+}
+
+function featureForGeometry(
+  routeLeg: RouteLeg,
+  geometry: LineString,
+  kind: RouteFeatureKind,
+  sectionIndex?: number,
+) {
+  return {
+    type: 'Feature' as const,
+    id: sectionIndex === undefined ? routeLeg.id : `${routeLeg.id}:${kind}:${sectionIndex}`,
+    geometry,
+    properties: {
+      id: routeLeg.id,
+      type: routeLeg.status === 'failed' ? 'failed' as const : routeLeg.type,
+      status: routeLeg.status,
+      kind,
+    },
+  };
+}
+
+function sectionFeatures(routeLeg: RouteLeg, geometry: LineString) {
+  const coordinates = geometry.coordinates;
+  const sections = [...(routeLeg.sections ?? [])].sort(
+    (left, right) => left.startGeometryIndex - right.startGeometryIndex,
+  );
+  if (sections.length === 0) return [featureForGeometry(routeLeg, geometry, 'road')];
+
+  const features: ReturnType<typeof featureForGeometry>[] = [];
+  let currentGeometryIndex = 0;
+  let featureIndex = 0;
+
+  for (const section of sections) {
+    if (section.startGeometryIndex > currentGeometryIndex) {
+      features.push(featureForGeometry(routeLeg, {
+        type: 'LineString',
+        coordinates: coordinates.slice(currentGeometryIndex, section.startGeometryIndex + 1),
+      }, 'road', featureIndex));
+      featureIndex += 1;
+    }
+
+    features.push(featureForGeometry(routeLeg, {
+      type: 'LineString',
+      coordinates: coordinates.slice(section.startGeometryIndex, section.endGeometryIndex + 1),
+    }, section.kind, featureIndex));
+    featureIndex += 1;
+    currentGeometryIndex = section.endGeometryIndex;
+  }
+
+  if (currentGeometryIndex < coordinates.length - 1) {
+    features.push(featureForGeometry(routeLeg, {
+      type: 'LineString',
+      coordinates: coordinates.slice(currentGeometryIndex),
+    }, 'road', featureIndex));
+  }
+
+  return features;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildRouteFeatures(
+  routeLegs: RouteLeg[],
+  destinations: Destination[] = [],
+): FeatureCollection<LineString, RouteFeatureProperties> {
+  return {
+    type: 'FeatureCollection',
+    features: routeLegs.flatMap((routeLeg) => {
+      const geometry = hasUsableRouteGeometry(routeLeg)
+        ? routeLeg.geometry
+        : routeGeometryForLeg(destinations, routeLeg);
+      if (!geometry) return [];
+
+      if (routeLeg.type === 'shipping-manual') {
+        return [featureForGeometry(routeLeg, geometry, 'manual')];
+      }
+      if (routeLeg.status === 'failed') {
+        return [featureForGeometry(routeLeg, geometry, 'failed')];
+      }
+      if (routeLeg.status !== 'ready' && routeLeg.status !== 'review-required') return [];
+
+      return sectionFeatures(routeLeg, geometry);
+    }),
+  };
+}
+
 function mapViewport(map: maplibregl.Map): MapViewport {
   const center = map.getCenter();
 
@@ -1088,7 +1183,7 @@ export function MapCanvas({
     setSourceData(
       map,
       routesSourceId,
-      buildRenderableRouteFeatures(latestDestinationsRef.current, latestRouteLegsRef.current),
+      buildRouteFeatures(latestRouteLegsRef.current, latestDestinationsRef.current),
     );
     if (shouldRenderFallbackMajorCities) {
       setSourceData(map, majorCitiesSourceId, buildMajorCityFeatures());
@@ -1258,12 +1353,20 @@ export function MapCanvas({
         paint: {
           'line-color': [
             'match',
-            ['get', 'type'],
-            'shipping-manual',
+            ['get', 'kind'],
+            'ferry',
+            mapColors.shipping,
+            'manual',
             mapColors.shipping,
             'failed',
             mapColors.text,
-            mapColors.accent,
+            [
+              'match',
+              ['get', 'status'],
+              'review-required',
+              mapColors.text,
+              mapColors.accent,
+            ],
           ],
           'line-dasharray': [
             'match',
@@ -1272,9 +1375,23 @@ export function MapCanvas({
             ['literal', [2, 2]],
             'failed',
             ['literal', [1, 2]],
-            ['literal', [1, 0]],
+            [
+              'match',
+              ['get', 'status'],
+              'review-required',
+              ['literal', [3, 1]],
+              ['literal', [1, 0]],
+            ],
           ],
-          'line-opacity': ['case', ['==', ['get', 'type'], 'failed'], 0.72, 0.92],
+          'line-opacity': [
+            'match',
+            ['get', 'status'],
+            'failed',
+            0.72,
+            'review-required',
+            0.86,
+            0.92,
+          ],
           'line-width': 4,
         },
       } as maplibregl.LayerSpecification);

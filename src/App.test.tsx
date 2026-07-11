@@ -1016,11 +1016,25 @@ describe('App', () => {
       coordinates: { lat: 41.7151, lng: 44.8271 },
       order: 1,
     });
+    const waypoint = {
+      id: 'waypoint-batumi',
+      order: 0,
+      name: 'Batumi',
+      coordinates: { lat: 41.6461, lng: 41.6402 },
+      location: tbilisi.location,
+      notes: 'Keep the Black Sea route.',
+      links: [],
+    };
     const routeLeg = {
       ...createRouteLeg({
         originDestinationId: istanbul.id,
         targetDestinationId: tbilisi.id,
         type: 'driving-auto',
+        movement: 'drive',
+        calculation: 'automatic',
+        ferryPolicy: 'require',
+        waypoints: [waypoint],
+        notes: 'Keep the border research notes.',
       }),
       status: 'ready' as const,
       distanceKm: 160,
@@ -1033,6 +1047,10 @@ describe('App', () => {
     };
     repositoryMock.initialDestinations = Promise.resolve([istanbul, tbilisi]);
     repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+    const routingVehicle = resolveVehiclePreset('large-camper');
+    mockTripWorkspace({
+      activeTrip: { ...tripsMock[0], routingVehicle },
+    } as Partial<ReturnType<typeof useTripWorkspace>>);
 
     render(<App />);
 
@@ -1042,6 +1060,15 @@ describe('App', () => {
       name: 'Edit route from Istanbul to Tbilisi',
     });
     await user.click(editRouteButton);
+
+    expect(calculateOpenRouteServiceRouteOptions).toHaveBeenCalledWith({
+      apiKey: expect.any(String),
+      origin: istanbul.coordinates,
+      target: tbilisi.coordinates,
+      routingVehicle,
+      waypoints: [waypoint],
+      ferryPolicy: 'require',
+    });
 
     expect(await screen.findByRole('dialog', { name: 'Edit route from Istanbul to Tbilisi' })).toBeInTheDocument();
     expect(await screen.findByText('Avoid highways')).toBeInTheDocument();
@@ -1056,6 +1083,12 @@ describe('App', () => {
           distanceKm: 220,
           travelTimeHours: 3.4,
           status: 'ready',
+          movement: 'drive',
+          calculation: 'automatic',
+          ferryPolicy: 'require',
+          waypoints: [waypoint],
+          notes: 'Keep the border research notes.',
+          sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 220 }],
         }),
       ),
     );

@@ -902,7 +902,9 @@ function TripWorkspace({
           apiKey: openRouteServiceApiKey,
           origin: origin.coordinates,
           target: target.coordinates,
-          profile: 'driving-car',
+          routingVehicle: activeTrip?.routingVehicle,
+          waypoints: routeLeg.waypoints ?? [],
+          ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
         });
 
         setRouteAlternativesState((current) =>
@@ -930,7 +932,7 @@ function TripWorkspace({
         );
       }
     },
-    [destinationsById, routeLegsById],
+    [activeTrip?.routingVehicle, destinationsById, routeLegsById],
   );
 
   const closeRouteAlternatives = useCallback(() => {
@@ -954,10 +956,9 @@ function TripWorkspace({
     setRouteAlternativesState((current) => (current ? { ...current, status: 'saving' } : current));
 
     try {
-      await updateRouteLeg(
-        routeAlternativesState.routeLegId,
-        routeLegPatchFromRouteOption(selectedOption),
-      );
+      const calculatedPatch = routeLegPatchFromRouteOption(selectedOption);
+      delete calculatedPatch.type;
+      await updateRouteLeg(routeAlternativesState.routeLegId, calculatedPatch);
       setRouteAlternativesState(null);
     } catch (caught) {
       setRouteAlternativesState((current) =>

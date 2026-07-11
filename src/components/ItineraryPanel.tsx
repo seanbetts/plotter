@@ -1,4 +1,4 @@
-import { Car, ChevronDown, ChevronUp, GripVertical, Pencil, RefreshCw, Ship, Signpost, Trash2 } from 'lucide-react';
+import { Car, ChevronDown, ChevronUp, GripVertical, MapPin, Pencil, RefreshCw, Ship, Signpost, Trash2, TriangleAlert } from 'lucide-react';
 import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { formatDestinationLocation, formatLocationContext, formatLocationParts } from '../domain/locations';
@@ -115,6 +115,19 @@ function nextRouteType(type: RouteLegType): RouteLegType {
   return type === 'shipping-manual' ? 'driving-auto' : 'shipping-manual';
 }
 
+function routeModePatch(type: RouteLegType) {
+  return type === 'shipping-manual'
+    ? { type, movement: 'vehicle-shipping' as const, calculation: 'manual' as const }
+    : { type, movement: 'drive' as const, calculation: 'automatic' as const };
+}
+
+function routeReviewLabel(routeLeg: RouteLeg) {
+  const warningMessages = (routeLeg.warnings ?? []).map((warning) => warning.message);
+  return warningMessages.length > 0
+    ? `Route requires review: ${warningMessages.join(' ')}`
+    : 'Route requires review';
+}
+
 function reorderedDestinationIds(
   destinations: Destination[],
   draggedDestinationId: string,
@@ -197,7 +210,8 @@ export function ItineraryPanel({
     0,
   );
   const totalTravelTimeHours = routeLegs.reduce(
-    (totalHours, routeLeg) => totalHours + (routeLeg.travelTimeHours ?? 0),
+    (totalHours, routeLeg) =>
+      totalHours + (routeLeg.status === 'review-required' ? 0 : routeLeg.travelTimeHours ?? 0),
     0,
   );
   const itineraryStats = [
@@ -449,6 +463,10 @@ export function ItineraryPanel({
                 : undefined;
               const isCalculatingRoute = routeLeg ? isRouteLegCalculating(routeLeg) : false;
               const isFailedRoute = routeLeg ? isRouteLegFailed(routeLeg) : false;
+              const hasFerrySection = routeLeg?.sections?.some((section) => section.kind === 'ferry') ?? false;
+              const routeWaypointCount = routeLeg?.waypoints?.length ?? 0;
+              const routeWaypointLabel = `${routeWaypointCount} route ${routeWaypointCount === 1 ? 'waypoint' : 'waypoints'}`;
+              const reviewLabel = routeLeg ? routeReviewLabel(routeLeg) : '';
               const borderCrossingLabel = nextDestination
                 ? formatBorderCrossingLabel(destination, nextDestination)
                 : null;
@@ -544,13 +562,11 @@ export function ItineraryPanel({
                       type="button"
                       className="inline-route-type"
                       aria-label={`Set ${destination.name} to ${nextDestination.name} to ${
-                        routeLeg.type === 'shipping-manual' ? 'driving' : 'shipping/manual'
+                        routeLeg.type === 'shipping-manual' ? 'driving' : 'Vehicle shipping'
                       }`}
-                      title={routeLeg.type === 'shipping-manual' ? 'Set to driving' : 'Set to shipping/manual'}
+                      title={routeLeg.type === 'shipping-manual' ? 'Set to driving' : 'Set to Vehicle shipping'}
                       onClick={() =>
-                        onUpdateRouteLeg(routeLeg.id, {
-                          type: nextRouteType(routeLeg.type),
-                        })
+                        onUpdateRouteLeg(routeLeg.id, routeModePatch(nextRouteType(routeLeg.type)))
                       }
                     >
                       {routeLeg.type === 'shipping-manual' ? <Ship size={15} /> : <Car size={15} />}
@@ -599,6 +615,21 @@ export function ItineraryPanel({
                         ) : null}
                         {formatLegTime(routeLeg) ? (
                           <span className="inline-route-metric">{formatLegTime(routeLeg)}</span>
+                        ) : null}
+                        {hasFerrySection ? (
+                          <span className="inline-route-indicator" role="img" aria-label="Route includes a ferry" title="Route includes a ferry">
+                            <Ship size={14} aria-hidden="true" />
+                          </span>
+                        ) : null}
+                        {routeWaypointCount > 0 ? (
+                          <span className="inline-route-indicator" role="img" aria-label={routeWaypointLabel} title={routeWaypointLabel}>
+                            <MapPin size={14} aria-hidden="true" />
+                          </span>
+                        ) : null}
+                        {routeLeg.status === 'review-required' ? (
+                          <span className="inline-route-indicator is-warning" role="img" aria-label={reviewLabel} title={reviewLabel}>
+                            <TriangleAlert size={14} aria-hidden="true" />
+                          </span>
                         ) : null}
                         {borderCrossingLabel ? (
                           <span

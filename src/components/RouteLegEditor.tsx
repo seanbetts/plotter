@@ -83,8 +83,8 @@ export function RouteLegEditor({ destinations, onCreateRouteLeg }: RouteLegEdito
       <label>
         Leg type
         <select value={type} onChange={(event) => setType(event.target.value as RouteLegType)}>
-          <option value="driving-auto">driving-auto</option>
-          <option value="shipping-manual">shipping-manual</option>
+          <option value="driving-auto">Automatic driving</option>
+          <option value="shipping-manual">Vehicle shipping</option>
         </select>
       </label>
 

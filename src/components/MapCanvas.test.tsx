@@ -4,7 +4,7 @@ import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
-import { MapCanvas } from './MapCanvas';
+import { buildRouteFeatures, MapCanvas } from './MapCanvas';
 
 type MockMap = {
   on: Mock;
@@ -179,6 +179,43 @@ describe('MapCanvas', () => {
     createdAt: '2026-06-28T00:00:00.000Z',
     updatedAt: '2026-06-28T00:00:00.000Z',
   };
+
+  it('splits stored ferry sections into exact road and ferry geometry slices', () => {
+    const coordinates = Array.from({ length: 11 }, (_, index) => [index, index + 40]);
+    const ferryRouteLeg: RouteLeg = {
+      ...routeLeg,
+      id: 'route-with-ferry',
+      status: 'review-required',
+      geometry: { type: 'LineString', coordinates },
+      sections: [{ kind: 'ferry', startGeometryIndex: 2, endGeometryIndex: 8, distanceKm: 135 }],
+    };
+
+    const features = buildRouteFeatures([ferryRouteLeg]).features;
+
+    expect(features.map((feature) => feature.properties.kind)).toEqual(['road', 'ferry', 'road']);
+    expect(features.map((feature) => feature.geometry.coordinates)).toEqual([
+      coordinates.slice(0, 3),
+      coordinates.slice(2, 9),
+      coordinates.slice(8),
+    ]);
+    expect(features.every((feature) => feature.properties.status === 'review-required')).toBe(true);
+  });
+
+  it('retains a distinct map feature for manual Vehicle shipping', () => {
+    const manualShippingLeg: RouteLeg = {
+      ...routeLeg,
+      id: 'route-manual-shipping',
+      type: 'shipping-manual',
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
+      status: 'manual',
+    };
+
+    expect(buildRouteFeatures([manualShippingLeg]).features[0].properties).toMatchObject({
+      kind: 'manual',
+      type: 'shipping-manual',
+    });
+  });
 
   const louvreActivity: Activity = {
     id: 'activity-louvre',
@@ -1388,6 +1425,15 @@ describe('MapCanvas', () => {
       expect.objectContaining({ type: 'geojson' }),
     );
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-routes-line' }));
+    const routeLayer = map.addLayer.mock.calls
+      .map(([layer]) => layer)
+      .find((layer) => layer.id === 'world-tour-routes-line');
+    expect(routeLayer.paint['line-color'].flat(Infinity)).toEqual(
+      expect.arrayContaining(['kind', 'ferry', 'manual', 'review-required']),
+    );
+    expect(routeLayer.paint['line-dasharray'].flat(Infinity)).toEqual(
+      expect.arrayContaining(['shipping-manual', 2, 2, 'review-required', 3, 1]),
+    );
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-selected-destination-halo' }));
     expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'world-tour-destination-points' }));
     expect(screen.queryByText('1 route leg')).not.toBeInTheDocument();

@@ -2671,6 +2671,28 @@ select {
   content: "·";
 }
 
+.inline-route-indicator {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--text-soft);
+  background: var(--surface-control);
+}
+
+.inline-route-indicator.is-warning {
+  border-color: var(--border-danger);
+  color: var(--color-danger);
+  background: var(--surface-danger-subtle);
+}
+
+.inline-route-indicator svg {
+  display: block;
+}
+
 .inline-route-retry {
   display: grid;
   flex: 0 0 auto;
