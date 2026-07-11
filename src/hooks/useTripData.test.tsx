@@ -2773,6 +2773,115 @@ describe('useTripData', () => {
     expect(result.current.routeLegs).toEqual([]);
   });
 
+  it('serializes same-repository reload reconciliation through a blocked save and rollback', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const currentVehicle = resolveVehiclePreset('large-camper');
+    const currentRouteLeg = createReadyRouteLegForVehicle(origin, target, currentVehicle);
+    const legacyRouteLeg = createReadyRouteLegForVehicle(
+      origin,
+      target,
+      createLegacyLargeCamperRoutingVehicle(),
+    );
+    const releaseFirstSave = createDeferred(undefined);
+    let storedRouteLeg = currentRouteLeg;
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => {
+      if (routeLeg.distanceKm === 128) {
+        await releaseFirstSave.promise;
+        throw new Error('First reload save failed');
+      }
+      storedRouteLeg = routeLeg;
+    });
+    const calculateRoute = vi
+      .fn()
+      .mockResolvedValueOnce({
+        distanceKm: 128,
+        travelTimeHours: 2.1,
+        geometry: legacyRouteLeg.geometry!,
+        provider: 'openrouteservice',
+        profile: 'driving-car' as const,
+        sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 128 }],
+      })
+      .mockResolvedValueOnce({
+        distanceKm: 222,
+        travelTimeHours: 3.4,
+        geometry: legacyRouteLeg.geometry!,
+        provider: 'openrouteservice',
+        profile: 'driving-car' as const,
+        sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 222 }],
+      });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: currentVehicle,
+    }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    storedRouteLeg = legacyRouteLeg;
+    let firstReload!: Promise<void>;
+    await act(async () => {
+      firstReload = result.current.reload();
+      await waitFor(() => expect(saveRouteLeg).toHaveBeenCalledTimes(1));
+    });
+
+    let secondReloadSettled = false;
+    let secondReload!: Promise<void>;
+    act(() => {
+      secondReload = result.current.reload();
+      void secondReload.then(() => { secondReloadSettled = true; });
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(secondReloadSettled).toBe(false);
+
+    await act(async () => {
+      releaseFirstSave.resolve();
+      await Promise.all([firstReload, secondReload]);
+    });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(2);
+    expect(saveRouteLeg).toHaveBeenCalledTimes(3);
+    expect(storedRouteLeg).toMatchObject({ status: 'ready', profile: 'driving-car', distanceKm: 222 });
+    expect(result.current.routeLegs).toEqual([storedRouteLeg]);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('performs no route calls or writes across repeated reloads of current data', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const currentVehicle = resolveVehiclePreset('large-camper');
+    const currentRouteLeg = createReadyRouteLegForVehicle(origin, target, currentVehicle);
+    const saveDestination = vi.fn(async () => undefined);
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const calculateRoute = vi.fn();
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [currentRouteLeg],
+      saveDestination,
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: currentVehicle,
+    }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.reload();
+      await result.current.reload();
+      await result.current.reload();
+    });
+
+    expect(result.current.routeLegs).toEqual([currentRouteLeg]);
+    expect(calculateRoute).not.toHaveBeenCalled();
+    expect(saveDestination).not.toHaveBeenCalled();
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+  });
+
   it('does not start the queued initial reload after fast unmount', async () => {
     const repository = createMemoryRepository(Promise.resolve([]));
     const { unmount } = renderHook(() => useTripData(repository));

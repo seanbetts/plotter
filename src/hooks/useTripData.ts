@@ -37,6 +37,7 @@ type ApplyValidatedRouteLegResultInput = {
 };
 
 const createTimestamp = () => new Date().toISOString();
+const allRouteMutationsQueueKey = '__all_route_mutations__';
 
 function changedDestinationsByReference(currentDestinations: Destination[], nextDestinations: Destination[]) {
   const currentById = new Map(currentDestinations.map((destination) => [destination.id, destination]));
@@ -222,7 +223,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     routeLegIds: string[],
     mutation: () => Promise<T>,
   ) => {
-    const uniqueRouteLegIds = [...new Set(['__all_route_mutations__', ...routeLegIds])].sort();
+    const uniqueRouteLegIds = [...new Set([allRouteMutationsQueueKey, ...routeLegIds])].sort();
     const previousMutations = uniqueRouteLegIds.map(
       (routeLegId) => routeLegMutationQueuesRef.current.get(routeLegId) ?? Promise.resolve(),
     );
@@ -283,36 +284,47 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     setIsLoading(true);
     setError(null);
     try {
-      const [loadedDestinations, loadedRouteLegs] = await Promise.all([
+      const [initialDestinations, initialRouteLegs] = await Promise.all([
         repository.listDestinations(),
         repository.listRouteLegs(),
       ]);
 
       if (!isCurrentReload()) return;
 
-      const loadedActivities = await Promise.all(
-        loadedDestinations.map(async (destination) => [
-          destination.id,
-          await repository.listActivities(destination.id),
-        ] as const),
-      );
-      const nextActivitiesByDestinationId = Object.fromEntries(loadedActivities);
+      const mustRefreshAfterWaiting = routeLegMutationQueuesRef.current.has(allRouteMutationsQueueKey);
+      await enqueueRouteLegMutations([], async () => {
+        if (!isCurrentReload()) return;
 
-      if (!isCurrentReload()) return;
+        const [loadedDestinations, loadedRouteLegs] = mustRefreshAfterWaiting
+          ? await Promise.all([
+              repository.listDestinations(),
+              repository.listRouteLegs(),
+            ])
+          : [initialDestinations, initialRouteLegs];
+        if (!isCurrentReload()) return;
 
-      const reconciled = await reconcileLoadedRoutesForVehicle({
-        repository,
-        destinations: loadedDestinations,
-        routeLegs: loadedRouteLegs,
-        routingVehicle: routingVehicleRef.current,
-        calculateRoute: calculateRouteRef.current,
-        isCurrentReload,
+        const reconciled = await reconcileLoadedRoutesForVehicle({
+          repository,
+          destinations: loadedDestinations,
+          routeLegs: loadedRouteLegs,
+          routingVehicle: routingVehicleRef.current,
+          calculateRoute: calculateRouteRef.current,
+          isCurrentReload,
+        });
+        if (!reconciled || !isCurrentReload()) return;
+
+        const loadedActivities = await Promise.all(
+          reconciled.destinations.map(async (destination) => [
+            destination.id,
+            await repository.listActivities(destination.id),
+          ] as const),
+        );
+        if (!isCurrentReload()) return;
+
+        replaceDestinations(reconciled.destinations);
+        replaceRouteLegs(reconciled.routeLegs);
+        replaceActivitiesByDestinationId(Object.fromEntries(loadedActivities));
       });
-      if (!reconciled || !isCurrentReload()) return;
-
-      replaceDestinations(reconciled.destinations);
-      replaceRouteLegs(reconciled.routeLegs);
-      replaceActivitiesByDestinationId(nextActivitiesByDestinationId);
     } catch (caught) {
       if (!isCurrentReload()) return;
 
@@ -323,6 +335,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
     setIsLoading(false);
   }, [
+    enqueueRouteLegMutations,
     isActiveGeneration,
     replaceActivitiesByDestinationId,
     replaceDestinations,
