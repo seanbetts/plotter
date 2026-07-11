@@ -808,6 +808,49 @@ describe('MapCanvas', () => {
     );
   });
 
+  it('reserves both resolved stop pill positions when placing an activity pill', () => {
+    const returnDestination: Destination = {
+      ...targetDestination,
+      id: 'dest-return',
+      name: 'Cappadocia return',
+      coordinates: destination.coordinates,
+    };
+    const caveActivity: Activity = {
+      ...louvreActivity,
+      id: 'activity-cave',
+      title: 'Cave Church',
+      destinationId: destination.id,
+      location: {
+        name: 'Cave Church',
+        address: 'Cappadocia, Turkey',
+        coordinates: destination.coordinates,
+        sourceProvider: 'maptiler',
+        sourceFeatureId: 'poi-cave',
+      },
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination, returnDestination]}
+        routeLegs={[]}
+        selectedDestinationId={destination.id}
+        focusedActivities={[caveActivity]}
+        selectedActivityId={null}
+        onSelectDestination={vi.fn()}
+        onSelectActivity={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+    act(() => { loadHandler(); });
+    maplibreMock.setZoom(4);
+    act(() => { zoomEndHandler(); });
+
+    expect(screen.queryByRole('button', { name: 'Open Cave Church activity details' })).not.toBeInTheDocument();
+  });
+
   it('flips a nearby activity pill above its pin to display close activity labels together', () => {
     const firstActivity: Activity = {
       ...louvreActivity,
@@ -1388,9 +1431,17 @@ describe('MapCanvas', () => {
   });
 
   it('renders the first destination stop label as the start label', () => {
+    const nonOverlappingTargetDestination: Destination = {
+      ...targetDestination,
+      coordinates: {
+        ...targetDestination.coordinates,
+        lng: targetDestination.coordinates.lng + 10,
+      },
+    };
+
     render(
       <MapCanvas
-        destinations={[destination, targetDestination]}
+        destinations={[destination, nonOverlappingTargetDestination]}
         routeLegs={[]}
         selectedDestinationId={null}
         onSelectDestination={vi.fn()}
@@ -1419,8 +1470,77 @@ describe('MapCanvas', () => {
     expect(destinationLabelLayer).toBeUndefined();
     expect(startLabel).toHaveClass('map-destination-label');
     expect(nextStopLabel).toHaveClass('map-destination-label');
+    expect(startLabel).not.toHaveClass('map-label-position-above');
+    expect(nextStopLabel).not.toHaveClass('map-label-position-above');
     expect(Number.parseFloat(startLabel.style.left)).toBeCloseTo(1348.289);
     expect(Number.parseFloat(startLabel.style.top)).toBeCloseTo(113.569);
+  });
+
+  it('places the earlier stop above and the later stop below when a trip returns to identical coordinates', () => {
+    const returnDestination: Destination = {
+      ...targetDestination,
+      id: 'dest-return',
+      name: 'Cappadocia return',
+      coordinates: destination.coordinates,
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination, returnDestination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+    act(() => { loadHandler(); });
+    maplibreMock.setZoom(4);
+    act(() => { zoomEndHandler(); });
+
+    expect(screen.getByRole('button', { name: 'Open Cappadocia stop details' })).toHaveClass(
+      'map-label-position-above',
+    );
+    expect(screen.getByRole('button', { name: 'Open Cappadocia return stop details' })).not.toHaveClass(
+      'map-label-position-above',
+    );
+  });
+
+  it('uses the same placement when nearby stop pills overlap in screen space', () => {
+    const nearbyDestination: Destination = {
+      ...targetDestination,
+      id: 'dest-nearby',
+      name: 'Nearby return',
+      coordinates: {
+        lat: destination.coordinates.lat + 0.02,
+        lng: destination.coordinates.lng + 0.02,
+      },
+    };
+
+    render(
+      <MapCanvas
+        destinations={[destination, nearbyDestination]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const loadHandler = map.on.mock.calls.find(([eventName]) => eventName === 'load')?.[1];
+    const zoomEndHandler = map.on.mock.calls.find(([eventName]) => eventName === 'zoomend')?.[1];
+    act(() => { loadHandler(); });
+    maplibreMock.setZoom(4);
+    act(() => { zoomEndHandler(); });
+
+    expect(screen.getByRole('button', { name: 'Open Cappadocia stop details' })).toHaveClass(
+      'map-label-position-above',
+    );
+    expect(screen.getByRole('button', { name: 'Open Nearby return stop details' })).not.toHaveClass(
+      'map-label-position-above',
+    );
   });
 
   it('hides destination stop labels until the map is zoomed into planning level', () => {
