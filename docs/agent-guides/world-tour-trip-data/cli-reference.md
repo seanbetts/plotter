@@ -12,7 +12,9 @@ npm run trip -- create --input ./trip-manifest.json --dry-run --summary --pretty
 npm run trip -- audit --trip-id <id> --pretty
 npm run trip -- recalculate-failed-routes --trip-id <id> --summary --pretty
 npm run trip -- rename --trip-id <id> --name "North Coast 500 Trip"
-npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck --dry-run
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck --yes
+npm run trip -- update-route-leg --trip-id trip-1 --route-leg-id leg-1 --input /tmp/route-intent.json --dry-run
 npm run trip -- update-route-leg --trip-id trip-1 --route-leg-id leg-1 --input /tmp/route-intent.json
 npm run trip -- delete --trip-id <id> --dry-run
 npm run trip -- delete --trip-id <id> --yes
@@ -69,7 +71,9 @@ Trip draft:
 }
 ```
 
-Manifest V1 remains readable for existing files and resolves the `standard` preset. Use manifest V2 for every new agent-authored trip. V2 requires `vehiclePreset`, creates every ordinary adjacent automatic leg, and overlays only exceptional directives from `routeLegs`:
+Compatibility only — legacy manifest V1 input remains readable for existing files and resolves the `standard` preset. Do not use V1 or its legacy `type` directive in new work.
+
+Use manifest V2 for every new agent-authored trip. The current V2 contract uses `movement` plus `calculation`, requires `vehiclePreset`, creates every ordinary adjacent automatic leg, and overlays only exceptional directives from `routeLegs`:
 
 ```json
 {
@@ -176,9 +180,29 @@ Existing-trip route-intent patch:
 }
 ```
 
-Writable route-intent fields are exactly `movement`, `calculation`, `ferryPolicy`, ordered `waypoints`, and `notes`. A waypoint draft may contain `name`, `place.query` and/or `place.coordinates`, `notes`, and `links`.
+Writable route-intent fields are exactly `movement`, `calculation`, `ferryPolicy`, ordered `waypoints`, and `notes`. A waypoint draft may contain `name`, `place.query` and/or sourced `place.coordinates`, `notes`, and `links` as URL strings.
 
-App-derived route fields are exactly `type`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, and `error`. Never put them in a manifest directive or `update-route-leg` input.
+Endpoint selection differs by workflow:
+
+- A manifest V2 directive selects one adjacent stop pair with `fromStopKey` and `toStopKey`. These manifest selectors are required on the directive but are not route-intent patch fields.
+- For an existing trip, `update-route-leg` selects the stored leg with `--route-leg-id`. Its patch cannot change the app-owned route-leg `id`, `originDestinationId`, or `targetDestinationId`.
+
+The complete current non-writable route-leg state is: `id`, `originDestinationId`, `targetDestinationId`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, `error`, `createdAt`, and `updatedAt`. Never put these fields in a manifest directive or `update-route-leg` input.
+
+For stored waypoints, the app owns `id`, `order`, normalized `coordinates`, and resolved location/address/provider metadata. A supplied waypoint-draft `place.coordinates` remains valid source input; do not confuse it with the normalized stored `coordinates` field. The app also enriches each waypoint URL into stored `ResearchLink` metadata: `id`, `title`, normalized `url`, `domain`, `imageUrl`, `sortOrder`, and `previewFetchedAt`. Draft `links` remain writable URL strings.
+
+Vehicle changes require confirmation. Preview and apply are separate commands:
+
+```bash
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck --dry-run
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck --yes
+```
+
+`update-route-leg` uses the implemented exact apply form below and does not require `--yes`. Add `--dry-run` only for a separate preview:
+
+```bash
+npm run trip -- update-route-leg --trip-id trip-1 --route-leg-id leg-1 --input /tmp/route-intent.json
+```
 
 For an approved new trip, perform one create and one audit:
 

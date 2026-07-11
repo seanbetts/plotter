@@ -7,7 +7,8 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 ## Core Rules
 
 - Use `npm run trip -- ...` for all trip data reads and writes.
-- Let the app calculate derived route fields: `type`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, and `error`.
+- Let the app own route-leg `id`, `originDestinationId`, `targetDestinationId`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, `error`, `createdAt`, and `updatedAt`.
+- Let the app own stored waypoint `id`, `order`, normalized `coordinates`, resolved location/address/provider metadata, and enriched `ResearchLink` metadata. Source `place.coordinates` and URL strings remain writable waypoint-draft inputs.
 - Never author route geometry or app-derived fields by hand.
 - Treat overnight locations as stops.
 - Treat non-overnight visits, tours, meals, viewpoints, walks, and events as activities under the nearest relevant stop.
@@ -24,7 +25,7 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 - Give every full-manifest stop a unique key and explicit positive `expectedStayDays`; use `1` for departure and return anchors.
 - Use `--summary` for large commands to avoid huge route geometry output.
 - Link-add commands are idempotent; retrying an existing URL should be safe.
-- Image import/upload is not part of the CLI v1 surface.
+- Image import/upload is not part of the current CLI surface.
 
 ## Workflow Branches
 
@@ -75,11 +76,17 @@ Use the least broad granular command: `insert-stop`, `update-stop`, `delete-stop
 Apply approved vehicle and exceptional route intent with these exact forms:
 
 ```bash
-npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck
+# Preview the vehicle change.
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck --dry-run
+
+# Apply only after separate approval.
+npm run trip -- set-vehicle --trip-id trip-1 --preset expedition-truck --yes
+
+# Apply the approved route-intent patch; this command does not require --yes.
 npm run trip -- update-route-leg --trip-id trip-1 --route-leg-id leg-1 --input /tmp/route-intent.json
 ```
 
-The route-intent input may contain only `movement`, `calculation`, `ferryPolicy`, ordered `waypoints`, and `notes`.
+The route-intent input may contain only `movement`, `calculation`, `ferryPolicy`, ordered `waypoints`, and `notes`. Use `--dry-run` separately when a route-intent preview is useful; the implemented apply form above writes without a confirmation flag.
 
 Use `recalculate-failed-routes` for persisted failed legs. Never use a no-op stop reorder to force route calculation.
 
