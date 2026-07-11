@@ -168,6 +168,52 @@ describe('OpenRouteService adapter', () => {
     ]);
   });
 
+  it('maps waycategory values containing the ferry bit to ferry sections', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[0, 0], [1, 0], [2, 0]] },
+          properties: {
+            summary: { distance: 222_390, duration: 7_200 },
+            extras: { waycategory: { values: [[0, 1, 1], [1, 2, 72]] } },
+          },
+        }],
+      }),
+    }));
+
+    const route = await calculateOpenRouteServiceRoute({ apiKey: 'key', origin, target });
+
+    expect(route.sections).toContainEqual({
+      kind: 'ferry',
+      startGeometryIndex: 1,
+      endGeometryIndex: 2,
+      distanceKm: 111.2,
+    });
+  });
+
+  it('maps missing waycategory metadata to one full road section', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[0, 0], [1, 0]] },
+          properties: { summary: { distance: 111_195, duration: 3_600 } },
+        }],
+      }),
+    }));
+
+    const route = await calculateOpenRouteServiceRoute({ apiKey: 'key', origin, target });
+
+    expect(route.sections).toEqual([
+      { kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 111.195 },
+    ]);
+  });
+
   it('rejects malformed waycategory ranges safely', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -179,6 +225,27 @@ describe('OpenRouteService adapter', () => {
           properties: {
             summary: { distance: 111_195, duration: 3_600 },
             extras: { waycategory: { values: [[0, 4, 8]] } },
+          },
+        }],
+      }),
+    }));
+
+    await expect(
+      calculateOpenRouteServiceRoute({ apiKey: 'key', origin, target }),
+    ).rejects.toThrow('OpenRouteService returned an invalid route');
+  });
+
+  it('rejects overlapping waycategory ranges', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[0, 0], [1, 0], [2, 0], [3, 0]] },
+          properties: {
+            summary: { distance: 333_585, duration: 10_800 },
+            extras: { waycategory: { values: [[0, 2, 1], [1, 3, 8]] } },
           },
         }],
       }),

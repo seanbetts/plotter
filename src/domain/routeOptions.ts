@@ -11,7 +11,7 @@ export type RouteOption = {
   distanceKm: number;
   travelTimeHours: number;
   geometry: LineString;
-  sections?: RouteSection[];
+  sections: RouteSection[];
   provider: string;
   profile: string;
   routeKey: string;
@@ -94,6 +94,10 @@ export function routeLegPatchFromRouteOption(
   option: RouteOption,
   calculatedAt = new Date().toISOString(),
 ): RouteLegOptionPatch {
+  if (!option.sections) {
+    throw new Error('Route option sections are required');
+  }
+
   return {
     type: 'driving-auto',
     status: 'ready',
@@ -103,7 +107,7 @@ export function routeLegPatchFromRouteOption(
     provider: option.provider,
     profile: option.profile,
     routeKey: option.routeKey,
-    sections: option.sections ?? [],
+    sections: option.sections,
     calculatedAt,
     error: undefined,
   };

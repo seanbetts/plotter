@@ -170,7 +170,7 @@ function parseWaycategoryRanges(values: unknown, lastGeometryIndex: number) {
     if (
       !Number.isInteger(startGeometryIndex) ||
       !Number.isInteger(endGeometryIndex) ||
-      typeof category !== 'number' ||
+      !Number.isInteger(category) ||
       startGeometryIndex < 0 ||
       startGeometryIndex >= endGeometryIndex ||
       endGeometryIndex > lastGeometryIndex ||
@@ -195,7 +195,7 @@ function parseRouteSections(
   }
 
   const ferryRanges = parseWaycategoryRanges(waycategory.values, lastGeometryIndex)
-    .filter((range) => range.category === 8);
+    .filter((range) => (range.category & 8) !== 0);
   const sections: RouteSection[] = [];
   let nextRoadStart = 0;
 

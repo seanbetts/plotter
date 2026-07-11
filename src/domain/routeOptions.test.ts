@@ -202,4 +202,23 @@ describe('route option helpers', () => {
     });
     expect(routeLeg.type).toBe('driving-auto');
   });
+
+  it('rejects applying an option whose section metadata is missing', () => {
+    const malformedOption = {
+      id: 'missing-sections',
+      label: 'Missing sections',
+      source: 'recommended',
+      distanceKm: 458.25,
+      travelTimeHours: 5,
+      geometry: directGeometry,
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'missing-sections',
+      sections: undefined,
+    } as unknown as Parameters<typeof routeLegPatchFromRouteOption>[0];
+
+    expect(() => routeLegPatchFromRouteOption(malformedOption)).toThrow(
+      'Route option sections are required',
+    );
+  });
 });
