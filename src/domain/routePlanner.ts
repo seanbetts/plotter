@@ -27,6 +27,7 @@ function routePairKey(originDestinationId: string, targetDestinationId: string) 
 
 const createTimestamp = () => new Date().toISOString();
 const drivingGeometryEndpointTolerance = 0.001;
+const recoveredAnchorRadiusKm = 2;
 
 function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
@@ -154,6 +155,14 @@ function routeGeometryMatchesCurrentEndpoints(
     return Boolean(
       anchor &&
       anchor.profile === profile &&
+      anchor.provider === 'openrouteservice' &&
+      Number.isFinite(anchor.originalCoordinates.lat) &&
+      Number.isFinite(anchor.originalCoordinates.lng) &&
+      Number.isFinite(anchor.coordinates.lat) &&
+      Number.isFinite(anchor.coordinates.lng) &&
+      Number.isFinite(anchor.snapDistanceKm) &&
+      anchor.snapDistanceKm >= 0 &&
+      anchor.snapDistanceKm <= recoveredAnchorRadiusKm &&
       coordinateMatches(anchor.originalCoordinates.lng, destination.coordinates.lng) &&
       coordinateMatches(anchor.originalCoordinates.lat, destination.coordinates.lat) &&
       coordinateMatches(coordinate?.[0], anchor.coordinates.lng, drivingGeometryEndpointTolerance) &&
@@ -162,6 +171,46 @@ function routeGeometryMatchesCurrentEndpoints(
   };
 
   return endpointMatches(firstCoordinate, origin) && endpointMatches(lastCoordinate, target);
+}
+
+export function reconcileReadyAutomaticRouteLegForCurrentIntent(
+  routeLeg: RouteLeg,
+  origin: Destination,
+  target: Destination,
+  routingVehicle: TripRoutingVehicle,
+): RouteLeg {
+  if (
+    routeLeg.status !== 'ready' ||
+    routeLeg.movement !== 'drive' ||
+    routeLeg.calculation !== 'automatic'
+  ) return routeLeg;
+
+  if (
+    hasCompleteAppImplementableDrivingRouteData(routeLeg, routingVehicle) &&
+    routeKeyMatchesCurrentIntent(routeLeg, origin, target, routingVehicle) &&
+    routeGeometryMatchesCurrentEndpoints(routeLeg, origin, target)
+  ) {
+    return routeLeg;
+  }
+
+  return {
+    ...routeLeg,
+    status: 'pending',
+    distanceKm: undefined,
+    travelTimeHours: undefined,
+    geometry: undefined,
+    provider: undefined,
+    profile: routingVehicle.profile,
+    routeKey: createRouteKey({
+      origin: origin.coordinates, target: target.coordinates, routingVehicle,
+      waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order).map((waypoint) => waypoint.coordinates),
+      ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+    }),
+    calculatedAt: undefined,
+    error: undefined,
+    providerDiagnostic: undefined,
+    updatedAt: createTimestamp(),
+  };
 }
 
 function refreshRouteLegForDestinationCoordinates(
@@ -192,32 +241,12 @@ function refreshRouteLegForDestinationCoordinates(
   }
 
   if (routeLeg.status === 'ready') {
-    if (
-      hasCompleteAppImplementableDrivingRouteData(routeLeg, routingVehicle) &&
-      routeKeyMatchesCurrentIntent(routeLeg, origin, target, routingVehicle) &&
-      routeGeometryMatchesCurrentEndpoints(routeLeg, origin, target)
-    ) {
-      return routeLeg;
-    }
-
-    return {
-      ...routeLeg,
-      status: 'pending',
-      distanceKm: undefined,
-      travelTimeHours: undefined,
-      geometry: undefined,
-      provider: undefined,
-      profile: routingVehicle.profile,
-      routeKey: createRouteKey({
-        origin: origin.coordinates, target: target.coordinates, routingVehicle,
-        waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order).map((waypoint) => waypoint.coordinates),
-        ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
-      }),
-      calculatedAt: undefined,
-      error: undefined,
-      providerDiagnostic: undefined,
-      updatedAt: createTimestamp(),
-    };
+    return reconcileReadyAutomaticRouteLegForCurrentIntent(
+      routeLeg,
+      origin,
+      target,
+      routingVehicle,
+    );
   }
 
   const routeKey = createRouteKey({

@@ -559,6 +559,63 @@ describe('route planner helpers', () => {
     expect(result.routeLegs[0]).toBe(recoveredLeg);
   });
 
+  it.each([
+    ['a non-ORS provider', { provider: 'other-provider' as 'openrouteservice' }],
+    ['a non-finite snap distance', { snapDistanceKm: Number.NaN }],
+    ['an over-radius snap distance', { snapDistanceKm: 2.01 }],
+  ])('invalidates recovered geometry backed by %s', (_label, anchorPatch) => {
+    const origin = createDestination({
+      name: 'Balcombe',
+      coordinates: { lat: 51.0573, lng: -0.1349 },
+      order: 0,
+    });
+    const targetCoordinates = { lat: 69.96887, lng: 23.27165 };
+    const targetAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: targetCoordinates,
+      snapDistanceKm: 1.61,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+      ...anchorPatch,
+    };
+    const target = {
+      ...createDestination({ name: 'Alta', coordinates: targetCoordinates, order: 1 }),
+      routingAnchors: { 'driving-car': targetAnchor },
+    };
+    const recoveredLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100,
+      travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [origin.coordinates.lng, origin.coordinates.lat],
+          [targetAnchor.coordinates.lng, targetAnchor.coordinates.lat],
+        ],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED', message: 'Adjusted target.' }],
+    });
+
+    const result = reconcileRouteLegsForDestinations([origin, target], [recoveredLeg]);
+
+    expect(result.routeLegs[0]).toMatchObject({
+      id: recoveredLeg.id,
+      status: 'pending',
+      geometry: undefined,
+      distanceKm: undefined,
+      travelTimeHours: undefined,
+      provider: undefined,
+      calculatedAt: undefined,
+    });
+  });
+
   it('preserves a warned driving-car fallback route for the current HGV intent', () => {
     const routingVehicle = resolveVehiclePreset('expedition-truck');
     const origin = createDestination({ name: 'Balcombe', coordinates: { lat: 51.0573, lng: -0.1349 }, order: 0 });

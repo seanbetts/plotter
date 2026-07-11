@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, withRoutingAnchor } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
-import type { Destination, RouteLeg, TripRoutingVehicle } from '../domain/types';
+import type { Destination, RouteLeg, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
@@ -181,6 +181,203 @@ describe('useTripData', () => {
     expect(calculateRoute).not.toHaveBeenCalled();
     expect(saveDestination).not.toHaveBeenCalled();
     expect(saveRouteLeg).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing distance', { distanceKm: undefined }],
+    ['missing geometry', { geometry: undefined }],
+    ['a stale route key', { routeKey: 'stale-route-key' }],
+  ])('recalculates a same-profile ready route with %s during load', async (_label, patch) => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const currentRouteLeg = createReadyRouteLegForVehicle(origin, target, standardRoutingVehicle);
+    let storedRouteLeg: RouteLeg = { ...currentRouteLeg, ...patch };
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => { storedRouteLeg = routeLeg; });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 128,
+      travelTimeHours: 2.1,
+      geometry: currentRouteLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 128 }],
+    }));
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(storedRouteLeg).toMatchObject({
+      status: 'ready',
+      distanceKm: 128,
+      geometry: currentRouteLeg.geometry,
+      routeKey: currentRouteLeg.routeKey,
+    });
+    expect(result.current.routeLegs).toEqual([storedRouteLeg]);
+  });
+
+  it.each([
+    ['a non-ORS provider', { provider: 'other-provider' as RoutingAnchor['provider'] }],
+    ['a non-finite snap distance', { snapDistanceKm: Number.NaN }],
+    ['an over-radius snap distance', { snapDistanceKm: 2.01 }],
+  ])('recalculates adjusted ready geometry backed by %s during load', async (_label, anchorPatch) => {
+    const origin = createDestination({ name: 'Balcombe', coordinates: { lat: 51.0573, lng: -0.1349 }, order: 0 });
+    const targetCoordinates = { lat: 69.96887, lng: 23.27165 };
+    const anchor: RoutingAnchor = {
+      profile: 'driving-car',
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: targetCoordinates,
+      snapDistanceKm: 1.61,
+      provider: 'openrouteservice',
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+      ...anchorPatch,
+    };
+    const target = withRoutingAnchor(createDestination({
+      name: 'Alta', coordinates: targetCoordinates, order: 1,
+    }), anchor);
+    const adjustedRouteLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100,
+      travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[origin.coordinates.lng, origin.coordinates.lat], [anchor.coordinates.lng, anchor.coordinates.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED', message: 'Adjusted target.' }],
+    });
+    let storedRouteLeg = adjustedRouteLeg;
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => { storedRouteLeg = routeLeg; });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 3_090,
+      travelTimeHours: 41,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [[origin.coordinates.lng, origin.coordinates.lat], [target.coordinates.lng, target.coordinates.lat]],
+      },
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 3_090 }],
+    }));
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(storedRouteLeg).toMatchObject({ status: 'ready', distanceKm: 3_090 });
+    expect(result.current.routeLegs).toEqual([storedRouteLeg]);
+  });
+
+  it('loads valid adjusted and fallback ready routes without calls or writes', async () => {
+    const adjustedOrigin = createDestination({ name: 'Balcombe', coordinates: { lat: 51.0573, lng: -0.1349 }, order: 0 });
+    const adjustedTargetCoordinates = { lat: 69.96887, lng: 23.27165 };
+    const vehicle = resolveVehiclePreset('expedition-truck');
+    const anchor: RoutingAnchor = {
+      profile: 'driving-hgv',
+      coordinates: { lat: 69.98334, lng: 23.27165 },
+      originalCoordinates: adjustedTargetCoordinates,
+      snapDistanceKm: 1.61,
+      provider: 'openrouteservice',
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const adjustedTarget = withRoutingAnchor(createDestination({
+      name: 'Alta', coordinates: adjustedTargetCoordinates, order: 1,
+    }), anchor);
+    const adjustedRouteLeg = createRouteLeg({
+      originDestinationId: adjustedOrigin.id,
+      targetDestinationId: adjustedTarget.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 3_100, travelTimeHours: 42,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[adjustedOrigin.coordinates.lng, adjustedOrigin.coordinates.lat], [anchor.coordinates.lng, anchor.coordinates.lat]],
+      },
+      provider: 'openrouteservice', profile: 'driving-hgv',
+      routeKey: createRouteKey({
+        origin: adjustedOrigin.coordinates,
+        target: adjustedTarget.coordinates,
+        routingVehicle: vehicle,
+      }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{ code: 'ROUTING_ANCHOR_ADJUSTED', message: 'Adjusted target.' }],
+    });
+    const fallbackOrigin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 2 });
+    const fallbackTarget = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 3 });
+    const fallbackRouteLeg = createRouteLeg({
+      originDestinationId: fallbackOrigin.id,
+      targetDestinationId: fallbackTarget.id,
+      movement: 'drive', calculation: 'automatic', status: 'ready',
+      distanceKm: 125, travelTimeHours: 2,
+      geometry: {
+        type: 'LineString',
+        coordinates: [[fallbackOrigin.coordinates.lng, fallbackOrigin.coordinates.lat], [fallbackTarget.coordinates.lng, fallbackTarget.coordinates.lat]],
+      },
+      provider: 'openrouteservice', profile: 'driving-car',
+      routeKey: createRouteKey({
+        origin: fallbackOrigin.coordinates,
+        target: fallbackTarget.coordinates,
+        routingVehicle: vehicle,
+        profile: 'driving-car',
+        variant: 'profile-fallback',
+      }),
+      calculatedAt: '2026-07-11T12:00:00.000Z',
+      warnings: [{ code: 'VEHICLE_PROFILE_FALLBACK', message: 'Truck dimensions were not validated.' }],
+    });
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const calculateRoute = vi.fn();
+    const repository = createMemoryRepository(
+      Promise.resolve([adjustedOrigin, adjustedTarget, fallbackOrigin, fallbackTarget]),
+      { listRouteLegs: async () => [adjustedRouteLeg, fallbackRouteLeg], saveRouteLeg },
+    );
+
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute, routingVehicle: vehicle }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.routeLegs).toEqual([adjustedRouteLeg, fallbackRouteLeg]);
+    expect(calculateRoute).not.toHaveBeenCalled();
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+  });
+
+  it('recalculates a stale ready route once across a repeated realtime reload', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const currentRouteLeg = createReadyRouteLegForVehicle(origin, target, standardRoutingVehicle);
+    let storedRouteLeg: RouteLeg = { ...currentRouteLeg, routeKey: 'stale-route-key' };
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => { storedRouteLeg = routeLeg; });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 128,
+      travelTimeHours: 2.1,
+      geometry: currentRouteLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 128 }],
+    }));
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => { await result.current.reload(); });
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(result.current.routeLegs).toEqual([storedRouteLeg]);
   });
 
   it('persists and publishes a failed car leg when legacy load reconciliation cannot calculate a route', async () => {
@@ -1683,7 +1880,7 @@ describe('useTripData', () => {
       geometry: { type: 'LineString' as const, coordinates: [[1, 50], [2, 51]] },
       provider: 'openrouteservice',
       profile: 'driving-car' as const,
-      routeKey: 'old-car-key',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
     };
     const saveRouteLeg = vi.fn(async () => undefined);
@@ -2353,6 +2550,149 @@ describe('useTripData', () => {
 
     expect(storedRouteLeg).toMatchObject({ profile: 'driving-hgv', distanceKm: 150 });
     expect(result.current.routeLegs[0]).toMatchObject({ profile: 'driving-hgv', distanceKm: 150 });
+  });
+
+  it('preserves a route edit queued while vehicle recalculation is blocked', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLegForVehicle(origin, target, standardRoutingVehicle);
+    const calculation = createDeferred({
+      distanceKm: 150,
+      travelTimeHours: 2.5,
+      geometry: routeLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-hgv' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 150 }],
+    });
+    let storedRouteLeg = routeLeg;
+    const saveRouteLeg = vi.fn(async (nextRouteLeg: RouteLeg) => { storedRouteLeg = nextRouteLeg; });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+    const calculateRoute = vi.fn(() => calculation.promise);
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let recalculatePromise!: Promise<void>;
+    let editPromise!: Promise<void>;
+    await act(async () => {
+      recalculatePromise = result.current.recalculateForVehicle(resolveVehiclePreset('expedition-truck'));
+      await waitFor(() => expect(calculateRoute).toHaveBeenCalledTimes(1));
+      editPromise = result.current.updateRouteLeg(routeLeg.id, { notes: 'Keep the newer route intent.' });
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      calculation.resolve();
+      await Promise.all([recalculatePromise, editPromise]);
+    });
+
+    expect(storedRouteLeg).toMatchObject({
+      profile: 'driving-hgv',
+      distanceKm: 150,
+      notes: 'Keep the newer route intent.',
+    });
+    expect(result.current.routeLegs[0]).toEqual(storedRouteLeg);
+  });
+
+  it('preserves newer repository intent reloaded while vehicle recalculation is blocked', async () => {
+    const origin = createDestination({ name: 'Panama City', coordinates: { lat: 9, lng: -79.5 }, order: 0 });
+    const target = createDestination({ name: 'Cartagena', coordinates: { lat: 10.4, lng: -75.5 }, order: 1 });
+    const routeLeg = createReadyRouteLegForVehicle(origin, target, standardRoutingVehicle);
+    const calculation = createDeferred({
+      distanceKm: 500,
+      travelTimeHours: 8,
+      geometry: routeLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-hgv' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 500 }],
+    });
+    const manualRouteLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
+      status: 'manual',
+      geometry: { type: 'LineString', coordinates: [[-79.5, 9], [-75.5, 10.4]] },
+      notes: 'Realtime shipping intent wins.',
+    });
+    let storedRouteLeg = routeLeg;
+    const saveRouteLeg = vi.fn(async (nextRouteLeg: RouteLeg) => { storedRouteLeg = nextRouteLeg; });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+    const calculateRoute = vi.fn(() => calculation.promise);
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let recalculatePromise!: Promise<void>;
+    let reloadPromise!: Promise<void>;
+    await act(async () => {
+      recalculatePromise = result.current.recalculateForVehicle(resolveVehiclePreset('expedition-truck'));
+      await waitFor(() => expect(calculateRoute).toHaveBeenCalledTimes(1));
+      storedRouteLeg = manualRouteLeg;
+      reloadPromise = result.current.reload();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      calculation.resolve();
+      await Promise.all([recalculatePromise, reloadPromise]);
+    });
+
+    expect(storedRouteLeg).toEqual(manualRouteLeg);
+    expect(result.current.routeLegs).toEqual([manualRouteLeg]);
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+  });
+
+  it('does not block or publish across a repository switch during vehicle recalculation', async () => {
+    const oldOrigin = createDestination({ name: 'Old origin', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const oldTarget = createDestination({ name: 'Old target', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const oldRouteLeg = createReadyRouteLegForVehicle(oldOrigin, oldTarget, standardRoutingVehicle);
+    const newDestination = createDestination({ name: 'New repository', coordinates: { lat: 48.8566, lng: 2.3522 } });
+    const calculation = createDeferred({
+      distanceKm: 150,
+      travelTimeHours: 2.5,
+      geometry: oldRouteLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-hgv' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 150 }],
+    });
+    const saveOldRouteLeg = vi.fn(async () => undefined);
+    const oldRepository = createMemoryRepository(Promise.resolve([oldOrigin, oldTarget]), {
+      listRouteLegs: async () => [oldRouteLeg],
+      saveRouteLeg: saveOldRouteLeg,
+    });
+    const newRepository = createMemoryRepository(Promise.resolve([newDestination]));
+    const calculateRoute = vi.fn(() => calculation.promise);
+    const { result, rerender } = renderHook(
+      ({ repository }) => useTripData(repository, { calculateRoute }),
+      { initialProps: { repository: oldRepository } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let recalculatePromise!: Promise<void>;
+    await act(async () => {
+      recalculatePromise = result.current.recalculateForVehicle(resolveVehiclePreset('expedition-truck'));
+      await waitFor(() => expect(calculateRoute).toHaveBeenCalledTimes(1));
+    });
+
+    rerender({ repository: newRepository });
+
+    await waitFor(() => expect(result.current.destinations).toEqual([newDestination]));
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.routeLegs).toEqual([]);
+
+    await act(async () => {
+      calculation.resolve();
+      await recalculatePromise;
+    });
+
+    expect(saveOldRouteLeg).not.toHaveBeenCalled();
+    expect(result.current.destinations).toEqual([newDestination]);
+    expect(result.current.routeLegs).toEqual([]);
   });
 
   it('lets direct deletion started during a blocked alternative save win', async () => {
@@ -3120,7 +3460,7 @@ function createReadyRouteLeg(
     },
     provider: 'openrouteservice',
     profile: 'driving-car',
-    routeKey: 'original-route',
+    routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
     calculatedAt: '2026-07-01T10:00:00.000Z',
   });
 }

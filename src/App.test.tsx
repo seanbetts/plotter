@@ -11,7 +11,7 @@ import {
 } from './adapters/openRouteService';
 import { createActivity } from './domain/activities';
 import { createDestination } from './domain/destinations';
-import { createRouteLeg } from './domain/routeLegs';
+import { createRouteKey, createRouteLeg } from './domain/routeLegs';
 import type { RouteOption } from './domain/routeOptions';
 import type {
   Activity,
@@ -363,7 +363,7 @@ function createRouteAlternativesRaceFixture() {
     geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
     provider: 'openrouteservice',
     profile: 'driving-car',
-    routeKey: 'original-route',
+    routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
     calculatedAt: '2026-07-01T10:00:00.000Z',
   });
   const createOption = (label: string, routeKey: string): RouteOption => ({
@@ -543,7 +543,8 @@ describe('App', () => {
         ],
       },
       provider: 'openrouteservice',
-      routeKey: 'balcombe-paris',
+      routeKey: createRouteKey({ origin: balcombe.coordinates, target: paris.coordinates }),
+      calculatedAt: '2026-07-01T10:00:00.000Z',
     });
     repositoryMock.initialDestinations = Promise.resolve([balcombe, paris]);
     repositoryMock.initialRouteLegs = Promise.resolve([readyRouteLeg]);
@@ -652,7 +653,7 @@ describe('App', () => {
       geometry: { type: 'LineString' as const, coordinates: [[1, 50], [2, 51]] },
       provider: 'openrouteservice',
       profile: 'driving-car' as const,
-      routeKey: 'old-car-key',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
     };
     repositoryMock.initialDestinations = Promise.resolve([origin, target]);
@@ -910,7 +911,8 @@ describe('App', () => {
         ],
       },
       provider: 'openrouteservice',
-      routeKey: 'paris-rome',
+      routeKey: createRouteKey({ origin: paris.coordinates, target: rome.coordinates }),
+      calculatedAt: '2026-07-01T10:00:00.000Z',
     });
     repositoryMock.initialDestinations = Promise.resolve([paris, rome]);
     repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
@@ -1119,6 +1121,7 @@ describe('App', () => {
       name: 'Samsun',
       coordinates: { lat: 41.2867, lng: 36.33 },
     };
+    const routingVehicle = resolveVehiclePreset('large-camper');
     const routeLeg = {
       ...createRouteLeg({
         originDestinationId: istanbul.id,
@@ -1136,12 +1139,16 @@ describe('App', () => {
       geometry: { type: 'LineString' as const, coordinates: [[28.9784, 41.0082], [44.8271, 41.7151]] },
       provider: 'openrouteservice',
       profile: 'driving-car' as const,
-      routeKey: 'recommended-route-key',
+      routeKey: createRouteKey({
+        origin: istanbul.coordinates,
+        target: tbilisi.coordinates,
+        routingVehicle,
+        waypoints: [earlierWaypoint.coordinates, waypoint.coordinates],
+      }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
     };
     repositoryMock.initialDestinations = Promise.resolve([istanbul, tbilisi]);
     repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
-    const routingVehicle = resolveVehiclePreset('large-camper');
     mockTripWorkspace({
       activeTrip: { ...tripsMock[0], routingVehicle },
     } as Partial<ReturnType<typeof useTripWorkspace>>);
@@ -1162,7 +1169,7 @@ describe('App', () => {
       routingVehicle,
       waypoints: [earlierWaypoint, waypoint],
       ferryPolicy: 'allow',
-      currentRouteLeg: expect.objectContaining({ id: routeLeg.id, routeKey: 'recommended-route-key' }),
+      currentRouteLeg: expect.objectContaining({ id: routeLeg.id, routeKey: routeLeg.routeKey }),
       originAnchors: istanbul.routingAnchors,
       targetAnchors: tbilisi.routingAnchors,
     });
@@ -1344,7 +1351,11 @@ describe('App', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-hgv',
-      routeKey: 'strict-hgv-key',
+      routeKey: createRouteKey({
+        origin: olderdalen.coordinates,
+        target: alta.coordinates,
+        routingVehicle: resolveVehiclePreset('expedition-truck'),
+      }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
     });
     const fallbackOption: RouteOption = {
@@ -1430,7 +1441,11 @@ describe('App', () => {
       geometry: { type: 'LineString', coordinates: [[20.5326, 69.6041], [23.27165, 69.96887]] },
       provider: 'openrouteservice',
       profile: 'driving-hgv',
-      routeKey: 'strict-hgv-key',
+      routeKey: createRouteKey({
+        origin: olderdalen.coordinates,
+        target: alta.coordinates,
+        routingVehicle: resolveVehiclePreset('expedition-truck'),
+      }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
     });
     const firstFallback: RouteOption = {
@@ -1495,7 +1510,7 @@ describe('App', () => {
       geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'original-route',
+      routeKey: createRouteKey({ origin: bremen.coordinates, target: hamburg.coordinates }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
       notes: 'Original intent.',
     });
@@ -1557,7 +1572,7 @@ describe('App', () => {
       geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'original-route',
+      routeKey: createRouteKey({ origin: bremen.coordinates, target: hamburg.coordinates }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
       notes: 'Original intent.',
     });
@@ -1611,7 +1626,7 @@ describe('App', () => {
       geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'original-route',
+      routeKey: createRouteKey({ origin: bremen.coordinates, target: hamburg.coordinates }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
       notes: 'Original intent.',
     });
@@ -1689,7 +1704,11 @@ describe('App', () => {
       geometry,
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'old-route',
+      routeKey: createRouteKey({
+        origin: bremen.coordinates,
+        target: hirtshals.coordinates,
+        ferryPolicy,
+      }),
       calculatedAt: '2026-07-01T10:00:00.000Z',
       warnings: [{ code: 'SUSPICIOUS_DETOUR', message: 'Stale warning.' }],
       notes: 'Preserve route notes.',

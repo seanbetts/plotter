@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, updateDestination as patchDestination } from '../domain/destinations';
-import { findBestDestinationInsertionIndex, planRouteLegReconciliation } from '../domain/routePlanner';
+import {
+  findBestDestinationInsertionIndex,
+  planRouteLegReconciliation,
+  reconcileReadyAutomaticRouteLegForCurrentIntent,
+} from '../domain/routePlanner';
 import { createRouteLeg } from '../domain/routeLegs';
 import type { Activity, Coordinates, Destination, DestinationLocation, RouteCalculationMode, RouteLeg, RouteMovement, TripRoutingVehicle } from '../domain/types';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
@@ -42,6 +46,15 @@ const allRouteMutationsQueueKey = '__all_route_mutations__';
 function changedDestinationsByReference(currentDestinations: Destination[], nextDestinations: Destination[]) {
   const currentById = new Map(currentDestinations.map((destination) => [destination.id, destination]));
   return nextDestinations.filter((destination) => currentById.get(destination.id) !== destination);
+}
+
+function entityRevisionsMatch<T extends { id: string; updatedAt: string }>(
+  expected: T[],
+  current: T[],
+) {
+  if (expected.length !== current.length) return false;
+  const currentRevisionById = new Map(current.map((entity) => [entity.id, entity.updatedAt]));
+  return expected.every((entity) => currentRevisionById.get(entity.id) === entity.updatedAt);
 }
 
 async function persistRouteCalculationBatch(input: {
@@ -98,21 +111,6 @@ async function persistRouteCalculationBatch(input: {
   }
 }
 
-function loadedRouteNeedsVehicleRecalculation(
-  routeLeg: RouteLeg,
-  routingVehicle: TripRoutingVehicle,
-) {
-  if (!hasPreservableDrivingRouteData(routeLeg) || routeLeg.profile === routingVehicle.profile) {
-    return false;
-  }
-
-  const isQualifiedCarFallback =
-    routingVehicle.profile === 'driving-hgv' &&
-    routeLeg.profile === 'driving-car' &&
-    (routeLeg.warnings ?? []).some((warning) => warning.code === 'VEHICLE_PROFILE_FALLBACK');
-  return !isQualifiedCarFallback;
-}
-
 async function reconcileLoadedRoutesForVehicle(input: {
   repository: TripRepository;
   destinations: Destination[];
@@ -121,19 +119,28 @@ async function reconcileLoadedRoutesForVehicle(input: {
   calculateRoute?: CalculateRoute;
   isCurrentReload: () => boolean;
 }) {
+  const destinationsById = new Map(
+    input.destinations.map((destination) => [destination.id, destination]),
+  );
+  const invalidatedRouteLegs = input.routeLegs.map((routeLeg) => {
+    const origin = destinationsById.get(routeLeg.originDestinationId);
+    const target = destinationsById.get(routeLeg.targetDestinationId);
+    if (!origin || !target) return routeLeg;
+    return reconcileReadyAutomaticRouteLegForCurrentIntent(
+      routeLeg,
+      origin,
+      target,
+      input.routingVehicle,
+    );
+  });
   const staleRouteLegIndexes = new Set(
-    input.routeLegs.flatMap((routeLeg, index) =>
-      loadedRouteNeedsVehicleRecalculation(routeLeg, input.routingVehicle) ? [index] : []),
+    invalidatedRouteLegs.flatMap((routeLeg, index) =>
+      routeLeg !== input.routeLegs[index] ? [index] : []),
   );
   if (staleRouteLegIndexes.size === 0) {
     return { destinations: input.destinations, routeLegs: input.routeLegs };
   }
 
-  const invalidatedRouteLegs = recalculateAutomaticRouteLegsForVehicle({
-    destinations: input.destinations,
-    routeLegs: input.routeLegs,
-    routingVehicle: input.routingVehicle,
-  }).map((routeLeg, index) => staleRouteLegIndexes.has(index) ? routeLeg : input.routeLegs[index]);
   const calculation = await calculateAutomaticRouteLegs({
     destinations: input.destinations,
     routeLegs: invalidatedRouteLegs,
@@ -856,44 +863,63 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
         async recalculateForVehicle(nextRoutingVehicle: TripRoutingVehicle) {
           if (!isActiveAction()) return;
+          const expectedReloadSequence = reloadSequenceRef.current;
 
-          const currentDestinations = destinationsRef.current;
-          const priorRouteLegs = structuredClone(routeLegsRef.current);
-          const invalidatedRouteLegs = recalculateAutomaticRouteLegsForVehicle({
-            destinations: currentDestinations,
-            routeLegs: priorRouteLegs,
-            routingVehicle: nextRoutingVehicle,
-          });
-          const calculation = await calculateAutomaticRouteLegs({
-            destinations: currentDestinations,
-            routeLegs: invalidatedRouteLegs,
-            routingVehicle: nextRoutingVehicle,
-            calculateRoute,
-            retryFailed: true,
-          });
-          const recalculatedRouteLegs = calculation.routeLegs;
-          const calculatedDestinations = calculation.destinations;
-          if (!isActiveAction()) return;
+          await enqueueRouteLegMutations([], async () => {
+            const isCurrentOperation = () =>
+              isActiveAction() && reloadSequenceRef.current === expectedReloadSequence;
+            if (!isCurrentOperation()) return;
 
-          await enqueueRouteLegMutations([
-            ...priorRouteLegs.map((routeLeg) => routeLeg.id),
-            ...recalculatedRouteLegs.map((routeLeg) => routeLeg.id),
-          ], async () => {
-            const destinationsToSave = changedDestinationsByReference(currentDestinations, calculatedDestinations);
+            const [loadedDestinations, loadedRouteLegs] = await Promise.all([
+              repository.listDestinations(),
+              repository.listRouteLegs(),
+            ]);
+            if (!isCurrentOperation()) return;
+
+            const priorDestinations = structuredClone(loadedDestinations);
+            const priorRouteLegs = structuredClone(loadedRouteLegs);
+            const invalidatedRouteLegs = recalculateAutomaticRouteLegsForVehicle({
+              destinations: priorDestinations,
+              routeLegs: priorRouteLegs,
+              routingVehicle: nextRoutingVehicle,
+            });
+            const calculation = await calculateAutomaticRouteLegs({
+              destinations: priorDestinations,
+              routeLegs: invalidatedRouteLegs,
+              routingVehicle: nextRoutingVehicle,
+              calculateRoute,
+              retryFailed: true,
+            });
+            if (!isCurrentOperation()) return;
+
+            const [latestDestinations, latestRouteLegs] = await Promise.all([
+              repository.listDestinations(),
+              repository.listRouteLegs(),
+            ]);
+            if (
+              !isCurrentOperation() ||
+              !entityRevisionsMatch(priorDestinations, latestDestinations) ||
+              !entityRevisionsMatch(priorRouteLegs, latestRouteLegs)
+            ) return;
+
+            const destinationsToSave = changedDestinationsByReference(
+              priorDestinations,
+              calculation.destinations,
+            );
             await persistRouteCalculationBatch({
               repository,
-              priorDestinations: currentDestinations,
+              priorDestinations,
               priorRouteLegs,
               destinationsToSave,
-              routeLegsToSave: recalculatedRouteLegs,
+              routeLegsToSave: calculation.routeLegs,
               failurePrefix: 'Unable to save recalculated routes',
             });
-            if (!isActiveAction()) return;
+            if (!isCurrentOperation()) return;
 
             if (destinationsToSave.length > 0) {
-              replaceDestinations(calculatedDestinations);
+              replaceDestinations(calculation.destinations);
             }
-            replaceRouteLegs(recalculatedRouteLegs);
+            replaceRouteLegs(calculation.routeLegs);
           });
         },
 
