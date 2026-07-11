@@ -1,7 +1,11 @@
 import maplibregl from 'maplibre-gl';
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Destination, RouteLeg } from '../domain/types';
-import { calmBasemapStyle, mapLabelFontStack, mapStyleUrl, readMapLayerColors } from './mapPresentation';
+import { calmBasemapStyle, mapStyleUrl, readMapLayerColors } from './mapPresentation';
+import {
+  buildStopPillPresentations,
+  createStopPillElement,
+} from './stopPillPresentation';
 import {
   buildRenderableRouteFeatures,
   tripMapBounds,
@@ -32,8 +36,6 @@ const routesSourceId = 'trip-map-export-routes';
 const stopsSourceId = 'trip-map-export-stops';
 const routeLayerId = 'trip-map-export-routes';
 const stopPointsLayerId = 'trip-map-export-stop-points';
-const stopNumbersLayerId = 'trip-map-export-stop-numbers';
-const stopNamesLayerId = 'trip-map-export-stop-names';
 
 export function tripMapFilename(name: string) {
   let stem = name
@@ -51,6 +53,11 @@ export function buildExportStopFeatures(
   destinations: Destination[],
   bounds?: TripMapBounds,
 ): FeatureCollection<Point, ExportStopProperties> {
+  const stopPills = buildStopPillPresentations({
+    destinations,
+    selectedDestinationId: null,
+    project: ([longitude, latitude]) => ({ x: longitude, y: latitude }),
+  });
   return {
     type: 'FeatureCollection' as const,
     features: destinations.map((destination, index) => ({
@@ -67,7 +74,7 @@ export function buildExportStopFeatures(
         id: destination.id,
         name: destination.name,
         number: index + 1,
-        label: `${index + 1} - ${destination.name}`,
+        label: stopPills[index].text,
       },
     })),
   };
@@ -259,41 +266,72 @@ function addExportSourcesAndLayers(
       'circle-stroke-width': 2,
     },
   });
+}
 
-  map.addLayer({
-    id: stopNumbersLayerId,
-    type: 'symbol',
-    source: stopsSourceId,
-    layout: {
-      'text-field': ['to-string', ['get', 'number']],
-      'text-font': mapLabelFontStack,
-      'text-size': 12,
-      'text-allow-overlap': true,
-      'text-ignore-placement': true,
-    },
-    paint: {
-      'text-color': mapColors.textInverse,
-    },
-  });
+function createStopPillOverlay(
+  container: HTMLDivElement,
+  map: maplibregl.Map,
+  destinations: Destination[],
+) {
+  const overlay = document.createElement('div');
+  overlay.dataset.tripMapExportLabels = '';
+  overlay.className = 'map-destination-label-layer';
+  overlay.style.width = `${exportWidth}px`;
+  overlay.style.height = `${exportHeight}px`;
 
-  map.addLayer({
-    id: stopNamesLayerId,
-    type: 'symbol',
-    source: stopsSourceId,
-    layout: {
-      'text-field': ['get', 'label'],
-      'text-font': mapLabelFontStack,
-      'text-size': 14,
-      'text-variable-anchor': ['top', 'bottom', 'left', 'right'],
-      'text-radial-offset': 1.4,
-      'text-justify': 'auto',
-    },
-    paint: {
-      'text-color': mapColors.textInverse,
-      'text-halo-color': mapColors.text,
-      'text-halo-width': 2,
-    },
+  for (const pill of buildStopPillPresentations({
+    destinations,
+    selectedDestinationId: null,
+    project: (coordinates) => map.project(coordinates),
+  })) {
+    overlay.append(createStopPillElement(pill));
+  }
+
+  container.append(overlay);
+  return overlay;
+}
+
+function inlineComputedStyles(source: Element, target: Element) {
+  const style = getComputedStyle(source);
+  const targetElement = target as HTMLElement;
+  for (let index = 0; index < style.length; index += 1) {
+    const property = style.item(index);
+    targetElement.style.setProperty(
+      property,
+      style.getPropertyValue(property),
+      style.getPropertyPriority(property),
+    );
+  }
+
+  Array.from(source.children).forEach((child, index) => {
+    const targetChild = target.children[index];
+    if (targetChild) inlineComputedStyles(child, targetChild);
   });
+}
+
+function loadImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to render trip map stop labels.'));
+    image.src = url;
+  });
+}
+
+async function rasterizeStopPillOverlay(overlay: HTMLDivElement) {
+  if (document.fonts) await document.fonts.ready;
+  const clone = overlay.cloneNode(true) as HTMLDivElement;
+  clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+  inlineComputedStyles(overlay, clone);
+
+  const serialized = new XMLSerializer().serializeToString(clone);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${exportWidth}" height="${exportHeight}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+  try {
+    return await loadImage(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function frameExportMap(map: maplibregl.Map, bounds: TripMapBounds) {
@@ -321,7 +359,27 @@ function attributionText(map: maplibregl.Map) {
   return [...new Set(attributions)].join(' · ');
 }
 
-function exportBlob(map: maplibregl.Map) {
+function drawAttribution(context: CanvasRenderingContext2D, map: maplibregl.Map) {
+  const attribution = attributionText(map);
+  if (attribution) {
+    context.font = '12px sans-serif';
+    context.textAlign = 'right';
+    context.textBaseline = 'bottom';
+    const padding = 8;
+    const textWidth = context.measureText(attribution).width;
+    context.fillStyle = 'rgba(245, 239, 227, 0.82)';
+    context.fillRect(
+      exportWidth - textWidth - padding * 2,
+      exportHeight - 12 - padding * 2,
+      textWidth + padding * 2,
+      12 + padding * 2,
+    );
+    context.fillStyle = '#111814';
+    context.fillText(attribution, exportWidth - padding, exportHeight - padding);
+  }
+}
+
+function exportBlob(map: maplibregl.Map, stopPillImage: HTMLImageElement) {
   return new Promise<Blob>((resolve, reject) => {
     const output = document.createElement('canvas');
     output.width = exportWidth;
@@ -333,23 +391,8 @@ function exportBlob(map: maplibregl.Map) {
     }
 
     context.drawImage(map.getCanvas(), 0, 0, exportWidth, exportHeight);
-    const attribution = attributionText(map);
-    if (attribution) {
-      context.font = '12px sans-serif';
-      context.textAlign = 'right';
-      context.textBaseline = 'bottom';
-      const padding = 8;
-      const textWidth = context.measureText(attribution).width;
-      context.fillStyle = 'rgba(245, 239, 227, 0.82)';
-      context.fillRect(
-        exportWidth - textWidth - padding * 2,
-        exportHeight - 12 - padding * 2,
-        textWidth + padding * 2,
-        12 + padding * 2,
-      );
-      context.fillStyle = '#111814';
-      context.fillText(attribution, exportWidth - padding, exportHeight - padding);
-    }
+    context.drawImage(stopPillImage, 0, 0, exportWidth, exportHeight);
+    drawAttribution(context, map);
 
     output.toBlob((blob) => {
       if (blob) {
@@ -372,6 +415,7 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
   let objectUrl: string | null = null;
   let anchor: HTMLAnchorElement | null = null;
   let errorMonitor: MapErrorMonitor | null = null;
+  let overlay: HTMLDivElement | null = null;
 
   try {
     map = createExportMap(container);
@@ -381,7 +425,9 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
     frameExportMap(map, bounds);
     errorMonitor.rejectIfFailed();
     await waitForMapEvent(map, 'idle', exportTimeoutMs, errorMonitor);
-    const blob = await rejectOnMapError(exportBlob(map), errorMonitor);
+    overlay = createStopPillOverlay(container, map, input.destinations);
+    const stopPillImage = await rejectOnMapError(rasterizeStopPillOverlay(overlay), errorMonitor);
+    const blob = await rejectOnMapError(exportBlob(map, stopPillImage), errorMonitor);
     errorMonitor.rejectIfFailed();
     objectUrl = URL.createObjectURL(blob);
     anchor = document.createElement('a');
@@ -394,6 +440,7 @@ export async function downloadTripMap(input: TripMapExportInput): Promise<void> 
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     errorMonitor?.remove();
     map?.remove();
+    overlay?.remove();
     container.remove();
   }
 }

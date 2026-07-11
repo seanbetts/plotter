@@ -1,4 +1,4 @@
-# Task 2 Report: Place And Link Enrichment
+# Task 2 Report: Composite the Real Stop-Pill Overlay into the PNG
 
 ## Status
 
@@ -6,92 +6,74 @@ Complete.
 
 ## Implementation summary
 
-- Added `createPlaceResolver` in `src/tripCommands/placeResolver.ts`.
-- Added `createLinkEnricher` in `src/tripCommands/linkEnrichment.ts`.
-- Added focused tests for both modules in:
-  - `src/tripCommands/placeResolver.test.ts`
-  - `src/tripCommands/linkEnrichment.test.ts`
+- Reused `buildStopPillPresentations` for canonical stop-pill text and final-viewport projection.
+- Reused `createStopPillElement` so exports render the same normal, unselected pill DOM used by the app.
+- Removed the export-only MapLibre stop-number and stop-name symbol layers while preserving route and stop-point layers and their existing styling.
+- Created the temporary `[data-trip-map-export-labels]` overlay only after the export map reached `idle`.
+- Cloned the overlay, recursively inlined computed styles, serialized it into an SVG `foreignObject`, and loaded it as an image with browser primitives only.
+- Composited pixels in the required order: MapLibre canvas, stop-pill image, source attribution, PNG conversion.
+- Preserved the existing dimensions, fit behavior, map error monitoring, timeouts, filename/download flow, attribution rendering, and cleanup lifecycle.
+- Added explicit cleanup for both the overlay and its temporary SVG object URL on success and failure.
+- Added no dependency.
 
-`createPlaceResolver` now:
-- Resolves query-only place input through `searchMapTilerPlaces` when a MapTiler API key is available.
-- Uses coordinate input as the canonical anchor and enriches it through `resolveMapTilerCoordinates` when possible.
-- Falls back to legacy/manual location data when coordinates exist but enrichment is unavailable.
-- Throws a clear error for query-only input without a MapTiler API key.
-- Supports both `stop` and `activity` profiles per the Task 2 brief.
-
-`createLinkEnricher` now:
-- Normalizes raw URLs before enrichment.
-- Uses preview metadata when a preview client succeeds.
-- Falls back to `createFallbackResearchLink` when no preview client is provided or preview fetching fails.
-
-## TDD RED/GREEN evidence
+## TDD evidence
 
 ### RED
 
 Command:
 
-```bash
-npm test -- src/tripCommands/placeResolver.test.ts src/tripCommands/linkEnrichment.test.ts
+```text
+npm test -- src/map/tripMapExport.test.ts
 ```
 
-Observed result:
-- FAILED as expected.
-- Failure reason was missing implementation files:
-  - `Failed to resolve import "./placeResolver"`
-  - `Failed to resolve import "./linkEnrichment"`
+Result: exit 1; 1 test file failed, with 3 expected failures and 29 passing tests.
 
-This matched the task brief's expected red state.
+The failures demonstrated the missing behavior directly:
+
+1. Feature labels were still `1 - Balcombe` and `2 - Paris` instead of `ST - Balcombe` and `02 - Paris`.
+2. MapLibre still contained `trip-map-export-stop-numbers` and `trip-map-export-stop-names`.
+3. The export overlay snapshot was empty instead of containing two normal, unselected app pills.
 
 ### GREEN
 
 Command:
 
-```bash
-npm test -- src/tripCommands/placeResolver.test.ts src/tripCommands/linkEnrichment.test.ts
+```text
+npm test -- src/map/tripMapExport.test.ts
 ```
 
-Observed result:
-- PASS
-- `Test Files  2 passed (2)`
-- `Tests  6 passed (6)`
+Result: exit 0; 1 test file passed, 33 tests passed.
 
-### Full suite
+The focused suite includes regressions for the real overlay DOM, map/overlay/attribution/toBlob ordering, rasterization rejection, overlay removal, and both SVG and PNG object-URL revocation.
 
-Command:
+## Verification
 
-```bash
-npm test
-```
+- `npm test -- src/map/tripMapExport.test.ts` — exit 0; 1 file passed, 33 tests passed.
+- `npm test` — exit 0; 57 files passed, 708 tests passed.
+- `npm run lint` — exit 0; no ESLint errors.
+- `npm run build` — exit 0; TypeScript and Vite production build succeeded.
+- `git diff --check` — exit 0; no whitespace errors.
 
-Observed result:
-- PASS
-- `Test Files  45 passed (45)`
-- `Tests  546 passed (546)`
-
-Observed warning output during the full suite:
-- Node emitted repeated `ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.`
-- These warnings pre-existed this task's code path and did not fail the suite, but they mean the output was not completely pristine.
-
-## Tests and results
-
-- Focused Task 2 tests: passed.
-- Full Vitest suite: passed.
+The full test run emitted the repository's Node `localStorage` experimental warnings. The build emitted the existing large-chunk advisory for the 1,702.99 kB main bundle; neither command failed.
 
 ## Files changed
 
-- `src/tripCommands/placeResolver.ts`
-- `src/tripCommands/placeResolver.test.ts`
-- `src/tripCommands/linkEnrichment.ts`
-- `src/tripCommands/linkEnrichment.test.ts`
+- `src/map/tripMapExport.ts`
+- `src/map/tripMapExport.test.ts`
+- `.superpowers/sdd/task-2-report.md`
 
-## Self-review findings
+The unrelated pre-existing modification to `.superpowers/sdd/task-1-report.md` was not edited or staged for this task.
 
-- The implementation stays scoped to the Task 2 brief and existing Task 1 interfaces.
-- The new code reuses existing domain helpers (`createLegacyLocation`, research-link normalization/fallback helpers) instead of duplicating logic.
-- The tests verify behavior at the public factory/function boundary and only mock the external geocoding dependency where isolation is necessary.
-- The brief-provided tests only exercise `stop` profile behavior directly; the implemented `activity` path was included because it is part of the explicit Task 2 contract.
+## Self-review
+
+- Confirmed the overlay is created after the final `idle` event, so `map.project` uses the fitted export viewport.
+- Confirmed pills use `selectedDestinationId: null` and the shared element factory, yielding normal unselected app classes and canonical text.
+- Confirmed MapLibre still owns the route and stop-point drawing, including the unchanged stop-point radius, colors, and stroke.
+- Confirmed attribution statements were extracted without behavioral changes and still execute after both image draws.
+- Confirmed SVG image-load errors remain observable and abort the download path.
+- Confirmed the SVG URL is revoked in the rasterizer `finally`, and the overlay, PNG URL, anchor, map monitor, map, and container are cleaned up by the existing outer `finally` path.
+- Confirmed the scoped diff adds no dependency and does not alter bounds, filename, timeout, download, or route behavior.
 
 ## Concerns
 
-- Full-suite output includes existing Node `localStorage` experimental warnings, so the run is passing but not warning-free.
-- The new tests are intentionally aligned to the implementation brief; they do not add extra direct coverage for the `activity` branch beyond implementation-by-contract.
+None blocking. Browser support for SVG `foreignObject` and computed-style inlining is the approach mandated by the task brief; failure is surfaced through the existing export error path rather than silently producing a label-free PNG.
