@@ -14,7 +14,10 @@ import {
   type CalculateRoute,
 } from './routeOrchestration';
 import { auditTripSnapshot, type TripAuditReport } from './tripAudit';
-import { materializeTripManifest } from './tripManifest';
+import {
+  calculatePreparedTripManifestRoutes,
+  prepareTripManifest,
+} from './tripManifest';
 import type {
   ChangedSummary,
   CommandResult,
@@ -942,13 +945,16 @@ export function createTripDataService(
       return withCommandHandling(async () => {
         if ('manifestVersion' in input) {
           const manifest = validateTripManifest(input);
-          const materialized = await materializeTripManifest(manifest, dependencies);
-          const audit = auditTripSnapshot({
-            destinations: materialized.destinations,
-            activities: materialized.activities,
-            routeLegs: materialized.routeLegs,
+          const prepared = await prepareTripManifest(manifest, {
+            resolvePlace: dependencies.resolvePlace,
+            enrichLink: dependencies.enrichLink,
           });
-          const blockingIssues = audit.issues.filter((issue) => issue.code === 'ACTIVITY_DISTANCE_OUTLIER');
+          const preRouteAudit = auditTripSnapshot({
+            destinations: prepared.destinations,
+            activities: prepared.activities,
+            routeLegs: [],
+          });
+          const blockingIssues = preRouteAudit.issues.filter((issue) => issue.code === 'ACTIVITY_DISTANCE_OUTLIER');
           if (blockingIssues.length > 0) {
             return commandError(
               'TRIP_AUDIT_FAILED',
@@ -957,6 +963,12 @@ export function createTripDataService(
               { audit: reportFromIssues(blockingIssues) },
             );
           }
+          const materialized = await calculatePreparedTripManifestRoutes(prepared, dependencies.calculateRoute);
+          const audit = auditTripSnapshot({
+            destinations: materialized.destinations,
+            activities: materialized.activities,
+            routeLegs: materialized.routeLegs,
+          });
 
           if (options?.dryRun) {
             return commandSuccess(`Would create trip ${manifest.name}.`, {

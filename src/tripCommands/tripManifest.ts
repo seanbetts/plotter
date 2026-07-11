@@ -30,6 +30,10 @@ export type MaterializedTripManifest = {
   changed: ChangedSummary;
 };
 
+export type PreparedTripManifest = Omit<MaterializedTripManifest, 'routeLegs'> & {
+  pendingRouteLegs: RouteLeg[];
+};
+
 function createChangedSummary(): ChangedSummary {
   return {
     tripsCreated: [],
@@ -107,10 +111,10 @@ async function resolveActivity(
   return fallbackActivityLocation(title, place.coordinates);
 }
 
-export async function materializeTripManifest(
+export async function prepareTripManifest(
   manifest: TripManifestDraft,
-  dependencies: TripManifestMaterializationDependencies,
-): Promise<MaterializedTripManifest> {
+  dependencies: Omit<TripManifestMaterializationDependencies, 'calculateRoute'>,
+): Promise<PreparedTripManifest> {
   const stopInputs = await Promise.all(manifest.stops.map(async (stop, order) => {
     const [resolved, links] = await Promise.all([
       resolveStop(stop.place, stop.name, dependencies.resolvePlace, `stops[${order}].place`),
@@ -222,12 +226,6 @@ export async function materializeTripManifest(
     });
   });
   const routingVehicle = resolveVehiclePreset(manifest.manifestVersion === 2 ? manifest.vehiclePreset : 'standard');
-  const routeLegs = await calculateAutomaticRouteLegs({
-    destinations,
-    routeLegs: pendingRouteLegs,
-    routingVehicle,
-    calculateRoute: dependencies.calculateRoute,
-  });
 
   const changed = createChangedSummary();
   changed.tripsCreated.push(manifest.name);
@@ -236,13 +234,42 @@ export async function materializeTripManifest(
   changed.linksAdded.push(
     ...destinations.flatMap((destination) => destination.research.links.map((link) => link.url)),
     ...activities.flatMap((activity) => activity.links.map((link) => link.url)),
-    ...routeLegs.flatMap((routeLeg) => (
+    ...pendingRouteLegs.flatMap((routeLeg) => (
       routeLeg.waypoints ?? []
     ).flatMap((waypoint) => waypoint.links.map((link) => link.url))),
   );
-  changed.routesRecalculated = routeLegs.filter((leg) => (
+  changed.routesRecalculated = pendingRouteLegs.filter((leg) => (
     leg.movement === 'drive' && leg.calculation === 'automatic'
   )).length;
 
-  return { destinations, activities, routeLegs, routingVehicle, changed };
+  return { destinations, activities, pendingRouteLegs, routingVehicle, changed };
+}
+
+export async function calculatePreparedTripManifestRoutes(
+  prepared: PreparedTripManifest,
+  calculateRoute: RouteCalculator | undefined,
+): Promise<MaterializedTripManifest> {
+  const routeLegs = await calculateAutomaticRouteLegs({
+    destinations: prepared.destinations,
+    routeLegs: prepared.pendingRouteLegs,
+    routingVehicle: prepared.routingVehicle,
+    calculateRoute,
+  });
+
+  return {
+    destinations: prepared.destinations,
+    activities: prepared.activities,
+    routeLegs,
+    routingVehicle: prepared.routingVehicle,
+    changed: prepared.changed,
+  };
+}
+
+export async function materializeTripManifest(
+  manifest: TripManifestDraft,
+  dependencies: TripManifestMaterializationDependencies,
+): Promise<MaterializedTripManifest> {
+  const { calculateRoute, ...preparationDependencies } = dependencies;
+  const prepared = await prepareTripManifest(manifest, preparationDependencies);
+  return calculatePreparedTripManifestRoutes(prepared, calculateRoute);
 }

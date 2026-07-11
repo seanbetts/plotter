@@ -1,115 +1,119 @@
-# Task 3 Report: Shared Route Orchestration
+# Task 3 Report: Validate Manifests Before Route Calculation
 
 Status: DONE
 
 ## Implementation Summary
 
-- Created `src/tripCommands/routeOrchestration.ts` with shared route orchestration helpers:
-  - `hasPreservableDrivingRouteData`
-  - `calculateDrivingRouteLegs`
-  - `finalizeRouteLeg`
-  - `reconcileAndSaveRouteLegs`
-- Moved route calculation, preserved driving route checks, manual shipping finalization, and route reconciliation persistence out of `useTripData`.
-- Updated `src/hooks/useTripData.ts` to delegate route orchestration to the shared command layer without changing the hook API.
-- Preserved optimistic pending route publication during destination reorder by keeping the local reconciliation in the hook.
-- Fixed a persistence edge discovered during self-review: reorder must pass the pre-optimistic route-leg snapshot into shared reconciliation so stale no-longer-adjacent route legs are deleted from storage.
+- Split manifest materialization into two explicit phases in `src/tripCommands/tripManifest.ts`:
+  - `prepareTripManifest(...)` resolves stops, activities, links, waypoints, pending route legs, routing vehicle, and change summary without calling ORS.
+  - `calculatePreparedTripManifestRoutes(...)` is now the only phase that calls route calculation.
+- Kept `materializeTripManifest(...)` as a compatibility composition of the two phases.
+- Updated manifest-backed `createTrip(...)` in `src/tripCommands/tripDataService.ts` to:
+  - prepare the manifest first,
+  - audit the prepared snapshot with `routeLegs: []`,
+  - block on `ACTIVITY_DISTANCE_OUTLIER` before any routing call,
+  - calculate routes only after that audit passes,
+  - keep the final post-route audit for the command response.
+- Strengthened tests so the semantic blocker proves zero route calls, while valid manifests still prove one route call per automatic adjacent leg.
 
 ## TDD RED/GREEN Evidence
 
-### Route orchestration tests
+### RED
 
-RED:
+Command:
 
 ```bash
-npm test -- src/tripCommands/routeOrchestration.test.ts
+npm test -- src/tripCommands/tripManifest.test.ts src/tripCommands/tripDataService.test.ts
 ```
 
-Observed after temporarily hiding the new implementation file because Task 3 files already existed in the worktree at handoff:
+Observed failures before the implementation:
 
 ```text
-FAIL src/tripCommands/routeOrchestration.test.ts
-Error: Failed to resolve import "./routeOrchestration" from "src/tripCommands/routeOrchestration.test.ts". Does the file exist?
+FAIL src/tripCommands/tripManifest.test.ts > prepares manifest data before route calculation and preserves automatic call counts after routing
+TypeError: prepareTripManifest is not a function
+
+FAIL src/tripCommands/tripDataService.test.ts > blocks a manifest with semantic errors before creating a trip
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 23 times
 ```
 
-GREEN:
+This showed both missing explicit-phase exports and the quota leak: a semantically invalid manifest still spent 23 route calculations before the audit rejection.
+
+### GREEN
+
+Command:
 
 ```bash
-npm test -- src/tripCommands/routeOrchestration.test.ts src/hooks/useTripData.test.tsx
+npm test -- src/tripCommands/tripManifest.test.ts src/tripCommands/tripDataService.test.ts
+```
+
+Result after the implementation:
+
+```text
+Test Files  2 passed (2)
+Tests  61 passed (61)
+```
+
+## Call-Count Evidence
+
+- Valid bulk manifest:
+  - 26 stops produce 25 adjacent legs.
+  - 2 explicit manual shipping directives remove 2 automatic calculations.
+  - Expected automatic route calls: `26 - 1 - 2 = 23`.
+  - The service test now derives that count and verifies `calculateRoute` is called exactly 23 times.
+- Semantic blocker case:
+  - The same manifest with an outlier activity now returns `TRIP_AUDIT_FAILED`.
+  - `calculateRoute` is asserted to be called 0 times.
+  - `createTrip` is asserted to be called 0 times.
+  - `replaceTripData` is asserted to be called 0 times.
+- Phase split case:
+  - `prepareTripManifest(...)` resolves all non-route data and leaves `calculateRoute` at 0 calls.
+  - `calculatePreparedTripManifestRoutes(...)` then performs exactly the expected automatic route work.
+
+## Files Changed
+
+- `src/tripCommands/tripManifest.ts`
+- `src/tripCommands/tripManifest.test.ts`
+- `src/tripCommands/tripDataService.ts`
+- `src/tripCommands/tripDataService.test.ts`
+- `.superpowers/sdd/task-3-report.md`
+
+## Full-Suite Evidence
+
+Command:
+
+```bash
+npm test
 ```
 
 Result:
 
 ```text
-Test Files  2 passed (2)
-Tests  29 passed (29)
+Test Files  61 passed (61)
+Tests  865 passed (865)
 ```
 
-### Reorder persistence regression
+Notes:
 
-During self-review, I added a hook regression test for persisted route legs after reorder.
+- Baseline HEAD was reported as 61 files / 864 tests.
+- The suite now reports 865 tests because Task 3 adds one new regression test covering the explicit preparation phase.
+- The run still emits the pre-existing Node experimental `localStorage` warnings; they are unrelated to this task.
 
-RED:
+## Self-Review
 
-```bash
-npm test -- src/hooks/useTripData.test.tsx
-```
-
-Result before the fix:
-
-```text
-FAIL src/hooks/useTripData.test.tsx > useTripData > deletes route legs that no longer match adjacent destinations after reorder
-AssertionError: expected ... to deeply equal ...
-```
-
-The persisted route-leg list still contained the stale previous adjacent pair.
-
-GREEN:
-
-```bash
-npm test -- src/hooks/useTripData.test.tsx
-```
-
-Result after snapshotting `previousRouteLegs` before optimistic publication:
-
-```text
-Test Files  1 passed (1)
-Tests  27 passed (27)
-```
-
-## Tests And Results
-
-- `npm test -- src/tripCommands/routeOrchestration.test.ts src/hooks/useTripData.test.tsx`
-  - PASS: 2 files, 29 tests.
-- `npm test`
-  - PASS: 46 files, 549 tests.
-  - Node emitted existing experimental localStorage warnings during the full run.
-- `npm run build`
-  - PASS: TypeScript build and Vite production build completed.
-  - Vite emitted the existing chunk-size warning for the large app bundle.
-
-## Files Changed
-
-- `src/tripCommands/routeOrchestration.ts`
-  - New shared command-layer route orchestration module.
-- `src/tripCommands/routeOrchestration.test.ts`
-  - New tests for creating/calculating adjacent driving route legs and preserving ready route legs.
-- `src/hooks/useTripData.ts`
-  - Removed local route helper implementations.
-  - Delegates route calculation/finalization/reconciliation to `routeOrchestration`.
-  - Keeps reorder optimistic pending state while preserving stale-leg deletion.
-- `src/hooks/useTripData.test.tsx`
-  - Added regression coverage for deleting persisted no-longer-adjacent route legs after reorder.
-
-## Self-Review Findings
-
-- Found and fixed one subtle regression introduced by the delegation refactor:
-  - Publishing optimistic reconciled route legs before calling shared reconciliation caused the shared helper to lose sight of removed route-leg IDs.
-  - Fix: snapshot `previousRouteLegs` before optimistic publication and pass that snapshot to `reconcileAndSaveRouteLegs`.
-- Confirmed preserved ready route behavior remains covered by both the new command tests and existing hook tests.
-- Confirmed manual shipping finalization behavior remains delegated through `finalizeRouteLeg` and existing hook coverage still passes.
-- Confirmed the hook public API did not change.
+- Confirmed `materializeTripManifest(...)` remains as a compatibility composition and existing callers can still request the full operation in one call.
+- Confirmed successful routing behavior is unchanged after validation passes:
+  - routing still uses the same pending adjacent legs,
+  - route calculation still runs through `calculateAutomaticRouteLegs(...)`,
+  - `changed.routesRecalculated` still counts the automatic adjacent legs.
+- Confirmed the pre-route audit intentionally uses `routeLegs: []`, so it only blocks on semantic issues that do not require route output.
+- Confirmed the final command response still includes the completed post-route audit.
+- Ran `git diff --check` on the Task 3 code files; it returned clean.
 
 ## Concerns
 
-- The worktree already contained Task 3-looking uncommitted files when I began (`routeOrchestration.ts`, `routeOrchestration.test.ts`, and `useTripData.ts` edits). I treated them as peer/user work, inspected them, and completed/fixed them rather than reverting.
-- Full test run passes, but it still prints Node experimental localStorage warnings unrelated to this task.
+- Pre-route blocking currently filters only `ACTIVITY_DISTANCE_OUTLIER`, matching the brief and current audit semantics. If more pre-route semantic blockers are added later, this filter will need to expand deliberately.
+- I preserved unrelated worktree changes and staged ownership only around the Task 3 files plus this report.
+
+## Commit
+
+Commit created with message `fix: validate trip data before routing`.

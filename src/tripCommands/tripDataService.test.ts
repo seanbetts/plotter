@@ -384,6 +384,7 @@ describe('TripDataService trips and stops', () => {
 
   it('creates a complete manifest with one bulk persistence call', async () => {
     const harness = createBulkManifestHarness();
+    const expectedAutomaticLegs = harness.manifest.stops.length - 1 - harness.manifest.routeLegs.length;
 
     const result = await harness.service.createTrip(harness.manifest);
 
@@ -391,7 +392,7 @@ describe('TripDataService trips and stops', () => {
     if (!result.ok) return;
     expect(harness.resolvePlace).toHaveBeenCalledTimes(41);
     expect(harness.enrichLink).toHaveBeenCalledTimes(18);
-    expect(harness.calculateRoute).toHaveBeenCalledTimes(23);
+    expect(harness.calculateRoute).toHaveBeenCalledTimes(expectedAutomaticLegs);
     expect(harness.replaceTripData).toHaveBeenCalledTimes(1);
     expect(harness.createActivity).not.toHaveBeenCalled();
     expect(harness.updateActivity).not.toHaveBeenCalled();
@@ -466,6 +467,7 @@ describe('TripDataService trips and stops', () => {
         },
       },
     });
+    expect(harness.calculateRoute).not.toHaveBeenCalled();
     expect(harness.createTrip).not.toHaveBeenCalled();
     expect(harness.replaceTripData).not.toHaveBeenCalled();
   });
