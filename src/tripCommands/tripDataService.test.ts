@@ -20,6 +20,7 @@ function createHarness(overrides?: {
   saveDestination?: (destination: Destination, persist: () => Promise<void>) => Promise<void>;
   deleteRouteLeg?: (routeLegId: string, persist: () => Promise<void>) => Promise<void>;
   deleteDestination?: (destinationId: string, persist: () => Promise<void>) => Promise<void>;
+  prepareDestinationDeletion?: TripRepository['prepareDestinationDeletion'];
   saveRouteLeg?: (routeLeg: RouteLeg, persist: () => Promise<void>) => Promise<void>;
   updateTrip?: (
     tripId: string,
@@ -85,6 +86,7 @@ function createHarness(overrides?: {
         if (overrides?.deleteDestination) await overrides.deleteDestination(destinationId, persist);
         else await persist();
       },
+      prepareDestinationDeletion: overrides?.prepareDestinationDeletion,
       async listRouteLegs() {
         return [...data.routeLegs];
       },
@@ -1200,6 +1202,35 @@ describe('TripDataService trips and stops', () => {
     expect(succeeded.ok).toBe(true);
     const loaded = await harness.service.getTrip({ tripId: created.trip.id });
     expect(loaded.ok && loaded.trip.stops.map(({ name }) => name)).toEqual(['A', 'Retained', 'B']);
+  });
+
+  it('compensates prior CLI topology and routes when prepared destination commit rejects', async () => {
+    const harness = createHarness({
+      prepareDestinationDeletion: async () => async () => { throw new Error('destination commit failed'); },
+    });
+    const created = await harness.service.createTrip({
+      name: 'Commit compensation',
+      stops: [
+        { name: 'A', place: { coordinates: { lat: 0, lng: 0 } } },
+        { name: 'B', place: { coordinates: { lat: 0, lng: 5 } } },
+        { name: 'C', place: { coordinates: { lat: 0, lng: 10 } } },
+      ],
+    });
+    if (!created.ok) throw new Error('Expected trip creation to pass.');
+    const data = harness.repositories.get(created.trip.id)!;
+    const priorDestinations = structuredClone(data.destinations);
+    const priorRoutes = structuredClone(data.routeLegs);
+
+    const result = await harness.service.deleteStop(
+      { tripId: created.trip.id, stopId: created.stops[1].id }, { yes: true },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { message: expect.stringMatching(/destination commit failed.*Previous destination and route snapshots were restored/) },
+    });
+    expect(data.destinations).toEqual(priorDestinations);
+    expect(data.routeLegs).toEqual(priorRoutes);
   });
 
   it('rejects malformed createTrip stops input with a validation error', async () => {

@@ -2144,6 +2144,45 @@ describe('useTripData', () => {
     expect(dependentRecords).toEqual({ activities: ['activity-1'], activityMedia: ['media-1'] });
   });
 
+  it('compensates prior topology and routes when prepared destination commit rejects', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const removed = createDestination({ name: 'Removed', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const priorDestinations = [origin, removed, target];
+    const priorRoutes = [
+      createRouteLeg({ originDestinationId: origin.id, targetDestinationId: removed.id }),
+      createRouteLeg({ originDestinationId: removed.id, targetDestinationId: target.id }),
+    ];
+    const storedDestinations = structuredClone(priorDestinations);
+    let storedRoutes = structuredClone(priorRoutes);
+    const repository = createMemoryRepository(Promise.resolve(priorDestinations), {
+      listDestinations: async () => structuredClone([...storedDestinations].sort((left, right) => left.order - right.order)),
+      listRouteLegs: async () => structuredClone(storedRoutes),
+      saveDestination: async (destination) => {
+        const index = storedDestinations.findIndex(({ id }) => id === destination.id);
+        if (index === -1) storedDestinations.push(destination); else storedDestinations[index] = destination;
+      },
+      saveRouteLeg: async (routeLeg) => {
+        const index = storedRoutes.findIndex(({ id }) => id === routeLeg.id);
+        if (index === -1) storedRoutes.push(routeLeg); else storedRoutes[index] = routeLeg;
+      },
+      deleteRouteLeg: async (id) => { storedRoutes = storedRoutes.filter((routeLeg) => routeLeg.id !== id); },
+      prepareDestinationDeletion: async () => async () => { throw new Error('destination commit failed'); },
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.deleteDestination(removed.id))
+        .rejects.toThrow(/destination commit failed.*Previous destination and route snapshots were restored/);
+    });
+
+    expect([...storedDestinations].sort((left, right) => left.order - right.order)).toEqual(priorDestinations);
+    expect(storedRoutes).toEqual(priorRoutes);
+    expect(result.current.destinations).toEqual(priorDestinations);
+    expect(result.current.routeLegs).toEqual(priorRoutes);
+  });
+
   it('removes attached route legs from state when deleting a destination', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));

@@ -241,6 +241,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             if (!nextRouteLegIds.has(routeLeg.id)) await repository.deleteRouteLeg(routeLeg.id);
           }
           for (const routeLeg of nextRouteLegs) await repository.saveRouteLeg(routeLeg);
+          await commitDestinationDeletion();
         } catch (caught) {
           const primaryMessage = caught instanceof Error ? caught.message : 'Unknown trip storage error';
           const priorDestinationIds = new Set(priorDestinations.map(({ id }) => id));
@@ -270,7 +271,6 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             : 'Previous destination and route snapshots were restored.';
           throw new Error(`Unable to persist trip snapshot: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
         }
-        await commitDestinationDeletion();
         return { destinations: nextDestinations, routeLegs: nextRouteLegs };
       });
     },
