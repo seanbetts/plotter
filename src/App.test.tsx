@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -669,6 +670,57 @@ describe('App', () => {
     expect(await screen.findByText(
       /route write failed.*route rollback failed.*trip metadata rollback failed/i,
     )).toBeInTheDocument();
+  });
+
+  it('keeps the concrete workspace rollback error visible with the consistency warning', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 50, lng: 1 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 51, lng: 2 }, order: 1 });
+    repositoryMock.initialDestinations = Promise.resolve([origin, target]);
+    repositoryMock.initialRouteLegs = Promise.resolve([
+      createRouteLeg({
+        originDestinationId: origin.id,
+        targetDestinationId: target.id,
+        type: 'driving-auto',
+      }),
+    ]);
+    repositoryMock.saveRouteLeg.mockRejectedValueOnce(new Error('route write rejected'));
+    const updateTrip = vi.fn();
+    vi.mocked(useTripWorkspace).mockImplementation(() => {
+      const [actionError, setActionError] = useState<string | null>(null);
+      updateTrip.mockImplementationOnce(async () => ({
+        ...tripsMock[0],
+        routingVehicle: resolveVehiclePreset('large-camper'),
+      }));
+      updateTrip.mockImplementationOnce(async () => {
+        setActionError('metadata write rejected');
+        return false;
+      });
+      return {
+        trips: tripsMock,
+        activeTrip: tripsMock[0],
+        repository: repositoryMock,
+        isLoading: false,
+        error: null,
+        actionError,
+        selectTrip: vi.fn(),
+        createTrip: vi.fn(),
+        updateTrip,
+        deleteTrip: vi.fn(),
+        refreshTrips: vi.fn(),
+        realtime: null,
+      } as ReturnType<typeof useTripWorkspace>;
+    });
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(screen.getByRole('button', { name: /current trip/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Edit World tour' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Large camper' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save trip' }));
+
+    const error = await screen.findByText(/trip metadata rollback failed/i);
+    expect(error).toHaveTextContent('metadata write rejected');
+    expect(error).toHaveTextContent('trip metadata may not match the restored route legs');
   });
 
   it('shows one centered loading panel while app clients and trip data load', async () => {

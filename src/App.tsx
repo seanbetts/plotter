@@ -344,6 +344,9 @@ function TripWorkspace({
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [tripConsistencyError, setTripConsistencyError] = useState<string | null>(null);
+  const combinedTripActionError = [tripConsistencyError, tripActionError]
+    .filter((message): message is string => Boolean(message))
+    .join(' ') || null;
   const [isStopsPanelCollapsed, setIsStopsPanelCollapsed] = useState(readStopsPanelCollapsedPreference);
   const [previewMedia, setPreviewMedia] = useState<PreviewMediaSelection | null>(null);
   const [destinationMediaRollupItems, setDestinationMediaRollupItems] = useState<MediaRollupItem[]>([]);
@@ -1174,7 +1177,7 @@ function TripWorkspace({
               <TripSelector
                 trips={trips}
                 activeTrip={activeTrip}
-                actionError={tripConsistencyError ?? tripActionError}
+                actionError={combinedTripActionError}
                 onSelectTrip={onSelectTrip}
                 onCreateTrip={onCreateTrip}
                 onUpdateTrip={handleUpdateTrip}
