@@ -96,6 +96,73 @@ describe('route planner helpers', () => {
     expect(result.routeLegs.flatMap((leg) => leg.waypoints ?? []).map((item) => item.id)).toEqual(['only']);
   });
 
+  it('treats reversed waypoint projections as ambiguous instead of reordering intent', () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const inserted = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const waypoints = [
+      { id: 'later', order: 0, name: 'Later', coordinates: { lat: 0, lng: 8 }, location: origin.location, notes: '', links: [] },
+      { id: 'earlier', order: 1, name: 'Earlier', coordinates: { lat: 0, lng: 2 }, location: origin.location, notes: '', links: [] },
+    ];
+    const source = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'ready',
+      waypoints,
+      geometry: { type: 'LineString', coordinates: Array.from({ length: 11 }, (_, lng) => [lng, 0]) },
+      distanceKm: 10,
+      travelTimeHours: 1,
+      provider: 'test',
+      profile: 'driving-car',
+      routeKey: 'ready',
+      calculatedAt: '2026-07-11T00:00:00.000Z',
+    });
+
+    const result = planRouteLegReconciliation({ destinations: [origin, inserted, target], currentRouteLegs: [source], routingVehicle: resolveVehiclePreset('standard') });
+
+    expect(result.routeLegs.every((leg) => leg.status === 'review-required')).toBe(true);
+    expect(result.routeLegs.every((leg) => (leg.waypoints ?? []).length === 0)).toBe(true);
+    expect(result.routeLegs.flatMap((leg) => leg.warnings ?? [])).toEqual([
+      expect.objectContaining({
+        code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED',
+        context: { sourceRouteLegId: source.id, unresolvedIntent: expect.objectContaining({ waypoints }) },
+      }),
+    ]);
+  });
+
+  it('treats out-of-range ferry section indices as ambiguous without dropping require', () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const inserted = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const source = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'driving-auto',
+      status: 'ready',
+      ferryPolicy: 'require',
+      sections: [{ kind: 'ferry', startGeometryIndex: 90, endGeometryIndex: 100, distanceKm: 10 }],
+      geometry: { type: 'LineString', coordinates: Array.from({ length: 11 }, (_, lng) => [lng, 0]) },
+      distanceKm: 10,
+      travelTimeHours: 1,
+      provider: 'test',
+      profile: 'driving-car',
+      routeKey: 'ready',
+      calculatedAt: '2026-07-11T00:00:00.000Z',
+    });
+
+    const result = planRouteLegReconciliation({ destinations: [origin, inserted, target], currentRouteLegs: [source], routingVehicle: resolveVehiclePreset('standard') });
+
+    expect(result.routeLegs.every((leg) => leg.status === 'review-required')).toBe(true);
+    expect(result.routeLegs.every((leg) => leg.ferryPolicy === 'allow')).toBe(true);
+    expect(result.routeLegs.flatMap((leg) => leg.warnings ?? [])).toEqual([
+      expect.objectContaining({
+        code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED',
+        context: { sourceRouteLegId: source.id, unresolvedIntent: expect.objectContaining({ ferryPolicy: 'require' }) },
+      }),
+    ]);
+  });
+
   it('marks ambiguous constrained replacements review-required with one complete intent warning', () => {
     const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
     const inserted = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 1 });

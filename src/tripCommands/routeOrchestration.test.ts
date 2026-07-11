@@ -306,6 +306,54 @@ describe('route orchestration', () => {
     expect(warningMessage).toContain('866 km excess');
   });
 
+  it('keeps every ambiguous split sibling review-required until intent is explicitly resolved', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 } });
+    const middle = createDestination({ name: 'Middle', coordinates: { lat: 0, lng: 5 } });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 } });
+    const unresolvedIntent = {
+      movement: 'drive' as const,
+      calculation: 'automatic' as const,
+      ferryPolicy: 'require' as const,
+      waypoints: [],
+      notes: '',
+    };
+    const warning = {
+      code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED' as const,
+      message: 'Resolve intent.',
+      context: { sourceRouteLegId: 'source-leg', unresolvedIntent },
+    };
+    const siblings = [
+      createRouteLeg({ originDestinationId: origin.id, targetDestinationId: middle.id, type: 'driving-auto', status: 'review-required', warnings: [warning] }),
+      createRouteLeg({ originDestinationId: middle.id, targetDestinationId: target.id, type: 'driving-auto', status: 'review-required', warnings: [] }),
+    ];
+    const calculateRoute: CalculateRoute = async ({ origin: routeOrigin, target: routeTarget }) => ({
+      distanceKm: 5,
+      travelTimeHours: 1,
+      geometry: { type: 'LineString' as const, coordinates: [[routeOrigin.lng, routeOrigin.lat], [routeTarget.lng, routeTarget.lat]] },
+      provider: 'test',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 5 }],
+    });
+
+    const calculated = await calculateAutomaticRouteLegs({
+      destinations: [origin, middle, target],
+      routeLegs: siblings,
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute,
+    });
+
+    expect(calculated.map((leg) => leg.status)).toEqual(['review-required', 'review-required']);
+    expect(calculated.flatMap((leg) => leg.warnings ?? [])).toEqual([warning]);
+
+    const resolved = await calculateAutomaticRouteLegs({
+      destinations: [origin, middle, target],
+      routeLegs: calculated.map((leg) => ({ ...leg, status: 'pending' as const, warnings: [] })),
+      routingVehicle: resolveVehiclePreset('standard'),
+      calculateRoute,
+    });
+    expect(resolved.map((leg) => leg.status)).toEqual(['ready', 'ready']);
+  });
+
   it('fails incomplete provider output instead of silently accepting missing sections', async () => {
     const origin = createDestination({ name: 'Calais', coordinates: { lat: 50.9513, lng: 1.8587 } });
     const target = createDestination({ name: 'Dover', coordinates: { lat: 51.1279, lng: 1.3134 } });

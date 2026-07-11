@@ -317,23 +317,10 @@ function splitRouteLeg(input: {
     target: input.destinations[index + 1],
     routingVehicle: input.routingVehicle,
   }));
-
-  if (!hasConstrainedIntent(intent)) return defaultSegments();
-
-  const geometry = input.source.status === 'ready' ? input.source.geometry : undefined;
-  const boundaryIndexes = geometry
-    ? input.destinations.map((destination) => nearestGeometryIndex(geometry, destination.coordinates))
-    : [];
-  const canProject = Boolean(
-    geometry &&
-    intent.notes.trim().length === 0 &&
-    boundaryIndexes.every((index, position) => position === 0 || index > boundaryIndexes[position - 1]),
-  );
-
-  if (!canProject) {
+  const ambiguousSegments = (message: string) => {
     const warning = {
       code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED' as const,
-      message: 'Route intent could not be assigned safely after the stop change.',
+      message,
       context: { sourceRouteLegId: input.source.id, unresolvedIntent: intent },
     };
     return defaultSegments().map((leg, index) => ({
@@ -341,9 +328,29 @@ function splitRouteLeg(input: {
       status: 'review-required' as const,
       warnings: index === 0 ? [warning] : [],
     }));
+  };
+
+  if (!hasConstrainedIntent(intent)) return defaultSegments();
+
+  const geometry = input.source.status === 'ready' ? input.source.geometry : undefined;
+  const boundaryIndexes = geometry
+    ? input.destinations.map((destination) => nearestGeometryIndex(geometry, destination.coordinates))
+    : [];
+  const waypointIndexes = geometry
+    ? intent.waypoints.map((waypoint) => nearestGeometryIndex(geometry, waypoint.coordinates))
+    : [];
+  const canProject = Boolean(
+    geometry &&
+    intent.notes.trim().length === 0 &&
+    boundaryIndexes.every((index, position) => position === 0 || index > boundaryIndexes[position - 1]) &&
+    waypointIndexes.every((index, position) => position === 0 || index >= waypointIndexes[position - 1]) &&
+    waypointIndexes.every((index) => index >= boundaryIndexes[0] && index <= boundaryIndexes.at(-1)!),
+  );
+
+  if (!canProject) {
+    return ambiguousSegments('Route intent could not be assigned safely after the stop change.');
   }
 
-  const waypointIndexes = intent.waypoints.map((waypoint) => nearestGeometryIndex(geometry!, waypoint.coordinates));
   const waypointSegments = Array.from({ length: segmentCount }, () => [] as RouteWaypoint[]);
   intent.waypoints.forEach((waypoint, waypointPosition) => {
     const geometryIndex = waypointIndexes[waypointPosition];
@@ -356,18 +363,22 @@ function splitRouteLeg(input: {
   let requiredFerrySegment = -1;
   if (intent.ferryPolicy === 'require') {
     const ferrySection = input.source.sections?.find((section) => section.kind === 'ferry');
-    if (!ferrySection) {
-      const warning = {
-        code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED' as const,
-        message: 'Required ferry intent could not be assigned safely after the stop change.',
-        context: { sourceRouteLegId: input.source.id, unresolvedIntent: intent },
-      };
-      return defaultSegments().map((leg, index) => ({ ...leg, status: 'review-required' as const, warnings: index === 0 ? [warning] : [] }));
+    const validFerrySection = ferrySection &&
+      Number.isInteger(ferrySection.startGeometryIndex) &&
+      Number.isInteger(ferrySection.endGeometryIndex) &&
+      ferrySection.startGeometryIndex >= 0 &&
+      ferrySection.endGeometryIndex >= ferrySection.startGeometryIndex &&
+      ferrySection.endGeometryIndex < geometry!.coordinates.length;
+    if (!validFerrySection) {
+      return ambiguousSegments('Required ferry intent could not be assigned safely after the stop change.');
     }
     const midpoint = (ferrySection.startGeometryIndex + ferrySection.endGeometryIndex) / 2;
     requiredFerrySegment = boundaryIndexes.findIndex((boundaryIndex, index) => (
       index < segmentCount && midpoint <= boundaryIndexes[index + 1]
     ));
+    if (requiredFerrySegment === -1 || midpoint < boundaryIndexes[0]) {
+      return ambiguousSegments('Required ferry intent could not be assigned safely after the stop change.');
+    }
   }
 
   return Array.from({ length: segmentCount }, (_, index) => createReplacementLeg({

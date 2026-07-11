@@ -334,12 +334,12 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           if (!isActiveAction()) return;
 
           const previousRouteLegs = routeLegsRef.current;
-          replaceDestinations(orderedDestinations);
           const reconciliation = planRouteLegReconciliation({
             destinations: orderedDestinations,
             currentRouteLegs: previousRouteLegs,
             routingVehicle: standardRoutingVehicle,
           });
+          replaceDestinations(orderedDestinations);
           replaceRouteLegs(reconciliation.routeLegs);
           const saveDestinations = Promise.all(
             orderedDestinations.map((destination) => repository.saveDestination(destination)),

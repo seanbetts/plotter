@@ -161,6 +161,7 @@ export async function calculateAutomaticRouteLegs(input: {
     const ferryPolicy = leg.ferryPolicy ?? 'allow';
     const waypoints = [...(leg.waypoints ?? [])].sort((left, right) => left.order - right.order);
     const routeKey = routeKeyForLeg({ origin, target, routeLeg: leg, routingVehicle: input.routingVehicle });
+    const preservesUnresolvedReview = leg.status === 'review-required';
     const clearedLeg = clearCalculatedRouteData(leg, input.routingVehicle.profile);
     const retainedWarnings = clearedLeg.warnings ?? [];
 
@@ -201,7 +202,7 @@ export async function calculateAutomaticRouteLegs(input: {
         routeDistanceKm: route.distanceKm,
       });
       const warnings = [...retainedWarnings, ...(detourWarning ? [detourWarning] : [])];
-      const reviewRequired = warnings.length > 0;
+      const reviewRequired = preservesUnresolvedReview || warnings.length > 0;
       calculatedRouteLegs.push({
         ...clearedLeg,
         ...route,

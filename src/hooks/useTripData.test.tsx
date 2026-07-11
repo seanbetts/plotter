@@ -1350,6 +1350,33 @@ describe('useTripData', () => {
     });
   });
 
+  it('rejects a reorder that splits manual shipping before publishing UI or repository changes', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 1 });
+    const inserted = createDestination({ name: 'Inserted', coordinates: { lat: 0, lng: 5 }, order: 2 });
+    const shipping = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      type: 'shipping-manual',
+    });
+    const saveDestination = vi.fn(async () => {});
+    const repository = createMemoryRepository(Promise.resolve([origin, target, inserted]), {
+      listRouteLegs: async () => [shipping],
+      saveDestination,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.reorderDestinations([origin.id, inserted.id, target.id]))
+        .rejects.toThrow('Resolve vehicle shipping before inserting a stop');
+    });
+
+    expect(saveDestination).not.toHaveBeenCalled();
+    expect(result.current.destinations.map((destination) => destination.name)).toEqual(['Origin', 'Target', 'Inserted']);
+    expect(result.current.routeLegs).toEqual([shipping]);
+  });
+
   it('marks an automatic route leg as a manual shipping leg', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));
