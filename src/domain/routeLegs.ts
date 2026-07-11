@@ -1,10 +1,29 @@
 import type { LineString } from 'geojson';
-import type { Coordinates, RouteLeg, RouteLegStatus, RouteLegType } from './types';
+import type {
+  Coordinates,
+  FerryPolicy,
+  RouteCalculationMode,
+  RouteLeg,
+  RouteLegStatus,
+  RouteLegType,
+  RouteMovement,
+  RouteSection,
+  RouteWarning,
+  RouteWaypoint,
+  TripRoutingVehicle,
+} from './types';
+import { standardRoutingVehicle } from './vehiclePresets';
 
 type CreateRouteLegInput = {
   originDestinationId: string;
   targetDestinationId: string;
   type: RouteLegType;
+  movement?: RouteMovement;
+  calculation?: RouteCalculationMode;
+  ferryPolicy?: FerryPolicy;
+  waypoints?: RouteWaypoint[];
+  sections?: RouteSection[];
+  warnings?: RouteWarning[];
   status?: RouteLegStatus;
   distanceKm?: number;
   travelTimeHours?: number;
@@ -21,6 +40,10 @@ type CreateRouteKeyInput = {
   origin: Coordinates;
   target: Coordinates;
   profile?: string;
+  routingVehicle?: TripRoutingVehicle;
+  waypoints?: Coordinates[];
+  ferryPolicy?: FerryPolicy;
+  variant?: string;
 };
 
 type CreateManualRouteLegInput = {
@@ -43,8 +66,27 @@ function coordinateKey(coordinates: Coordinates) {
   return `${coordinates.lng.toFixed(5)},${coordinates.lat.toFixed(5)}`;
 }
 
-export function createRouteKey({ origin, target, profile = defaultProfile }: CreateRouteKeyInput) {
-  return `${profile}:${coordinateKey(origin)}:${coordinateKey(target)}`;
+export function createRouteKey({
+  origin,
+  target,
+  profile,
+  routingVehicle = standardRoutingVehicle,
+  waypoints = [],
+  ferryPolicy = 'allow',
+  variant,
+}: CreateRouteKeyInput) {
+  const vehicleSnapshot = profile && profile !== routingVehicle.profile
+    ? { ...routingVehicle, profile }
+    : routingVehicle;
+
+  return JSON.stringify({
+    routingVehicle: vehicleSnapshot,
+    waypoints: waypoints.map(coordinateKey),
+    ferryPolicy,
+    origin: coordinateKey(origin),
+    target: coordinateKey(target),
+    variant: variant ?? null,
+  });
 }
 
 export function createStraightLineGeometry(origin: Coordinates, target: Coordinates): LineString {
@@ -70,12 +112,19 @@ export function createManualRouteLeg(input: CreateManualRouteLegInput): RouteLeg
 
 export function createRouteLeg(input: CreateRouteLegInput): RouteLeg {
   const timestamp = nowIso();
+  const isManualShipping = input.type === 'shipping-manual';
 
   return {
     id: createId(),
     originDestinationId: input.originDestinationId,
     targetDestinationId: input.targetDestinationId,
     type: input.type,
+    movement: input.movement ?? (isManualShipping ? 'vehicle-shipping' : 'drive'),
+    calculation: input.calculation ?? (isManualShipping ? 'manual' : 'automatic'),
+    ferryPolicy: input.ferryPolicy ?? 'allow',
+    waypoints: input.waypoints ?? [],
+    sections: input.sections ?? [],
+    warnings: input.warnings ?? [],
     status: input.status ?? defaultStatusForType(input.type),
     distanceKm: input.distanceKm,
     travelTimeHours: input.travelTimeHours,

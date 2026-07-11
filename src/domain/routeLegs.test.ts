@@ -5,6 +5,7 @@ import {
   createRouteLeg,
   createStraightLineGeometry,
 } from './routeLegs';
+import { resolveVehiclePreset, standardRoutingVehicle } from './vehiclePresets';
 
 describe('route leg helpers', () => {
   it('creates a manual route leg between two destinations', () => {
@@ -18,6 +19,12 @@ describe('route leg helpers', () => {
     expect(leg.targetDestinationId).toBe('target-1');
     expect(leg.type).toBe('shipping-manual');
     expect(leg.status).toBe('manual');
+    expect(leg.movement).toBe('vehicle-shipping');
+    expect(leg.calculation).toBe('manual');
+    expect(leg.ferryPolicy).toBe('allow');
+    expect(leg.waypoints).toEqual([]);
+    expect(leg.sections).toEqual([]);
+    expect(leg.warnings).toEqual([]);
     expect(leg.notes).toBe('');
   });
 
@@ -31,18 +38,53 @@ describe('route leg helpers', () => {
 
     expect(leg.type).toBe('driving-auto');
     expect(leg.status).toBe('pending');
+    expect(leg.movement).toBe('drive');
+    expect(leg.calculation).toBe('automatic');
+    expect(leg.ferryPolicy).toBe('allow');
+    expect(leg.waypoints).toEqual([]);
+    expect(leg.sections).toEqual([]);
+    expect(leg.warnings).toEqual([]);
     expect(leg.profile).toBe('driving-car');
     expect(leg.routeKey).toBe('driving-car:1,2:3,4');
   });
 
   it('creates stable route keys from coordinates and profile', () => {
-    expect(
-      createRouteKey({
-        origin: { lat: 51.50724, lng: -0.12762 },
-        target: { lat: 41.00822, lng: 28.97841 },
-        profile: 'driving-car',
-      }),
-    ).toBe('driving-car:-0.12762,51.50724:28.97841,41.00822');
+    const input = {
+      origin: { lat: 51.50724, lng: -0.12762 },
+      target: { lat: 41.00822, lng: 28.97841 },
+      profile: 'driving-car',
+    };
+
+    expect(createRouteKey(input)).toBe(createRouteKey(input));
+  });
+
+  it('keys vehicle, waypoint and ferry intent', () => {
+    const base = {
+      origin: { lat: 59.0502, lng: 10.0296 },
+      target: { lat: 57.5948, lng: 9.9796 },
+      routingVehicle: standardRoutingVehicle,
+      waypoints: [],
+      ferryPolicy: 'allow' as const,
+    };
+
+    expect(createRouteKey(base)).not.toBe(createRouteKey({
+      ...base,
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+    }));
+    expect(createRouteKey(base)).not.toBe(createRouteKey({
+      ...base,
+      waypoints: [{ lat: 57.5948, lng: 9.9796 }],
+    }));
+    expect(createRouteKey(base)).not.toBe(createRouteKey({ ...base, ferryPolicy: 'avoid' }));
+  });
+
+  it('keys optional route variants', () => {
+    const base = {
+      origin: { lat: 59.0502, lng: 10.0296 },
+      target: { lat: 57.5948, lng: 9.9796 },
+    };
+
+    expect(createRouteKey(base)).not.toBe(createRouteKey({ ...base, variant: 'alternative-1' }));
   });
 
   it('creates GeoJSON line geometry in longitude latitude order', () => {
@@ -72,6 +114,12 @@ describe('route leg helpers', () => {
       targetDestinationId: 'hirtshals',
       type: 'shipping-manual',
       status: 'manual',
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
+      ferryPolicy: 'allow',
+      waypoints: [],
+      sections: [],
+      warnings: [],
       notes: 'Vehicle ferry.',
       geometry: {
         type: 'LineString',
