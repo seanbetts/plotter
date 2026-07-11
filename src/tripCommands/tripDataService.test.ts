@@ -653,7 +653,7 @@ describe('TripDataService trips and stops', () => {
       ok: false,
       error: { code: 'COMMAND_FAILED', message: 'Metadata update failed after write.' },
     });
-    expect(events.slice(0, 3)).toEqual(['route:driving-hgv', 'route:driving-hgv', 'metadata:large-camper']);
+    expect(events.slice(0, 3)).toEqual(['route:driving-car', 'route:driving-car', 'metadata:large-camper']);
     expect(events).toContain('metadata:standard');
     expect(harness.trips[0]).toMatchObject({ ...beforeTrip, updatedAt: expect.any(String) });
     expect(harness.repositories.get(created.trip.id)!.routeLegs).toEqual(beforeRoutes);
@@ -662,13 +662,17 @@ describe('TripDataService trips and stops', () => {
   it('surfaces explicit consistency diagnostics when vehicle rollback fails', async () => {
     let vehicleChangeStarted = false;
     let newRouteSaveCount = 0;
+    let primaryFailureTriggered = false;
     const harness = createHarness({
       saveRouteLeg: async (routeLeg, persist) => {
-        if (vehicleChangeStarted && routeLeg.profile === 'driving-hgv') {
+        if (vehicleChangeStarted && routeLeg.profile === 'driving-car' && !primaryFailureTriggered) {
           newRouteSaveCount += 1;
-          if (newRouteSaveCount === 2) throw new Error('Primary storage failure.');
+          if (newRouteSaveCount === 2) {
+            primaryFailureTriggered = true;
+            throw new Error('Primary storage failure.');
+          }
         }
-        if (vehicleChangeStarted && routeLeg.profile === 'driving-car') {
+        if (vehicleChangeStarted && routeLeg.profile === 'driving-car' && primaryFailureTriggered) {
           throw new Error('Rollback storage failure.');
         }
         await persist();

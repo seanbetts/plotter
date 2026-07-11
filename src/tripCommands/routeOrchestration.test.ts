@@ -318,7 +318,7 @@ describe('route orchestration', () => {
       travelTimeHours: 9,
       geometry: { type: 'LineString' as const, coordinates: [[8.8017, 53.0793], [9.9598, 57.5881]] },
       provider: 'test',
-      profile: 'driving-hgv' as const,
+      profile: 'driving-car' as const,
       sections: [{ kind: 'ferry' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 200 }],
     }));
 
@@ -338,7 +338,7 @@ describe('route orchestration', () => {
     expect(calculateRoute).toHaveBeenCalledWith({
       origin: origin.coordinates,
       target: target.coordinates,
-      profile: 'driving-hgv',
+      profile: 'driving-car',
       routingVehicle,
       waypoints: [waypoint],
       ferryPolicy: 'require',

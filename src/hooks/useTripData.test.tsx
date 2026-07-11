@@ -1558,7 +1558,7 @@ describe('useTripData', () => {
       travelTimeHours: 1,
       geometry: { type: 'LineString' as const, coordinates: [[1, 1], [2, 2]] },
       provider: 'openrouteservice',
-      profile: 'driving-hgv' as const,
+      profile: 'driving-car' as const,
       sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 10 }],
     }));
     const vehicle = resolveVehiclePreset('large-camper');
@@ -1575,7 +1575,7 @@ describe('useTripData', () => {
     });
 
     expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
-      profile: 'driving-hgv',
+      profile: 'driving-car',
       routingVehicle: vehicle,
     }));
   });
