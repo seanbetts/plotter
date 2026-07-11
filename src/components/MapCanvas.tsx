@@ -54,6 +54,7 @@ type ProjectedDestinationLabel = {
   name: string;
   label: string;
   selected: boolean;
+  position: LabelPosition;
   x: number;
   y: number;
 };
@@ -62,12 +63,12 @@ type ProjectedActivityLabel = {
   id: string;
   title: string;
   selected: boolean;
-  position: ActivityLabelPosition;
+  position: LabelPosition;
   x: number;
   y: number;
 };
 
-type ActivityLabelPosition = 'below' | 'above';
+type LabelPosition = 'below' | 'above';
 
 type LabelBounds = {
   left: number;
@@ -639,31 +640,54 @@ function estimateActivityLabelWidth(title: string) {
   );
 }
 
-function labelCandidateBounds(input: { title: string; x: number; y: number }, position: ActivityLabelPosition) {
+function renderedLabelBounds(input: { title: string; x: number; y: number }, position: LabelPosition) {
   const width = estimateActivityLabelWidth(input.title);
-  const left = input.x - width / 2 - activityLabelCollisionPaddingPx;
+  const left = input.x - width / 2;
   const top =
     position === 'above'
-      ? input.y - activityLabelVerticalOffsetPx - activityLabelHeightPx - activityLabelCollisionPaddingPx
-      : input.y + activityLabelVerticalOffsetPx - activityLabelCollisionPaddingPx;
+      ? input.y - activityLabelVerticalOffsetPx - activityLabelHeightPx
+      : input.y + activityLabelVerticalOffsetPx;
 
   return {
     left,
-    right: left + width + activityLabelCollisionPaddingPx * 2,
+    right: left + width,
     top,
-    bottom: top + activityLabelHeightPx + activityLabelCollisionPaddingPx * 2,
+    bottom: top + activityLabelHeightPx,
+  };
+}
+
+function labelCandidateBounds(input: { title: string; x: number; y: number }, position: LabelPosition) {
+  const renderedBounds = renderedLabelBounds(input, position);
+
+  return {
+    left: renderedBounds.left - activityLabelCollisionPaddingPx,
+    right: renderedBounds.right + activityLabelCollisionPaddingPx,
+    top: renderedBounds.top - activityLabelCollisionPaddingPx,
+    bottom: renderedBounds.bottom + activityLabelCollisionPaddingPx,
   };
 }
 
 function destinationLabelBounds(label: ProjectedDestinationLabel) {
   return labelCandidateBounds(
-    {
-      title: `${label.label} - ${label.name}`,
-      x: label.x,
-      y: label.y,
-    },
-    'below',
+    { title: `${label.label} - ${label.name}`, x: label.x, y: label.y },
+    label.position,
   );
+}
+
+function positionDestinationLabels(labels: Array<Omit<ProjectedDestinationLabel, 'position'>>) {
+  const belowBounds = labels.map((label) =>
+    renderedLabelBounds(
+      { title: `${label.label} - ${label.name}`, x: label.x, y: label.y },
+      'below',
+    ),
+  );
+
+  return labels.map((label, index) => ({
+    ...label,
+    position: belowBounds.slice(index + 1).some((bounds) =>
+      activityLabelBoundsOverlap(belowBounds[index], bounds),
+    ) ? 'above' as const : 'below' as const,
+  }));
 }
 
 function activityLabelBoundsOverlap(left: LabelBounds, right: LabelBounds) {
@@ -907,17 +931,13 @@ export function MapCanvas({
     applyCurrentMapDetailSettings();
   }, [applyCurrentMapDetailSettings, mapDetailSettings, selectedZoomStep]);
 
-  const updateDestinationLabelPositions = useCallback(() => {
+  const projectDestinationLabels = useCallback(() => {
     const map = mapRef.current;
-    if (!map) {
-      setProjectedDestinationLabels([]);
-      return;
-    }
+    if (!map) return [];
 
-    setProjectedDestinationLabels(
+    return positionDestinationLabels(
       latestDestinationsRef.current.map((destination, index) => {
         const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
-
         return {
           id: destination.id,
           name: destination.name,
@@ -930,6 +950,10 @@ export function MapCanvas({
     );
   }, []);
 
+  const updateDestinationLabelPositions = useCallback(() => {
+    setProjectedDestinationLabels(projectDestinationLabels());
+  }, [projectDestinationLabels]);
+
   const updateActivityLabelPositions = useCallback(() => {
     const map = mapRef.current;
     const selectedDestinationId = latestSelectedDestinationIdRef.current;
@@ -938,18 +962,7 @@ export function MapCanvas({
       return;
     }
 
-    const reservedDestinationLabelBounds = latestDestinationsRef.current.map((destination, index) => {
-      const point = map.project([destination.coordinates.lng, destination.coordinates.lat]);
-
-      return destinationLabelBounds({
-        id: destination.id,
-        name: destination.name,
-        label: formatStopMarker(index + 1),
-        selected: destination.id === latestSelectedDestinationIdRef.current,
-        x: point.x,
-        y: point.y,
-      });
-    });
+    const reservedDestinationLabelBounds = projectDestinationLabels().map(destinationLabelBounds);
 
     setProjectedActivityLabels(
       visibleActivityLabels(
@@ -972,7 +985,7 @@ export function MapCanvas({
             {
               order: index,
               selected: label.selected,
-              placements: (['below', 'above'] satisfies ActivityLabelPosition[]).map((position) => ({
+              placements: (['below', 'above'] satisfies LabelPosition[]).map((position) => ({
                 ...label,
                 position,
                 order: index,
@@ -984,7 +997,7 @@ export function MapCanvas({
         reservedDestinationLabelBounds,
       ),
     );
-  }, []);
+  }, [projectDestinationLabels]);
 
   const updateMapLabelPositions = useCallback(() => {
     updateDestinationLabelPositions();
@@ -1603,6 +1616,7 @@ export function MapCanvas({
               type="button"
               className={[
                 'map-destination-label',
+                destinationLabel.position === 'above' ? 'map-label-position-above' : '',
                 destinationLabel.selected ? 'is-selected' : '',
               ]
                 .filter(Boolean)
