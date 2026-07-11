@@ -97,6 +97,68 @@ async function persistRouteCalculationBatch(input: {
   }
 }
 
+function loadedRouteNeedsVehicleRecalculation(
+  routeLeg: RouteLeg,
+  routingVehicle: TripRoutingVehicle,
+) {
+  if (!hasPreservableDrivingRouteData(routeLeg) || routeLeg.profile === routingVehicle.profile) {
+    return false;
+  }
+
+  const isQualifiedCarFallback =
+    routingVehicle.profile === 'driving-hgv' &&
+    routeLeg.profile === 'driving-car' &&
+    (routeLeg.warnings ?? []).some((warning) => warning.code === 'VEHICLE_PROFILE_FALLBACK');
+  return !isQualifiedCarFallback;
+}
+
+async function reconcileLoadedRoutesForVehicle(input: {
+  repository: TripRepository;
+  destinations: Destination[];
+  routeLegs: RouteLeg[];
+  routingVehicle: TripRoutingVehicle;
+  calculateRoute?: CalculateRoute;
+  isCurrentReload: () => boolean;
+}) {
+  const staleRouteLegIndexes = new Set(
+    input.routeLegs.flatMap((routeLeg, index) =>
+      loadedRouteNeedsVehicleRecalculation(routeLeg, input.routingVehicle) ? [index] : []),
+  );
+  if (staleRouteLegIndexes.size === 0) {
+    return { destinations: input.destinations, routeLegs: input.routeLegs };
+  }
+
+  const invalidatedRouteLegs = recalculateAutomaticRouteLegsForVehicle({
+    destinations: input.destinations,
+    routeLegs: input.routeLegs,
+    routingVehicle: input.routingVehicle,
+  }).map((routeLeg, index) => staleRouteLegIndexes.has(index) ? routeLeg : input.routeLegs[index]);
+  const calculation = await calculateAutomaticRouteLegs({
+    destinations: input.destinations,
+    routeLegs: invalidatedRouteLegs,
+    routingVehicle: input.routingVehicle,
+    calculateRoute: input.calculateRoute,
+  });
+
+  if (!input.isCurrentReload()) return null;
+
+  const destinationsToSave = changedDestinationsByReference(input.destinations, calculation.destinations);
+  const routeLegsToSave = calculation.routeLegs.filter(
+    (routeLeg, index) => routeLeg !== input.routeLegs[index],
+  );
+  await persistRouteCalculationBatch({
+    repository: input.repository,
+    priorDestinations: structuredClone(input.destinations),
+    priorRouteLegs: structuredClone(input.routeLegs),
+    destinationsToSave,
+    routeLegsToSave,
+    failurePrefix: 'Unable to save reconciled routes',
+  });
+
+  if (!input.isCurrentReload()) return null;
+  return calculation;
+}
+
 export function useTripData(repository: TripRepository, options: UseTripDataOptions = {}) {
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [routeLegs, setRouteLegs] = useState<RouteLeg[]>([]);
@@ -111,9 +173,14 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const reloadSequenceRef = useRef(0);
   const routeLegMutationQueuesRef = useRef(new Map<string, Promise<void>>());
   const calculateRoute = options.calculateRoute;
+  const calculateRouteRef = useRef(calculateRoute);
   const routingVehicle = options.routingVehicle ?? standardRoutingVehicle;
   const routingVehicleRef = useRef(routingVehicle);
   const repositoryToken = useMemo(() => ({ repository }), [repository]);
+
+  useLayoutEffect(() => {
+    calculateRouteRef.current = calculateRoute;
+  }, [calculateRoute]);
 
   useLayoutEffect(() => {
     routingVehicleRef.current = routingVehicle;
@@ -233,8 +300,18 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
       if (!isCurrentReload()) return;
 
-      replaceDestinations(loadedDestinations);
-      replaceRouteLegs(loadedRouteLegs);
+      const reconciled = await reconcileLoadedRoutesForVehicle({
+        repository,
+        destinations: loadedDestinations,
+        routeLegs: loadedRouteLegs,
+        routingVehicle: routingVehicleRef.current,
+        calculateRoute: calculateRouteRef.current,
+        isCurrentReload,
+      });
+      if (!reconciled || !isCurrentReload()) return;
+
+      replaceDestinations(reconciled.destinations);
+      replaceRouteLegs(reconciled.routeLegs);
       replaceActivitiesByDestinationId(nextActivitiesByDestinationId);
     } catch (caught) {
       if (!isCurrentReload()) return;

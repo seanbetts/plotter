@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, withRoutingAnchor } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
-import type { Destination, RouteLeg } from '../domain/types';
+import type { Destination, RouteLeg, TripRoutingVehicle } from '../domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
@@ -82,6 +82,186 @@ describe('useTripData', () => {
     expect(result.current.activitiesByDestinationId[destination.id].map((activity) => activity.title)).toEqual([
       'Louvre',
     ]);
+  });
+
+  it('recalculates and persists a legacy large-camper HGV route before publishing the loaded trip', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const currentVehicle = resolveVehiclePreset('large-camper');
+    const legacyVehicle = createLegacyLargeCamperRoutingVehicle();
+    const legacyRouteLeg = createReadyRouteLegForVehicle(origin, target, legacyVehicle);
+    let storedRouteLeg = legacyRouteLeg;
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => { storedRouteLeg = routeLeg; });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 128,
+      travelTimeHours: 2.1,
+      geometry: legacyRouteLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 128 }],
+    }));
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: currentVehicle,
+    }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving-car',
+      routingVehicle: currentVehicle,
+    }));
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(storedRouteLeg).toMatchObject({ status: 'ready', profile: 'driving-car', distanceKm: 128 });
+    expect(result.current.routeLegs).toEqual([storedRouteLeg]);
+  });
+
+  it('leaves manual vehicle shipping untouched during initial vehicle reconciliation', async () => {
+    const origin = createDestination({ name: 'Panama City', coordinates: { lat: 9, lng: -79.5 }, order: 0 });
+    const target = createDestination({ name: 'Cartagena', coordinates: { lat: 10.4, lng: -75.5 }, order: 1 });
+    const manualRouteLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'vehicle-shipping',
+      calculation: 'manual',
+      status: 'manual',
+      geometry: { type: 'LineString', coordinates: [[-79.5, 9], [-75.5, 10.4]] },
+      notes: 'Preserve the Darien Gap shipping plan.',
+    });
+    const saveDestination = vi.fn(async () => undefined);
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const calculateRoute = vi.fn();
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [manualRouteLeg],
+      saveDestination,
+      saveRouteLeg,
+    });
+
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: resolveVehiclePreset('large-camper'),
+    }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.routeLegs).toEqual([manualRouteLeg]);
+    expect(calculateRoute).not.toHaveBeenCalled();
+    expect(saveDestination).not.toHaveBeenCalled();
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+  });
+
+  it('publishes an already-current ready route without route calls or persistence writes', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const currentVehicle = resolveVehiclePreset('large-camper');
+    const currentRouteLeg = createReadyRouteLegForVehicle(origin, target, currentVehicle);
+    const saveDestination = vi.fn(async () => undefined);
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const calculateRoute = vi.fn();
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [currentRouteLeg],
+      saveDestination,
+      saveRouteLeg,
+    });
+
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: currentVehicle,
+    }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.routeLegs).toEqual([currentRouteLeg]);
+    expect(calculateRoute).not.toHaveBeenCalled();
+    expect(saveDestination).not.toHaveBeenCalled();
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+  });
+
+  it('persists and publishes a failed car leg when legacy load reconciliation cannot calculate a route', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const legacyRouteLeg = createReadyRouteLegForVehicle(origin, target, createLegacyLargeCamperRoutingVehicle());
+    let storedRouteLeg = legacyRouteLeg;
+    const saveRouteLeg = vi.fn(async (routeLeg: RouteLeg) => { storedRouteLeg = routeLeg; });
+    const calculateRoute = vi.fn(async () => { throw new Error('Legacy car recalculation failed'); });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: resolveVehiclePreset('large-camper'),
+    }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(storedRouteLeg).toMatchObject({
+      id: legacyRouteLeg.id,
+      status: 'failed',
+      profile: 'driving-car',
+      geometry: undefined,
+      error: 'Legacy car recalculation failed',
+    });
+    expect(result.current.destinations).toEqual([origin, target]);
+    expect(result.current.routeLegs).toEqual([storedRouteLeg]);
+  });
+
+  it('does not retry failed or review-required automatic routes merely by loading them', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const legacyVehicle = createLegacyLargeCamperRoutingVehicle();
+    const failedRouteLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'failed',
+      profile: 'driving-hgv',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, routingVehicle: legacyVehicle }),
+      error: 'Existing failure needs an explicit retry.',
+    });
+    const reviewRouteLeg = createRouteLeg({
+      originDestinationId: origin.id,
+      targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', status: 'review-required',
+      profile: 'driving-hgv',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, routingVehicle: legacyVehicle }),
+      geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
+      provider: 'openrouteservice',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+      warnings: [{
+        code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED',
+        message: 'Keep this unresolved review intent.',
+      }],
+    });
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const calculateRoute = vi.fn();
+    let loadedRouteLegs = [failedRouteLeg];
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => loadedRouteLegs,
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository, {
+      calculateRoute,
+      routingVehicle: resolveVehiclePreset('large-camper'),
+    }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.routeLegs).toEqual([failedRouteLeg]);
+
+    loadedRouteLegs = [reviewRouteLeg];
+    await act(async () => { await result.current.reload(); });
+
+    expect(result.current.routeLegs).toEqual([reviewRouteLeg]);
+    expect(calculateRoute).not.toHaveBeenCalled();
+    expect(saveRouteLeg).not.toHaveBeenCalled();
   });
 
   it('adds, updates, reorders, and deletes activities through hook actions', async () => {
@@ -2548,6 +2728,51 @@ describe('useTripData', () => {
     expect(result.current.destinations[0].name).toBe('Current');
   });
 
+  it('does not persist an obsolete legacy-route calculation after the repository changes', async () => {
+    const slowOrigin = createDestination({ name: 'Slow origin', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const slowTarget = createDestination({ name: 'Slow target', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const currentDestination = createDestination({ name: 'Current', coordinates: { lat: 2, lng: 2 } });
+    const legacyRouteLeg = createReadyRouteLegForVehicle(
+      slowOrigin,
+      slowTarget,
+      createLegacyLargeCamperRoutingVehicle(),
+    );
+    const calculation = createDeferred({
+      distanceKm: 128,
+      travelTimeHours: 2.1,
+      geometry: legacyRouteLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 128 }],
+    });
+    const saveObsoleteRouteLeg = vi.fn(async () => undefined);
+    const calculateRoute = vi.fn(() => calculation.promise);
+    const slowRepository = createMemoryRepository(Promise.resolve([slowOrigin, slowTarget]), {
+      listRouteLegs: async () => [legacyRouteLeg],
+      saveRouteLeg: saveObsoleteRouteLeg,
+    });
+    const currentRepository = createMemoryRepository(Promise.resolve([currentDestination]));
+
+    const { result, rerender } = renderHook(
+      ({ repository }) => useTripData(repository, {
+        calculateRoute,
+        routingVehicle: resolveVehiclePreset('large-camper'),
+      }),
+      { initialProps: { repository: slowRepository } },
+    );
+
+    await waitFor(() => expect(calculateRoute).toHaveBeenCalledTimes(1));
+
+    rerender({ repository: currentRepository });
+
+    await act(async () => { calculation.resolve(); });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(saveObsoleteRouteLeg).not.toHaveBeenCalled();
+    expect(result.current.destinations).toEqual([currentDestination]);
+    expect(result.current.routeLegs).toEqual([]);
+  });
+
   it('does not start the queued initial reload after fast unmount', async () => {
     const repository = createMemoryRepository(Promise.resolve([]));
     const { unmount } = renderHook(() => useTripData(repository));
@@ -2674,6 +2899,43 @@ function createReadyRouteLeg(
     provider: 'openrouteservice',
     profile: 'driving-car',
     routeKey: 'original-route',
+    calculatedAt: '2026-07-01T10:00:00.000Z',
+  });
+}
+
+function createLegacyLargeCamperRoutingVehicle(): TripRoutingVehicle {
+  return {
+    ...resolveVehiclePreset('large-camper'),
+    profile: 'driving-hgv',
+    vehicleType: 'hgv',
+  };
+}
+
+function createReadyRouteLegForVehicle(
+  origin: ReturnType<typeof createDestination>,
+  target: ReturnType<typeof createDestination>,
+  routingVehicle: TripRoutingVehicle,
+) {
+  return createRouteLeg({
+    originDestinationId: origin.id,
+    targetDestinationId: target.id,
+    movement: 'drive', calculation: 'automatic', status: 'ready',
+    distanceKm: 125,
+    travelTimeHours: 2,
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [origin.coordinates.lng, origin.coordinates.lat],
+        [target.coordinates.lng, target.coordinates.lat],
+      ],
+    },
+    provider: 'openrouteservice',
+    profile: routingVehicle.profile,
+    routeKey: createRouteKey({
+      origin: origin.coordinates,
+      target: target.coordinates,
+      routingVehicle,
+    }),
     calculatedAt: '2026-07-01T10:00:00.000Z',
   });
 }
