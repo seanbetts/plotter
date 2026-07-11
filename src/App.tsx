@@ -26,7 +26,6 @@ import type {
   Destination,
   DestinationLocation,
   MediaRollupItem,
-  RouteLeg,
 } from './domain/types';
 import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
@@ -34,7 +33,7 @@ import { useTripData } from './hooks/useTripData';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
 import { downloadTripMap } from './map/tripMapExport';
 import { preloadImageUrls } from './media/imagePreloading';
-import { applyCalculatedRouteResult } from './tripCommands/routeOrchestration';
+import { applyCalculatedRouteResult, createRouteResultFingerprint } from './tripCommands/routeOrchestration';
 import { createAppLinkPreviewClient } from './services/linkPreviewClient';
 import type { LinkPreviewClient } from './services/linkPreviewClient';
 import { createAppWebImageSearchClient } from './services/webImageSearchClient';
@@ -78,27 +77,12 @@ type PreviewMediaSelection = {
 };
 type RouteAlternativesState = {
   routeLegId: string;
+  expectedFingerprint: string;
   status: 'loading' | 'ready' | 'empty' | 'error' | 'saving';
   options: RouteOption[];
   selectedOptionId: string | null;
   error: string | null;
 };
-
-function calculatedRoutePatch(routeLeg: RouteLeg) {
-  return {
-    status: routeLeg.status,
-    distanceKm: routeLeg.distanceKm,
-    travelTimeHours: routeLeg.travelTimeHours,
-    geometry: routeLeg.geometry,
-    provider: routeLeg.provider,
-    profile: routeLeg.profile,
-    routeKey: routeLeg.routeKey,
-    sections: routeLeg.sections,
-    warnings: routeLeg.warnings,
-    calculatedAt: routeLeg.calculatedAt,
-    error: routeLeg.error,
-  };
-}
 type AppProps = {
   webImageSearchClient?: WebImageSearchClient;
 };
@@ -349,6 +333,7 @@ function TripWorkspace({
     deleteDestination,
     reorderDestinations,
     updateRouteLeg,
+    applyValidatedRouteLegResult,
     createActivity,
     updateActivity,
     deleteActivity,
@@ -901,14 +886,16 @@ function TripWorkspace({
   const openRouteAlternatives = useCallback(
     async (routeLegId: string) => {
       const routeLeg = routeLegsById.get(routeLegId);
-      if (!routeLeg || routeLeg.type !== 'driving-auto') return;
+      if (!routeLeg || routeLeg.type !== 'driving-auto' || !activeTrip) return;
 
       const origin = destinationsById.get(routeLeg.originDestinationId);
       const target = destinationsById.get(routeLeg.targetDestinationId);
       if (!origin || !target) return;
+      const expectedFingerprint = createRouteResultFingerprint(routeLeg, activeTrip.routingVehicle);
 
       setRouteAlternativesState({
         routeLegId,
+        expectedFingerprint,
         status: 'loading',
         options: [],
         selectedOptionId: null,
@@ -929,6 +916,7 @@ function TripWorkspace({
           current?.routeLegId === routeLegId
             ? {
                 routeLegId,
+                expectedFingerprint,
                 status: options.length > 0 ? 'ready' : 'empty',
                 options,
                 selectedOptionId: options[0]?.id ?? null,
@@ -950,7 +938,7 @@ function TripWorkspace({
         );
       }
     },
-    [activeTrip?.routingVehicle, destinationsById, routeLegsById],
+    [activeTrip, destinationsById, routeLegsById],
   );
 
   const closeRouteAlternatives = useCallback(() => {
@@ -996,7 +984,19 @@ function TripWorkspace({
           profile: selectedOption.profile,
         },
       });
-      await updateRouteLeg(routeAlternativesState.routeLegId, calculatedRoutePatch(validatedRouteLeg));
+      const applied = await applyValidatedRouteLegResult({
+        routeLegId: routeAlternativesState.routeLegId,
+        expectedFingerprint: routeAlternativesState.expectedFingerprint,
+        validatedRouteLeg,
+      });
+      if (!applied) {
+        setRouteAlternativesState((current) =>
+          current
+            ? { ...current, status: 'error', error: 'Route intent changed. Recalculate route options.' }
+            : current,
+        );
+        return;
+      }
       setRouteAlternativesState(null);
     } catch (caught) {
       setRouteAlternativesState((current) =>
@@ -1009,7 +1009,7 @@ function TripWorkspace({
           : current,
       );
     }
-  }, [destinationsById, routeAlternativesState, routeLegsById, updateRouteLeg]);
+  }, [applyValidatedRouteLegResult, destinationsById, routeAlternativesState, routeLegsById]);
 
   const handleCloseDestinationProfile = useCallback(() => {
     setSelectedDestinationId(null);

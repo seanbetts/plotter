@@ -8,6 +8,7 @@ import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripRepository } from '../storage/tripRepository';
 import {
   calculateAutomaticRouteLegs,
+  createRouteResultFingerprint,
   finalizeRouteLeg,
   hasFinalizedAutomaticRouteResult,
   hasPreservableDrivingRouteData,
@@ -29,6 +30,12 @@ type UseTripDataOptions = {
   routingVehicle?: TripRoutingVehicle;
 };
 
+type ApplyValidatedRouteLegResultInput = {
+  routeLegId: string;
+  expectedFingerprint: string;
+  validatedRouteLeg: RouteLeg;
+};
+
 const createTimestamp = () => new Date().toISOString();
 
 export function useTripData(repository: TripRepository, options: UseTripDataOptions = {}) {
@@ -44,9 +51,15 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const activeRepositoryTokenRef = useRef<object | null>(null);
   const reloadSequenceRef = useRef(0);
   const routeReconciliationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const routeLegMutationQueuesRef = useRef(new Map<string, Promise<void>>());
   const calculateRoute = options.calculateRoute;
   const routingVehicle = options.routingVehicle ?? standardRoutingVehicle;
+  const routingVehicleRef = useRef(routingVehicle);
   const repositoryToken = useMemo(() => ({ repository }), [repository]);
+
+  useLayoutEffect(() => {
+    routingVehicleRef.current = routingVehicle;
+  }, [routingVehicle]);
 
   const replaceDestinations = useCallback((nextDestinations: Destination[]) => {
     destinationsRef.current = nextDestinations;
@@ -79,6 +92,22 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     },
     [],
   );
+
+  const enqueueRouteLegMutation = useCallback(<T,>(
+    routeLegId: string,
+    mutation: () => Promise<T>,
+  ) => {
+    const previousMutation = routeLegMutationQueuesRef.current.get(routeLegId) ?? Promise.resolve();
+    const queuedMutation = previousMutation.then(mutation, mutation);
+    const queueTail = queuedMutation.then(() => undefined, () => undefined);
+    routeLegMutationQueuesRef.current.set(routeLegId, queueTail);
+    void queueTail.then(() => {
+      if (routeLegMutationQueuesRef.current.get(routeLegId) === queueTail) {
+        routeLegMutationQueuesRef.current.delete(routeLegId);
+      }
+    });
+    return queuedMutation;
+  }, []);
 
   useLayoutEffect(() => {
     isMountedRef.current = true;
@@ -381,20 +410,21 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           routeLegId: string,
           patch: RouteLegPatch,
         ) {
-          const existing = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
-          if (!existing) return;
+          return enqueueRouteLegMutation(routeLegId, async () => {
+            const existing = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
+            if (!existing) return;
 
-          const updatedAt = createTimestamp();
-          const mergedRouteLeg = {
-            ...existing,
-            ...patch,
-            updatedAt,
-          };
-          const isIncompleteReadyDrivingPatch =
-            patch.status === 'ready' &&
-            mergedRouteLeg.type === 'driving-auto' &&
-            !hasPreservableDrivingRouteData(patch);
-          const routeLegForFinalization = isIncompleteReadyDrivingPatch
+            const updatedAt = createTimestamp();
+            const mergedRouteLeg = {
+              ...existing,
+              ...patch,
+              updatedAt,
+            };
+            const isIncompleteReadyDrivingPatch =
+              patch.status === 'ready' &&
+              mergedRouteLeg.type === 'driving-auto' &&
+              !hasPreservableDrivingRouteData(patch);
+            const routeLegForFinalization = isIncompleteReadyDrivingPatch
               ? {
                 ...mergedRouteLeg,
                 distanceKm: patch.distanceKm,
@@ -407,12 +437,9 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
                 error: patch.error,
               }
               : mergedRouteLeg;
-          const hasExplicitFinalizedResult =
-            patch.status !== undefined && hasFinalizedAutomaticRouteResult(routeLegForFinalization);
-          const pendingRouteLeg =
-            routeLegForFinalization.type === 'driving-auto' &&
-            !hasPreservableDrivingRouteData(routeLegForFinalization) &&
-            !hasExplicitFinalizedResult
+            const pendingRouteLeg =
+              routeLegForFinalization.type === 'driving-auto' &&
+              !hasPreservableDrivingRouteData(routeLegForFinalization)
               ? {
                 ...routeLegForFinalization,
                 status: 'pending' as const,
@@ -420,27 +447,80 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               }
               : routeLegForFinalization;
 
-          if (pendingRouteLeg.status === 'pending') {
+            if (pendingRouteLeg.status === 'pending') {
+              updateRouteLegs((current) =>
+                current.map((routeLeg) => (routeLeg.id === routeLegId ? pendingRouteLeg : routeLeg)),
+              );
+            }
+
+            const updated = await finalizeRouteLeg({
+              routeLeg: pendingRouteLeg,
+              destinations: destinationsRef.current,
+              calculateRoute,
+            });
+            if (!isActiveAction()) return;
+
+            await repository.saveRouteLeg(updated);
+            if (!isActiveAction()) return;
+
             updateRouteLegs((current) =>
-              current.map((routeLeg) => (routeLeg.id === routeLegId ? pendingRouteLeg : routeLeg)),
+              current.map((routeLeg) => (routeLeg.id === routeLegId ? updated : routeLeg)),
             );
-          }
+          });
+        },
 
-          const updated = hasExplicitFinalizedResult
-            ? pendingRouteLeg
-            : await finalizeRouteLeg({
-                routeLeg: pendingRouteLeg,
-                destinations: destinationsRef.current,
-                calculateRoute,
-              });
-          if (!isActiveAction()) return;
+        async applyValidatedRouteLegResult({
+          routeLegId,
+          expectedFingerprint,
+          validatedRouteLeg,
+        }: ApplyValidatedRouteLegResultInput) {
+          return enqueueRouteLegMutation(routeLegId, async () => {
+            const currentRouteLeg = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
+            if (
+              !currentRouteLeg ||
+              createRouteResultFingerprint(currentRouteLeg, routingVehicleRef.current) !== expectedFingerprint
+            ) {
+              return false;
+            }
+            if (validatedRouteLeg.id !== routeLegId || !hasFinalizedAutomaticRouteResult(validatedRouteLeg)) {
+              throw new Error('Validated route result is incomplete');
+            }
 
-          await repository.saveRouteLeg(updated);
-          if (!isActiveAction()) return;
+            const updated = {
+              ...currentRouteLeg,
+              status: validatedRouteLeg.status,
+              distanceKm: validatedRouteLeg.distanceKm,
+              travelTimeHours: validatedRouteLeg.travelTimeHours,
+              geometry: validatedRouteLeg.geometry,
+              provider: validatedRouteLeg.provider,
+              profile: validatedRouteLeg.profile,
+              routeKey: validatedRouteLeg.routeKey,
+              sections: validatedRouteLeg.sections,
+              warnings: validatedRouteLeg.warnings,
+              calculatedAt: validatedRouteLeg.calculatedAt,
+              error: validatedRouteLeg.error,
+              updatedAt: createTimestamp(),
+            };
+            if (!hasFinalizedAutomaticRouteResult(updated)) {
+              throw new Error('Validated route result does not match current route intent');
+            }
 
-          updateRouteLegs((current) =>
-            current.map((routeLeg) => (routeLeg.id === routeLegId ? updated : routeLeg)),
-          );
+            const latestRouteLeg = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
+            if (
+              latestRouteLeg !== currentRouteLeg ||
+              createRouteResultFingerprint(currentRouteLeg, routingVehicleRef.current) !== expectedFingerprint
+            ) {
+              return false;
+            }
+
+            await repository.saveRouteLeg(updated);
+            if (!isActiveAction()) return false;
+
+            updateRouteLegs((current) =>
+              current.map((routeLeg) => (routeLeg.id === routeLegId ? updated : routeLeg)),
+            );
+            return true;
+          });
         },
 
         async deleteRouteLeg(routeLegId: string) {
@@ -586,6 +666,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     },
     [
       calculateRoute,
+      enqueueRouteLegMutation,
       isActiveGeneration,
       reconcilePersistedRouteLegs,
       reload,

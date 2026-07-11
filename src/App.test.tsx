@@ -1104,6 +1104,40 @@ describe('App', () => {
     );
   });
 
+  it('does not save a stale alternative after route intent changes while the picker is open', async () => {
+    const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const hamburg = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createRouteLeg({
+      originDestinationId: bremen.id,
+      targetDestinationId: hamburg.id,
+      type: 'driving-auto',
+      status: 'ready',
+      distanceKm: 125,
+      travelTimeHours: 2,
+      geometry: { type: 'LineString', coordinates: [[8.8017, 53.0793], [10.0013, 53.5502]] },
+      provider: 'openrouteservice',
+      profile: 'driving-car',
+      routeKey: 'original-route',
+      calculatedAt: '2026-07-01T10:00:00.000Z',
+      notes: 'Original intent.',
+    });
+    repositoryMock.initialDestinations = Promise.resolve([bremen, hamburg]);
+    repositoryMock.initialRouteLegs = Promise.resolve([routeLeg]);
+
+    render(<App />);
+    await waitForTripReady();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit route from Bremen to Hamburg' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Set Bremen to Hamburg to Vehicle shipping' }));
+    await waitFor(() => expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Use selected route' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Route intent changed'));
+    expect(repositoryMock.saveRouteLeg).toHaveBeenCalledTimes(1);
+    expect(repositoryMock.saveRouteLeg).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'shipping-manual', status: 'manual', notes: 'Original intent.' }),
+    );
+  });
+
   it.each([
     {
       name: 'fails when a required ferry is missing',

@@ -1,5 +1,5 @@
 import type { FeatureCollection, LineString } from 'geojson';
-import type { Destination, RouteLeg } from '../domain/types';
+import type { Destination, RouteLeg, RouteSection } from '../domain/types';
 
 export type RouteFeatureProperties = {
   id: string;
@@ -103,24 +103,42 @@ function featureForGeometry(
   };
 }
 
-function hasValidSections(routeLeg: RouteLeg, coordinateCount: number) {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasValidSections(sections: unknown, coordinateCount: number): sections is RouteSection[] {
+  if (!Array.isArray(sections)) return false;
   let previousEndGeometryIndex = 0;
 
-  for (const [index, section] of (routeLeg.sections ?? []).entries()) {
+  for (const [index, section] of sections.entries()) {
+    if (!isPlainObject(section)) return false;
+    const kind = section.kind;
+    const startGeometryIndex = section.startGeometryIndex;
+    const endGeometryIndex = section.endGeometryIndex;
+    const distanceKm = section.distanceKm;
     if (
-      !Number.isFinite(section.startGeometryIndex) ||
-      !Number.isFinite(section.endGeometryIndex) ||
-      !Number.isInteger(section.startGeometryIndex) ||
-      !Number.isInteger(section.endGeometryIndex) ||
-      section.startGeometryIndex < 0 ||
-      section.endGeometryIndex >= coordinateCount ||
-      section.startGeometryIndex >= section.endGeometryIndex ||
-      (index > 0 && section.startGeometryIndex < previousEndGeometryIndex)
+      (kind !== 'road' && kind !== 'ferry') ||
+      typeof startGeometryIndex !== 'number' ||
+      typeof endGeometryIndex !== 'number' ||
+      typeof distanceKm !== 'number' ||
+      !Number.isFinite(startGeometryIndex) ||
+      !Number.isFinite(endGeometryIndex) ||
+      !Number.isInteger(startGeometryIndex) ||
+      !Number.isInteger(endGeometryIndex) ||
+      !Number.isFinite(distanceKm) ||
+      distanceKm < 0 ||
+      startGeometryIndex < 0 ||
+      endGeometryIndex >= coordinateCount ||
+      startGeometryIndex >= endGeometryIndex ||
+      (index > 0 && startGeometryIndex < previousEndGeometryIndex)
     ) {
       return false;
     }
 
-    previousEndGeometryIndex = section.endGeometryIndex;
+    previousEndGeometryIndex = endGeometryIndex;
   }
 
   return true;
@@ -128,8 +146,8 @@ function hasValidSections(routeLeg: RouteLeg, coordinateCount: number) {
 
 function sectionFeatures(routeLeg: RouteLeg, geometry: LineString) {
   const coordinates = geometry.coordinates;
-  const sections = routeLeg.sections ?? [];
-  if (sections.length === 0 || !hasValidSections(routeLeg, coordinates.length)) {
+  const sections: unknown = routeLeg.sections ?? [];
+  if (!hasValidSections(sections, coordinates.length) || sections.length === 0) {
     return [featureForGeometry(routeLeg, geometry, 'road')];
   }
 

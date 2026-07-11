@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg } from '../domain/routeLegs';
+import type { RouteLeg } from '../domain/types';
 import { buildRenderableRouteFeatures, buildRouteFeatures, routeGeometryForLeg, tripMapBounds } from './tripRouteFeatures';
 
 const origin = createDestination({ name: 'Origin', countryRegion: 'A', coordinates: { lat: 10, lng: 20 } });
@@ -54,6 +55,11 @@ describe('tripRouteFeatures', () => {
     ['reversed', [{ kind: 'ferry' as const, startGeometryIndex: 3, endGeometryIndex: 2, distanceKm: 10 }]],
     ['non-integer', [{ kind: 'ferry' as const, startGeometryIndex: 1.5, endGeometryIndex: 3, distanceKm: 10 }]],
     ['non-finite', [{ kind: 'ferry' as const, startGeometryIndex: 1, endGeometryIndex: Number.NaN, distanceKm: 10 }]],
+    ['non-array', { kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 3, distanceKm: 10 }],
+    ['null entry', [null]],
+    ['unsupported kind', [{ kind: 'rail', startGeometryIndex: 1, endGeometryIndex: 3, distanceKm: 10 }]],
+    ['non-finite distance', [{ kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 3, distanceKm: Number.NaN }]],
+    ['negative distance', [{ kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 3, distanceKm: -1 }]],
     ['unsorted', [
       { kind: 'ferry' as const, startGeometryIndex: 2, endGeometryIndex: 4, distanceKm: 10 },
       { kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 2, distanceKm: 10 },
@@ -73,7 +79,7 @@ describe('tripRouteFeatures', () => {
       type: 'driving-auto',
       status: 'ready',
       geometry,
-      sections,
+      sections: sections as unknown as RouteLeg['sections'],
     });
 
     expect(buildRouteFeatures([leg]).features).toEqual([

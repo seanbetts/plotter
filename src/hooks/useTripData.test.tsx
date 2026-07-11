@@ -8,6 +8,7 @@ import type { RouteLeg } from '../domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
+import { createRouteResultFingerprint } from '../tripCommands/routeOrchestration';
 import { useTripData } from './useTripData';
 
 type TripRepository = ReturnType<typeof createTripRepository>;
@@ -1641,6 +1642,115 @@ describe('useTripData', () => {
     });
   });
 
+  it('rejects a validated result when intent changed before the action runs', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [routeLeg],
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const expectedFingerprint = createRouteResultFingerprint(routeLeg, standardRoutingVehicle);
+    const validatedRouteLeg = createSelectedRouteResult(routeLeg);
+
+    await act(async () => {
+      await result.current.updateRouteLeg(routeLeg.id, { notes: 'Newer intent notes.' });
+    });
+    saveRouteLeg.mockClear();
+
+    let applied = true;
+    await act(async () => {
+      applied = await result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint,
+        validatedRouteLeg,
+      });
+    });
+
+    expect(applied).toBe(false);
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+    expect(result.current.routeLegs[0].notes).toBe('Newer intent notes.');
+  });
+
+  it('serializes an intent edit queued during an async validated-result save so the edit wins', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    const releaseFirstSave = createDeferred(undefined);
+    let storedRouteLeg = routeLeg;
+    let saveCount = 0;
+    const saveRouteLeg = vi.fn(async (nextRouteLeg: RouteLeg) => {
+      saveCount += 1;
+      if (saveCount === 1) await releaseFirstSave.promise;
+      storedRouteLeg = nextRouteLeg;
+    });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [routeLeg],
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let applyPromise!: Promise<boolean>;
+    let editPromise!: Promise<void>;
+    await act(async () => {
+      applyPromise = result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint: createRouteResultFingerprint(routeLeg, standardRoutingVehicle),
+        validatedRouteLeg: createSelectedRouteResult(routeLeg),
+      });
+      await waitFor(() => expect(saveRouteLeg).toHaveBeenCalledTimes(1));
+      editPromise = result.current.updateRouteLeg(routeLeg.id, { notes: 'Newer queued intent.' });
+      await Promise.resolve();
+    });
+
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseFirstSave.resolve();
+      await Promise.all([applyPromise, editPromise]);
+    });
+
+    expect(storedRouteLeg.notes).toBe('Newer queued intent.');
+    expect(result.current.routeLegs[0].notes).toBe('Newer queued intent.');
+    expect(result.current.routeLegs[0].routeKey).toBe('selected-route');
+  });
+
+  it('rejects a validated result when the current trip vehicle changed', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [routeLeg],
+      saveRouteLeg,
+    });
+    const { result, rerender } = renderHook(
+      ({ routingVehicle }) => useTripData(repository, { routingVehicle }),
+      { initialProps: { routingVehicle: standardRoutingVehicle } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const expectedFingerprint = createRouteResultFingerprint(routeLeg, standardRoutingVehicle);
+
+    rerender({ routingVehicle: resolveVehiclePreset('expedition-truck') });
+
+    let applied = true;
+    await act(async () => {
+      applied = await result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint,
+        validatedRouteLeg: createSelectedRouteResult(routeLeg),
+      });
+    });
+
+    expect(applied).toBe(false);
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+    expect(result.current.routeLegs[0].routeKey).toBe(routeLeg.routeKey);
+  });
+
   it('removes attached route legs from state when deleting a destination', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));
@@ -1820,6 +1930,45 @@ describe('useTripData', () => {
     expect(reorderActivities).not.toHaveBeenCalled();
   });
 });
+
+function createReadyRouteLeg(
+  origin: ReturnType<typeof createDestination>,
+  target: ReturnType<typeof createDestination>,
+) {
+  return createRouteLeg({
+    originDestinationId: origin.id,
+    targetDestinationId: target.id,
+    type: 'driving-auto',
+    status: 'ready',
+    distanceKm: 125,
+    travelTimeHours: 2,
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [origin.coordinates.lng, origin.coordinates.lat],
+        [target.coordinates.lng, target.coordinates.lat],
+      ],
+    },
+    provider: 'openrouteservice',
+    profile: 'driving-car',
+    routeKey: 'original-route',
+    calculatedAt: '2026-07-01T10:00:00.000Z',
+  });
+}
+
+function createSelectedRouteResult(routeLeg: RouteLeg): RouteLeg {
+  return {
+    ...routeLeg,
+    status: 'ready',
+    distanceKm: 140,
+    travelTimeHours: 2.25,
+    routeKey: 'selected-route',
+    sections: [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 140 }],
+    warnings: [],
+    calculatedAt: '2026-07-02T10:00:00.000Z',
+    error: undefined,
+  };
+}
 
 function createDeferred<T>(value: T) {
   let resolve!: () => void;

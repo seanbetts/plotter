@@ -41,6 +41,39 @@ export type RouteLegPersistence = {
 
 const createTimestamp = () => new Date().toISOString();
 
+export function createRouteResultFingerprint(
+  routeLeg: RouteLeg,
+  routingVehicle: TripRoutingVehicle,
+) {
+  return JSON.stringify({
+    movement: routeLeg.movement ?? (routeLeg.type === 'shipping-manual' ? 'vehicle-shipping' : 'drive'),
+    calculation: routeLeg.calculation ?? (routeLeg.type === 'shipping-manual' ? 'manual' : 'automatic'),
+    ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+    waypoints: [...(routeLeg.waypoints ?? [])]
+      .sort((left, right) => left.order - right.order)
+      .map((waypoint) => ({
+        id: waypoint.id,
+        order: waypoint.order,
+        lat: waypoint.coordinates.lat,
+        lng: waypoint.coordinates.lng,
+      })),
+    notes: routeLeg.notes,
+    routingVehicle: {
+      preset: routingVehicle.preset,
+      profile: routingVehicle.profile,
+      vehicleType: routingVehicle.vehicleType ?? null,
+      restrictions: {
+        length: routingVehicle.restrictions.length ?? null,
+        width: routingVehicle.restrictions.width ?? null,
+        height: routingVehicle.restrictions.height ?? null,
+        weight: routingVehicle.restrictions.weight ?? null,
+        axleLoad: routingVehicle.restrictions.axleLoad ?? null,
+      },
+    },
+    routeKey: routeLeg.routeKey ?? null,
+  });
+}
+
 export function hasPreservableAutomaticRouteData(routeLeg: RouteLeg | RouteLegPatch): boolean {
   return Boolean(
     routeLeg.type === 'driving-auto' &&
