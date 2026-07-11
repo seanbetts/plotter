@@ -1751,6 +1751,182 @@ describe('useTripData', () => {
     expect(result.current.routeLegs[0].routeKey).toBe(routeLeg.routeKey);
   });
 
+  it('lets a vehicle recalculation started during a blocked alternative save win', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    const releaseFirstSave = createDeferred(undefined);
+    let storedRouteLeg = routeLeg;
+    let saveCount = 0;
+    const saveRouteLeg = vi.fn(async (nextRouteLeg: RouteLeg) => {
+      saveCount += 1;
+      if (saveCount === 1) await releaseFirstSave.promise;
+      storedRouteLeg = nextRouteLeg;
+    });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 150,
+      travelTimeHours: 2.5,
+      geometry: routeLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-hgv' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 150 }],
+    }));
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let applyPromise!: Promise<boolean>;
+    let recalculatePromise!: Promise<void>;
+    await act(async () => {
+      applyPromise = result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint: createRouteResultFingerprint(routeLeg, standardRoutingVehicle),
+        validatedRouteLeg: createSelectedRouteResult(routeLeg),
+      });
+      await waitFor(() => expect(saveRouteLeg).toHaveBeenCalledTimes(1));
+      recalculatePromise = result.current.recalculateForVehicle(resolveVehiclePreset('expedition-truck'));
+      await Promise.resolve();
+    });
+
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      releaseFirstSave.resolve();
+      await Promise.all([applyPromise, recalculatePromise]);
+    });
+
+    expect(storedRouteLeg).toMatchObject({ profile: 'driving-hgv', distanceKm: 150 });
+    expect(result.current.routeLegs[0]).toMatchObject({ profile: 'driving-hgv', distanceKm: 150 });
+  });
+
+  it('lets direct deletion started during a blocked alternative save win', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    const releaseFirstSave = createDeferred(undefined);
+    let storedRouteLeg: RouteLeg | undefined = routeLeg;
+    const saveRouteLeg = vi.fn(async (nextRouteLeg: RouteLeg) => {
+      await releaseFirstSave.promise;
+      storedRouteLeg = nextRouteLeg;
+    });
+    const deleteRouteLeg = vi.fn(async () => { storedRouteLeg = undefined; });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => storedRouteLeg ? [storedRouteLeg] : [],
+      saveRouteLeg,
+      deleteRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let applyPromise!: Promise<boolean>;
+    let deletePromise!: Promise<void>;
+    await act(async () => {
+      applyPromise = result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint: createRouteResultFingerprint(routeLeg, standardRoutingVehicle),
+        validatedRouteLeg: createSelectedRouteResult(routeLeg),
+      });
+      await waitFor(() => expect(saveRouteLeg).toHaveBeenCalledTimes(1));
+      deletePromise = result.current.deleteRouteLeg(routeLeg.id);
+      await Promise.resolve();
+    });
+
+    expect(deleteRouteLeg).not.toHaveBeenCalled();
+    await act(async () => {
+      releaseFirstSave.resolve();
+      await Promise.all([applyPromise, deletePromise]);
+    });
+
+    expect(storedRouteLeg).toBeUndefined();
+    expect(result.current.routeLegs).toEqual([]);
+  });
+
+  it('lets destination reconciliation started during a blocked alternative save win', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    const releaseFirstSave = createDeferred(undefined);
+    let storedRouteLeg = routeLeg;
+    let saveCount = 0;
+    const saveRouteLeg = vi.fn(async (nextRouteLeg: RouteLeg) => {
+      saveCount += 1;
+      if (saveCount === 1) await releaseFirstSave.promise;
+      storedRouteLeg = nextRouteLeg;
+    });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+      saveDestination: vi.fn(async () => undefined),
+    });
+    const calculateRoute = vi.fn(async () => ({
+      distanceKm: 175,
+      travelTimeHours: 3,
+      geometry: routeLeg.geometry!,
+      provider: 'openrouteservice',
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 175 }],
+    }));
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let applyPromise!: Promise<boolean>;
+    let reconcilePromise!: Promise<void>;
+    await act(async () => {
+      applyPromise = result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint: createRouteResultFingerprint(routeLeg, standardRoutingVehicle),
+        validatedRouteLeg: createSelectedRouteResult(routeLeg),
+      });
+      await waitFor(() => expect(saveRouteLeg).toHaveBeenCalledTimes(1));
+      reconcilePromise = result.current.updateDestination(origin.id, {
+        coordinates: { lat: origin.coordinates.lat + 0.1, lng: origin.coordinates.lng },
+      });
+      await Promise.resolve();
+    });
+
+    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      releaseFirstSave.resolve();
+      await Promise.all([applyPromise, reconcilePromise]);
+    });
+
+    expect(storedRouteLeg.distanceKm).toBe(175);
+    expect(result.current.routeLegs[0].distanceKm).toBe(175);
+  });
+
+  it('does not poison a leg mutation queue after a rejected save', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
+    const routeLeg = createReadyRouteLeg(origin, target);
+    let saveCount = 0;
+    let storedRouteLeg = routeLeg;
+    const saveRouteLeg = vi.fn(async (nextRouteLeg: RouteLeg) => {
+      saveCount += 1;
+      if (saveCount === 1) throw new Error('First save failed');
+      storedRouteLeg = nextRouteLeg;
+    });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [storedRouteLeg],
+      saveRouteLeg,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.applyValidatedRouteLegResult({
+        routeLegId: routeLeg.id,
+        expectedFingerprint: createRouteResultFingerprint(routeLeg, standardRoutingVehicle),
+        validatedRouteLeg: createSelectedRouteResult(routeLeg),
+      })).rejects.toThrow('First save failed');
+      await result.current.updateRouteLeg(routeLeg.id, { notes: 'Later mutation succeeded.' });
+    });
+
+    expect(storedRouteLeg.notes).toBe('Later mutation succeeded.');
+    expect(result.current.routeLegs[0].notes).toBe('Later mutation succeeded.');
+  });
+
   it('removes attached route legs from state when deleting a destination', async () => {
     const repository = createTestRepository();
     const { result } = renderHook(() => useTripData(repository));
