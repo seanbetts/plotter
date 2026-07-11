@@ -139,6 +139,12 @@ export function createTripDb(name = 'world-tour-planner'): TripDb {
     });
   });
 
+  db.version(8).stores(currentStores).upgrade(async (transaction) => {
+    await transaction.table('destinations').toCollection().modify((destination) => {
+      destination.routingAnchors ??= {};
+    });
+  });
+
   return db;
 }
 

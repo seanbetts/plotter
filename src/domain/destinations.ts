@@ -1,4 +1,4 @@
-import type { Coordinates, Destination, DestinationLocation } from './types';
+import type { Coordinates, Destination, DestinationLocation, RoutingAnchor } from './types';
 import { createLegacyLocation } from './locations';
 
 type CreateDestinationInput = {
@@ -11,6 +11,7 @@ type CreateDestinationInput = {
 
 const nowIso = () => new Date().toISOString();
 const createId = () => crypto.randomUUID();
+const coordinatesMatch = (left: Coordinates, right: Coordinates) => left.lat === right.lat && left.lng === right.lng;
 const nextIsoAfter = (timestamp: string) => {
   const now = nowIso();
 
@@ -29,6 +30,7 @@ export function createDestination(input: CreateDestinationInput): Destination {
     name: input.name,
     countryRegion: input.location?.countryName || input.countryRegion || '',
     coordinates: input.coordinates,
+    routingAnchors: {},
     location: input.location ?? createLegacyLocation({ name: input.name, countryRegion: input.countryRegion }),
     order: input.order ?? 0,
     status: 'idea',
@@ -69,9 +71,25 @@ export function updateDestination(
   destination: Destination,
   patch: Partial<Omit<Destination, 'id' | 'createdAt' | 'updatedAt'>>,
 ): Destination {
+  const coordinates = patch.coordinates ?? destination.coordinates;
+  const routingAnchors = coordinatesMatch(destination.coordinates, coordinates)
+    ? (patch.routingAnchors ?? destination.routingAnchors)
+    : {};
+
   return {
     ...destination,
     ...patch,
+    coordinates,
+    routingAnchors,
     updatedAt: nextIsoAfter(destination.updatedAt),
   };
+}
+
+export function withRoutingAnchor(destination: Destination, anchor: RoutingAnchor): Destination {
+  return updateDestination(destination, {
+    routingAnchors: {
+      ...destination.routingAnchors,
+      [anchor.profile]: anchor,
+    },
+  });
 }

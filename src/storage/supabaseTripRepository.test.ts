@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createActivity as createActivityModel } from '../domain/activities';
-import { createDestination } from '../domain/destinations';
+import { createDestination, withRoutingAnchor } from '../domain/destinations';
 import { createRouteLeg, createStraightLineGeometry } from '../domain/routeLegs';
 import type { Activity } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
@@ -247,12 +247,22 @@ describe('supabase trip directory repository', () => {
 
 describe('supabase trip repository mappers', () => {
   it('maps destinations to and from Supabase rows', () => {
-    const destination = createDestination({
-      name: 'Balcombe',
-      countryRegion: 'United Kingdom',
-      coordinates: { lat: 51.0576, lng: -0.1342 },
-      order: 2,
-    });
+    const destination = withRoutingAnchor(
+      createDestination({
+        name: 'Balcombe',
+        countryRegion: 'United Kingdom',
+        coordinates: { lat: 51.0576, lng: -0.1342 },
+        order: 2,
+      }),
+      {
+        profile: 'driving-car',
+        coordinates: { lat: 51.0577, lng: -0.1341 },
+        originalCoordinates: { lat: 51.0576, lng: -0.1342 },
+        snapDistanceKm: 0.014,
+        provider: 'openrouteservice',
+        resolvedAt: '2026-07-11T12:00:00.000Z',
+      },
+    );
     const tripId = crypto.randomUUID();
 
     const row = destinationToSupabaseRow(destination, tripId);
@@ -267,6 +277,9 @@ describe('supabase trip repository mappers', () => {
       stop_order: 2,
       route_context: destination.routeContext,
     });
+    expect(destinationToSupabaseRow(destination, tripId).routing_anchors).toEqual(destination.routingAnchors);
+    expect(destinationFromSupabaseRow(row).routingAnchors).toEqual(row.routing_anchors);
+    expect(destinationFromSupabaseRow({ ...row, routing_anchors: undefined }).routingAnchors).toEqual({});
     expect(destinationFromSupabaseRow(row)).toEqual(destination);
   });
 

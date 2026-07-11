@@ -304,6 +304,50 @@ describe('trip repository', () => {
     );
   });
 
+  it('backfills missing routing anchors during the v8 upgrade', async () => {
+    const name = `plotter-test-${crypto.randomUUID()}`;
+    const legacyDb = new Dexie(name);
+    const legacyDestination = createDestination({
+      name: 'Legacy anchor stop',
+      coordinates: { lat: 59.9139, lng: 10.7522 },
+    });
+    const { routingAnchors: _routingAnchors, ...destinationWithoutAnchors } = legacyDestination as typeof legacyDestination & {
+      routingAnchors?: unknown;
+    };
+    void _routingAnchors;
+
+    legacyDb.version(7).stores({
+      trips: 'id, name, updatedAt, createdAt',
+      destinations: 'id, tripId, [tripId+order], name, countryRegion, status, priority, updatedAt',
+      routeLegs: 'id, tripId, [tripId+updatedAt], originDestinationId, targetDestinationId, movement, calculation, status, routeKey, updatedAt',
+      activities: 'id, tripId, [tripId+destinationId], [tripId+destinationId+order], title, status, priority, updatedAt',
+      activityMedia: 'id, tripId, [tripId+activityId], [tripId+destinationId], sortOrder, uploadedAt',
+    });
+    await legacyDb.table('destinations').put({
+      ...destinationWithoutAnchors,
+      id: `legacy-trip:${legacyDestination.id}`,
+      entityId: legacyDestination.id,
+      tripId: 'legacy-trip',
+    });
+    legacyDb.close();
+
+    const upgradedDb = createTripDb(name);
+    testDatabases.push({ db: upgradedDb, name });
+    const repository = createTripRepository(upgradedDb, 'legacy-trip');
+
+    await expect(upgradedDb.destinations.get(`legacy-trip:${legacyDestination.id}`)).resolves.toEqual(
+      expect.objectContaining({
+        routingAnchors: {},
+      }),
+    );
+    await expect(repository.listDestinations()).resolves.toEqual([
+      expect.objectContaining({
+        id: legacyDestination.id,
+        routingAnchors: {},
+      }),
+    ]);
+  });
+
   it('physically persists route intent for local saves and snapshot replacements', async () => {
     const name = `plotter-test-${crypto.randomUUID()}`;
     const db = createTripDb(name);

@@ -1,89 +1,57 @@
-## Task 4 Report: TripDataService For Trips And Stops
+## Task 4 Report: Persist and Invalidate Profile-Specific Routing Anchors
 
 ### Status
-- Complete
+- GREEN
 
-### Implementation Summary
-- Added `src/tripCommands/tripDataService.ts` with the `createTripDataService` factory and the Task 4 trip/stop command surface:
-  - `listTrips`
-  - `getTrip`
-  - `createTrip`
-  - `deleteTrip`
-  - `renameTrip`
-  - `replaceStops`
-  - `insertStop`
-  - `updateStop`
-  - `deleteStop`
-  - `reorderStops`
-- Kept activity and link methods present but intentionally returning structured `COMMAND_NOT_IMPLEMENTED` results for Task 5.
-- Mapped stop notes to `Destination.research.notes` for both stop creation and stop updates.
-- Preserved the ordered-adjacent-stop route-leg rule through the shared `reconcileAndSaveRouteLegs` helper.
-- Added trip/stop service coverage in `src/tripCommands/tripDataService.test.ts` with an in-memory fake directory/repository that throws for unimplemented methods not used by the tests.
+### RED
+- Added failing coverage before production edits in:
+  - `src/domain/destinations.test.ts`
+  - `src/storage/supabaseTripRepository.test.ts`
+  - `src/storage/tripRepository.test.ts`
+- Ran:
+  - `npm test -- src/domain/destinations.test.ts src/storage/supabaseTripRepository.test.ts src/storage/tripRepository.test.ts`
+- Observed expected failures:
+  - `withRoutingAnchor is not a function`
+  - Supabase destination rows did not expose `routing_anchors`
+  - Dexie v8 upgrade test proved legacy destinations were not backfilled with `routingAnchors: {}`
 
-### Files Changed
-- `src/tripCommands/tripDataService.ts`
-- `src/tripCommands/tripDataService.test.ts`
-- `.superpowers/sdd/task-4-report.md`
+### GREEN
+- Added `RoutingAnchorProfile`, `RoutingAnchor`, and `RoutingAnchors` in `src/domain/types.ts`.
+- Added `Destination.routingAnchors`, defaulted new destinations to `{}`, and implemented `withRoutingAnchor()` in `src/domain/destinations.ts`.
+- Updated `updateDestination()` so exact `lat`/`lng` equality preserves anchors, while any coordinate change clears all anchors.
+- Mapped `routing_anchors` in `src/storage/supabaseTripRepository.ts`, defaulting missing Supabase values to `{}` and keeping anchors out of `route_context`.
+- Added Dexie v8 destination backfill in `src/storage/tripDb.ts`.
+- Re-ran:
+  - `npm test -- src/domain/destinations.test.ts src/storage/supabaseTripRepository.test.ts src/storage/tripRepository.test.ts`
+- Result:
+  - `Test Files 3 passed`
+  - `Tests 84 passed`
 
-### TDD Evidence
-#### RED
-1. Added `src/tripCommands/tripDataService.test.ts` before any production implementation.
-2. Ran:
-   - `npm test -- src/tripCommands/tripDataService.test.ts`
-3. Result:
-   - Failed as expected because `src/tripCommands/tripDataService.ts` did not exist.
-   - Key failure: `Failed to resolve import "./tripDataService" ... Does the file exist?`
+### Migration And Round-Trip Evidence
+- Supabase round-trip:
+  - `destinationToSupabaseRow(destination, tripId).routing_anchors` matched `destination.routingAnchors`
+  - `destinationFromSupabaseRow(row).routingAnchors` matched `row.routing_anchors`
+  - `destinationFromSupabaseRow({ ...row, routing_anchors: undefined }).routingAnchors` returned `{}`
+- Local migration:
+  - Seeded a version 7 Dexie database with a destination row missing `routingAnchors`
+  - Opened it through `createTripDb()` version 8
+  - Verified both the stored row and `createTripRepository(...).listDestinations()` returned `routingAnchors: {}`
 
-#### GREEN
-1. Implemented the initial service and reran:
-   - `npm test -- src/tripCommands/tripDataService.test.ts`
-2. Observed failing behavioral assertions around duplicate route calculations and one incorrect reorder expectation in the test.
-3. Refined the implementation so apply paths calculate routes once, while dry-run paths still preview route changes.
-4. Corrected the reorder expectation to reflect preserved adjacent legs.
-5. Final focused result:
-   - `Test Files 1 passed`
-   - `Tests 10 passed`
+### Files
+- `src/domain/types.ts`
+- `src/domain/destinations.ts`
+- `src/domain/destinations.test.ts`
+- `src/storage/supabaseTripRepository.ts`
+- `src/storage/supabaseTripRepository.test.ts`
+- `src/storage/tripDb.ts`
+- `src/storage/tripRepository.test.ts`
 
-### Tests And Results
-- Focused service tests:
-  - `npm test -- src/tripCommands/tripDataService.test.ts`
-  - Result: passed (`1` file, `10` tests)
-- Full suite:
+### Full Suite
+- Ran:
   - `npm test`
-  - Result: passed (`47` files, `559` tests)
-- Build verification:
-  - `npm run build`
-  - Result: passed
-  - Note: Vite reported an existing chunk-size warning for the production bundle, but the build completed successfully.
-
-### Self-Review Findings
-- The service now supports dry-run previews for all Task 4 write commands that were implemented.
-- Destructive commands requiring confirmation:
-  - `deleteTrip`
-  - `replaceStops`
-  - `deleteStop`
-- Route recalculation accounting is based on actual route-leg changes rather than raw stop count changes, which avoided overstating recalculations on reorder.
-- Apply paths no longer double-call the route calculator after the first implementation pass.
+- Result:
+  - `Test Files 61 passed`
+  - `Tests 867 passed`
 
 ### Concerns
-- `getTrip` currently accepts `includeLinks` but does not branch behavior on it yet; stop links remain present in returned destinations. This did not affect Task 4 because link command behavior is deferred to Task 5.
-- The implementation normalizes destination links opportunistically in the service layer so returned stop data stays consistently sorted even before Task 5 fills in link mutation paths.
-
-### Commit Scope
-- Commit should include only:
-  - `src/tripCommands/tripDataService.ts`
-  - `src/tripCommands/tripDataService.test.ts`
-
-### Review Fix Addendum
-- Addressed reviewer feedback that `createTrip` could fall through to a generic `COMMAND_FAILED` when `stops` was malformed.
-- Added explicit `stops` array validation in `createTrip`, matching the existing `replaceStops` guard and returning `INVALID_STOPS` with path `stops`.
-- Added a focused regression test for `createTrip({ name: 'NC500', stops: {} as never })` that asserts:
-  - `ok: false`
-  - structured validation error output
-  - no trip creation side effect
-
-### Verification
-- `npm test -- src/tripCommands/tripDataService.test.ts`
-  - passed (`1` file, `11` tests)
-- `npm test`
-  - passed (`47` files, `560` tests)
+- None.

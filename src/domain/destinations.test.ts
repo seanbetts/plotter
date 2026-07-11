@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDestination, updateDestination } from './destinations';
+import { createDestination, updateDestination, withRoutingAnchor } from './destinations';
 import { formatDestinationLocation } from './locations';
 
 describe('destination helpers', () => {
@@ -80,5 +80,26 @@ describe('destination helpers', () => {
     });
 
     expect(destination.order).toBe(12);
+  });
+
+  it('preserves routing anchors for non-location edits and clears them for coordinate edits', () => {
+    const anchor = {
+      profile: 'driving-car' as const,
+      coordinates: { lat: 70.023071, lng: 23.254598 },
+      originalCoordinates: { lat: 70.0154962, lng: 23.2185097 },
+      snapDistanceKm: 1.609,
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T12:00:00.000Z',
+    };
+    const destination = withRoutingAnchor(
+      createDestination({ name: 'Alta', coordinates: anchor.originalCoordinates }),
+      anchor,
+    );
+
+    expect(updateDestination(destination, { name: 'Alta buffer' }).routingAnchors['driving-car']).toEqual(anchor);
+    expect(updateDestination(destination, { coordinates: { ...anchor.originalCoordinates } }).routingAnchors).toEqual({
+      'driving-car': anchor,
+    });
+    expect(updateDestination(destination, { coordinates: { lat: 70.1, lng: 23.3 } }).routingAnchors).toEqual({});
   });
 });

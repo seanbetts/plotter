@@ -36,6 +36,19 @@ export type TripRoutingVehicle = {
   restrictions: VehicleRestrictions;
 };
 
+export type RoutingAnchorProfile = TripRoutingVehicle['profile'];
+
+export type RoutingAnchor = {
+  profile: RoutingAnchorProfile;
+  coordinates: Coordinates;
+  originalCoordinates: Coordinates;
+  snapDistanceKm: number;
+  provider: 'openrouteservice';
+  resolvedAt: string;
+};
+
+export type RoutingAnchors = Partial<Record<RoutingAnchorProfile, RoutingAnchor>>;
+
 export type RouteMovement = 'drive' | 'vehicle-shipping';
 export type RouteCalculationMode = 'automatic' | 'manual';
 export type FerryPolicy = 'allow' | 'avoid' | 'require';
@@ -138,6 +151,7 @@ export type Destination = {
   name: string;
   countryRegion: string;
   coordinates: Coordinates;
+  routingAnchors: RoutingAnchors;
   location: DestinationLocation;
   order: number;
   status: DestinationStatus;

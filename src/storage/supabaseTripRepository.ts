@@ -41,6 +41,7 @@ type SupabaseDestinationRow = {
   research: Destination['research'];
   activities: Destination['activities'];
   route_context: Destination['routeContext'];
+  routing_anchors?: Destination['routingAnchors'];
   tags: string[];
   created_at: string;
   updated_at: string;
@@ -286,6 +287,7 @@ export function destinationToSupabaseRow(destination: Destination, tripId: strin
     research: destination.research,
     activities: destination.activities,
     route_context: destination.routeContext,
+    routing_anchors: destination.routingAnchors,
     tags: destination.tags,
     created_at: destination.createdAt,
     updated_at: destination.updatedAt,
@@ -318,6 +320,7 @@ export function destinationFromSupabaseRow(row: SupabaseDestinationRow): Destina
     },
     activities: row.activities,
     routeContext: row.route_context,
+    routingAnchors: row.routing_anchors ?? {},
     tags: row.tags,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
