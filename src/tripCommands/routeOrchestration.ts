@@ -367,6 +367,7 @@ export function recalculateAutomaticRouteLegsForVehicle(input: {
 export async function finalizeRouteLeg(input: {
   routeLeg: RouteLeg;
   destinations: Destination[];
+  routingVehicle: TripRoutingVehicle;
   calculateRoute?: CalculateRoute;
 }): Promise<RouteLeg> {
   const destinationsById = new Map(input.destinations.map((destination) => [destination.id, destination]));
@@ -395,13 +396,14 @@ export async function finalizeRouteLeg(input: {
     return { ...input.routeLeg, error: undefined, updatedAt: createTimestamp() };
   }
 
-  const [calculatedRouteLeg] = await calculateDrivingRouteLegs({
+  const [calculatedRouteLeg] = await calculateAutomaticRouteLegs({
     destinations: input.destinations,
     calculateRoute: input.calculateRoute,
+    routingVehicle: input.routingVehicle,
     routeLegs: [{
       ...input.routeLeg,
       status: 'pending',
-      profile: input.routeLeg.profile ?? 'driving-car',
+      profile: input.routingVehicle.profile,
       error: undefined,
       updatedAt: createTimestamp(),
     }],
@@ -417,11 +419,16 @@ export async function reconcileAndSaveRouteLegs(input: {
   routingVehicle?: TripRoutingVehicle;
   calculateRoute?: CalculateRoute;
 }): Promise<RouteLeg[]> {
-  const reconciliation = reconcileRouteLegsForDestinations(input.destinations, input.currentRouteLegs);
+  const routingVehicle = input.routingVehicle ?? standardRoutingVehicle;
+  const reconciliation = reconcileRouteLegsForDestinations(
+    input.destinations,
+    input.currentRouteLegs,
+    routingVehicle,
+  );
   const nextRouteLegs = await calculateAutomaticRouteLegs({
     destinations: input.destinations,
     routeLegs: reconciliation.routeLegs,
-    routingVehicle: input.routingVehicle ?? standardRoutingVehicle,
+    routingVehicle,
     calculateRoute: input.calculateRoute,
   });
 

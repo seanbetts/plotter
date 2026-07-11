@@ -1580,6 +1580,39 @@ describe('useTripData', () => {
     }));
   });
 
+  it('uses the expedition-truck HGV snapshot when the UI toggles manual shipping to automatic', async () => {
+    const origin = createDestination({ name: 'Panama City', coordinates: { lat: 9, lng: -79.5 }, order: 0 });
+    const target = createDestination({ name: 'Cartagena', coordinates: { lat: 10.4, lng: -75.5 }, order: 1 });
+    const manual = createRouteLeg({
+      originDestinationId: origin.id, targetDestinationId: target.id,
+      movement: 'vehicle-shipping', calculation: 'manual', status: 'manual',
+      geometry: { type: 'LineString', coordinates: [[-79.5, 9], [-75.5, 10.4]] },
+    });
+    const vehicle = resolveVehiclePreset('expedition-truck');
+    let stored = manual;
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [stored],
+      saveRouteLeg: async (routeLeg) => { stored = routeLeg; },
+    });
+    const calculateRoute = vi.fn(async ({ origin: routeOrigin, target: routeTarget }) => ({
+      distanceKm: 500, travelTimeHours: 8,
+      geometry: { type: 'LineString' as const, coordinates: [[routeOrigin.lng, routeOrigin.lat], [routeTarget.lng, routeTarget.lat]] },
+      provider: 'openrouteservice', profile: 'driving-hgv' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 500 }],
+    }));
+    const { result } = renderHook(() => useTripData(repository, { routingVehicle: vehicle, calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.updateRouteLeg(manual.id, { movement: 'drive', calculation: 'automatic' });
+    });
+
+    expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving-hgv', routingVehicle: vehicle,
+    }));
+    expect(stored).toMatchObject({ movement: 'drive', calculation: 'automatic', profile: 'driving-hgv' });
+  });
+
   it('shows a failed route leg as pending while an explicit retry is in flight', async () => {
     const origin = createDestination({
       name: 'Ghent',
@@ -1690,7 +1723,7 @@ describe('useTripData', () => {
       storedRouteLeg = nextRouteLeg;
     });
     const repository = createMemoryRepository(Promise.resolve([origin, target]), {
-      listRouteLegs: async () => [routeLeg],
+      listRouteLegs: async () => [storedRouteLeg],
       saveRouteLeg,
     });
     const { result } = renderHook(() => useTripData(repository));
@@ -1927,6 +1960,105 @@ describe('useTripData', () => {
 
     expect(storedRouteLeg.notes).toBe('Later mutation succeeded.');
     expect(result.current.routeLegs[0].notes).toBe('Later mutation succeeded.');
+  });
+
+  it('serializes a constrained intent edit started while reconciliation is blocked so the edit wins', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53, lng: 8 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 54, lng: 9 }, order: 1 });
+    const pending = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id });
+    const provider = createDeferred({
+      distanceKm: 100, travelTimeHours: 2,
+      geometry: { type: 'LineString' as const, coordinates: [[8, 53], [9, 54]] },
+      provider: 'openrouteservice', profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 100 }],
+    });
+    let stored = pending;
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listRouteLegs: async () => [stored],
+      saveRouteLeg: async (leg) => { stored = leg; },
+    });
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute: () => provider.promise }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let reconcilePromise!: Promise<void>;
+    let editPromise!: Promise<void>;
+    await act(async () => {
+      reconcilePromise = result.current.reorderDestinations([origin.id, target.id]);
+      await Promise.resolve();
+      editPromise = result.current.updateRouteLeg(pending.id, { ferryPolicy: 'avoid', notes: 'New constrained intent.' });
+      await Promise.resolve();
+    });
+    expect(stored.ferryPolicy).toBe('allow');
+
+    await act(async () => {
+      provider.resolve();
+      await Promise.all([reconcilePromise, editPromise]);
+    });
+
+    expect(stored).toMatchObject({ ferryPolicy: 'avoid', notes: 'New constrained intent.' });
+    expect(result.current.routeLegs[0]).toMatchObject({ ferryPolicy: 'avoid', notes: 'New constrained intent.' });
+  });
+
+  it('restores destination and route snapshots when a route write fails after destination persistence', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53, lng: 8 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 54, lng: 9 }, order: 1 });
+    const priorLeg = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id });
+    let storedDestinations = [origin, target];
+    let storedRoutes = [priorLeg];
+    let failNextRouteSave = true;
+    const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
+      listDestinations: async () => structuredClone(storedDestinations),
+      listRouteLegs: async () => structuredClone(storedRoutes),
+      saveDestination: async (destination) => {
+        const index = storedDestinations.findIndex(({ id }) => id === destination.id);
+        if (index === -1) storedDestinations.push(destination); else storedDestinations[index] = destination;
+      },
+      deleteDestination: async (id) => { storedDestinations = storedDestinations.filter((item) => item.id !== id); },
+      saveRouteLeg: async (leg) => {
+        if (failNextRouteSave) { failNextRouteSave = false; throw new Error('route write failed'); }
+        const index = storedRoutes.findIndex(({ id }) => id === leg.id);
+        if (index === -1) storedRoutes.push(leg); else storedRoutes[index] = leg;
+      },
+      deleteRouteLeg: async (id) => { storedRoutes = storedRoutes.filter((item) => item.id !== id); },
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.addDestination({ name: 'Hanover', coordinates: { lat: 53.5, lng: 8.5 } }))
+        .rejects.toThrow(/route write failed.*Previous destination and route snapshots were restored/);
+    });
+
+    expect(storedDestinations).toEqual([origin, target]);
+    expect(storedRoutes).toEqual([priorLeg]);
+    expect(result.current.destinations).toEqual([origin, target]);
+    expect(result.current.routeLegs).toEqual([priorLeg]);
+  });
+
+  it('keeps UI state and reports destination rollback failures after a destination write rejection', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53, lng: 8 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 54, lng: 9 }, order: 1 });
+    const priorLeg = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id });
+    let saveCount = 0;
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listDestinations: async () => structuredClone([origin, target]),
+      listRouteLegs: async () => structuredClone([priorLeg]),
+      saveDestination: async () => {
+        saveCount += 1;
+        if (saveCount === 2) throw new Error('destination write failed');
+        if (saveCount === 3) throw new Error('destination rollback failed');
+      },
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.updateDestination(origin.id, { name: 'Updated Bremen' }))
+        .rejects.toThrow(/destination write failed.*Rollback consistency failures.*destination rollback failed/);
+    });
+
+    expect(result.current.destinations).toEqual([origin, target]);
+    expect(result.current.routeLegs).toEqual([priorLeg]);
   });
 
   it('removes attached route legs from state when deleting a destination', async () => {

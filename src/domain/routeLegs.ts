@@ -42,6 +42,7 @@ type CreateRouteKeyInput = {
   waypoints?: Coordinates[];
   ferryPolicy?: FerryPolicy;
   variant?: string;
+  providerOptions?: Record<string, unknown>;
 };
 
 type CreateManualRouteLegInput = {
@@ -60,8 +61,18 @@ function defaultStatusForIntent(movement: RouteMovement, calculation: RouteCalcu
   return movement === 'vehicle-shipping' && calculation === 'manual' ? 'manual' : 'pending';
 }
 
-function coordinateKey(coordinates: Coordinates) {
-  return `${coordinates.lng.toFixed(5)},${coordinates.lat.toFixed(5)}`;
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, canonicalize(nested)]),
+  );
+}
+
+function coordinateSnapshot(coordinates: Coordinates) {
+  return { lat: coordinates.lat, lng: coordinates.lng };
 }
 
 export function createRouteKey({
@@ -72,17 +83,31 @@ export function createRouteKey({
   waypoints = [],
   ferryPolicy = 'allow',
   variant,
+  providerOptions = {},
 }: CreateRouteKeyInput) {
   const vehicleSnapshot = profile && profile !== routingVehicle.profile
     ? { ...routingVehicle, profile }
     : routingVehicle;
 
   return JSON.stringify({
-    routingVehicle: vehicleSnapshot,
-    waypoints: waypoints.map(coordinateKey),
+    version: 1,
+    origin: coordinateSnapshot(origin),
+    target: coordinateSnapshot(target),
+    waypoints: waypoints.map(coordinateSnapshot),
+    routingVehicle: {
+      preset: vehicleSnapshot.preset,
+      profile: vehicleSnapshot.profile,
+      vehicleType: vehicleSnapshot.vehicleType ?? null,
+      restrictions: {
+        length: vehicleSnapshot.restrictions.length ?? null,
+        width: vehicleSnapshot.restrictions.width ?? null,
+        height: vehicleSnapshot.restrictions.height ?? null,
+        weight: vehicleSnapshot.restrictions.weight ?? null,
+        axleLoad: vehicleSnapshot.restrictions.axleLoad ?? null,
+      },
+    },
     ferryPolicy,
-    origin: coordinateKey(origin),
-    target: coordinateKey(target),
+    providerOptions: canonicalize(providerOptions),
     variant: variant ?? null,
   });
 }

@@ -200,7 +200,6 @@ export async function materializeTripManifest(
     const directive = directiveByPair.get(`${fromKey}\u0000${toKey}`);
     const normalizedDirective = directive as RouteLegDirectiveDraftV2 | undefined;
     if (
-      manifest.manifestVersion === 1 &&
       normalizedDirective?.movement === 'vehicle-shipping' &&
       normalizedDirective.calculation === 'manual'
     ) {

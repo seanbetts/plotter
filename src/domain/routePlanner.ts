@@ -1,6 +1,7 @@
 import { createRouteKey, createRouteLeg, createStraightLineGeometry } from './routeLegs';
 import type { LineString } from 'geojson';
 import type { Coordinates, Destination, RouteIntentSnapshot, RouteLeg, RouteWaypoint, TripRoutingVehicle } from './types';
+import { standardRoutingVehicle } from './vehiclePresets';
 
 type ReconcileRouteLegsResult = {
   routeLegs: RouteLeg[];
@@ -66,7 +67,7 @@ function routeGeometryMatchesCoordinates(
   );
 }
 
-function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg) {
+function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg, routingVehicle: TripRoutingVehicle) {
   return (
     routeLeg.movement === 'drive' &&
     routeLeg.calculation === 'automatic' &&
@@ -75,46 +76,44 @@ function hasCompleteAppImplementableDrivingRouteData(routeLeg: RouteLeg) {
     routeLeg.distanceKm !== undefined &&
     routeLeg.travelTimeHours !== undefined &&
     routeLeg.provider &&
-    routeLeg.profile === 'driving-car' &&
+    routeLeg.profile === routingVehicle.profile &&
     routeLeg.routeKey &&
     routeLeg.calculatedAt &&
     !routeLeg.error
   );
 }
 
-function routeKeyMatchesCurrentDrivingEndpoints(routeLeg: RouteLeg, origin: Destination, target: Destination) {
+function routeKeyMatchesCurrentIntent(
+  routeLeg: RouteLeg,
+  origin: Destination,
+  target: Destination,
+  routingVehicle: TripRoutingVehicle,
+) {
   const routeKey = routeLeg.routeKey;
   if (!routeKey) return false;
-
-  const currentRouteKey = createRouteKey({
-    origin: origin.coordinates,
-    target: target.coordinates,
-    profile: 'driving-car',
-  });
-  const legacyRouteKey = `${routeLeg.profile ?? 'driving-car'}:${origin.coordinates.lng.toFixed(5)},${origin.coordinates.lat.toFixed(5)}:${target.coordinates.lng.toFixed(5)},${target.coordinates.lat.toFixed(5)}`;
-
-  return routeKey === currentRouteKey || routeKey.startsWith(`${currentRouteKey}:`) || routeKey.startsWith(legacyRouteKey);
-}
-
-function createLegacyDrivingRouteKey(origin: Coordinates, target: Coordinates, profile = 'driving-car') {
-  return `${profile}:${origin.lng.toFixed(5)},${origin.lat.toFixed(5)}:${target.lng.toFixed(5)},${target.lat.toFixed(5)}`;
-}
-
-function createRefreshedDrivingRouteKey(
-  routeLeg: RouteLeg,
-  origin: Coordinates,
-  target: Coordinates,
-  profile = routeLeg.profile ?? 'driving-car',
-) {
-  return routeLeg.routeKey?.startsWith('{')
-    ? createRouteKey({ origin, target, profile })
-    : createLegacyDrivingRouteKey(origin, target, profile);
+  try {
+    const parsed = JSON.parse(routeKey) as { variant?: string; providerOptions?: Record<string, unknown> };
+    return routeKey === createRouteKey({
+      origin: origin.coordinates,
+      target: target.coordinates,
+      routingVehicle,
+      waypoints: [...(routeLeg.waypoints ?? [])]
+        .sort((left, right) => left.order - right.order)
+        .map((waypoint) => waypoint.coordinates),
+      ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+      variant: parsed.variant ?? undefined,
+      providerOptions: parsed.providerOptions ?? {},
+    });
+  } catch {
+    return false;
+  }
 }
 
 function refreshRouteLegForDestinationCoordinates(
   routeLeg: RouteLeg,
   origin: Destination,
   target: Destination,
+  routingVehicle: TripRoutingVehicle,
 ): RouteLeg {
   if (routeLeg.movement === 'vehicle-shipping' && routeLeg.calculation === 'manual') {
     if (!routeLeg.geometry || routeGeometryMatchesCoordinates(routeLeg, origin, target)) {
@@ -138,8 +137,8 @@ function refreshRouteLegForDestinationCoordinates(
 
   if (routeLeg.status === 'ready') {
     if (
-      hasCompleteAppImplementableDrivingRouteData(routeLeg) &&
-      routeKeyMatchesCurrentDrivingEndpoints(routeLeg, origin, target) &&
+      hasCompleteAppImplementableDrivingRouteData(routeLeg, routingVehicle) &&
+      routeKeyMatchesCurrentIntent(routeLeg, origin, target, routingVehicle) &&
       routeGeometryMatchesCoordinates(routeLeg, origin, target, drivingGeometryEndpointTolerance)
     ) {
       return routeLeg;
@@ -152,15 +151,23 @@ function refreshRouteLegForDestinationCoordinates(
       travelTimeHours: undefined,
       geometry: undefined,
       provider: undefined,
-      profile: 'driving-car',
-      routeKey: createRefreshedDrivingRouteKey(routeLeg, origin.coordinates, target.coordinates, 'driving-car'),
+      profile: routingVehicle.profile,
+      routeKey: createRouteKey({
+        origin: origin.coordinates, target: target.coordinates, routingVehicle,
+        waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order).map((waypoint) => waypoint.coordinates),
+        ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+      }),
       calculatedAt: undefined,
       error: undefined,
       updatedAt: createTimestamp(),
     };
   }
 
-  const routeKey = createRefreshedDrivingRouteKey(routeLeg, origin.coordinates, target.coordinates);
+  const routeKey = createRouteKey({
+    origin: origin.coordinates, target: target.coordinates, routingVehicle,
+    waypoints: [...(routeLeg.waypoints ?? [])].sort((left, right) => left.order - right.order).map((waypoint) => waypoint.coordinates),
+    ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
+  });
 
   if (routeLeg.routeKey === routeKey) {
     return routeLeg;
@@ -173,7 +180,7 @@ function refreshRouteLegForDestinationCoordinates(
     travelTimeHours: undefined,
     geometry: undefined,
     provider: undefined,
-    profile: routeLeg.profile ?? 'driving-car',
+    profile: routingVehicle.profile,
     routeKey,
     calculatedAt: undefined,
     error: undefined,
@@ -405,7 +412,7 @@ export function planRouteLegReconciliation({
     const targetIndex = destinationIndexById.get(routeLeg.targetDestinationId);
     return originIndex !== undefined && targetIndex !== undefined && targetIndex > originIndex + 1;
   });
-  const base = reconcileRouteLegsForDestinations(destinations, currentRouteLegs);
+  const base = reconcileRouteLegsForDestinations(destinations, currentRouteLegs, routingVehicle);
   if (splitSources.length === 0) return base;
 
   const replacementsByPair = new Map<string, RouteLeg>();
@@ -431,6 +438,7 @@ export function planRouteLegReconciliation({
 export function reconcileRouteLegsForDestinations(
   destinations: Destination[],
   routeLegs: RouteLeg[],
+  routingVehicle: TripRoutingVehicle = standardRoutingVehicle,
 ): ReconcileRouteLegsResult {
   const existingRouteLegsByPair = new Map(
     routeLegs.map((leg) => [
@@ -449,7 +457,7 @@ export function reconcileRouteLegsForDestinations(
 
     const existingRouteLeg = existingRouteLegsByPair.get(pairKey);
     if (existingRouteLeg) {
-      nextRouteLegs.push(refreshRouteLegForDestinationCoordinates(existingRouteLeg, origin, target));
+      nextRouteLegs.push(refreshRouteLegForDestinationCoordinates(existingRouteLeg, origin, target, routingVehicle));
       continue;
     }
 
@@ -459,10 +467,12 @@ export function reconcileRouteLegsForDestinations(
         targetDestinationId: target.id,
         movement: 'drive',
         calculation: 'automatic',
-        routeKey: createRouteKey({
-          origin: origin.coordinates,
-          target: target.coordinates,
-        }),
+          routeKey: createRouteKey({
+            origin: origin.coordinates,
+            target: target.coordinates,
+            routingVehicle,
+          }),
+          profile: routingVehicle.profile,
       }),
     );
   }

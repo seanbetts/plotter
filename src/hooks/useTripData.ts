@@ -49,7 +49,6 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const isMountedRef = useRef(false);
   const activeRepositoryTokenRef = useRef<object | null>(null);
   const reloadSequenceRef = useRef(0);
-  const routeReconciliationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const routeLegMutationQueuesRef = useRef(new Map<string, Promise<void>>());
   const calculateRoute = options.calculateRoute;
   const routingVehicle = options.routingVehicle ?? standardRoutingVehicle;
@@ -96,7 +95,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     routeLegIds: string[],
     mutation: () => Promise<T>,
   ) => {
-    const uniqueRouteLegIds = [...new Set(routeLegIds)].sort();
+    const uniqueRouteLegIds = [...new Set(['__all_route_mutations__', ...routeLegIds])].sort();
     const previousMutations = uniqueRouteLegIds.map(
       (routeLegId) => routeLegMutationQueuesRef.current.get(routeLegId) ?? Promise.resolve(),
     );
@@ -199,51 +198,75 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   }, [repositoryToken, startReload]);
 
   const reconcilePersistedRouteLegs = useCallback(
-    (nextDestinations: Destination[], planned = planRouteLegReconciliation({
-      destinations: nextDestinations,
-      currentRouteLegs: routeLegsRef.current,
-      routingVehicle,
-    })) => {
+    (nextDestinations: Destination[]) => {
       const generation = repositoryToken;
-      const reconcile = async () => {
+      return enqueueRouteLegMutations([], async () => {
         if (!isActiveGeneration(generation)) return routeLegsRef.current;
 
-        const persistedRouteLegs = await repository.listRouteLegs();
+        const [loadedDestinations, loadedRouteLegs] = await Promise.all([
+          repository.listDestinations(),
+          repository.listRouteLegs(),
+        ]);
+        const priorDestinations = structuredClone(loadedDestinations);
+        const persistedRouteLegs = structuredClone(loadedRouteLegs);
         if (!isActiveGeneration(generation)) return routeLegsRef.current;
-
+        const currentVehicle = routingVehicleRef.current;
+        const planned = planRouteLegReconciliation({
+          destinations: nextDestinations,
+          currentRouteLegs: persistedRouteLegs,
+          routingVehicle: currentVehicle,
+        });
         const nextRouteLegs = await calculateAutomaticRouteLegs({
           destinations: nextDestinations,
           routeLegs: planned.routeLegs,
-          routingVehicle,
+          routingVehicle: currentVehicle,
           calculateRoute,
         });
-        const plannedIds = new Set(planned.routeLegs.map((routeLeg) => routeLeg.id));
-        const removedRouteLegIds = new Set([
-          ...planned.removedRouteLegIds,
-          ...persistedRouteLegs.filter((routeLeg) => !plannedIds.has(routeLeg.id)).map((routeLeg) => routeLeg.id),
-        ]);
-        return enqueueRouteLegMutations([
-          ...removedRouteLegIds,
-          ...nextRouteLegs.map((routeLeg) => routeLeg.id),
-        ], async () => {
-          if (!isActiveGeneration(generation)) return routeLegsRef.current;
-          for (const routeLegId of removedRouteLegIds) {
-            await repository.deleteRouteLeg(routeLegId);
+        const nextDestinationIds = new Set(nextDestinations.map(({ id }) => id));
+        const nextRouteLegIds = new Set(nextRouteLegs.map(({ id }) => id));
+
+        try {
+          for (const destination of nextDestinations) await repository.saveDestination(destination);
+          for (const destination of priorDestinations) {
+            if (!nextDestinationIds.has(destination.id)) await repository.deleteDestination(destination.id);
           }
-          for (const routeLeg of nextRouteLegs) {
-            await repository.saveRouteLeg(routeLeg);
+          for (const routeLeg of persistedRouteLegs) {
+            if (!nextRouteLegIds.has(routeLeg.id)) await repository.deleteRouteLeg(routeLeg.id);
           }
-          return nextRouteLegs;
-        });
-      };
-      const queuedReconciliation = routeReconciliationQueueRef.current.then(reconcile, reconcile);
-      routeReconciliationQueueRef.current = queuedReconciliation.then(
-        () => undefined,
-        () => undefined,
-      );
-      return queuedReconciliation;
+          for (const routeLeg of nextRouteLegs) await repository.saveRouteLeg(routeLeg);
+        } catch (caught) {
+          const primaryMessage = caught instanceof Error ? caught.message : 'Unknown trip storage error';
+          const priorDestinationIds = new Set(priorDestinations.map(({ id }) => id));
+          const priorRouteLegIds = new Set(persistedRouteLegs.map(({ id }) => id));
+          const rollbackOperations: Array<{ label: string; operation: () => Promise<void> }> = [
+            ...nextDestinations
+              .filter(({ id }) => !priorDestinationIds.has(id))
+              .map(({ id }) => ({ label: `destination ${id} removal`, operation: () => repository.deleteDestination(id) })),
+            ...priorDestinations.map((destination) => ({
+              label: `destination ${destination.id} restore`, operation: () => repository.saveDestination(destination),
+            })),
+            ...nextRouteLegs
+              .filter(({ id }) => !priorRouteLegIds.has(id))
+              .map(({ id }) => ({ label: `route ${id} removal`, operation: () => repository.deleteRouteLeg(id) })),
+            ...persistedRouteLegs.map((routeLeg) => ({
+              label: `route ${routeLeg.id} restore`, operation: () => repository.saveRouteLeg(routeLeg),
+            })),
+          ];
+          const rollbackFailures: string[] = [];
+          for (const { label, operation } of rollbackOperations) {
+            try { await operation(); } catch (rollbackError) {
+              rollbackFailures.push(`${label}: ${rollbackError instanceof Error ? rollbackError.message : 'Unknown rollback error'}`);
+            }
+          }
+          const rollbackMessage = rollbackFailures.length > 0
+            ? `Rollback consistency failures: ${rollbackFailures.join('; ')}`
+            : 'Previous destination and route snapshots were restored.';
+          throw new Error(`Unable to persist trip snapshot: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
+        }
+        return nextRouteLegs;
+      });
     },
-    [calculateRoute, enqueueRouteLegMutations, isActiveGeneration, repository, repositoryToken, routingVehicle],
+    [calculateRoute, enqueueRouteLegMutations, isActiveGeneration, repository, repositoryToken],
   );
 
   useEffect(() => {
@@ -285,17 +308,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
               ? nextDestination
               : patchDestination(nextDestination, { order }),
           );
-          const planned = planRouteLegReconciliation({
-            destinations: orderedDestinations,
-            currentRouteLegs: routeLegsRef.current,
-            routingVehicle,
-          });
-
-          await Promise.all(
-            orderedDestinations.map((orderedDestination) =>
-              repository.saveDestination(orderedDestination),
-            ),
-          );
+          const nextRouteLegs = await reconcilePersistedRouteLegs(orderedDestinations);
           if (!isActiveAction()) return destination;
 
           replaceDestinations(orderedDestinations);
@@ -303,9 +316,6 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             ...current,
             [destination.id]: current[destination.id] ?? [],
           }));
-          const nextRouteLegs = await reconcilePersistedRouteLegs(orderedDestinations, planned);
-          if (!isActiveAction()) return destination;
-
           replaceRouteLegs(nextRouteLegs);
           return destination;
         },
@@ -324,19 +334,10 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           const nextDestinations = destinationsRef.current.map((destination) =>
             destination.id === destinationId ? updated : destination,
           );
-          const planned = planRouteLegReconciliation({
-            destinations: nextDestinations,
-            currentRouteLegs: routeLegsRef.current,
-            routingVehicle,
-          });
-
-          await repository.saveDestination(updated);
+          const nextRouteLegs = await reconcilePersistedRouteLegs(nextDestinations);
           if (!isActiveAction()) return;
 
           replaceDestinations(nextDestinations);
-          const nextRouteLegs = await reconcilePersistedRouteLegs(nextDestinations, planned);
-          if (!isActiveAction()) return;
-
           replaceRouteLegs(nextRouteLegs);
         },
 
@@ -344,20 +345,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           if (!isActiveAction()) return;
 
           const nextDestinations = destinationsRef.current.filter((destination) => destination.id !== destinationId);
-          const attachedRouteLegIds = routeLegsRef.current
-            .filter(
-              (routeLeg) =>
-                routeLeg.originDestinationId === destinationId ||
-                routeLeg.targetDestinationId === destinationId,
-            )
-            .map((routeLeg) => routeLeg.id);
-          const planned = planRouteLegReconciliation({
-            destinations: nextDestinations,
-            currentRouteLegs: routeLegsRef.current,
-            routingVehicle,
-          });
-
-          await enqueueRouteLegMutations(attachedRouteLegIds, () => repository.deleteDestination(destinationId));
+          const nextRouteLegs = await reconcilePersistedRouteLegs(nextDestinations);
           if (!isActiveAction()) return;
 
           replaceDestinations(nextDestinations);
@@ -366,16 +354,6 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             delete remaining[destinationId];
             return remaining;
           });
-          updateRouteLegs((current) =>
-            current.filter(
-              (leg) =>
-                leg.originDestinationId !== destinationId &&
-                leg.targetDestinationId !== destinationId,
-            ),
-          );
-          const nextRouteLegs = await reconcilePersistedRouteLegs(nextDestinations, planned);
-          if (!isActiveAction()) return;
-
           replaceRouteLegs(nextRouteLegs);
         },
 
@@ -394,27 +372,28 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
           if (!isActiveAction()) return;
 
-          const previousRouteLegs = routeLegsRef.current;
-          const reconciliation = planRouteLegReconciliation({
+          const priorDestinations = destinationsRef.current;
+          const priorRouteLegs = routeLegsRef.current;
+          const optimisticPlan = planRouteLegReconciliation({
             destinations: orderedDestinations,
-            currentRouteLegs: previousRouteLegs,
-            routingVehicle,
+            currentRouteLegs: priorRouteLegs,
+            routingVehicle: routingVehicleRef.current,
           });
           replaceDestinations(orderedDestinations);
-          replaceRouteLegs(reconciliation.routeLegs);
-          const saveDestinations = Promise.all(
-            orderedDestinations.map((destination) => repository.saveDestination(destination)),
-          );
-          await saveDestinations;
+          replaceRouteLegs(optimisticPlan.routeLegs);
+          let nextRouteLegs: RouteLeg[];
+          try {
+            nextRouteLegs = await reconcilePersistedRouteLegs(orderedDestinations);
+          } catch (caught) {
+            if (isActiveAction()) {
+              replaceDestinations(priorDestinations);
+              replaceRouteLegs(priorRouteLegs);
+            }
+            throw caught;
+          }
           if (!isActiveAction()) return;
 
-          const routeLegReconciliation = reconcilePersistedRouteLegs(orderedDestinations, reconciliation).then((nextRouteLegs) => {
-            if (!isActiveAction()) return routeLegsRef.current;
-
-            replaceRouteLegs(nextRouteLegs);
-            return nextRouteLegs;
-          });
-          await routeLegReconciliation;
+          replaceRouteLegs(nextRouteLegs);
         },
 
         async addRouteLeg(input: {
@@ -439,7 +418,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
           patch: RouteLegPatch,
         ) {
           return enqueueRouteLegMutation(routeLegId, async () => {
-            const existing = routeLegsRef.current.find((routeLeg) => routeLeg.id === routeLegId);
+            const persistedRouteLegs = await repository.listRouteLegs();
+            const existing = persistedRouteLegs.find((routeLeg) => routeLeg.id === routeLegId);
             if (!existing) return;
 
             const updatedAt = createTimestamp();
@@ -486,6 +466,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             const updated = await finalizeRouteLeg({
               routeLeg: pendingRouteLeg,
               destinations: destinationsRef.current,
+              routingVehicle: routingVehicleRef.current,
               calculateRoute,
             });
             if (!isActiveAction()) return;
@@ -714,7 +695,6 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       replaceRouteLegs,
       repository,
       repositoryToken,
-      routingVehicle,
       updateActivitiesByDestinationId,
       updateRouteLegs,
     ],

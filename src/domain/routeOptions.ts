@@ -1,5 +1,7 @@
 import type { LineString } from 'geojson';
-import type { Coordinates, RouteLeg, RouteSection } from './types';
+import type { Coordinates, FerryPolicy, RouteLeg, RouteSection, TripRoutingVehicle } from './types';
+import { createRouteKey } from './routeLegs';
+import { standardRoutingVehicle } from './vehiclePresets';
 
 export type RouteOptionSource = 'recommended' | 'provider-alternative' | 'avoid-feature';
 export type RouteAvoidFeature = 'highways' | 'ferries' | 'tollways';
@@ -20,7 +22,11 @@ export type RouteOption = {
 type CreateRouteOptionKeyInput = {
   origin: Coordinates;
   target: Coordinates;
-  profile: string;
+  profile?: string;
+  routingVehicle?: TripRoutingVehicle;
+  waypoints?: Coordinates[];
+  ferryPolicy?: FerryPolicy;
+  providerOptions?: Record<string, unknown>;
   variant: string;
 };
 
@@ -28,10 +34,6 @@ type RouteOptionFromCalculationInput = CreateRouteOptionKeyInput &
   Omit<RouteOption, 'routeKey'>;
 
 export type RouteLegOptionPatch = Partial<Omit<RouteLeg, 'id' | 'createdAt' | 'updatedAt'>>;
-
-function coordinateKey(coordinates: Coordinates) {
-  return `${coordinates.lng.toFixed(5)},${coordinates.lat.toFixed(5)}`;
-}
 
 function coordinatePairKey(coordinate: number[]) {
   const [lng, lat] = coordinate;
@@ -46,9 +48,15 @@ export function createRouteOptionKey({
   origin,
   target,
   profile,
+  routingVehicle = standardRoutingVehicle,
+  waypoints = [],
+  ferryPolicy = 'allow',
+  providerOptions = {},
   variant,
 }: CreateRouteOptionKeyInput) {
-  return `${profile}:${coordinateKey(origin)}:${coordinateKey(target)}:${variant}`;
+  return createRouteKey({
+    origin, target, profile, routingVehicle, waypoints, ferryPolicy, providerOptions, variant,
+  });
 }
 
 export function routeOptionFromCalculation(input: RouteOptionFromCalculationInput): RouteOption {
@@ -66,6 +74,10 @@ export function routeOptionFromCalculation(input: RouteOptionFromCalculationInpu
       origin: input.origin,
       target: input.target,
       profile: input.profile,
+      routingVehicle: input.routingVehicle,
+      waypoints: input.waypoints,
+      ferryPolicy: input.ferryPolicy,
+      providerOptions: input.providerOptions,
       variant: input.variant,
     }),
   };

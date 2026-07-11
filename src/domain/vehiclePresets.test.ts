@@ -17,6 +17,8 @@ describe('vehicle presets', () => {
       profile: 'driving-car',
       restrictions: {},
     });
+    expect(Object.isFrozen(standardRoutingVehicle)).toBe(true);
+    expect(Object.isFrozen(standardRoutingVehicle.restrictions)).toBe(true);
   });
 
   it('returns an independent restriction snapshot', () => {

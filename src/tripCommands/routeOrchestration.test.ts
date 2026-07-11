@@ -6,6 +6,7 @@ import type { RouteLeg } from '../domain/types';
 import {
   applyCalculatedRouteResult,
   calculateAutomaticRouteLegs,
+  finalizeRouteLeg,
   recalculateAutomaticRouteLegsForVehicle,
   reconcileAndSaveRouteLegs,
   type CalculateRoute,
@@ -589,5 +590,29 @@ describe('route orchestration', () => {
       }),
     });
     expect(preserved).toBe(manual);
+  });
+
+  it('finalizes a manual-to-automatic toggle with the expedition truck snapshot', async () => {
+    const origin = createDestination({ name: 'Panama City', coordinates: { lat: 9, lng: -79.5 } });
+    const target = createDestination({ name: 'Cartagena', coordinates: { lat: 10.4, lng: -75.5 } });
+    const routingVehicle = resolveVehiclePreset('expedition-truck');
+    const calculateRoute = vi.fn(async ({ origin: routeOrigin, target: routeTarget }) => ({
+      distanceKm: 500, travelTimeHours: 8,
+      geometry: { type: 'LineString' as const, coordinates: [[routeOrigin.lng, routeOrigin.lat], [routeTarget.lng, routeTarget.lat]] },
+      provider: 'test', profile: 'driving-hgv' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 500 }],
+    }));
+
+    await finalizeRouteLeg({
+      routeLeg: createRouteLeg({
+        originDestinationId: origin.id, targetDestinationId: target.id,
+        movement: 'drive', calculation: 'automatic', status: 'pending',
+      }),
+      destinations: [origin, target], routingVehicle, calculateRoute,
+    });
+
+    expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'driving-hgv', routingVehicle,
+    }));
   });
 });

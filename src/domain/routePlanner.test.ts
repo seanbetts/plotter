@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDestination } from './destinations';
-import { createRouteLeg } from './routeLegs';
+import { createRouteKey, createRouteLeg } from './routeLegs';
 import { resolveVehiclePreset } from './vehiclePresets';
 import {
   coordinateDistanceKm,
@@ -11,6 +11,35 @@ import {
 } from './routePlanner';
 
 describe('route planner helpers', () => {
+  it('preserves an unrelated ready expedition-truck leg byte-for-relevant-fields', () => {
+    const vehicle = resolveVehiclePreset('expedition-truck');
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53, lng: 8 }, order: 0 });
+    const target = createDestination({ name: 'Hamburg', coordinates: { lat: 54, lng: 9 }, order: 1 });
+    const unrelated = createDestination({ name: 'Berlin', coordinates: { lat: 52.5, lng: 13.4 }, order: 2 });
+    const waypoint = { id: 'wp', order: 0, name: 'Via', coordinates: { lat: 53.5, lng: 8.5 }, location: origin.location, notes: '', links: [] };
+    const ready = createRouteLeg({
+      originDestinationId: origin.id, targetDestinationId: target.id,
+      movement: 'drive', calculation: 'automatic', ferryPolicy: 'avoid', waypoints: [waypoint],
+      status: 'ready', distanceKm: 120, travelTimeHours: 2,
+      geometry: { type: 'LineString', coordinates: [[8, 53], [8.5, 53.5], [9, 54]] },
+      provider: 'openrouteservice', profile: 'driving-hgv', calculatedAt: '2026-07-11T00:00:00.000Z',
+      routeKey: createRouteKey({
+        origin: origin.coordinates, target: target.coordinates, routingVehicle: vehicle,
+        waypoints: [waypoint.coordinates], ferryPolicy: 'avoid',
+      }),
+    });
+
+    const result = planRouteLegReconciliation({
+      destinations: [origin, target, unrelated], currentRouteLegs: [ready], routingVehicle: vehicle,
+    });
+
+    expect(result.routeLegs[0]).toBe(ready);
+    expect(result.routeLegs[0]).toMatchObject({
+      status: 'ready', profile: 'driving-hgv', routeKey: ready.routeKey,
+      ferryPolicy: 'avoid', waypoints: [waypoint], geometry: ready.geometry,
+      distanceKm: 120, travelTimeHours: 2,
+    });
+  });
   it('creates two automatic trip-vehicle legs after an ordinary insertion', () => {
     const bremen = createDestination({ name: 'Bremen', coordinates: { lat: 53.08, lng: 8.8 }, order: 0 });
     const hirtshals = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.59, lng: 9.96 }, order: 1 });
@@ -427,7 +456,7 @@ describe('route planner helpers', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, variant: 'alternative-1' }),
       calculatedAt: '2026-07-04T12:00:00.000Z',
     });
 
@@ -465,7 +494,7 @@ describe('route planner helpers', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, variant: 'alternative-1' }),
       calculatedAt: '2026-07-04T12:00:00.000Z',
     });
 
@@ -507,7 +536,7 @@ describe('route planner helpers', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, variant: 'alternative-1' }),
       calculatedAt: '2026-07-04T12:00:00.000Z',
     });
 
@@ -523,7 +552,7 @@ describe('route planner helpers', () => {
         geometry: undefined,
         provider: undefined,
         profile: 'driving-car',
-        routeKey: 'driving-car:19.04500,43.14000:18.77120,42.42470',
+        routeKey: createRouteKey({ origin: movedOrigin.coordinates, target: target.coordinates }),
         calculatedAt: undefined,
         error: undefined,
       },
@@ -562,7 +591,7 @@ describe('route planner helpers', () => {
       },
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470:alternative-1',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates, variant: 'alternative-1' }),
       calculatedAt: '2026-07-04T12:00:00.000Z',
     });
 
@@ -577,7 +606,7 @@ describe('route planner helpers', () => {
       travelTimeHours: undefined,
       provider: undefined,
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03430,43.13070:18.77120,42.42470',
+      routeKey: createRouteKey({ origin: slightlyMovedOrigin.coordinates, target: target.coordinates }),
       calculatedAt: undefined,
       error: undefined,
     });
@@ -715,7 +744,7 @@ describe('route planner helpers', () => {
       travelTimeHours: undefined,
       provider: undefined,
       profile: 'driving-car',
-      routeKey: 'driving-car:19.03420,43.13060:18.77120,42.42470',
+      routeKey: createRouteKey({ origin: origin.coordinates, target: target.coordinates }),
       calculatedAt: undefined,
       error: undefined,
     });

@@ -363,6 +363,12 @@ async function calculateProviderAlternativeOptions({
       sections: route.sections,
       provider,
       profile,
+      routingVehicle,
+      waypoints: waypoints.map((waypoint) => waypoint.coordinates),
+      ferryPolicy,
+      providerOptions: {
+        alternativeRoutes: { targetCount: maxRouteOptions, shareFactor: 0.6, weightFactor: 2 },
+      },
       variant: isRecommended ? 'recommended' : `alternative-${index}`,
     });
   });
@@ -402,6 +408,10 @@ async function calculateAvoidFeatureOption({
     sections: route.sections,
     provider,
     profile,
+    routingVehicle,
+    waypoints: waypoints.map((waypoint) => waypoint.coordinates),
+    ferryPolicy,
+    providerOptions: { avoidFeatures: [feature] },
     variant: `avoid:${feature}`,
   });
 }

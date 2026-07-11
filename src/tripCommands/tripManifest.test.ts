@@ -38,6 +38,31 @@ describe('trip manifest materialization', () => {
     expect(materialized.routeLegs[0]).not.toHaveProperty('type');
   });
 
+  it('materializes a version 2 manual vehicle-shipping directive with straight-line manual semantics', async () => {
+    const manifest = validateTripManifest({
+      manifestVersion: 2,
+      name: 'Darien bypass',
+      vehiclePreset: 'expedition-truck',
+      stops: [
+        { key: 'panama', name: 'Panama City', place: { coordinates: { lat: 9, lng: -79.5 } }, expectedStayDays: 1 },
+        { key: 'cartagena', name: 'Cartagena', place: { coordinates: { lat: 10.4, lng: -75.5 } }, expectedStayDays: 1 },
+      ],
+      routeLegs: [{
+        fromStopKey: 'panama', toStopKey: 'cartagena',
+        movement: 'vehicle-shipping', calculation: 'manual', notes: 'Freight around the Darien Gap.',
+      }],
+    });
+
+    const materialized = await materializeTripManifest(manifest, {});
+
+    expect(materialized.routeLegs[0]).toMatchObject({
+      movement: 'vehicle-shipping', calculation: 'manual', status: 'manual',
+      geometry: { type: 'LineString', coordinates: [[-79.5, 9], [-75.5, 10.4]] },
+      notes: 'Freight around the Darien Gap.',
+    });
+    expect(materialized.routeLegs[0]).not.toHaveProperty('type');
+  });
+
   it('resolves and assembles a complete ordered trip snapshot exactly once', async () => {
     const legacyRouteTypeField = ['ty', 'pe'].join('');
     const legacyManualShippingValue = ['shipping', 'manual'].join('-');

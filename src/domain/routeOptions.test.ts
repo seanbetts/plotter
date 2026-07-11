@@ -2,6 +2,7 @@ import type { LineString } from 'geojson';
 import { describe, expect, it } from 'vitest';
 import { createRouteLeg } from './routeLegs';
 import type { RouteSection } from './types';
+import { resolveVehiclePreset } from './vehiclePresets';
 import {
   createRouteOptionKey,
   dedupeRouteOptions,
@@ -32,15 +33,34 @@ describe('route option helpers', () => {
     { kind: 'ferry', startGeometryIndex: 1, endGeometryIndex: 2, distanceKm: 238.25 },
   ];
 
-  it('creates stable route option keys from coordinates, profile, and variant', () => {
+  it('creates canonical route option keys from the complete calculation contract', () => {
+    const routingVehicle = resolveVehiclePreset('expedition-truck');
     expect(
       createRouteOptionKey({
         origin,
         target,
-        profile: 'driving-car',
+        routingVehicle,
+        waypoints: [{ lat: 50, lng: 1 }],
+        ferryPolicy: 'require',
+        providerOptions: { alternativeRoutes: { targetCount: 3, shareFactor: 0.6, weightFactor: 2 } },
         variant: 'avoid:highways',
       }),
-    ).toBe('driving-car:-0.12760,51.50720:2.35220,48.85660:avoid:highways');
+    ).toBe(createRouteOptionKey({
+      target,
+      origin,
+      routingVehicle: {
+        restrictions: { axleLoad: 7.5, weight: 15, height: 3.8, width: 2.55, length: 9 },
+        vehicleType: 'hgv', profile: 'driving-hgv', preset: 'expedition-truck',
+      },
+      waypoints: [{ lng: 1, lat: 50 }],
+      ferryPolicy: 'require',
+      providerOptions: { alternativeRoutes: { weightFactor: 2, shareFactor: 0.6, targetCount: 3 } },
+      variant: 'avoid:highways',
+    }));
+    expect(createRouteOptionKey({ origin, target, routingVehicle, variant: 'recommended' }))
+      .not.toBe(createRouteOptionKey({
+        origin, target, routingVehicle, variant: 'recommended', ferryPolicy: 'avoid',
+      }));
   });
 
   it('normalizes calculated route options with labels and provider metadata', () => {
@@ -69,7 +89,7 @@ describe('route option helpers', () => {
       sections,
       provider: 'openrouteservice',
       profile: 'driving-car',
-      routeKey: 'driving-car:-0.12760,51.50720:2.35220,48.85660:recommended',
+      routeKey: createRouteOptionKey({ origin, target, profile: 'driving-car', variant: 'recommended' }),
     });
   });
 

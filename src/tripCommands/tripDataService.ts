@@ -8,7 +8,6 @@ import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehicleP
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import {
-  calculateDrivingRouteLegs,
   calculateAutomaticRouteLegs,
   recalculateAutomaticRouteLegsForVehicle,
   reconcileAndSaveRouteLegs,
@@ -482,38 +481,72 @@ function countRouteLegChanges(currentRouteLegs: RouteLeg[], nextRouteLegs: Route
 
 async function saveStopsAndRouteLegs(input: {
   repository: TripRepository;
-  currentRouteLegs: RouteLeg[];
   nextDestinations: Destination[];
-  removedDestinationIds?: string[];
   routingVehicle: TripSummary['routingVehicle'];
   calculateRoute?: CalculateRoute;
 }) {
+  const [loadedDestinations, loadedRouteLegs] = await Promise.all([
+    input.repository.listDestinations(),
+    input.repository.listRouteLegs(),
+  ]);
+  const priorDestinations = structuredClone(loadedDestinations);
+  const currentRouteLegs = structuredClone(loadedRouteLegs);
   const planned = planRouteLegReconciliation({
     destinations: input.nextDestinations,
-    currentRouteLegs: input.currentRouteLegs,
+    currentRouteLegs,
     routingVehicle: input.routingVehicle,
   });
-
-  for (const destination of input.nextDestinations) {
-    await input.repository.saveDestination(destination);
-  }
-
-  for (const destinationId of input.removedDestinationIds ?? []) {
-    await input.repository.deleteDestination(destinationId);
-  }
-
-  const routeLegs = await reconcileAndSaveRouteLegs({
+  const routeLegs = await calculateAutomaticRouteLegs({
     destinations: input.nextDestinations,
-    currentRouteLegs: planned.routeLegs,
-    repository: input.repository,
+    routeLegs: planned.routeLegs,
     routingVehicle: input.routingVehicle,
     calculateRoute: input.calculateRoute,
   });
-  await Promise.all(planned.removedRouteLegIds.map((routeLegId) => input.repository.deleteRouteLeg(routeLegId)));
+  const nextDestinationIds = new Set(input.nextDestinations.map(({ id }) => id));
+  const nextRouteIds = new Set(routeLegs.map(({ id }) => id));
+
+  try {
+    for (const destination of input.nextDestinations) await input.repository.saveDestination(destination);
+    for (const destination of priorDestinations) {
+      if (!nextDestinationIds.has(destination.id)) await input.repository.deleteDestination(destination.id);
+    }
+    for (const routeLeg of currentRouteLegs) {
+      if (!nextRouteIds.has(routeLeg.id)) await input.repository.deleteRouteLeg(routeLeg.id);
+    }
+    for (const routeLeg of routeLegs) await input.repository.saveRouteLeg(routeLeg);
+  } catch (caught) {
+    const primaryMessage = caught instanceof Error ? caught.message : 'Unknown trip storage error';
+    const priorDestinationIds = new Set(priorDestinations.map(({ id }) => id));
+    const priorRouteIds = new Set(currentRouteLegs.map(({ id }) => id));
+    const rollbackOperations: Array<{ label: string; operation: () => Promise<void> }> = [
+      ...input.nextDestinations.filter(({ id }) => !priorDestinationIds.has(id)).map(({ id }) => ({
+        label: `destination ${id} removal`, operation: () => input.repository.deleteDestination(id),
+      })),
+      ...priorDestinations.map((destination) => ({
+        label: `destination ${destination.id} restore`, operation: () => input.repository.saveDestination(destination),
+      })),
+      ...routeLegs.filter(({ id }) => !priorRouteIds.has(id)).map(({ id }) => ({
+        label: `route ${id} removal`, operation: () => input.repository.deleteRouteLeg(id),
+      })),
+      ...currentRouteLegs.map((routeLeg) => ({
+        label: `route ${routeLeg.id} restore`, operation: () => input.repository.saveRouteLeg(routeLeg),
+      })),
+    ];
+    const rollbackFailures: string[] = [];
+    for (const { label, operation } of rollbackOperations) {
+      try { await operation(); } catch (rollbackError) {
+        rollbackFailures.push(`${label}: ${rollbackError instanceof Error ? rollbackError.message : 'Unknown rollback error'}`);
+      }
+    }
+    const rollbackMessage = rollbackFailures.length > 0
+      ? `Rollback consistency failures: ${rollbackFailures.join('; ')}`
+      : 'Previous destination and route snapshots were restored.';
+    throw new Error(`Unable to persist trip snapshot: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
+  }
 
   return {
     routeLegs,
-    routesRecalculated: countRouteLegChanges(input.currentRouteLegs, routeLegs),
+    routesRecalculated: countRouteLegChanges(currentRouteLegs, routeLegs),
   };
 }
 
@@ -580,6 +613,18 @@ async function withCommandHandling<T>(execute: () => Promise<CommandResult<T>>):
 export function createTripDataService(
   dependencies: TripDataServiceDependencies,
 ): TripDataService {
+  const tripMutationQueues = new Map<string, Promise<void>>();
+  const enqueueTripMutation = <T,>(tripId: string, mutation: () => Promise<T>) => {
+    const previous = tripMutationQueues.get(tripId) ?? Promise.resolve();
+    const queued = previous.then(mutation, mutation);
+    const tail = queued.then(() => undefined, () => undefined);
+    tripMutationQueues.set(tripId, tail);
+    void tail.then(() => {
+      if (tripMutationQueues.get(tripId) === tail) tripMutationQueues.delete(tripId);
+    });
+    return queued;
+  };
+
   return {
     async listTrips() {
       return withCommandHandling(async () => {
@@ -663,7 +708,11 @@ export function createTripDataService(
           repository.listDestinations(),
           repository.listRouteLegs(),
         ]);
-        const reconciliation = reconcileRouteLegsForDestinations(destinations, currentRouteLegs);
+        const reconciliation = reconcileRouteLegsForDestinations(
+          destinations,
+          currentRouteLegs,
+          trip.routingVehicle,
+        );
         const failedRoutesBefore = currentRouteLegs.filter((routeLeg) => (
           routeLeg.movement === 'drive' && routeLeg.calculation === 'automatic' && routeLeg.status === 'failed'
         )).length;
@@ -672,9 +721,10 @@ export function createTripDataService(
           routeLeg.calculation === 'automatic' &&
           (routeLeg.status === 'failed' || routeLeg.status === 'pending')
         ));
-        const recalculatedRouteLegs = await calculateDrivingRouteLegs({
+        const recalculatedRouteLegs = await calculateAutomaticRouteLegs({
           destinations,
           routeLegs: routeLegsToCalculate,
+          routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
           retryFailed: true,
         });
@@ -811,6 +861,7 @@ export function createTripDataService(
         const patch = validateRouteLegIntentPatch(input.patch);
         const trip = await findTripSummary(dependencies.directory, tripId);
         const repository = dependencies.createTripRepository(trip.id);
+        return enqueueTripMutation(trip.id, async () => {
         const [destinations, routeLegs] = await Promise.all([
           repository.listDestinations(),
           repository.listRouteLegs(),
@@ -870,6 +921,7 @@ export function createTripDataService(
           `${options?.dryRun ? 'Would update' : 'Updated'} route leg ${routeLegId}.`,
           { routeLeg: nextRouteLeg, changed },
         );
+        });
       });
     },
 
@@ -1119,14 +1171,12 @@ export function createTripDataService(
           });
         }
 
-        const saved = await saveStopsAndRouteLegs({
+        const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          currentRouteLegs,
           nextDestinations: nextStops,
-          removedDestinationIds: removedStops.map((stop) => stop.id),
           routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
-        });
+        }));
 
         changed.routesRecalculated = saved.routesRecalculated;
         return commandSuccess(`Replaced stops for trip ${tripId}.`, {
@@ -1195,13 +1245,12 @@ export function createTripDataService(
           });
         }
 
-        const saved = await saveStopsAndRouteLegs({
+        const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          currentRouteLegs,
           nextDestinations: nextStops,
           routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
-        });
+        }));
         changed.routesRecalculated = saved.routesRecalculated;
 
         return commandSuccess(`Inserted ${insertedStop.name}.`, {
@@ -1245,13 +1294,12 @@ export function createTripDataService(
           });
         }
 
-        const saved = await saveStopsAndRouteLegs({
+        const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          currentRouteLegs,
           nextDestinations: nextStops,
           routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
-        });
+        }));
         changed.routesRecalculated = saved.routesRecalculated;
 
         return commandSuccess(`Updated ${updatedStop.name}.`, {
@@ -1296,14 +1344,12 @@ export function createTripDataService(
           return commandSuccess(`Would delete ${stop.name}.`, { changed });
         }
 
-        const saved = await saveStopsAndRouteLegs({
+        const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          currentRouteLegs,
           nextDestinations: nextStops,
-          removedDestinationIds: [stopId],
           routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
-        });
+        }));
         changed.routesRecalculated = saved.routesRecalculated;
 
         return commandSuccess(`Deleted ${stop.name}.`, { changed });
@@ -1354,13 +1400,12 @@ export function createTripDataService(
           });
         }
 
-        const saved = await saveStopsAndRouteLegs({
+        const saved = await enqueueTripMutation(tripId, () => saveStopsAndRouteLegs({
           repository,
-          currentRouteLegs,
           nextDestinations: nextStops,
           routingVehicle: trip.routingVehicle,
           calculateRoute: dependencies.calculateRoute,
-        });
+        }));
         changed.routesRecalculated = saved.routesRecalculated;
 
         return commandSuccess('Reordered stops.', {

@@ -48,14 +48,37 @@ describe('route leg helpers', () => {
     expect(leg.routeKey).toBe('driving-car:1,2:3,4');
   });
 
-  it('creates stable route keys from coordinates and profile', () => {
+  it('creates a concrete canonical key independent of vehicle property insertion order', () => {
     const input = {
       origin: { lat: 51.50724, lng: -0.12762 },
       target: { lat: 41.00822, lng: 28.97841 },
-      profile: 'driving-car',
+      routingVehicle: resolveVehiclePreset('expedition-truck'),
+      waypoints: [{ lat: 52.1, lng: 1.2 }],
+      ferryPolicy: 'avoid' as const,
+      providerOptions: { avoidFeatures: ['tollways', 'ferries'], preference: 'fastest' },
+      variant: 'alternative-1',
+    };
+    const reorderedVehicle = {
+      restrictions: { axleLoad: 7.5, weight: 15, height: 3.8, width: 2.55, length: 9 },
+      vehicleType: 'hgv' as const,
+      profile: 'driving-hgv' as const,
+      preset: 'expedition-truck' as const,
     };
 
-    expect(createRouteKey(input)).toBe(createRouteKey(input));
+    expect(createRouteKey(input)).toBe(createRouteKey({ ...input, routingVehicle: reorderedVehicle }));
+    expect(JSON.parse(createRouteKey(input))).toEqual({
+      version: 1,
+      origin: { lat: 51.50724, lng: -0.12762 },
+      target: { lat: 41.00822, lng: 28.97841 },
+      waypoints: [{ lat: 52.1, lng: 1.2 }],
+      routingVehicle: {
+        preset: 'expedition-truck', profile: 'driving-hgv', vehicleType: 'hgv',
+        restrictions: { length: 9, width: 2.55, height: 3.8, weight: 15, axleLoad: 7.5 },
+      },
+      ferryPolicy: 'avoid',
+      providerOptions: { avoidFeatures: ['tollways', 'ferries'], preference: 'fastest' },
+      variant: 'alternative-1',
+    });
   });
 
   it('keys vehicle, waypoint and ferry intent', () => {
@@ -76,6 +99,10 @@ describe('route leg helpers', () => {
       waypoints: [{ lat: 57.5948, lng: 9.9796 }],
     }));
     expect(createRouteKey(base)).not.toBe(createRouteKey({ ...base, ferryPolicy: 'avoid' }));
+    expect(createRouteKey(base)).not.toBe(createRouteKey({
+      ...base,
+      providerOptions: { preference: 'fastest' },
+    }));
   });
 
   it('keys optional route variants', () => {

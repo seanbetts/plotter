@@ -16,4 +16,6 @@ export function resolveVehiclePreset(preset: VehiclePreset): TripRoutingVehicle 
   return structuredClone(presets[preset]);
 }
 
-export const standardRoutingVehicle = resolveVehiclePreset('standard');
+const standardVehicle = resolveVehiclePreset('standard');
+Object.freeze(standardVehicle.restrictions);
+export const standardRoutingVehicle = Object.freeze(standardVehicle);
