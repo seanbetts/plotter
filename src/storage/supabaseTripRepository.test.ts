@@ -702,6 +702,57 @@ describe('supabase trip repository mappers', () => {
     expect(remove).toHaveBeenCalledWith(['one.webp']);
   });
 
+  it('applies a stop topology delta through one transactional RPC', async () => {
+    const tripId = crypto.randomUUID();
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 1 });
+    const routeLeg = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id });
+    const rpc = vi.fn(async () => ({ data: [], error: null }));
+    const repository = createSupabaseTripRepository({ rpc } as never, tripId);
+
+    await repository.applyTripMutation({
+      destinationsToUpsert: [origin, target],
+      destinationIdsToDelete: [],
+      routeLegsToUpsert: [routeLeg],
+      routeLegIdsToDelete: ['old-route'],
+    });
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('apply_trip_mutation', {
+      p_trip_id: tripId,
+      p_destinations_to_upsert: [
+        destinationToSupabaseRow(origin, tripId),
+        destinationToSupabaseRow(target, tripId),
+      ],
+      p_destination_ids_to_delete: [],
+      p_route_legs_to_upsert: [routeLegToSupabaseRow(routeLeg, tripId)],
+      p_route_leg_ids_to_delete: ['old-route'],
+    });
+  });
+
+  it('cleans up deleted stop media returned by the mutation RPC without another database request', async () => {
+    const tripId = crypto.randomUUID();
+    const destinationId = crypto.randomUUID();
+    const rpc = vi.fn(async () => ({
+      data: [{ bucket_id: 'trip-media', object_path: 'trip/stop/image.webp' }],
+      error: null,
+    }));
+    const remove = vi.fn(async () => ({ data: null, error: null }));
+    const from = vi.fn(() => ({ remove }));
+    const repository = createSupabaseTripRepository({ rpc, storage: { from } } as never, tripId);
+
+    await repository.applyTripMutation({
+      destinationsToUpsert: [],
+      destinationIdsToDelete: [destinationId],
+      routeLegsToUpsert: [],
+      routeLegIdsToDelete: [],
+    });
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(from).toHaveBeenCalledWith('trip-media');
+    expect(remove).toHaveBeenCalledWith(['trip/stop/image.webp']);
+  });
+
   it('lists activities for a destination ordered by activity order and creation time', async () => {
     const tripId = crypto.randomUUID();
     const destinationId = crypto.randomUUID();

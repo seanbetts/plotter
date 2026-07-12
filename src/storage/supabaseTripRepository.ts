@@ -457,9 +457,10 @@ export function createSupabaseTripRepository(
   tripId: string,
   options: SupabaseTripRepositoryOptions = {},
 ): TripRepository {
-  async function prepareDestinationDeletion(destinationIds: string[]) {
+  async function loadDestinationDeletionObjects(destinationIds: string[]) {
     const uniqueIds = [...new Set(destinationIds)];
-    if (uniqueIds.length === 0) return async () => undefined;
+    const objectPathsByBucketId = new Map<string, string[]>();
+    if (uniqueIds.length === 0) return objectPathsByBucketId;
     const mediaRows = assertNoSupabaseError<SupabaseMediaAssetRow[]>(
       await supabase
         .from('media_assets')
@@ -468,13 +469,19 @@ export function createSupabaseTripRepository(
         .in('destination_id', uniqueIds),
       'Unable to load destination media.',
     );
-    const objectPathsByBucketId = new Map<string, string[]>();
     for (const row of mediaRows) {
       objectPathsByBucketId.set(row.bucket_id, [
         ...(objectPathsByBucketId.get(row.bucket_id) ?? []),
         row.object_path,
       ]);
     }
+    return objectPathsByBucketId;
+  }
+
+  async function prepareDestinationDeletion(destinationIds: string[]) {
+    const uniqueIds = [...new Set(destinationIds)];
+    if (uniqueIds.length === 0) return async () => undefined;
+    const objectPathsByBucketId = await loadDestinationDeletionObjects(uniqueIds);
     return async () => {
       assertSupabaseWriteSucceeded(
         await supabase
@@ -930,6 +937,31 @@ export function createSupabaseTripRepository(
 
     deleteDestinations,
     prepareDestinationDeletion,
+
+    async applyTripMutation(delta) {
+      const deletedMediaObjects = assertNoSupabaseError<Array<Pick<SupabaseMediaAssetRow, 'bucket_id' | 'object_path'>>>(
+        await supabase.rpc('apply_trip_mutation', {
+          p_trip_id: tripId,
+          p_destinations_to_upsert: delta.destinationsToUpsert.map((destination) =>
+            destinationToSupabaseRow(destination, tripId)),
+          p_destination_ids_to_delete: delta.destinationIdsToDelete,
+          p_route_legs_to_upsert: delta.routeLegsToUpsert.map((routeLeg) =>
+            routeLegToSupabaseRow(routeLeg, tripId)),
+          p_route_leg_ids_to_delete: delta.routeLegIdsToDelete,
+        }),
+        'Unable to apply trip mutation.',
+      );
+      const deletionObjects = new Map<string, string[]>();
+      for (const row of deletedMediaObjects) {
+        deletionObjects.set(row.bucket_id, [
+          ...(deletionObjects.get(row.bucket_id) ?? []),
+          row.object_path,
+        ]);
+      }
+      for (const [bucketId, objectPaths] of deletionObjects) {
+        await removeStorageObjectsBestEffort(bucketId, objectPaths);
+      }
+    },
 
     async listActivities(destinationId) {
       return listTripActivities(tripId, destinationId);

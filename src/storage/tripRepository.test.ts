@@ -1124,6 +1124,34 @@ describe('trip repository', () => {
     expect(await repository.listActivityMedia(activity.id)).toEqual([]);
   });
 
+  it('applies a stop topology delta in one local transaction', async () => {
+    const repository = createTestRepository();
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const removed = createDestination({ name: 'Removed', coordinates: { lat: 0, lng: 5 }, order: 1 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
+    const replacementTarget = { ...target, order: 1 };
+    const firstLeg = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: removed.id });
+    const secondLeg = createRouteLeg({ originDestinationId: removed.id, targetDestinationId: target.id });
+    const replacementLeg = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id });
+    await repository.replaceTripData({
+      destinations: [origin, removed, target],
+      routeLegs: [firstLeg, secondLeg],
+    });
+
+    await repository.applyTripMutation({
+      destinationsToUpsert: [replacementTarget],
+      destinationIdsToDelete: [removed.id],
+      routeLegsToUpsert: [replacementLeg],
+      routeLegIdsToDelete: [firstLeg.id, secondLeg.id],
+    });
+
+    expect((await repository.listDestinations()).map(({ id, order }) => ({ id, order }))).toEqual([
+      { id: origin.id, order: 0 },
+      { id: target.id, order: 1 },
+    ]);
+    expect(await repository.listRouteLegs()).toEqual([replacementLeg]);
+  });
+
   it('rejects creating an activity for a missing destination', async () => {
     const repository = createTestRepository();
 

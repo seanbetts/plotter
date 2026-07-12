@@ -86,6 +86,7 @@ function createHarness(overrides?: {
         if (overrides?.deleteDestination) await overrides.deleteDestination(destinationId, persist);
         else await persist();
       },
+      async applyTripMutation() {},
       prepareDestinationDeletion: overrides?.prepareDestinationDeletion,
       async listRouteLegs() {
         return [...data.routeLegs];

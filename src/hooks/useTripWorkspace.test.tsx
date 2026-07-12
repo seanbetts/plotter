@@ -22,6 +22,7 @@ function createRepository(): TripRepository {
     listDestinations: vi.fn(async () => []),
     saveDestination: vi.fn(),
     deleteDestination: vi.fn(),
+    applyTripMutation: vi.fn(),
     listActivities: vi.fn(async () => []),
     createActivity: vi.fn(),
     updateActivity: vi.fn(),

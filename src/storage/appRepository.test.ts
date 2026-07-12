@@ -18,6 +18,7 @@ function createMockRepository(snapshot: {
     listDestinations: vi.fn(async () => snapshot.destinations ?? []),
     saveDestination: vi.fn(),
     deleteDestination: vi.fn(),
+    applyTripMutation: vi.fn(),
     listActivities: vi.fn(async (destinationId: string) =>
       (snapshot.activities ?? []).filter((activity) => activity.destinationId === destinationId),
     ),

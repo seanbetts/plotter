@@ -331,6 +331,7 @@ function TripWorkspace({
     activitiesByDestinationId,
     isLoading,
     error,
+    mutationError,
     addDestination,
     updateDestination,
     deleteDestination,
@@ -350,7 +351,7 @@ function TripWorkspace({
   const [selectedDestinationId, setSelectedDestinationId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [tripConsistencyError, setTripConsistencyError] = useState<string | null>(null);
-  const combinedTripActionError = [tripConsistencyError, tripActionError]
+  const combinedTripActionError = [tripConsistencyError, tripActionError, mutationError]
     .filter((message): message is string => Boolean(message))
     .join(' ') || null;
   const [isStopsPanelCollapsed, setIsStopsPanelCollapsed] = useState(readStopsPanelCollapsedPreference);

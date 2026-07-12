@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, withRoutingAnchor } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
-import type { Destination, RouteLeg, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
+import type { Activity, Destination, RouteLeg, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
 import { createTripRepository } from '../storage/tripRepository';
@@ -60,6 +60,186 @@ describe('useTripData', () => {
     });
 
     expect(result.current.destinations).toEqual([]);
+  });
+
+  it('publishes an inserted stop and pending route legs before route calculation resolves', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 1 });
+    const readyRoute = createReadyRouteLegForVehicle(origin, target, standardRoutingVehicle);
+    const routeResult = createDeferred({
+      distanceKm: 5,
+      travelTimeHours: 1,
+      geometry: { type: 'LineString' as const, coordinates: [[0, 0], [5, 0]] },
+      provider: 'openrouteservice' as const,
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 5 }],
+    });
+    let storedDestinations = [origin, target];
+    let storedRoutes = [readyRoute];
+    const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
+      listDestinations: async () => structuredClone(storedDestinations),
+      listRouteLegs: async () => structuredClone(storedRoutes),
+      saveDestination: async (destination) => {
+        const index = storedDestinations.findIndex(({ id }) => id === destination.id);
+        if (index === -1) storedDestinations.push(destination); else storedDestinations[index] = destination;
+      },
+      saveRouteLeg: async (routeLeg) => {
+        const index = storedRoutes.findIndex(({ id }) => id === routeLeg.id);
+        if (index === -1) storedRoutes.push(routeLeg); else storedRoutes[index] = routeLeg;
+      },
+      deleteRouteLeg: async (routeLegId) => {
+        storedRoutes = storedRoutes.filter(({ id }) => id !== routeLegId);
+      },
+    });
+    const calculateRoute = vi.fn(() => routeResult.promise);
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let addPromise!: Promise<Destination>;
+    await act(async () => {
+      addPromise = result.current.addDestination({ name: 'Middle', coordinates: { lat: 0, lng: 5 } });
+      await Promise.resolve();
+    });
+
+    expect(result.current.destinations.map(({ name }) => name)).toEqual(['Origin', 'Middle', 'Target']);
+    expect(result.current.routeLegs).toHaveLength(2);
+    expect(result.current.routeLegs.every(({ status }) => status === 'pending')).toBe(true);
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      routeResult.resolve();
+      await addPromise;
+    });
+  });
+
+  it('resolves an inserted stop action while route calculation continues in the background', async () => {
+    const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
+    const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 1 });
+    const readyRoute = createReadyRouteLegForVehicle(origin, target, standardRoutingVehicle);
+    const routeResult = createDeferred({
+      distanceKm: 5,
+      travelTimeHours: 1,
+      geometry: { type: 'LineString' as const, coordinates: [[0, 0], [5, 0]] },
+      provider: 'openrouteservice' as const,
+      profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 5 }],
+    });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listDestinations: async () => [origin, target],
+      listRouteLegs: async () => [readyRoute],
+    });
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute: () => routeResult.promise }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let resolvedDestination: Destination | undefined;
+    await act(async () => {
+      void result.current.addDestination({ name: 'Middle', coordinates: { lat: 0, lng: 5 } })
+        .then((destination) => { resolvedDestination = destination; });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(resolvedDestination?.name).toBe('Middle');
+    expect(result.current.routeLegs.every(({ status }) => status === 'pending')).toBe(true);
+
+    await act(async () => {
+      routeResult.resolve();
+      await Promise.resolve();
+    });
+  });
+
+  it('persists a middle insertion with one transaction and only recalculates adjacent legs', async () => {
+    const currentDestinations = Array.from({ length: 23 }, (_, order) => createDestination({
+      name: `Stop ${order}`, coordinates: { lat: 0, lng: order }, order,
+    }));
+    const currentRouteLegs = currentDestinations.slice(0, -1).map((origin, index) =>
+      createReadyRouteLegForVehicle(origin, currentDestinations[index + 1], standardRoutingVehicle));
+    const applyTripMutation = vi.fn<TripRepository['applyTripMutation']>(async () => undefined);
+    const repository = createMemoryRepository(Promise.resolve(currentDestinations), {
+      listDestinations: async () => currentDestinations,
+      listRouteLegs: async () => currentRouteLegs,
+      applyTripMutation,
+    });
+    const calculateRoute = vi.fn(async ({ origin, target }) => ({
+      distanceKm: 1, travelTimeHours: 0.1,
+      geometry: { type: 'LineString' as const, coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]] },
+      provider: 'openrouteservice', profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1 }],
+    }));
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.addDestination({ name: 'Middle', coordinates: { lat: 0, lng: 10.5 } });
+    });
+
+    expect(result.current.destinations).toHaveLength(24);
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
+    expect(calculateRoute).toHaveBeenCalledTimes(2);
+    expect(applyTripMutation).toHaveBeenCalledTimes(1);
+    const [delta] = applyTripMutation.mock.calls[0];
+    expect(delta.routeLegsToUpsert).toHaveLength(2);
+    expect(delta.routeLegIdsToDelete).toHaveLength(1);
+    expect(delta.routeLegsToUpsert.some(({ id }) => currentRouteLegs.some((routeLeg) => routeLeg.id === id))).toBe(false);
+  });
+
+  it('persists a middle deletion with one transaction and only recalculates the joined leg', async () => {
+    const currentDestinations = Array.from({ length: 23 }, (_, order) => createDestination({
+      name: `Stop ${order}`, coordinates: { lat: 0, lng: order }, order,
+    }));
+    const currentRouteLegs = currentDestinations.slice(0, -1).map((origin, index) =>
+      createReadyRouteLegForVehicle(origin, currentDestinations[index + 1], standardRoutingVehicle));
+    const applyTripMutation = vi.fn<TripRepository['applyTripMutation']>(async () => undefined);
+    const repository = createMemoryRepository(Promise.resolve(currentDestinations), {
+      listDestinations: async () => currentDestinations,
+      listRouteLegs: async () => currentRouteLegs,
+      applyTripMutation,
+    });
+    const calculateRoute = vi.fn(async ({ origin, target }) => ({
+      distanceKm: 2, travelTimeHours: 0.2,
+      geometry: { type: 'LineString' as const, coordinates: [[origin.lng, origin.lat], [target.lng, target.lat]] },
+      provider: 'openrouteservice', profile: 'driving-car' as const,
+      sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 2 }],
+    }));
+    const { result } = renderHook(() => useTripData(repository, { calculateRoute }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.deleteDestination(currentDestinations[10].id);
+    });
+
+    expect(result.current.destinations).toHaveLength(22);
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
+    expect(calculateRoute).toHaveBeenCalledTimes(1);
+    expect(applyTripMutation).toHaveBeenCalledTimes(1);
+    const [delta] = applyTripMutation.mock.calls[0];
+    expect(delta.destinationIdsToDelete).toEqual([currentDestinations[10].id]);
+    expect(delta.routeLegsToUpsert).toHaveLength(1);
+    expect(delta.routeLegIdsToDelete).toHaveLength(2);
+  });
+
+  it('queues activity creation behind persistence of its newly inserted stop', async () => {
+    let storedDestinations: Destination[] = [];
+    const createActivity = vi.fn(async (input: Parameters<TripRepository['createActivity']>[0]) => {
+      if (!storedDestinations.some(({ id }) => id === input.destinationId)) throw new Error('Destination not found');
+      return createActivityModel({ ...input, order: input.order ?? 0 });
+    });
+    const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
+      listDestinations: async () => storedDestinations,
+      listRouteLegs: async () => [],
+      saveDestination: async (destination) => { storedDestinations = [destination]; },
+      createActivity,
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let activityPromise!: Promise<Activity>;
+    await act(async () => {
+      const destination = await result.current.addDestination({ name: 'New stop', coordinates: { lat: 1, lng: 1 } });
+      activityPromise = result.current.createActivity({ destinationId: destination.id, title: 'Visit' });
+    });
+    await expect(activityPromise).resolves.toMatchObject({ title: 'Visit' });
+    expect(createActivity).toHaveBeenCalledTimes(1);
   });
 
   it('loads activities for loaded destinations', async () => {
@@ -667,6 +847,7 @@ describe('useTripData', () => {
       originDestinationId = origin.id;
       targetDestinationId = target.id;
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [routeLeg] = result.current.routeLegs;
 
@@ -719,6 +900,7 @@ describe('useTripData', () => {
         coordinates: { lat: 42.4247, lng: 18.7712 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     expect(calculateRoute).toHaveBeenCalledWith({
       origin: { lat: 43.1306, lng: 19.0342 },
@@ -781,6 +963,7 @@ describe('useTripData', () => {
         coordinates: { lat: 42.4247, lng: 18.7712 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [routeLeg] = result.current.routeLegs;
     calculateRoute.mockClear();
@@ -874,6 +1057,7 @@ describe('useTripData', () => {
         coordinates: { lat: 42.4247, lng: 18.7712 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [routeLeg] = result.current.routeLegs;
     calculateRoute.mockClear();
@@ -1055,6 +1239,7 @@ describe('useTripData', () => {
         coordinates: { lat: 42.4247, lng: 18.7712 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [routeLeg] = result.current.routeLegs;
 
@@ -1170,6 +1355,7 @@ describe('useTripData', () => {
         coordinates: { lat: 42.4247, lng: 18.7712 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [routeLeg] = result.current.routeLegs;
 
@@ -1284,6 +1470,7 @@ describe('useTripData', () => {
         coordinates: { lat: 42.4247, lng: 18.7712 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [routeLeg] = result.current.routeLegs;
     calculateRoute.mockClear();
@@ -1370,6 +1557,7 @@ describe('useTripData', () => {
         coordinates: { lat: 42.4247, lng: 18.7712 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [routeLeg] = result.current.routeLegs;
     calculateRoute.mockClear();
@@ -1682,6 +1870,7 @@ describe('useTripData', () => {
         coordinates: { lat: 48.8566, lng: 2.3522 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [balcombe, paris, liseleje] = result.current.destinations;
 
@@ -1861,6 +2050,7 @@ describe('useTripData', () => {
         coordinates: { lat: 10.391, lng: -75.4794 },
       });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     const [routeLeg] = result.current.routeLegs;
 
@@ -2039,6 +2229,7 @@ describe('useTripData', () => {
       await result.current.addDestination({ name: 'One', coordinates: { lat: 1, lng: 1 } });
       await result.current.addDestination({ name: 'Two', coordinates: { lat: 2, lng: 2 } });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     expect(calculateRoute).toHaveBeenCalledWith(expect.objectContaining({
       profile: 'driving-car',
@@ -3041,62 +3232,47 @@ describe('useTripData', () => {
     expect(result.current.routeLegs[0]).toMatchObject({ ferryPolicy: 'avoid', notes: 'New constrained intent.' });
   });
 
-  it('restores destination and route snapshots when a route write fails after destination persistence', async () => {
+  it('rolls an optimistic stop insertion back when the atomic mutation fails', async () => {
     const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53, lng: 8 }, order: 0 });
     const target = createDestination({ name: 'Hamburg', coordinates: { lat: 54, lng: 9 }, order: 1 });
     const priorLeg = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id });
-    let storedDestinations = [origin, target];
-    let storedRoutes = [priorLeg];
-    let failNextRouteSave = true;
-    const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
-      listDestinations: async () => structuredClone([...storedDestinations].sort((left, right) => left.order - right.order)),
-      listRouteLegs: async () => structuredClone(storedRoutes),
-      saveDestination: async (destination) => {
-        const index = storedDestinations.findIndex(({ id }) => id === destination.id);
-        if (index === -1) storedDestinations.push(destination); else storedDestinations[index] = destination;
-      },
-      deleteDestination: async (id) => { storedDestinations = storedDestinations.filter((item) => item.id !== id); },
-      saveRouteLeg: async (leg) => {
-        if (failNextRouteSave) { failNextRouteSave = false; throw new Error('route write failed'); }
-        const index = storedRoutes.findIndex(({ id }) => id === leg.id);
-        if (index === -1) storedRoutes.push(leg); else storedRoutes[index] = leg;
-      },
-      deleteRouteLeg: async (id) => { storedRoutes = storedRoutes.filter((item) => item.id !== id); },
+    const applyTripMutation = vi.fn(async () => {
+      throw new Error('trip mutation failed');
+    });
+    const repository = createMemoryRepository(Promise.resolve([origin, target]), {
+      listDestinations: async () => structuredClone([origin, target]),
+      listRouteLegs: async () => structuredClone([priorLeg]),
+      applyTripMutation,
     });
     const { result } = renderHook(() => useTripData(repository));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
-      await expect(result.current.addDestination({ name: 'Hanover', coordinates: { lat: 53.5, lng: 8.5 } }))
-        .rejects.toThrow(/route write failed.*Previous destination and route snapshots were restored/);
+      await result.current.addDestination({ name: 'Hanover', coordinates: { lat: 53.5, lng: 8.5 } });
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
-    expect(storedDestinations).toEqual([origin, target]);
-    expect(storedRoutes).toEqual([priorLeg]);
+    expect(applyTripMutation).toHaveBeenCalledTimes(1);
+    expect(result.current.mutationError).toBe('trip mutation failed');
     expect(result.current.destinations).toEqual([origin, target]);
     expect(result.current.routeLegs).toEqual([priorLeg]);
   });
 
-  it('keeps UI state and reports destination rollback failures after a destination write rejection', async () => {
+  it('keeps UI state unchanged when an atomic destination update is rejected', async () => {
     const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53, lng: 8 }, order: 0 });
     const target = createDestination({ name: 'Hamburg', coordinates: { lat: 54, lng: 9 }, order: 1 });
     const priorLeg = createRouteLeg({ originDestinationId: origin.id, targetDestinationId: target.id });
-    let saveCount = 0;
     const repository = createMemoryRepository(Promise.resolve([origin, target]), {
       listDestinations: async () => structuredClone([origin, target]),
       listRouteLegs: async () => structuredClone([priorLeg]),
-      saveDestination: async () => {
-        saveCount += 1;
-        if (saveCount === 1) throw new Error('destination write failed');
-        if (saveCount === 2) throw new Error('destination rollback failed');
-      },
+      applyTripMutation: async () => { throw new Error('destination write failed'); },
     });
     const { result } = renderHook(() => useTripData(repository));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
       await expect(result.current.updateDestination(origin.id, { name: 'Updated Bremen' }))
-        .rejects.toThrow(/destination write failed.*Rollback consistency failures.*destination rollback failed/);
+        .rejects.toThrow('destination write failed');
     });
 
     expect(result.current.destinations).toEqual([origin, target]);
@@ -3150,13 +3326,14 @@ describe('useTripData', () => {
       firstProvider.resolve();
       await Promise.all([first, second]);
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     expect([...storedDestinations].sort((left, right) => left.order - right.order).map(({ name }) => name))
       .toEqual(['Origin', 'First insert', 'Second insert', 'Target']);
     expect(result.current.destinations.map(({ name }) => name)).toEqual(['Origin', 'First insert', 'Second insert', 'Target']);
   });
 
-  it('does not run destructive destination cascade when replacement route persistence fails', async () => {
+  it('keeps dependent destination records when the atomic deletion fails', async () => {
     const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
     const removed = createDestination({ name: 'Removed', coordinates: { lat: 0, lng: 5 }, order: 1 });
     const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
@@ -3172,21 +3349,24 @@ describe('useTripData', () => {
     const repository = createMemoryRepository(Promise.resolve([origin, removed, target]), {
       listDestinations: async () => [origin, removed, target],
       listRouteLegs: async () => routes,
-      saveRouteLeg: async () => { throw new Error('replacement route failed'); },
+      applyTripMutation: async () => { throw new Error('replacement route failed'); },
       deleteDestination,
     });
     const { result } = renderHook(() => useTripData(repository));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
-      await expect(result.current.deleteDestination(removed.id)).rejects.toThrow('replacement route failed');
+      await result.current.deleteDestination(removed.id);
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
     expect(deleteDestination).not.toHaveBeenCalled();
     expect(dependentRecords).toEqual({ activities: ['activity-1'], activityMedia: ['media-1'] });
+    expect(result.current.destinations).toEqual([origin, removed, target]);
+    expect(result.current.mutationError).toBe('replacement route failed');
   });
 
-  it('compensates prior topology and routes when prepared destination commit rejects', async () => {
+  it('does not issue partial writes when an atomic destination deletion rejects', async () => {
     const origin = createDestination({ name: 'Origin', coordinates: { lat: 0, lng: 0 }, order: 0 });
     const removed = createDestination({ name: 'Removed', coordinates: { lat: 0, lng: 5 }, order: 1 });
     const target = createDestination({ name: 'Target', coordinates: { lat: 0, lng: 10 }, order: 2 });
@@ -3195,32 +3375,31 @@ describe('useTripData', () => {
       createRouteLeg({ originDestinationId: origin.id, targetDestinationId: removed.id }),
       createRouteLeg({ originDestinationId: removed.id, targetDestinationId: target.id }),
     ];
-    const storedDestinations = structuredClone(priorDestinations);
-    let storedRoutes = structuredClone(priorRoutes);
+    const saveDestination = vi.fn(async () => undefined);
+    const saveRouteLeg = vi.fn(async () => undefined);
+    const deleteRouteLeg = vi.fn(async () => undefined);
+    const deleteDestination = vi.fn(async () => undefined);
     const repository = createMemoryRepository(Promise.resolve(priorDestinations), {
-      listDestinations: async () => structuredClone([...storedDestinations].sort((left, right) => left.order - right.order)),
-      listRouteLegs: async () => structuredClone(storedRoutes),
-      saveDestination: async (destination) => {
-        const index = storedDestinations.findIndex(({ id }) => id === destination.id);
-        if (index === -1) storedDestinations.push(destination); else storedDestinations[index] = destination;
-      },
-      saveRouteLeg: async (routeLeg) => {
-        const index = storedRoutes.findIndex(({ id }) => id === routeLeg.id);
-        if (index === -1) storedRoutes.push(routeLeg); else storedRoutes[index] = routeLeg;
-      },
-      deleteRouteLeg: async (id) => { storedRoutes = storedRoutes.filter((routeLeg) => routeLeg.id !== id); },
-      prepareDestinationDeletion: async () => async () => { throw new Error('destination commit failed'); },
+      listDestinations: async () => structuredClone(priorDestinations),
+      listRouteLegs: async () => structuredClone(priorRoutes),
+      saveDestination,
+      saveRouteLeg,
+      deleteRouteLeg,
+      deleteDestination,
+      applyTripMutation: async () => { throw new Error('destination commit failed'); },
     });
     const { result } = renderHook(() => useTripData(repository));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     await act(async () => {
-      await expect(result.current.deleteDestination(removed.id))
-        .rejects.toThrow(/destination commit failed.*Previous destination and route snapshots were restored/);
+      await result.current.deleteDestination(removed.id);
     });
+    await waitFor(() => expect(result.current.isMutatingStops).toBe(false));
 
-    expect([...storedDestinations].sort((left, right) => left.order - right.order)).toEqual(priorDestinations);
-    expect(storedRoutes).toEqual(priorRoutes);
+    expect(saveDestination).not.toHaveBeenCalled();
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+    expect(deleteRouteLeg).not.toHaveBeenCalled();
+    expect(deleteDestination).not.toHaveBeenCalled();
     expect(result.current.destinations).toEqual(priorDestinations);
     expect(result.current.routeLegs).toEqual(priorRoutes);
   });
@@ -3803,6 +3982,13 @@ function createMemoryRepository(
     async saveRouteLeg() {},
 
     async deleteRouteLeg() {},
+
+    async applyTripMutation(delta) {
+      for (const routeLegId of delta.routeLegIdsToDelete) await this.deleteRouteLeg(routeLegId);
+      for (const destination of delta.destinationsToUpsert) await this.saveDestination(destination);
+      for (const routeLeg of delta.routeLegsToUpsert) await this.saveRouteLeg(routeLeg);
+      for (const destinationId of delta.destinationIdsToDelete) await this.deleteDestination(destinationId);
+    },
 
     async replaceTripData() {},
   } satisfies TripRepository & { destinationListCalls: number };

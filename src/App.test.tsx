@@ -131,6 +131,20 @@ const repositoryMock = vi.hoisted(() => {
         (leg) => leg.originDestinationId !== destinationId && leg.targetDestinationId !== destinationId,
       );
     }),
+    applyTripMutation: vi.fn<TripRepository['applyTripMutation']>(async (delta) => {
+      const destinationIdsToDelete = new Set(delta.destinationIdsToDelete);
+      const routeLegIdsToDelete = new Set(delta.routeLegIdsToDelete);
+      repository.destinations = repository.destinations.filter(({ id }) => !destinationIdsToDelete.has(id));
+      repository.routeLegs = repository.routeLegs.filter(({ id }) => !routeLegIdsToDelete.has(id));
+      for (const destination of delta.destinationsToUpsert) {
+        const index = repository.destinations.findIndex(({ id }) => id === destination.id);
+        if (index === -1) repository.destinations.push(destination); else repository.destinations[index] = destination;
+      }
+      for (const routeLeg of delta.routeLegsToUpsert) {
+        const index = repository.routeLegs.findIndex(({ id }) => id === routeLeg.id);
+        if (index === -1) repository.routeLegs.push(routeLeg); else repository.routeLegs[index] = routeLeg;
+      }
+    }),
     listActivities: vi.fn<TripRepository['listActivities']>(async () => []),
     createActivity: vi.fn(async (input: CreateActivityInput): Promise<Activity> => ({
       id: 'activity-mock',
@@ -406,6 +420,21 @@ describe('App', () => {
       if (index === -1) repositoryMock.destinations.push(destination); else repositoryMock.destinations[index] = destination;
     });
     repositoryMock.deleteDestination.mockClear();
+    repositoryMock.applyTripMutation.mockClear();
+    repositoryMock.applyTripMutation.mockImplementation(async (delta) => {
+      const destinationIdsToDelete = new Set(delta.destinationIdsToDelete);
+      const routeLegIdsToDelete = new Set(delta.routeLegIdsToDelete);
+      repositoryMock.destinations = repositoryMock.destinations.filter(({ id }) => !destinationIdsToDelete.has(id));
+      repositoryMock.routeLegs = repositoryMock.routeLegs.filter(({ id }) => !routeLegIdsToDelete.has(id));
+      for (const destination of delta.destinationsToUpsert) {
+        const index = repositoryMock.destinations.findIndex(({ id }) => id === destination.id);
+        if (index === -1) repositoryMock.destinations.push(destination); else repositoryMock.destinations[index] = destination;
+      }
+      for (const routeLeg of delta.routeLegsToUpsert) {
+        const index = repositoryMock.routeLegs.findIndex(({ id }) => id === routeLeg.id);
+        if (index === -1) repositoryMock.routeLegs.push(routeLeg); else repositoryMock.routeLegs[index] = routeLeg;
+      }
+    });
     repositoryMock.listActivities.mockClear();
     repositoryMock.listActivities.mockImplementation(async () => []);
     repositoryMock.createActivity.mockClear();
@@ -1752,7 +1781,7 @@ describe('App', () => {
     });
   });
 
-  it('hides an open route alternatives panel while trip data reloads in the loading state', async () => {
+  it('keeps an open route alternatives panel usable during a background realtime reload', async () => {
     const user = userEvent.setup();
     const tripDataChanges: Array<() => void> = [];
     const reloadDestinations = createDeferred<Destination[]>();
@@ -1816,8 +1845,8 @@ describe('App', () => {
       tripDataChanges[0]?.();
     });
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Loading Plotter');
-    expect(screen.queryByRole('dialog', { name: 'Edit route from Paris to Rome' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Edit route from Paris to Rome' })).toBeInTheDocument();
 
     await act(async () => {
       reloadDestinations.resolve(repositoryMock.destinations);
@@ -1827,7 +1856,7 @@ describe('App', () => {
     });
 
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
-    expect(screen.queryByRole('dialog', { name: 'Edit route from Paris to Rome' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Edit route from Paris to Rome' })).toBeInTheDocument();
   });
 
   it('remembers when the stops panel is collapsed', async () => {
@@ -2030,10 +2059,11 @@ describe('App', () => {
 
   it('does not create duplicate map stops from rapid Add stop clicks', async () => {
     const user = userEvent.setup();
-    const saveDestination = createDeferred<void>();
-    repositoryMock.saveDestination.mockImplementation(async (destination: Destination) => {
-      repositoryMock.destinations.push(destination);
-      await saveDestination.promise;
+    const mutation = createDeferred<void>();
+    const applyMutation = repositoryMock.applyTripMutation.getMockImplementation()!;
+    repositoryMock.applyTripMutation.mockImplementation(async (delta) => {
+      await applyMutation(delta);
+      await mutation.promise;
     });
     vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
       createPlaceSearchResult({
@@ -2053,25 +2083,13 @@ describe('App', () => {
     const addButton = await screen.findByRole('button', { name: 'Add stop' });
     await waitFor(() => expect(addButton).toBeEnabled());
     await user.click(addButton);
-    expect(addButton).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-    await user.click(addButton);
-
-    expect(repositoryMock.saveDestination).toHaveBeenCalledTimes(1);
-
-    const wasNotCanceled = fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
-    expect(wasNotCanceled).toBe(false);
-    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toBeInTheDocument();
-
-    await openContextMenuMapStop({ lat: 48.8566, lng: 2.3522 });
-
-    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).toHaveTextContent('Balcombe');
-    expect(screen.getByRole('dialog', { name: 'Add stop from map' })).not.toHaveTextContent('Paris');
+    expect(screen.queryByRole('dialog', { name: 'Add stop from map' })).not.toBeInTheDocument();
+    expect(repositoryMock.applyTripMutation).toHaveBeenCalledTimes(1);
     expect(resolveMapTilerCoordinates).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      saveDestination.resolve(undefined);
-      await saveDestination.promise;
+      mutation.resolve(undefined);
+      await mutation.promise;
     });
     expect(await screen.findByRole('complementary', { name: 'Balcombe profile' })).toBeInTheDocument();
   });
@@ -2859,22 +2877,24 @@ describe('App', () => {
       { lat: 51.1091, lng: -0.1872 },
       { apiKey: expect.any(String), profile: 'stop' },
     );
-    await waitFor(() =>
-      expect(repositoryMock.saveDestination).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: destination.id,
-          coordinates: { lat: 51.1091, lng: -0.1872 },
-          countryRegion: 'United Kingdom',
-          location: expect.objectContaining({
-            placeName: 'Crawley',
-            regionName: 'West Sussex',
-            countryName: 'United Kingdom',
-            sourceProvider: 'maptiler',
-            sourceFeatureId: 'place-crawley',
+    await waitFor(() => expect(repositoryMock.applyTripMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destinationsToUpsert: expect.arrayContaining([
+          expect.objectContaining({
+            id: destination.id,
+            coordinates: { lat: 51.1091, lng: -0.1872 },
+            countryRegion: 'United Kingdom',
+            location: expect.objectContaining({
+              placeName: 'Crawley',
+              regionName: 'West Sussex',
+              countryName: 'United Kingdom',
+              sourceProvider: 'maptiler',
+              sourceFeatureId: 'place-crawley',
+            }),
           }),
-        }),
-      ),
-    );
+        ]),
+      }),
+    ));
   });
 
   it('reverse geocodes coordinate edits for an existing activity location', async () => {

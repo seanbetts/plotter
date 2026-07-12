@@ -9,7 +9,7 @@ import {
 import { createRouteLeg } from '../domain/routeLegs';
 import type { Activity, Coordinates, Destination, DestinationLocation, RouteCalculationMode, RouteLeg, RouteMovement, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
-import type { TripRepository } from '../storage/tripRepository';
+import type { TripMutationDelta, TripRepository } from '../storage/tripRepository';
 import {
   calculateAutomaticRouteLegs,
   createRouteResultFingerprint,
@@ -43,12 +43,80 @@ type ApplyValidatedRouteLegResultInput = {
   }>;
 };
 
+type DestinationRecipe = (currentDestinations: Destination[]) => Destination[];
+
+type PendingTopologyMutation = {
+  id: number;
+  destinationIds: string[];
+  applyRecipe: DestinationRecipe;
+  fallbackDestinations: Destination[];
+  fallbackRouteLegs: RouteLeg[];
+  rollbackActivities: () => void;
+};
+
+class TripMutationPersistenceError extends Error {
+  constructor(
+    message: string,
+    readonly priorDestinations: Destination[],
+    readonly priorRouteLegs: RouteLeg[],
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
+
 const createTimestamp = () => new Date().toISOString();
 const allRouteMutationsQueueKey = '__all_route_mutations__';
 
 function changedDestinationsByReference(currentDestinations: Destination[], nextDestinations: Destination[]) {
   const currentById = new Map(currentDestinations.map((destination) => [destination.id, destination]));
   return nextDestinations.filter((destination) => currentById.get(destination.id) !== destination);
+}
+
+function createTripMutationDelta(input: {
+  priorDestinations: Destination[];
+  nextDestinations: Destination[];
+  priorRouteLegs: RouteLeg[];
+  nextRouteLegs: RouteLeg[];
+}): TripMutationDelta {
+  const priorDestinationById = new Map(input.priorDestinations.map((destination) => [destination.id, destination]));
+  const nextDestinationIds = new Set(input.nextDestinations.map(({ id }) => id));
+  const priorRouteLegById = new Map(input.priorRouteLegs.map((routeLeg) => [routeLeg.id, routeLeg]));
+  const nextRouteLegIds = new Set(input.nextRouteLegs.map(({ id }) => id));
+
+  return {
+    destinationsToUpsert: input.nextDestinations.filter(
+      (destination) => priorDestinationById.get(destination.id) !== destination,
+    ),
+    destinationIdsToDelete: input.priorDestinations
+      .filter(({ id }) => !nextDestinationIds.has(id))
+      .map(({ id }) => id),
+    routeLegsToUpsert: input.nextRouteLegs.filter(
+      (routeLeg) => priorRouteLegById.get(routeLeg.id) !== routeLeg,
+    ),
+    routeLegIdsToDelete: input.priorRouteLegs
+      .filter(({ id }) => !nextRouteLegIds.has(id))
+      .map(({ id }) => id),
+  };
+}
+
+function projectTopologyMutations(input: {
+  destinations: Destination[];
+  routeLegs: RouteLeg[];
+  pendingMutations: PendingTopologyMutation[];
+  routingVehicle: TripRoutingVehicle;
+}) {
+  let destinations = input.destinations;
+  let routeLegs = input.routeLegs;
+  for (const mutation of input.pendingMutations) {
+    destinations = mutation.applyRecipe(destinations);
+    routeLegs = planRouteLegReconciliation({
+      destinations,
+      currentRouteLegs: routeLegs,
+      routingVehicle: input.routingVehicle,
+    }).routeLegs;
+  }
+  return { destinations, routeLegs };
 }
 
 function entityRevisionsMatch<T extends { id: string; updatedAt: string }>(
@@ -176,12 +244,18 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const [activitiesByDestinationId, setActivitiesByDestinationId] = useState<Record<string, Activity[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [pendingTopologyMutationCount, setPendingTopologyMutationCount] = useState(0);
   const destinationsRef = useRef<Destination[]>([]);
   const routeLegsRef = useRef<RouteLeg[]>([]);
   const activitiesByDestinationIdRef = useRef<Record<string, Activity[]>>({});
   const isMountedRef = useRef(false);
   const activeRepositoryTokenRef = useRef<object | null>(null);
   const reloadSequenceRef = useRef(0);
+  const pendingTopologyMutationsRef = useRef<PendingTopologyMutation[]>([]);
+  const nextTopologyMutationIdRef = useRef(0);
+  const deferredReloadRef = useRef(false);
+  const hasCompletedInitialLoadRef = useRef(false);
   const routeLegMutationQueuesByGenerationRef = useRef(
     new Map<object, Map<string, Promise<void>>>(),
   );
@@ -280,6 +354,12 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   useLayoutEffect(() => {
     activeRepositoryTokenRef.current = repositoryToken;
     reloadSequenceRef.current += 1;
+    pendingTopologyMutationsRef.current = [];
+    setPendingTopologyMutationCount(0);
+    deferredReloadRef.current = false;
+    hasCompletedInitialLoadRef.current = false;
+    setIsLoading(true);
+    setMutationError(null);
 
     return () => {
       if (activeRepositoryTokenRef.current === repositoryToken) {
@@ -303,7 +383,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     const isCurrentReload = () =>
       isActiveGeneration(generation) && reloadSequenceRef.current === sequence;
 
-    setIsLoading(true);
+    const isInitialLoad = !hasCompletedInitialLoadRef.current;
+    if (isInitialLoad) setIsLoading(true);
     setError(null);
     try {
       const [initialDestinations, initialRouteLegs] = await Promise.all([
@@ -357,6 +438,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
     if (!isCurrentReload()) return;
 
+    hasCompletedInitialLoadRef.current = true;
     setIsLoading(false);
   }, [
     enqueueRouteLegMutations,
@@ -368,91 +450,127 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   ]);
 
   const reload = useCallback(async () => {
+    if (pendingTopologyMutationsRef.current.length > 0) {
+      deferredReloadRef.current = true;
+      return;
+    }
     await startReload(repositoryToken);
   }, [repositoryToken, startReload]);
 
+  const applyDestinationRecipe = useCallback(
+    async (applyRecipe: DestinationRecipe, generation: object) => {
+      const [loadedDestinations, loadedRouteLegs] = await Promise.all([
+        repository.listDestinations(),
+        repository.listRouteLegs(),
+      ]);
+      const priorDestinations = loadedDestinations;
+      const priorRouteLegs = loadedRouteLegs;
+      if (!isActiveGeneration(generation)) {
+        return { priorDestinations, priorRouteLegs, destinations: priorDestinations, routeLegs: priorRouteLegs };
+      }
+      const nextDestinations = applyRecipe(loadedDestinations);
+      const currentVehicle = routingVehicleRef.current;
+      const planned = planRouteLegReconciliation({
+        destinations: nextDestinations,
+        currentRouteLegs: loadedRouteLegs,
+        routingVehicle: currentVehicle,
+      });
+      const calculation = await calculateAutomaticRouteLegs({
+        destinations: nextDestinations,
+        routeLegs: planned.routeLegs,
+        routingVehicle: currentVehicle,
+        calculateRoute,
+      });
+      if (!isActiveGeneration(generation)) {
+        return { priorDestinations, priorRouteLegs, destinations: priorDestinations, routeLegs: priorRouteLegs };
+      }
+      try {
+        await repository.applyTripMutation(createTripMutationDelta({
+          priorDestinations,
+          nextDestinations: calculation.destinations,
+          priorRouteLegs,
+          nextRouteLegs: calculation.routeLegs,
+        }));
+      } catch (caught) {
+        throw new TripMutationPersistenceError(
+          caught instanceof Error ? caught.message : 'Unable to apply trip mutation',
+          priorDestinations,
+          priorRouteLegs,
+          { cause: caught },
+        );
+      }
+      return {
+        priorDestinations,
+        priorRouteLegs,
+        destinations: calculation.destinations,
+        routeLegs: calculation.routeLegs,
+      };
+    },
+    [calculateRoute, isActiveGeneration, repository],
+  );
+
   const reconcilePersistedRouteLegs = useCallback(
-    (applyRecipe: (currentDestinations: Destination[]) => Destination[]) => {
+    (applyRecipe: DestinationRecipe) => {
       const generation = repositoryToken;
       return enqueueRouteLegMutations([], async () => {
-        if (!isActiveGeneration(generation)) return { destinations: destinationsRef.current, routeLegs: routeLegsRef.current };
-
-        const [loadedDestinations, loadedRouteLegs] = await Promise.all([
-          repository.listDestinations(),
-          repository.listRouteLegs(),
-        ]);
-        const priorDestinations = structuredClone(loadedDestinations);
-        const persistedRouteLegs = structuredClone(loadedRouteLegs);
-        if (!isActiveGeneration(generation)) return { destinations: destinationsRef.current, routeLegs: routeLegsRef.current };
-        const nextDestinations = applyRecipe(priorDestinations);
-        const currentVehicle = routingVehicleRef.current;
-        const planned = planRouteLegReconciliation({
-          destinations: nextDestinations,
-          currentRouteLegs: persistedRouteLegs,
-          routingVehicle: currentVehicle,
-        });
-        const calculation = await calculateAutomaticRouteLegs({
-          destinations: nextDestinations,
-          routeLegs: planned.routeLegs,
-          routingVehicle: currentVehicle,
-          calculateRoute,
-        });
-        const calculatedDestinations = calculation.destinations;
-        const nextRouteLegs = calculation.routeLegs;
-        const destinationsToSave = changedDestinationsByReference(priorDestinations, calculatedDestinations);
-        const nextDestinationIds = new Set(calculatedDestinations.map(({ id }) => id));
-        const nextRouteLegIds = new Set(nextRouteLegs.map(({ id }) => id));
-        const removedDestinationIds = priorDestinations
-          .filter(({ id }) => !nextDestinationIds.has(id))
-          .map(({ id }) => id);
-        const commitDestinationDeletion = repository.prepareDestinationDeletion
-          ? await repository.prepareDestinationDeletion(removedDestinationIds)
-          : async () => {
-              if (repository.deleteDestinations) await repository.deleteDestinations(removedDestinationIds);
-              else for (const destinationId of removedDestinationIds) await repository.deleteDestination(destinationId);
-            };
-
-        try {
-          for (const destination of destinationsToSave) await repository.saveDestination(destination);
-          for (const routeLeg of persistedRouteLegs) {
-            if (!nextRouteLegIds.has(routeLeg.id)) await repository.deleteRouteLeg(routeLeg.id);
-          }
-          for (const routeLeg of nextRouteLegs) await repository.saveRouteLeg(routeLeg);
-          await commitDestinationDeletion();
-        } catch (caught) {
-          const primaryMessage = caught instanceof Error ? caught.message : 'Unknown trip storage error';
-          const priorDestinationIds = new Set(priorDestinations.map(({ id }) => id));
-          const priorRouteLegIds = new Set(persistedRouteLegs.map(({ id }) => id));
-          const rollbackOperations: Array<{ label: string; operation: () => Promise<void> }> = [
-            ...nextDestinations
-              .filter(({ id }) => !priorDestinationIds.has(id))
-              .map(({ id }) => ({ label: `destination ${id} removal`, operation: () => repository.deleteDestination(id) })),
-            ...priorDestinations.map((destination) => ({
-              label: `destination ${destination.id} restore`, operation: () => repository.saveDestination(destination),
-            })),
-            ...nextRouteLegs
-              .filter(({ id }) => !priorRouteLegIds.has(id))
-              .map(({ id }) => ({ label: `route ${id} removal`, operation: () => repository.deleteRouteLeg(id) })),
-            ...persistedRouteLegs.map((routeLeg) => ({
-              label: `route ${routeLeg.id} restore`, operation: () => repository.saveRouteLeg(routeLeg),
-            })),
-          ];
-          const rollbackFailures: string[] = [];
-          for (const { label, operation } of rollbackOperations) {
-            try { await operation(); } catch (rollbackError) {
-              rollbackFailures.push(`${label}: ${rollbackError instanceof Error ? rollbackError.message : 'Unknown rollback error'}`);
-            }
-          }
-          const rollbackMessage = rollbackFailures.length > 0
-            ? `Rollback consistency failures: ${rollbackFailures.join('; ')}`
-            : 'Previous destination and route snapshots were restored.';
-          throw new Error(`Unable to persist trip snapshot: ${primaryMessage}. ${rollbackMessage}`, { cause: caught });
-        }
-        return { destinations: calculatedDestinations, routeLegs: nextRouteLegs };
+        const result = await applyDestinationRecipe(applyRecipe, generation);
+        return { destinations: result.destinations, routeLegs: result.routeLegs };
       });
     },
-    [calculateRoute, enqueueRouteLegMutations, isActiveGeneration, repository, repositoryToken],
+    [applyDestinationRecipe, enqueueRouteLegMutations, repositoryToken],
   );
+
+  const queueTopologyMutation = useCallback((operation: PendingTopologyMutation) => {
+    const generation = repositoryToken;
+    void enqueueRouteLegMutations([], async () => {
+      let baseDestinations: Destination[];
+      let baseRouteLegs: RouteLeg[];
+      try {
+        const result = await applyDestinationRecipe(operation.applyRecipe, generation);
+        baseDestinations = result.destinations;
+        baseRouteLegs = result.routeLegs;
+      } catch (caught) {
+        baseDestinations = caught instanceof TripMutationPersistenceError
+          ? caught.priorDestinations
+          : operation.fallbackDestinations;
+        baseRouteLegs = caught instanceof TripMutationPersistenceError
+          ? caught.priorRouteLegs
+          : operation.fallbackRouteLegs;
+        operation.rollbackActivities();
+        if (isActiveGeneration(generation)) {
+          setMutationError(caught instanceof Error ? caught.message : 'Unable to save stop changes');
+        }
+      }
+
+      pendingTopologyMutationsRef.current = pendingTopologyMutationsRef.current.filter(
+        ({ id }) => id !== operation.id,
+      );
+      setPendingTopologyMutationCount(pendingTopologyMutationsRef.current.length);
+      if (!isActiveGeneration(generation)) return;
+
+      const projected = projectTopologyMutations({
+        destinations: baseDestinations,
+        routeLegs: baseRouteLegs,
+        pendingMutations: pendingTopologyMutationsRef.current,
+        routingVehicle: routingVehicleRef.current,
+      });
+      replaceDestinations(projected.destinations);
+      replaceRouteLegs(projected.routeLegs);
+
+      if (pendingTopologyMutationsRef.current.length === 0 && deferredReloadRef.current) {
+        deferredReloadRef.current = false;
+        queueMicrotask(() => { void startReload(generation); });
+      }
+    });
+  }, [
+    applyDestinationRecipe,
+    enqueueRouteLegMutations,
+    isActiveGeneration,
+    replaceDestinations,
+    replaceRouteLegs,
+    repositoryToken,
+    startReload,
+  ]);
 
   useEffect(() => {
     const generation = repositoryToken;
@@ -481,21 +599,44 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
             order: 0,
           });
           if (!isActiveAction()) return destination;
-          const persisted = await reconcilePersistedRouteLegs((currentDestinations) => {
+          const priorDestinations = destinationsRef.current;
+          const priorRouteLegs = routeLegsRef.current;
+          const applyInsertion = (currentDestinations: Destination[]) => {
             const insertionIndex = findBestDestinationInsertionIndex(currentDestinations, input.coordinates);
             const nextDestinations = [...currentDestinations];
             nextDestinations.splice(insertionIndex, 0, destination);
             return nextDestinations.map((nextDestination, order) =>
               nextDestination.order === order ? nextDestination : patchDestination(nextDestination, { order }));
+          };
+          const optimisticDestinations = applyInsertion(priorDestinations);
+          const optimisticPlan = planRouteLegReconciliation({
+            destinations: optimisticDestinations,
+            currentRouteLegs: priorRouteLegs,
+            routingVehicle: routingVehicleRef.current,
           });
-          if (!isActiveAction()) return destination;
-
-          replaceDestinations(persisted.destinations);
+          setMutationError(null);
+          replaceDestinations(optimisticDestinations);
           updateActivitiesByDestinationId((current) => ({
             ...current,
             [destination.id]: current[destination.id] ?? [],
           }));
-          replaceRouteLegs(persisted.routeLegs);
+          replaceRouteLegs(optimisticPlan.routeLegs);
+          const operation: PendingTopologyMutation = {
+            id: nextTopologyMutationIdRef.current + 1,
+            destinationIds: [destination.id],
+            applyRecipe: applyInsertion,
+            fallbackDestinations: priorDestinations,
+            fallbackRouteLegs: priorRouteLegs,
+            rollbackActivities: () => updateActivitiesByDestinationId((current) => {
+              const remaining = { ...current };
+              delete remaining[destination.id];
+              return remaining;
+            }),
+          };
+          nextTopologyMutationIdRef.current = operation.id;
+          pendingTopologyMutationsRef.current = [...pendingTopologyMutationsRef.current, operation];
+          setPendingTopologyMutationCount(pendingTopologyMutationsRef.current.length);
+          queueTopologyMutation(operation);
           return destination;
         },
 
@@ -521,20 +662,45 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
         async deleteDestination(destinationId: string) {
           if (!isActiveAction()) return;
-
-          const persisted = await reconcilePersistedRouteLegs((currentDestinations) =>
+          const priorDestinations = destinationsRef.current;
+          const priorRouteLegs = routeLegsRef.current;
+          const deletedActivities = activitiesByDestinationIdRef.current[destinationId];
+          const applyDeletion = (currentDestinations: Destination[]) =>
             currentDestinations
               .filter((destination) => destination.id !== destinationId)
-              .map((destination, order) => destination.order === order ? destination : patchDestination(destination, { order })));
-          if (!isActiveAction()) return;
-
-          replaceDestinations(persisted.destinations);
+              .map((destination, order) => destination.order === order ? destination : patchDestination(destination, { order }));
+          const optimisticDestinations = applyDeletion(priorDestinations);
+          const optimisticPlan = planRouteLegReconciliation({
+            destinations: optimisticDestinations,
+            currentRouteLegs: priorRouteLegs,
+            routingVehicle: routingVehicleRef.current,
+          });
+          setMutationError(null);
+          replaceDestinations(optimisticDestinations);
           updateActivitiesByDestinationId((current) => {
             const remaining = { ...current };
             delete remaining[destinationId];
             return remaining;
           });
-          replaceRouteLegs(persisted.routeLegs);
+          replaceRouteLegs(optimisticPlan.routeLegs);
+          const operation: PendingTopologyMutation = {
+            id: nextTopologyMutationIdRef.current + 1,
+            destinationIds: [destinationId],
+            applyRecipe: applyDeletion,
+            fallbackDestinations: priorDestinations,
+            fallbackRouteLegs: priorRouteLegs,
+            rollbackActivities: () => {
+              if (!deletedActivities) return;
+              updateActivitiesByDestinationId((current) => ({
+                ...current,
+                [destinationId]: deletedActivities,
+              }));
+            },
+          };
+          nextTopologyMutationIdRef.current = operation.id;
+          pendingTopologyMutationsRef.current = [...pendingTopologyMutationsRef.current, operation];
+          setPendingTopologyMutationCount(pendingTopologyMutationsRef.current.length);
+          queueTopologyMutation(operation);
         },
 
         async reorderDestinations(destinationIds: string[]) {
@@ -799,7 +965,12 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         }) {
           if (!isActiveAction()) return createActivityModel(input);
 
-          const activity = await repository.createActivity(input);
+          const create = () => repository.createActivity(input);
+          const activity = pendingTopologyMutationsRef.current.some(
+            ({ destinationIds }) => destinationIds.includes(input.destinationId),
+          )
+            ? await enqueueRouteLegMutations([], create)
+            : await create();
           if (!isActiveAction()) return activity;
 
           updateActivitiesByDestinationId((current) => ({
@@ -942,6 +1113,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       enqueueRouteLegMutation,
       enqueueRouteLegMutations,
       isActiveGeneration,
+      queueTopologyMutation,
       reconcilePersistedRouteLegs,
       reload,
       replaceDestinations,
@@ -959,6 +1131,8 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     activitiesByDestinationId,
     isLoading,
     error,
+    mutationError,
+    isMutatingStops: pendingTopologyMutationCount > 0,
     ...actions,
   };
 }

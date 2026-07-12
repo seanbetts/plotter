@@ -73,6 +73,8 @@ function createTripRepository(overrides: Partial<TripRepository> = {}) {
 
     async deleteDestination() {},
 
+    async applyTripMutation() {},
+
     listActivities: vi.fn(async () => []),
 
     createActivity: vi.fn(),
