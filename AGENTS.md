@@ -13,6 +13,14 @@
 - Keep normal app storage and e2e storage separate.
 - E2e runs must use `VITE_TRIP_STORAGE=e2e-local` so they do not depend on Supabase auth, rate limits, or the personal trip state.
 
+## Permanent Local Hosting
+
+- `npm run dev` remains loopback development only.
+- Permanent hosting builds the committed revision with `VITE_PUBLIC_BASE_PATH=/plotter/`.
+- Caddy serves `dist`, so no persistent Node process is required.
+- `SERPAPI_API_KEY` is not a browser build variable.
+- Trip data reads and writes still use the existing `npm run trip -- <command>` CLI.
+
 ## Debugging And Verification
 
 - For UI issues, verify the rendered app in a browser before drawing conclusions from code alone.

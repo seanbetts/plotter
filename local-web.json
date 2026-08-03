@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "plotter",
+  "title": "Plotter",
+  "route": "/plotter",
+  "kind": "static",
+  "build": {
+    "commands": [
+      ["npm", "ci"],
+      ["npm", "run", "build"]
+    ],
+    "output": "dist",
+    "environment": [
+      "VITE_PUBLIC_BASE_PATH",
+      "VITE_MAPTILER_API_KEY",
+      "VITE_OPENROUTESERVICE_API_KEY",
+      "VITE_SUPABASE_URL",
+      "VITE_SUPABASE_PUBLISHABLE_KEY",
+      "VITE_TRIP_STORAGE"
+    ]
+  },
+  "healthPath": "/plotter/"
+}
