@@ -19,5 +19,9 @@
       "VITE_TRIP_STORAGE"
     ]
   },
-  "healthPath": "/plotter/"
+  "healthPath": "/plotter/",
+  "home": {
+    "icon": "route",
+    "accent": "#75A7FF"
+  }
 }
