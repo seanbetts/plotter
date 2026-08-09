@@ -42,6 +42,73 @@ function expectBoxInsideBox(inner: Box, outer: Box) {
   expect(inner.y + inner.height).toBeLessThanOrEqual(outer.y + outer.height + 1);
 }
 
+function expectBoxesNotToOverlap(first: Box, second: Box) {
+  const overlapsHorizontally = first.x < second.x + second.width
+    && first.x + first.width > second.x;
+  const overlapsVertically = first.y < second.y + second.height
+    && first.y + first.height > second.y;
+  expect(overlapsHorizontally && overlapsVertically).toBe(false);
+}
+
+async function openPopulatedRouteAlternatives(page: Page) {
+  const places = {
+    Paris: {
+      id: 'place.paris',
+      text: 'Paris',
+      place_name: 'Paris, France',
+      center: [2.3522, 48.8566],
+      properties: { country_code: 'fr' },
+      context: [{ id: 'country.1', text: 'France', short_code: 'fr' }],
+    },
+    London: {
+      id: 'place.london',
+      text: 'London',
+      place_name: 'London, United Kingdom',
+      center: [-0.1276, 51.5072],
+      properties: { country_code: 'gb' },
+      context: [{ id: 'country.1', text: 'United Kingdom', short_code: 'gb' }],
+    },
+  } as const;
+
+  await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
+    const url = new URL(route.request().url());
+    const query = decodeURIComponent(url.pathname.replace('/geocoding/', '').replace('.json', ''));
+    const place = places[query as keyof typeof places];
+    await route.fulfill({ contentType: 'application/json', json: { features: place ? [place] : [] } });
+  });
+  await page.route('https://api.openrouteservice.org/v2/directions/**', async (route) => {
+    const body = route.request().postDataJSON() as { coordinates?: number[][] } | null;
+    const coordinates = body?.coordinates ?? [places.Paris.center, places.London.center];
+    await route.fulfill({
+      contentType: 'application/json',
+      json: {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: { summary: { distance: 455_000, duration: 19_800 } },
+          geometry: { type: 'LineString', coordinates },
+        }],
+      },
+    });
+  });
+
+  await page.goto('/');
+  const search = page.getByLabel('Search for a destination');
+  for (const place of Object.values(places)) {
+    await search.fill(place.text);
+    await page.getByRole('option', { name: place.place_name }).click();
+    await expect(search).toHaveValue('');
+  }
+
+  await expect(page.getByText('283 mi')).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Calculating Paris to London route' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Edit route from Paris to London' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit route from Paris to London' });
+  await expect(dialog.getByRole('radio').first()).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Use selected route' })).toBeEnabled();
+  return dialog;
+}
+
 test('serves the shared fallback theme and persists colour mode without changing the trip', async ({ page, request }) => {
   const themeResponse = await request.get('/_local-web/platform/theme.css');
   expect(themeResponse.status()).toBe(200);
@@ -126,6 +193,39 @@ for (const viewport of requiredViewports) {
     }));
     expect(overflow.horizontal).toBeLessThanOrEqual(1);
     expect(overflow.vertical).toBeLessThanOrEqual(1);
+  });
+}
+
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+] as const) {
+  test(`contains populated route alternatives below the map toolbar at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const dialog = await openPopulatedRouteAlternatives(page);
+    const stage = page.getByRole('region', { name: 'Plotter map workspace' });
+    const toolbar = page.locator('.top-toolbar');
+
+    const dialogBox = await dialog.boundingBox();
+    const stageBox = await stage.boundingBox();
+    const toolbarBox = await toolbar.boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(stageBox).not.toBeNull();
+    expect(toolbarBox).not.toBeNull();
+    expectBoxInsideBox(dialogBox!, stageBox!);
+    expectBoxesNotToOverlap(dialogBox!, toolbarBox!);
+
+    for (const action of [
+      dialog.locator('label.route-alternative-option').first(),
+      dialog.getByRole('button', { name: 'Close route options' }),
+      dialog.getByRole('button', { name: 'Cancel' }),
+      dialog.getByRole('button', { name: 'Use selected route' }),
+    ]) {
+      await action.scrollIntoViewIfNeeded();
+      const actionBox = await expectFullyInsideViewport(page, action);
+      expectBoxInsideBox(actionBox, stageBox!);
+      await expectActionablePointsTopmost(action);
+    }
   });
 }
 

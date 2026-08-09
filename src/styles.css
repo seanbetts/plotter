@@ -1394,7 +1394,7 @@ select {
   border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
   border-radius: 999px;
   padding: var(--lwp-space-1) 7px var(--lwp-space-1) 9px;
-  color: var(--color-accent-strong);
+  color: var(--color-text);
   background: color-mix(in srgb, var(--color-accent) 11%, transparent);
   font-size: 0.78rem;
   font-weight: 700;
@@ -3077,7 +3077,7 @@ select {
   border: 0;
   border-radius: var(--radius-control);
   padding: 0 14px;
-  color: white;
+  color: var(--color-text-inverse);
   background: var(--color-accent);
   font-weight: 800;
   cursor: pointer;
@@ -3237,7 +3237,7 @@ select {
     bottom: calc(var(--mobile-itinerary-panel-clearance) + var(--lwp-space-6));
     left: var(--lwp-space-3);
     width: auto;
-    max-height: calc(100dvh - var(--mobile-itinerary-panel-clearance) - 128px);
+    max-height: max(0px, calc(100% - var(--mobile-itinerary-panel-clearance) - 128px));
   }
 
   .destination-profile,

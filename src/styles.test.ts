@@ -175,7 +175,9 @@ describe('app status panel styles', () => {
   it('styles status errors and retry actions with existing tokens', () => {
     expect(styles).toMatch(/\.app-status-panel--error\s*{[^}]*border-color:\s*var\(--border-danger\);/s);
     expect(styles).toMatch(/\.app-status-panel--error \.app-status-panel__copy strong\s*{[^}]*color:\s*var\(--color-danger\);/s);
-    expect(styles).toMatch(/\.app-status-panel__retry\s*{[^}]*background:\s*var\(--color-accent\);/s);
+    expect(styles).toMatch(
+      /\.app-status-panel__retry\s*{[^}]*color:\s*var\(--color-text-inverse\);[^}]*background:\s*var\(--color-accent\);/s,
+    );
   });
 });
 
@@ -224,6 +226,11 @@ describe('panel tag editor styles', () => {
     expect(styles).not.toMatch(/\.tag-pill-list\s*{[^}]*background:/s);
     expect(styles).toMatch(/\.tag-empty-state\s*{[^}]*color:\s*var\(--text-muted\);/s);
     expect(styles).toMatch(/\.tag-add-button\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;/s);
+  });
+
+  it('uses declared app aliases for tag pill text', () => {
+    expect(styles).toMatch(/\.tag-pill\s*{[^}]*color:\s*var\(--color-text\);/s);
+    expect(styles).not.toContain('var(--color-accent-strong)');
   });
 
   it('preserves legacy tag input styling until panels migrate to the shared editor', () => {
