@@ -45,9 +45,14 @@ platform contract in commit `2f0906c`:
 
 `local-web app doctor --repository .` reports `plotter: compatible`. The existing
 ten-test Playwright suite passes after installing its matching Chromium headless
-shell. The new aggregate check also exposes two pre-existing lint failures in
-`useTripData.ts` and `useTripData.test.tsx`. Those failures must be resolved without
-changing trip behaviour before Phase 1 can pass the complete platform matrix.
+shell. One verification run exposed an intermittent persistence-polling race in
+the Nordkapp test: its UI showed the inserted Aalborg stop and calculating route
+legs before the test observed the IndexedDB record. The same test then passed three
+targeted repetitions and the next complete suite passed. The new aggregate check
+also exposes two pre-existing lint failures in `useTripData.ts` and
+`useTripData.test.tsx`. The lint failures and test-stability risk must be resolved
+without changing trip behaviour before Phase 1 can pass the complete platform
+matrix.
 
 ## Scope
 
@@ -299,7 +304,9 @@ git diff --check
 Also verify independent root development with package fallback tokens and a
 `VITE_PUBLIC_BASE_PATH=/plotter/` build with the hosted live theme. Completion
 requires every matrix row to pass; the existing lint failures may not be waived or
-hidden by weakening the check script.
+hidden by weakening the check script. The observed Nordkapp polling race must be
+stabilized or disproved with repeated complete-suite evidence; any test adjustment
+must wait for persistence instead of weakening its domain assertions.
 
 ## Success Criteria
 
