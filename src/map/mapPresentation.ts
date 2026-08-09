@@ -41,15 +41,15 @@ const hiddenBasemapLayerPatterns = [
 const softenedLineLayerPatterns = ['minor', 'path', 'track', 'service'];
 
 const mapColorTokenFallbacks = {
-  '--color-accent': '#d9467a',
-  '--color-accent-rgb': '217 70 122',
-  '--color-map-selected': '#f7f0d0',
-  '--color-route-shipping': '#7ec8e3',
-  '--color-text': '#f5efe3',
-  '--color-text-rgb': '245 239 227',
-  '--color-text-inverse': '#111814',
-  '--color-text-inverse-rgb': '17 24 20',
-};
+  '--map-colour-accent': '#d9467a',
+  '--map-colour-accent-rgb': '217 70 122',
+  '--map-colour-selected': '#f7f0d0',
+  '--map-colour-shipping': '#7ec8e3',
+  '--map-colour-text': '#17201c',
+  '--map-colour-text-rgb': '23 32 28',
+  '--map-colour-text-inverse': '#111814',
+  '--map-colour-text-inverse-rgb': '17 24 20',
+} as const;
 
 function readCssToken(tokenName: keyof typeof mapColorTokenFallbacks) {
   if (typeof window === 'undefined') {
@@ -76,14 +76,14 @@ function layerMatchesPattern(layerId: string, patterns: string[]) {
 
 export function readMapLayerColors(): MapLayerColors {
   return {
-    accent: readCssToken('--color-accent'),
-    accentHalo: readCssRgbToken('--color-accent-rgb', 0.22),
-    selected: readCssToken('--color-map-selected'),
-    shipping: readCssToken('--color-route-shipping'),
-    text: readCssToken('--color-text'),
-    textInverse: readCssToken('--color-text-inverse'),
-    cityText: readCssRgbToken('--color-text-inverse-rgb', 0.82),
-    cityHalo: readCssRgbToken('--color-text-rgb', 0.82),
+    accent: readCssToken('--map-colour-accent'),
+    accentHalo: readCssRgbToken('--map-colour-accent-rgb', 0.22),
+    selected: readCssToken('--map-colour-selected'),
+    shipping: readCssToken('--map-colour-shipping'),
+    text: readCssToken('--map-colour-text'),
+    textInverse: readCssToken('--map-colour-text-inverse'),
+    cityText: readCssRgbToken('--map-colour-text-inverse-rgb', 0.82),
+    cityHalo: readCssRgbToken('--map-colour-text-rgb', 0.82),
   };
 }
 
