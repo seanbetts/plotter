@@ -11,7 +11,8 @@
     "test": "VITE_MAPTILER_API_KEY=e2e-test-key vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "trip": "tsx src/cli/trip.ts"
+    "trip": "tsx src/cli/trip.ts",
+    "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.108.2",
@@ -20,7 +21,8 @@
     "lucide-react": "^1.21.0",
     "maplibre-gl": "^5.24.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "@local-web/ui": "file:vendor/local-web-ui.tgz"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

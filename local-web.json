@@ -6,8 +6,15 @@
   "kind": "static",
   "build": {
     "commands": [
-      ["npm", "ci"],
-      ["npm", "run", "build"]
+      [
+        "npm",
+        "ci"
+      ],
+      [
+        "npm",
+        "run",
+        "build"
+      ]
     ],
     "output": "dist",
     "environment": [
@@ -23,5 +30,13 @@
   "home": {
     "icon": "route",
     "accent": "#D9467A"
+  },
+  "platform": {
+    "contractVersion": 1,
+    "templateVersion": 1,
+    "uiVersion": "0.5.2",
+    "capabilities": [
+      "supabase"
+    ]
   }
 }

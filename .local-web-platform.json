@@ -1,0 +1,17 @@
+{
+  "capabilities": [
+    "supabase"
+  ],
+  "domainPaletteTokens": [],
+  "managedFiles": [
+    "local-web.json",
+    "vendor/local-web-ui.tgz"
+  ],
+  "platformContractVersion": 1,
+  "schemaVersion": 1,
+  "templateVersion": 1,
+  "ui": {
+    "sha256": "47101a066ece3447c14956d959df3986df7c647d9bccaf0eb2023a99856bdcf0",
+    "version": "0.5.2"
+  }
+}
