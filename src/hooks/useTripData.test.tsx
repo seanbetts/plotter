@@ -3614,6 +3614,7 @@ describe('useTripData', () => {
       createLegacyLargeCamperRoutingVehicle(),
     );
     const releaseOldSave = createDeferred(undefined);
+    const newDestinations = createDeferred([newDestination]);
     let storedOldRouteLeg = currentOldRouteLeg;
     const saveOldRouteLeg = vi.fn(async (routeLeg: RouteLeg) => {
       await releaseOldSave.promise;
@@ -3624,7 +3625,7 @@ describe('useTripData', () => {
       listRouteLegs: async () => [storedOldRouteLeg],
       saveRouteLeg: saveOldRouteLeg,
     });
-    const newRepository = createMemoryRepository(Promise.resolve([newDestination]), {
+    const newRepository = createMemoryRepository(newDestinations.promise, {
       saveRouteLeg: saveNewRouteLeg,
     });
     const calculateRoute = vi.fn(async () => ({
@@ -3650,6 +3651,10 @@ describe('useTripData', () => {
 
     rerender({ repository: newRepository });
 
+    await waitFor(() => expect(newRepository.destinationListCalls).toBe(1));
+    await act(async () => {
+      newDestinations.resolve();
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.destinations).toEqual([newDestination]);
     expect(result.current.routeLegs).toEqual([]);
