@@ -5,6 +5,15 @@ import { describe, expect, it } from 'vitest';
 
 const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
 
+describe('platform shell track geometry', () => {
+  it('fills the platform main track without owning viewport height', () => {
+    expect(styles).toMatch(/\.app-shell\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;/s);
+    expect(styles).toMatch(/\.map-stage\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;/s);
+    expect(styles).not.toMatch(/\.app-shell\s*{[^}]*(?:100vh|100dvh)[^}]*}/s);
+    expect(styles).not.toMatch(/\.map-stage\s*{[^}]*(?:100vh|100dvh)[^}]*}/s);
+  });
+});
+
 describe('platform token contract', () => {
   it('derives generic interface aliases from public platform tokens', () => {
     expect(styles).toContain('--color-bg: var(--lwp-colour-canvas);');

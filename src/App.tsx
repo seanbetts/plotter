@@ -33,6 +33,7 @@ import { useActivityMedia } from './hooks/useActivityMedia';
 import { useDestinationMedia } from './hooks/useDestinationMedia';
 import { useTripData } from './hooks/useTripData';
 import { useTripWorkspace } from './hooks/useTripWorkspace';
+import { clampOverlayPosition, getAvailableOverlayHeight } from './map/overlayGeometry';
 import { downloadTripMap } from './map/tripMapExport';
 import { preloadImageUrls } from './media/imagePreloading';
 import { applyCalculatedRouteResult, createRouteResultFingerprint } from './tripCommands/routeOrchestration';
@@ -69,11 +70,6 @@ type PendingMapStop = {
   saveError: string | null;
 };
 
-type OverlayPosition = {
-  x: number;
-  y: number;
-};
-
 type PreviewMediaSource = 'destination-rollup' | 'activity';
 type PreviewMediaSelection = {
   mediaId: string;
@@ -92,7 +88,6 @@ type AppProps = {
   webImageSearchClient?: WebImageSearchClient;
 };
 
-const overlayViewportPaddingPx = 16;
 const activitySearchRadiusKm = 100;
 const mapStopConfirmationApproxSize = {
   width: 320,
@@ -190,33 +185,6 @@ function shouldResolveActivityLocation(location: ActivityLocation | undefined): 
   coordinates: Coordinates;
 } {
   return Boolean(location?.coordinates);
-}
-
-function clampOverlayPosition(
-  position: OverlayPosition,
-  size: { width: number; height: number },
-): OverlayPosition {
-  if (typeof window === 'undefined') return position;
-
-  return {
-    x: Math.min(
-      Math.max(overlayViewportPaddingPx, position.x),
-      Math.max(overlayViewportPaddingPx, window.innerWidth - size.width - overlayViewportPaddingPx),
-    ),
-    y: Math.min(
-      Math.max(overlayViewportPaddingPx, position.y),
-      Math.max(overlayViewportPaddingPx, window.innerHeight - size.height - overlayViewportPaddingPx),
-    ),
-  };
-}
-
-function getAvailableOverlayHeight(position: OverlayPosition) {
-  if (typeof window === 'undefined') return `calc(100vh - ${overlayViewportPaddingPx * 2}px)`;
-
-  return `${Math.max(
-    overlayViewportPaddingPx,
-    window.innerHeight - position.y - overlayViewportPaddingPx,
-  )}px`;
 }
 
 export default function App({ webImageSearchClient: injectedWebImageSearchClient }: AppProps = {}) {
@@ -365,6 +333,7 @@ function TripWorkspace({
   const routeLegsRef = useRef(routeLegs);
   const activeRoutingVehicleRef = useRef(activeTrip?.routingVehicle ?? null);
   const activityPanelRef = useRef<HTMLElement | null>(null);
+  const mapStageRef = useRef<HTMLElement | null>(null);
   const rollupLoadSequenceRef = useRef(0);
   const pendingMapStopRequestIdRef = useRef(0);
   const routeAlternativesOperationIdRef = useRef(0);
@@ -541,11 +510,21 @@ function TripWorkspace({
     previewMediaIndex === -1
       ? null
       : previewMediaNavigationItems[previewMediaIndex];
-  const pendingMapStopPosition = pendingMapStop
-    ? clampOverlayPosition(pendingMapStop.screenPosition, mapStopConfirmationApproxSize)
+  const mapStageRect = pendingMapStop
+    ? mapStageRef.current?.getBoundingClientRect()
     : null;
-  const pendingMapStopMaxHeight = pendingMapStopPosition
-    ? getAvailableOverlayHeight(pendingMapStopPosition)
+  const mapStageViewport = mapStageRect
+    ? { width: mapStageRect.width, height: mapStageRect.height }
+    : null;
+  const pendingMapStopPosition = pendingMapStop && mapStageViewport
+    ? clampOverlayPosition(
+        pendingMapStop.screenPosition,
+        mapStopConfirmationApproxSize,
+        mapStageViewport,
+      )
+    : null;
+  const pendingMapStopMaxHeight = pendingMapStopPosition && mapStageViewport
+    ? getAvailableOverlayHeight(pendingMapStopPosition, mapStageViewport)
     : undefined;
   const isBlockingStatusState = isInteractionLocked || Boolean(error);
   const mapStageClassName = [
@@ -1323,7 +1302,7 @@ function TripWorkspace({
   return (
     <div className="app-shell">
       <style>{blockingStatusMapStyles}</style>
-      <section className={mapStageClassName} aria-label="Plotter map workspace">
+      <section ref={mapStageRef} className={mapStageClassName} aria-label="Plotter map workspace">
         <MapCanvas
           destinations={destinations}
           routeLegs={routeLegs}
@@ -1381,7 +1360,9 @@ function TripWorkspace({
             style={{
               left: `${pendingMapStopPosition.x}px`,
               top: `${pendingMapStopPosition.y}px`,
-              maxHeight: pendingMapStopMaxHeight,
+              maxHeight: pendingMapStopMaxHeight === undefined
+                ? undefined
+                : `${pendingMapStopMaxHeight}px`,
             }}
           >
             <div>

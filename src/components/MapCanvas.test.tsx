@@ -11,6 +11,7 @@ type MockMap = {
   on: Mock;
   off: Mock;
   remove: Mock;
+  resize: Mock;
   addControl: Mock;
   getZoom: Mock;
   getCenter: Mock;
@@ -32,6 +33,14 @@ type MockMap = {
   jumpTo: Mock;
 };
 
+type ResizeObserverInstance = {
+  callback: ResizeObserverCallback;
+  observe: Mock;
+  disconnect: Mock;
+};
+
+const resizeObserverInstances: ResizeObserverInstance[] = [];
+
 type MockGeoJsonSource = {
   setData: Mock;
 };
@@ -47,6 +56,7 @@ const maplibreMock = vi.hoisted(() => {
       on: vi.fn(),
       off: vi.fn(),
       remove: vi.fn(),
+      resize: vi.fn(),
       addControl: vi.fn(),
       getZoom: vi.fn(() => zoom),
       getCenter: vi.fn(() => ({ lat: 24, lng: 18 })),
@@ -250,6 +260,18 @@ describe('MapCanvas', () => {
   };
 
   beforeEach(() => {
+    vi.unstubAllGlobals();
+    resizeObserverInstances.length = 0;
+    vi.stubGlobal('ResizeObserver', vi.fn(function (callback: ResizeObserverCallback) {
+      const observer = {
+        callback,
+        observe: vi.fn(),
+        unobserve: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      resizeObserverInstances.push(observer);
+      return observer;
+    }));
     maplibreMock.Map.mockClear();
     maplibreMock.NavigationControl.mockClear();
     maplibreMock.mapInstances.length = 0;
@@ -274,6 +296,45 @@ describe('MapCanvas', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Select Cappadocia' })).toBeInTheDocument();
+  });
+
+  it('resizes MapLibre when the map container dimensions change', () => {
+    render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const map = maplibreMock.mapInstances[0];
+    const observer = resizeObserverInstances[0];
+    if (!observer) throw new Error('MapCanvas did not observe its map container');
+
+    act(() => {
+      observer.callback([], {} as ResizeObserver);
+    });
+
+    expect(map.resize).toHaveBeenCalledTimes(1);
+  });
+
+  it('disconnects the map container observer on unmount', () => {
+    const { unmount } = render(
+      <MapCanvas
+        destinations={[]}
+        routeLegs={[]}
+        selectedDestinationId={null}
+        onSelectDestination={vi.fn()}
+      />,
+    );
+
+    const observer = resizeObserverInstances[0];
+    if (!observer) throw new Error('MapCanvas did not observe its map container');
+
+    unmount();
+
+    expect(observer.disconnect).toHaveBeenCalledTimes(1);
   });
 
   it('fires onSelectDestination when a pin button is clicked', async () => {
@@ -439,7 +500,7 @@ describe('MapCanvas', () => {
     });
   });
 
-  it('keeps the add-stop context menu inside the viewport near the bottom-right edge', () => {
+  it('keeps the add-stop context menu inside the map stage near the bottom-right edge', () => {
     render(
       <MapCanvas
         destinations={[]}
@@ -451,19 +512,33 @@ describe('MapCanvas', () => {
     );
 
     const map = maplibreMock.mapInstances[0];
+    const container = screen.getByTestId('map-container');
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 80,
+      left: 0,
+      top: 80,
+      right: 1000,
+      bottom: 780,
+      width: 1000,
+      height: 700,
+      toJSON: () => ({}),
+    });
+    vi.stubGlobal('innerWidth', 1400);
+    vi.stubGlobal('innerHeight', 1000);
     const contextMenuHandler = map.on.mock.calls.find(([eventName]) => eventName === 'contextmenu')?.[1];
 
     act(() => {
       contextMenuHandler({
         preventDefault: vi.fn(),
         lngLat: { lat: 51.0576, lng: -0.1342 },
-        point: { x: 1000, y: 740 },
+        point: { x: 990, y: 690 },
       });
     });
 
     const menu = screen.getByRole('menu');
 
-    expect(menu).toHaveStyle({ left: '828px', top: '640px' });
+    expect(menu).toHaveStyle({ left: '804px', top: '572px' });
   });
 
   it('emits an add-stop request after a long press on the map', () => {

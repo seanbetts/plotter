@@ -5,6 +5,7 @@ import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactP
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import type { Activity, Coordinates, Destination, RouteLeg } from '../domain/types';
 import { calmBasemapStyle, mapLabelFontStack, mapStyleUrl, readMapLayerColors } from '../map/mapPresentation';
+import { clampOverlayPosition, type OverlayPoint } from '../map/overlayGeometry';
 import {
   buildStopPillPresentations,
   positionStopPillPresentations,
@@ -85,11 +86,6 @@ type ActivityLabelCandidateGroup = {
   order: number;
   selected: boolean;
   placements: ActivityLabelCandidate[];
-};
-
-type OverlayPosition = {
-  x: number;
-  y: number;
 };
 
 type MapViewport = {
@@ -494,7 +490,6 @@ const destinationPointsLayerId = 'plotter-destination-points';
 const routeLineLayerId = 'plotter-routes-line';
 const cityPointsLayerId = 'plotter-city-points';
 const cityLabelsLayerId = 'plotter-city-labels';
-const overlayViewportPaddingPx = 16;
 const addStopMenuApproxSize = {
   width: 180,
   height: 112,
@@ -832,24 +827,6 @@ function applyMapDetailSettings(map: maplibregl.Map, settings: Record<string, bo
   }
 }
 
-function clampOverlayPosition(
-  position: OverlayPosition,
-  size: { width: number; height: number },
-): OverlayPosition {
-  if (typeof window === 'undefined') return position;
-
-  return {
-    x: Math.min(
-      Math.max(overlayViewportPaddingPx, position.x),
-      Math.max(overlayViewportPaddingPx, window.innerWidth - size.width - overlayViewportPaddingPx),
-    ),
-    y: Math.min(
-      Math.max(overlayViewportPaddingPx, position.y),
-      Math.max(overlayViewportPaddingPx, window.innerHeight - size.height - overlayViewportPaddingPx),
-    ),
-  };
-}
-
 export function MapCanvas({
   destinations,
   routeLegs,
@@ -888,6 +865,7 @@ export function MapCanvas({
   const [projectedDestinationLabels, setProjectedDestinationLabels] = useState<ProjectedDestinationLabel[]>([]);
   const [projectedActivityLabels, setProjectedActivityLabels] = useState<ProjectedActivityLabel[]>([]);
   const [addStopMenu, setAddStopMenu] = useState<MapAddStopRequest | null>(null);
+  const [addStopMenuPosition, setAddStopMenuPosition] = useState<OverlayPoint | null>(null);
   const selectedZoomStepRef = useRef(selectedZoomStep);
   const mapDetailSettingsRef = useRef(mapDetailSettings);
 
@@ -983,15 +961,25 @@ export function MapCanvas({
 
   const closeAddStopMenu = useCallback(() => {
     setAddStopMenu(null);
+    setAddStopMenuPosition(null);
   }, []);
 
   const requestAddStop = useCallback((request: MapAddStopRequest) => {
     setAddStopMenu(null);
+    setAddStopMenuPosition(null);
     onRequestAddStopRef.current?.(request);
   }, []);
 
   const openAddStopMenu = useCallback((request: MapAddStopRequest) => {
+    const containerRect = mapContainerRef.current?.getBoundingClientRect();
+    if (!containerRect) return;
+
     setAddStopMenu(request);
+    setAddStopMenuPosition(clampOverlayPosition(
+      request.screenPosition,
+      addStopMenuApproxSize,
+      { width: containerRect.width, height: containerRect.height },
+    ));
   }, []);
 
   const openAddStopMenuAtClientPoint = useCallback(
@@ -1491,15 +1479,22 @@ export function MapCanvas({
     updateMapLabelPositions,
   ]);
 
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    const map = mapRef.current;
+    if (!container || !map || typeof ResizeObserver === 'undefined') return undefined;
+
+    const observer = new ResizeObserver(() => map.resize());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   const selectedZoomSettings = mapDetailSettings[selectedZoomStep];
   const visibleDetailCount = mapDetailCategories.filter(
     (category) => selectedZoomSettings[category.id],
   ).length;
   const hiddenDetailCount = mapDetailCategories.length - visibleDetailCount;
   const shouldShowDestinationLabels = currentMapZoom >= destinationLabelMinZoom;
-  const addStopMenuPosition = addStopMenu
-    ? clampOverlayPosition(addStopMenu.screenPosition, addStopMenuApproxSize)
-    : null;
 
   const setZoomStep = (nextZoom: number) => {
     const nextZoomStep = clampDetailZoomStep(nextZoom);

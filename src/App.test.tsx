@@ -1971,7 +1971,7 @@ describe('App', () => {
     expect(screen.getByText('Start')).toBeInTheDocument();
   });
 
-  it('keeps the map stop confirmation inside the viewport near the bottom-right edge', async () => {
+  it('keeps the map stop confirmation inside the map stage near the bottom-right edge', async () => {
     vi.mocked(resolveMapTilerCoordinates).mockResolvedValue(
       createPlaceSearchResult({
         id: 'place-balcombe',
@@ -1987,20 +1987,35 @@ describe('App', () => {
 
     await waitForTripReady();
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+    const mapStage = screen.getByRole('region', { name: 'Plotter map workspace' });
+    vi.spyOn(mapStage, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 80,
+      left: 0,
+      top: 80,
+      right: 1000,
+      bottom: 780,
+      width: 1000,
+      height: 700,
+      toJSON: () => ({}),
+    });
+    vi.stubGlobal('innerWidth', 1400);
+    vi.stubGlobal('innerHeight', 1000);
 
     const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
     act(() => {
       contextMenuHandler({
         preventDefault: vi.fn(),
         lngLat: { lat: 51.0576, lng: -0.1342 },
-        point: { x: 1000, y: 740 },
+        point: { x: 990, y: 690 },
       });
     });
     await userEvent.click(screen.getByRole('menuitem', { name: 'Add stop here' }));
 
     expect(await screen.findByRole('dialog', { name: 'Add stop from map' })).toHaveStyle({
-      left: '688px',
-      top: '492px',
+      left: '664px',
+      top: '424px',
+      maxHeight: '260px',
     });
   });
 
@@ -2021,6 +2036,18 @@ describe('App', () => {
 
     await waitForTripReady();
     await waitFor(() => expect(maplibreMock.mapInstances.length).toBeGreaterThan(0));
+    const mapStage = screen.getByRole('region', { name: 'Plotter map workspace' });
+    vi.spyOn(mapStage, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 80,
+      left: 0,
+      top: 80,
+      right: 1000,
+      bottom: 780,
+      width: 1000,
+      height: 700,
+      toJSON: () => ({}),
+    });
 
     const contextMenuHandler = getMapEventHandler(maplibreMock.mapInstances.at(-1)!, 'contextmenu');
     act(() => {
