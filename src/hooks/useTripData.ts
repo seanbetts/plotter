@@ -352,16 +352,24 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   }, []);
 
   useLayoutEffect(() => {
+    let isCancelled = false;
+
     activeRepositoryTokenRef.current = repositoryToken;
     reloadSequenceRef.current += 1;
     pendingTopologyMutationsRef.current = [];
-    setPendingTopologyMutationCount(0);
     deferredReloadRef.current = false;
     hasCompletedInitialLoadRef.current = false;
-    setIsLoading(true);
-    setMutationError(null);
+
+    queueMicrotask(() => {
+      if (isCancelled || activeRepositoryTokenRef.current !== repositoryToken) return;
+
+      setPendingTopologyMutationCount(0);
+      setIsLoading(true);
+      setMutationError(null);
+    });
 
     return () => {
+      isCancelled = true;
       if (activeRepositoryTokenRef.current === repositoryToken) {
         activeRepositoryTokenRef.current = null;
         reloadSequenceRef.current += 1;

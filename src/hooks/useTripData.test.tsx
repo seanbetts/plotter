@@ -74,7 +74,7 @@ describe('useTripData', () => {
       profile: 'driving-car' as const,
       sections: [{ kind: 'road' as const, startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 5 }],
     });
-    let storedDestinations = [origin, target];
+    const storedDestinations = [origin, target];
     let storedRoutes = [readyRoute];
     const repository = createMemoryRepository(Promise.resolve(storedDestinations), {
       listDestinations: async () => structuredClone(storedDestinations),
