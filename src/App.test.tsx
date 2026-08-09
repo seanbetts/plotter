@@ -534,6 +534,31 @@ describe('App', () => {
     vi.stubGlobal('Image', FakeImage);
   });
 
+  it('uses one platform main landmark while startup storage is unavailable', async () => {
+    mockTripWorkspace({
+      repository: null,
+      error: {
+        title: 'Trip storage unavailable',
+        message: 'Unable to create an anonymous Supabase session.',
+      },
+    });
+
+    render(<App />);
+
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getAllByRole('navigation', { name: 'Location' })).toHaveLength(1);
+    expect(screen.getAllByRole('region', { name: 'Plotter map workspace' })).toHaveLength(1);
+  });
+
+  it('uses one platform main landmark while the trip workspace is ready', async () => {
+    render(<App />);
+
+    await screen.findByLabelText('Search for a destination');
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getAllByRole('navigation', { name: 'Location' })).toHaveLength(1);
+    expect(screen.getAllByRole('region', { name: 'Plotter map workspace' })).toHaveLength(1);
+  });
+
   it('disables trip map export for an empty trip', async () => {
     repositoryMock.initialDestinations = Promise.resolve([]);
     repositoryMock.initialRouteLegs = Promise.resolve([]);

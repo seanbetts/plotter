@@ -13,6 +13,7 @@ import { DestinationProfile } from './components/DestinationProfile';
 import { ItineraryPanel } from './components/ItineraryPanel';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapAddStopRequest } from './components/MapCanvas';
+import { PlotterAppShell } from './components/PlotterAppShell';
 import { RouteAlternativesPanel } from './components/RouteAlternativesPanel';
 import { TopToolbar } from './components/TopToolbar';
 import { TripSelector } from './components/TripSelector';
@@ -247,9 +248,8 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     });
   }, [refreshTrips, realtime]);
 
-  if (!repository || !linkPreviewClient || !webImageSearchClient) {
-    return (
-      <main className="app-shell">
+  const workspace = !repository || !linkPreviewClient || !webImageSearchClient ? (
+    <div className="app-shell">
         <style>{blockingStatusMapStyles}</style>
         <section className="map-stage map-stage--blocking-status" aria-label="Plotter map workspace">
           <MapCanvas
@@ -264,11 +264,8 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
             message={error?.message ?? 'Preparing your trip map.'}
           />
         </section>
-      </main>
-    );
-  }
-
-  return (
+    </div>
+  ) : (
     <TripWorkspace
       key={activeTrip?.id}
       repository={repository}
@@ -285,6 +282,8 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
       realtime={realtime}
     />
   );
+
+  return <PlotterAppShell>{workspace}</PlotterAppShell>;
 }
 
 function TripWorkspace({
@@ -1322,7 +1321,7 @@ function TripWorkspace({
   }
 
   return (
-    <main className="app-shell">
+    <div className="app-shell">
       <style>{blockingStatusMapStyles}</style>
       <section className={mapStageClassName} aria-label="Plotter map workspace">
         <MapCanvas
@@ -1519,6 +1518,6 @@ function TripWorkspace({
           />
         ) : null}
       </section>
-    </main>
+    </div>
   );
 }

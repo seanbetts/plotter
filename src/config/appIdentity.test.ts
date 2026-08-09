@@ -1,7 +1,14 @@
 import manifest from '../../local-web.json';
+import { plotterAppIdentity } from './appIdentity';
 
 describe('Plotter local-web identity', () => {
-  it('uses the canonical Plotter accent', () => {
-    expect(manifest.home.accent).toBe('#D9467A');
+  it('matches the generated local-web manifest', () => {
+    expect(plotterAppIdentity).toEqual({
+      id: manifest.id,
+      name: manifest.title,
+      icon: manifest.home.icon,
+      accent: manifest.home.accent,
+    });
+    expect(plotterAppIdentity.accent).toBe('#D9467A');
   });
 });
