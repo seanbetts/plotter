@@ -16,6 +16,7 @@
   --map-colour-label-surface: rgb(255 255 255 / 0.82);
   --map-colour-label-surface-selected: rgb(255 255 255 / 0.9);
   --map-colour-label-surface-hover: rgb(255 255 255 / 0.92);
+  --map-radius-label: 999px;
 }
 
 .lwp-app-shell[data-lwp-app-id='plotter'] .lwp-platform-shell {
@@ -154,7 +155,7 @@ select {
   padding: var(--lwp-space-1) var(--lwp-space-2);
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--map-colour-accent) 24%, transparent);
-  border-radius: var(--radius-pill);
+  border-radius: var(--map-radius-label);
   color: var(--map-colour-accent);
   background: var(--map-colour-label-surface);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--map-colour-text-inverse) 12%, transparent);

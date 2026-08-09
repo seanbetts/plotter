@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createDestination } from '../domain/destinations';
 import { createRouteLeg } from '../domain/routeLegs';
 import type { Destination, RouteLeg } from '../domain/types';
@@ -263,6 +264,26 @@ it('renders normal unselected app pills in an export overlay', async () => {
     { className: 'map-destination-label map-label-position-above', text: 'ST - Balcombe', selected: false },
     { className: 'map-destination-label', text: 'ED - Paris', selected: false },
   ]);
+});
+
+it('inlines the pill radius when exporting labels outside the platform shell', async () => {
+  const style = document.createElement('style');
+  style.textContent = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
+  document.head.append(style);
+
+  try {
+    const { promise, map } = await advanceExportToIdle();
+    map.callbacks.get('idle')?.();
+    await promise;
+
+    const svg = decodeURIComponent(imageSources[0].split(',', 2)[1]);
+
+    expect(svg).toContain('map-destination-label');
+    expect(svg).toMatch(/--map-radius-label:\s*999px/);
+    expect(svg).toMatch(/border-radius:\s*var\(--map-radius-label\)/);
+  } finally {
+    style.remove();
+  }
 });
 
 it('places an earlier overlapping export pill above and the later pill below', async () => {

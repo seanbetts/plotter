@@ -264,6 +264,10 @@ function createStopPillOverlay(
   overlay.className = 'map-destination-label-layer';
   overlay.style.width = `${exportWidth}px`;
   overlay.style.height = `${exportHeight}px`;
+  overlay.style.setProperty(
+    '--map-radius-label',
+    getComputedStyle(document.documentElement).getPropertyValue('--map-radius-label').trim(),
+  );
 
   const pills = buildStopPillPresentations({
     destinations,
