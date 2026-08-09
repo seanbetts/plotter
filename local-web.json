@@ -22,6 +22,6 @@
   "healthPath": "/plotter/",
   "home": {
     "icon": "route",
-    "accent": "#75A7FF"
+    "accent": "#D9467A"
   }
 }
