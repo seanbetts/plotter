@@ -3141,6 +3141,13 @@ select {
     --mobile-itinerary-panel-clearance: 38vh;
   }
 
+  .app-status-panel--empty {
+    left: var(--lwp-space-4);
+    right: calc(var(--lwp-space-4) + var(--lwp-space-8));
+    width: auto;
+    transform: translateY(-50%);
+  }
+
   .map-stop-confirmation {
     left: var(--lwp-space-4) !important;
     right: var(--lwp-space-4);
@@ -3262,8 +3269,8 @@ select {
 
 .image-preview-modal {
   width: min(1120px, 100%);
-  height: min(760px, calc(100vh - 96px));
-  min-height: 360px;
+  height: min(760px, 100%);
+  min-height: min(360px, 100%);
   color: var(--color-text);
 }
 
