@@ -1,10 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
+import { createE2eViteEnvironment } from './tests/start-service';
 
 export default defineConfig({
   testDir: './tests',
+  testIgnore: '**/*.unit.test.ts',
   globalSetup: './tests/global-setup.ts',
   webServer: {
-    command: 'VITE_TRIP_STORAGE=e2e-service VITE_PUBLIC_BASE_PATH=/plotter/ VITE_E2E_SERVICE_URL=http://127.0.0.1:5175/ VITE_OPENROUTESERVICE_API_KEY=e2e-test-key vite --host 127.0.0.1 --port 5174 --strictPort',
+    command: 'vite --host 127.0.0.1 --port 5174 --strictPort',
+    env: createE2eViteEnvironment(process.env, 'http://127.0.0.1:5175/'),
     url: 'http://127.0.0.1:5174/plotter/',
     reuseExistingServer: false,
     timeout: 120_000,

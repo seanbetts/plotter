@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { APIRequestContext, Locator, Page, Route } from '@playwright/test';
-import { expect, test } from './fixtures';
+import { expect, gotoServiceApp, test } from './fixtures';
 
 const execFileAsync = promisify(execFile);
 const serviceBaseUrl = 'http://127.0.0.1:5175/';
@@ -96,6 +96,14 @@ test('loads service-seeded trips in a fresh browser without creating IndexedDB',
   page,
   request,
 }) => {
+  const mapTilerRequests: string[] = [];
+  page.on('request', (browserRequest) => {
+    if (browserRequest.url().includes('api.maptiler.com') || browserRequest.url().includes('parent-maptiler-secret')) {
+      mapTilerRequests.push(browserRequest.url());
+    }
+  });
+  await page.route('https://api.maptiler.com/**', (route) => route.abort('blockedbyclient'));
+  const blankStyleRequest = page.waitForRequest('https://demotiles.maplibre.org/style.json');
   const directory = await readDirectory(request);
   const createResponse = await request.post('/plotter/api/v1/trips', {
     headers: { 'x-plotter-write': '1' },
@@ -107,9 +115,11 @@ test('loads service-seeded trips in a fresh browser without creating IndexedDB',
   expect(createResponse.status(), await createResponse.text()).toBe(201);
 
   await page.goto('./');
+  await blankStyleRequest;
 
   await expect(page.getByRole('button', { name: /current trip: Fresh service trip/i })).toBeVisible();
   expect(await page.evaluate(() => indexedDB.databases())).toEqual([]);
+  expect(mapTilerRequests).toEqual([]);
 });
 
 test('invalidates the same trip across two browser contexts', async ({ browser }) => {
@@ -119,7 +129,7 @@ test('invalidates the same trip across two browser contexts', async ({ browser }
     const firstPage = await firstContext.newPage();
     const secondPage = await secondContext.newPage();
     await Promise.all([installMapFakes(firstPage), installMapFakes(secondPage)]);
-    await Promise.all([firstPage.goto('/plotter/'), secondPage.goto('/plotter/')]);
+    await Promise.all([gotoServiceApp(firstPage), gotoServiceApp(secondPage)]);
     await Promise.all([
       expect(firstPage.getByRole('button', { name: /current trip: Untitled trip/i })).toBeVisible(),
       expect(secondPage.getByRole('button', { name: /current trip: Untitled trip/i })).toBeVisible(),
@@ -206,7 +216,7 @@ test('uses visibility reconciliation to recover an event missed while disconnect
 });
 
 test('renders the exact service-unavailable state within the map shell', async ({ page }, testInfo) => {
-  await page.route('**/plotter/api/v1/trips', async (route) => {
+  const unavailableTrips = async (route: Route) => {
     await route.fulfill({
       status: 503,
       contentType: 'application/json',
@@ -215,7 +225,8 @@ test('renders the exact service-unavailable state within the map shell', async (
         error: { code: 'storage-unavailable', message: 'Plotter storage is unavailable.' },
       },
     });
-  });
+  };
+  await page.route('**/plotter/api/v1/trips', unavailableTrips);
 
   await page.goto('./');
 
@@ -223,7 +234,8 @@ test('renders the exact service-unavailable state within the map shell', async (
   const alert = stage.getByRole('alert');
   await expect(alert.getByText('Trip storage unavailable')).toBeVisible();
   await expect(alert.getByText('Shared trip storage is unavailable.')).toBeVisible();
-  await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible();
+  const retry = alert.getByRole('button', { name: 'Retry' });
+  await expect(retry).toBeVisible();
   const [stageBox, alertBox] = await Promise.all([stage.boundingBox(), alert.boundingBox()]);
   expect(stageBox).not.toBeNull();
   expect(alertBox).not.toBeNull();
@@ -235,6 +247,17 @@ test('renders the exact service-unavailable state within the map shell', async (
     body: await page.screenshot(),
     contentType: 'image/png',
   });
+
+  await page.unroute('**/plotter/api/v1/trips', unavailableTrips);
+  const recoveredDirectory = page.waitForResponse((response) =>
+    response.request().method() === 'GET'
+    && new URL(response.url()).pathname === '/plotter/api/v1/trips'
+    && response.ok(),
+  );
+  await retry.click();
+  await recoveredDirectory;
+  await expect(page.getByRole('button', { name: /current trip: Untitled trip/i })).toBeVisible();
+  expect(await page.evaluate(() => indexedDB.databases())).toEqual([]);
 });
 
 test('uploads, streams, displays, and deletes service-owned media', async ({ page, request }) => {
@@ -255,7 +278,12 @@ test('uploads, streams, displays, and deletes service-owned media', async ({ pag
   expect(uploadResponse.ok(), await uploadResponse.text()).toBe(true);
   const previewButton = stopPanel.getByRole('button', { name: 'Open full image' });
   await expect(previewButton).toBeVisible();
-  const imageUrl = await previewButton.locator('img').evaluate((element: HTMLImageElement) => element.src);
+  const previewImage = previewButton.locator('img');
+  await expect.poll(() => previewImage.evaluate((element: HTMLImageElement) => ({
+    complete: element.complete,
+    naturalWidth: element.naturalWidth,
+  }))).toEqual({ complete: true, naturalWidth: 1 });
+  const imageUrl = await previewImage.evaluate((element: HTMLImageElement) => element.src);
   expect(new URL(imageUrl).pathname).toMatch(/^\/plotter\/api\/v1\/media\/.+\/content$/);
   const mediaResponse = await request.get(imageUrl);
   expect(mediaResponse.status()).toBe(200);
