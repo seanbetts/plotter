@@ -1,4 +1,32 @@
 export const LATEST_SCHEMA_VERSION = 1;
+// SHA-256 of ordered, non-internal sqlite_schema rows created by migration 1.
+export const SCHEMA_V1_FINGERPRINT = 'a970938c51bab123ceda51920ef60615eaccfbe6a98f35700cc49697efef1b24';
+
+export const REQUIRED_SCHEMA_TABLES = [
+  'activities',
+  'destinations',
+  'media_assets',
+  'migration_provenance',
+  'route_legs',
+  'schema_metadata',
+  'store_metadata',
+  'trip_revisions',
+  'trips',
+] as const;
+
+export const REQUIRED_SCHEMA_INDEXES = [
+  'activities_trip_destination_order_idx',
+  'activities_trip_updated_at_idx',
+  'destinations_trip_order_idx',
+  'destinations_trip_updated_at_idx',
+  'media_assets_activity_owned_sort_order_key',
+  'media_assets_destination_owned_sort_order_key',
+  'media_assets_trip_destination_activity_idx',
+  'route_legs_origin_destination_idx',
+  'route_legs_target_destination_idx',
+  'route_legs_trip_updated_at_idx',
+  'trips_updated_created_idx',
+] as const;
 
 export type SchemaMigration = {
   version: number;

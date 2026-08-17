@@ -1,5 +1,12 @@
+import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { LATEST_SCHEMA_VERSION, SCHEMA_MIGRATIONS } from './schema';
+import {
+  LATEST_SCHEMA_VERSION,
+  REQUIRED_SCHEMA_INDEXES,
+  REQUIRED_SCHEMA_TABLES,
+  SCHEMA_MIGRATIONS,
+  SCHEMA_V1_FINGERPRINT,
+} from './schema';
 
 const BUSY_TIMEOUT_MILLISECONDS = 5_000;
 const INTEGRITY_ERROR_MESSAGE = 'Plotter database integrity validation failed.';
@@ -87,6 +94,50 @@ function assertCurrentSchemaMetadata(connection: DatabaseSync): void {
   }
 }
 
+function assertCurrentSchemaShape(connection: DatabaseSync): void {
+  const tableNames = connection.prepare(`
+    SELECT name
+    FROM sqlite_schema
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+    ORDER BY name
+  `).all().map((row) => (row as { name: string }).name);
+
+  if (
+    tableNames.length !== REQUIRED_SCHEMA_TABLES.length
+    || tableNames.some((name, index) => name !== REQUIRED_SCHEMA_TABLES[index])
+  ) {
+    throw new UnsupportedSchemaError();
+  }
+
+  const indexNames = connection.prepare(`
+    SELECT name
+    FROM sqlite_schema
+    WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex_%'
+    ORDER BY name
+  `).all().map((row) => (row as { name: string }).name);
+
+  if (
+    indexNames.length !== REQUIRED_SCHEMA_INDEXES.length
+    || indexNames.some((name, index) => name !== REQUIRED_SCHEMA_INDEXES[index])
+  ) {
+    throw new UnsupportedSchemaError();
+  }
+
+  const schemaRows = connection.prepare(`
+    SELECT type, name, tbl_name, sql
+    FROM sqlite_schema
+    WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+    ORDER BY type, name
+  `).all();
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify(schemaRows))
+    .digest('hex');
+
+  if (fingerprint !== SCHEMA_V1_FINGERPRINT) {
+    throw new UnsupportedSchemaError();
+  }
+}
+
 export function openPlotterDatabase(databasePath: string): PlotterDatabase {
   let connection: DatabaseSync | undefined;
 
@@ -99,6 +150,7 @@ export function openPlotterDatabase(databasePath: string): PlotterDatabase {
     const versionRow = connection.prepare('PRAGMA user_version').get() as { user_version: number };
     assertSupportedSchemaVersion(connection, versionRow.user_version);
     applyMigrations(connection, versionRow.user_version);
+    assertCurrentSchemaShape(connection);
     assertCurrentSchemaMetadata(connection);
     assertDatabaseIntegrity(connection);
     const openedConnection = connection;

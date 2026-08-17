@@ -538,4 +538,40 @@ describe('openPlotterDatabase', () => {
     expect((corruptError as Error).message).not.toContain(corruptPath);
     expect((corruptError as Error).message).not.toContain('PRAGMA');
   });
+
+  it('rejects a current-version database missing a required table without repairing it', () => {
+    const databasePath = createDatabasePath();
+    const database = openPlotterDatabase(databasePath);
+    database.connection.exec('DROP TABLE route_legs');
+    database.close();
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(() => openPlotterDatabase(databasePath))
+        .toThrow('Plotter database schema is not supported.');
+    }
+  });
+
+  it('rejects a current-version database missing a required named index without repairing it', () => {
+    const databasePath = createDatabasePath();
+    const database = openPlotterDatabase(databasePath);
+    database.connection.exec('DROP INDEX activities_trip_updated_at_idx');
+    database.close();
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(() => openPlotterDatabase(databasePath))
+        .toThrow('Plotter database schema is not supported.');
+    }
+  });
+
+  it('rejects a current-version database with a malformed required column without repairing it', () => {
+    const databasePath = createDatabasePath();
+    const database = openPlotterDatabase(databasePath);
+    database.connection.exec('ALTER TABLE trips RENAME COLUMN name TO trip_name');
+    database.close();
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(() => openPlotterDatabase(databasePath))
+        .toThrow('Plotter database schema is not supported.');
+    }
+  });
 });
