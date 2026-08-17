@@ -278,6 +278,55 @@ describe('Supabase source materialization', () => {
     database.close();
   });
 
+  it('rejects unknown legacy research-link fields before normalization can discard them', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-unknown-legacy-link-field-'));
+    temporaryDirectories.push(root);
+    const loaded = await fixture();
+    const destination = loaded.source.tables.destinations[0]!;
+    const legacyResearch = {
+      notes: null,
+      links: [{
+        id: 'legacy-link',
+        title: '',
+        url: 'example.invalid',
+        unexpectedLegacyField: 'must-not-disappear',
+      }],
+    };
+    destination.research = structuredClone(legacyResearch);
+    const rawSourceRow = structuredClone(destination);
+    const fingerprint = fingerprintSourceSnapshot(loaded.source, loaded.schema);
+    const archive = await createRawArchive({
+      stagingParent: root,
+      source: loaded.source,
+      schema: loaded.schema,
+      fingerprint,
+      rawSchemaSql: loaded.rawSchemaSql,
+      rawDataSql: loaded.rawDataSql,
+    });
+    const materializedRoot = join(archive.root, 'materialized');
+    mkdirSync(materializedRoot, { mode: 0o700 });
+
+    const materialized = await materializeSource({
+      destinationRoot: materializedRoot,
+      archiveRelativePath: 'imports/synthetic',
+      source: loaded.source,
+      fingerprint,
+      importedAt: '2026-08-17T12:00:00.000Z',
+    });
+
+    expect(materialized.failures).toContainEqual({
+      gate: 'domain',
+      message: 'Source destination domain data is invalid.',
+    });
+    expect(materialized.promotable).toBe(false);
+    expect(destination).toEqual(rawSourceRow);
+    const archivedRows = JSON.parse(readFileSync(
+      join(archive.root, 'tables', 'destinations.json'),
+      'utf8',
+    )) as Array<Record<string, unknown>>;
+    expect(archivedRows[0]!.research).toEqual(legacyResearch);
+  });
+
   it.each([
     ['vehicle restrictions', (source: SourceSnapshot) => {
       source.tables.trips[0]!.vehicle_restrictions = { height: 'too-tall' };
@@ -322,10 +371,30 @@ describe('Supabase source materialization', () => {
     ['legacy research container', (source: SourceSnapshot) => {
       source.tables.destinations[0]!.research = 42;
     }],
+    ['legacy research container unknown field', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.research = {
+        notes: null, links: [], unexpectedLegacyField: 'must-not-disappear',
+      };
+    }],
     ['book reference', (source: SourceSnapshot) => {
       source.tables.destinations[0]!.research = {
         notes: '', links: [], bookReferences: [{ id: 'book', source: 'Invalid', reference: '', note: '' }],
       };
+    }],
+    ['book reference unknown field', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.research = {
+        notes: '', links: [], bookReferences: [{
+          id: '00000000-0000-4000-8000-000000000032', source: 'Other', reference: '', note: '',
+          unexpectedLegacyField: 'must-not-disappear',
+        }],
+      };
+    }],
+    ['destination media item unknown field', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.media = [{
+        id: '00000000-0000-4000-8000-000000000030',
+        url: 'https://example.invalid/image', caption: '', credit: '',
+        unexpectedLegacyField: 'must-not-disappear',
+      }];
     }],
     ['legacy activity item', (source: SourceSnapshot) => {
       source.tables.destinations[0]!.activities = {

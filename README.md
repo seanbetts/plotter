@@ -136,7 +136,9 @@ candidate can pass reconciliation. Production-supported legacy destination
 research is first normalized through the same persisted-row codec used by the
 application; the raw source row remains unchanged in the archive, while the
 normalized fields are recorded in import provenance and validated recursively
-before materialization.
+before materialization. Exact raw key allowlists run before that normalization,
+so an unknown legacy research, link, book, or media field cannot be silently
+discarded from an otherwise promotable candidate.
 
 These commands are implementation and fixture gates only. They do not claim
 that a live Supabase project has been read, that personal `user-data/` has been

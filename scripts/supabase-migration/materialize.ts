@@ -77,6 +77,15 @@ const bookReferenceSources = new Set([
   'Powder',
   'Other',
 ]);
+const researchContainerKeys = ['notes', 'links', 'bookReferences'] as const;
+const researchLinkKeys = [
+  'id', 'title', 'url', 'domain', 'imageUrl', 'sortOrder', 'previewFetchedAt',
+] as const;
+const bookReferenceKeys = ['id', 'source', 'reference', 'note'] as const;
+const mediaItemKeys = [
+  'id', 'url', 'thumbnailUrl', 'previewUrl', 'fullUrl', 'caption', 'credit', 'sortOrder',
+  'bucketId', 'objectPath', 'contentType', 'sizeBytes', 'uploadedAt',
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -164,7 +173,7 @@ function validDestinationLocation(value: unknown): boolean {
 function validResearchLink(value: unknown, normalizedLegacy = false): boolean {
   if (!exactRecord(
     value,
-    ['id', 'title', 'url', 'domain', 'imageUrl', 'sortOrder', 'previewFetchedAt'],
+    researchLinkKeys,
     ['id', 'title', 'url', 'domain', 'sortOrder'],
   )) return false;
   return (normalizedLegacy
@@ -181,10 +190,7 @@ function validResearchLink(value: unknown, normalizedLegacy = false): boolean {
 function validMediaItem(value: unknown): boolean {
   if (!exactRecord(
     value,
-    [
-      'id', 'url', 'thumbnailUrl', 'previewUrl', 'fullUrl', 'caption', 'credit', 'sortOrder',
-      'bucketId', 'objectPath', 'contentType', 'sizeBytes', 'uploadedAt',
-    ],
+    mediaItemKeys,
     ['id', 'url', 'caption', 'credit'],
   )) return false;
   return isCanonicalId(value.id)
@@ -203,7 +209,7 @@ function validMediaItem(value: unknown): boolean {
 }
 
 function validBookReference(value: unknown): boolean {
-  return exactRecord(value, ['id', 'source', 'reference', 'note'], ['id', 'source', 'reference', 'note'])
+  return exactRecord(value, bookReferenceKeys, bookReferenceKeys)
     && isCanonicalId(value.id)
     && bookReferenceSources.has(String(value.source))
     && stringValue(value.reference)
@@ -380,7 +386,7 @@ function validCanonicalDestinationRow(row: Record<string, unknown>): boolean {
     )
     && exactRecord(row.why, ['summary', 'highlights', 'personalRationale'], ['summary', 'highlights', 'personalRationale'])
     && Array.isArray(row.media)
-    && exactRecord(row.research, ['notes', 'links', 'bookReferences'], ['notes', 'links', 'bookReferences'])
+    && exactRecord(row.research, researchContainerKeys, researchContainerKeys)
     && exactRecord(row.activities, ['items'], ['items'])
     && exactRecord(
       row.route_context,
@@ -409,6 +415,21 @@ function validCanonicalDestinationRow(row: Record<string, unknown>): boolean {
     && stringValue(routeContext.borderShippingNotes) && stringValue(routeContext.notes);
 }
 
+function hasOnlyRawDestinationNestedKeys(row: Record<string, unknown>): boolean {
+  const research = row.research;
+  if (research !== null && research !== undefined) {
+    if (!exactRecord(research, researchContainerKeys)) return false;
+    if (research.links !== null && research.links !== undefined
+      && (!Array.isArray(research.links)
+        || !research.links.every((link) => exactRecord(link, researchLinkKeys)))) return false;
+    if (research.bookReferences !== null && research.bookReferences !== undefined
+      && (!Array.isArray(research.bookReferences)
+        || !research.bookReferences.every((book) => exactRecord(book, bookReferenceKeys)))) return false;
+  }
+  return !Array.isArray(row.media)
+    || row.media.every((media) => exactRecord(media, mediaItemKeys));
+}
+
 function normalizedDestinationRow(
   row: Record<string, unknown>,
 ): PersistedDestinationRow | undefined {
@@ -423,6 +444,7 @@ function normalizedDestinationRow(
 }
 
 function validDestination(row: Record<string, unknown>): boolean {
+  if (!hasOnlyRawDestinationNestedKeys(row)) return false;
   const normalized = normalizedDestinationRow(row);
   return normalized !== undefined
     && validCanonicalDestinationRow(normalized as unknown as Record<string, unknown>);
