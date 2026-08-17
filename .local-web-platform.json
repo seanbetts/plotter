@@ -1,7 +1,5 @@
 {
-  "capabilities": [
-    "supabase"
-  ],
+  "capabilities": [],
   "domainPaletteTokens": [],
   "managedFiles": [
     "local-web.json",
@@ -11,7 +9,7 @@
   "schemaVersion": 1,
   "templateVersion": 1,
   "ui": {
-    "sha256": "47101a066ece3447c14956d959df3986df7c647d9bccaf0eb2023a99856bdcf0",
+    "sha256": "b7b7e048b474a624200bafee94e1a48b54363d729b090ba5baded1bd39094201",
     "version": "0.5.2"
   }
 }

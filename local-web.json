@@ -3,7 +3,7 @@
   "id": "plotter",
   "title": "Plotter",
   "route": "/plotter",
-  "kind": "static",
+  "kind": "service",
   "build": {
     "commands": [
       [
@@ -16,17 +16,43 @@
         "build"
       ]
     ],
-    "output": "dist",
+    "output": "release",
+    "release": [
+      {
+        "source": "dist",
+        "target": "public"
+      },
+      {
+        "source": "server-dist",
+        "target": "server"
+      }
+    ],
     "environment": [
       "VITE_PUBLIC_BASE_PATH",
       "VITE_MAPTILER_API_KEY",
-      "VITE_OPENROUTESERVICE_API_KEY",
-      "VITE_SUPABASE_URL",
-      "VITE_SUPABASE_PUBLISHABLE_KEY",
-      "VITE_TRIP_STORAGE"
+      "VITE_OPENROUTESERVICE_API_KEY"
     ]
   },
-  "healthPath": "/plotter/",
+  "healthPath": "/plotter/healthz",
+  "service": {
+    "module": "server/service.mjs",
+    "internalHealthPath": "/healthz",
+    "frontendOutput": "public",
+    "proxyPaths": [
+      "/api"
+    ],
+    "startCommand": [
+      "/usr/bin/env",
+      "node",
+      "{release}/server/service.mjs",
+      "--port",
+      "{port}",
+      "--data-dir",
+      "{repository}/user-data",
+      "--env-file",
+      "{repository}/.env"
+    ]
+  },
   "home": {
     "icon": "route",
     "accent": "#D9467A"
@@ -35,8 +61,6 @@
     "contractVersion": 1,
     "templateVersion": 1,
     "uiVersion": "0.5.2",
-    "capabilities": [
-      "supabase"
-    ]
+    "capabilities": []
   }
 }

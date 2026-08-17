@@ -44,7 +44,7 @@ const handler = createPlotterHttpHandler({
   },
   backups: storage.backups,
   operations: storage.operations,
-  publicRoot: resolve(repositoryRoot, 'dist'),
+  publicRoot: resolve(repositoryRoot, 'public'),
 });
 
 const server = createServer((request, response) => {

@@ -5,22 +5,24 @@ import { plotterAppIdentity } from './src/config/appIdentity';
 import { normalizePublicBasePath } from './src/config/publicBasePath';
 
 const basePath = normalizePublicBasePath(process.env.VITE_PUBLIC_BASE_PATH);
-const e2eServiceUrl = process.env.VITE_E2E_SERVICE_URL;
+const serviceUrl = process.env.VITE_E2E_SERVICE_URL ?? 'http://127.0.0.1:5175';
+const serviceProxyPath = `${basePath.replace(/\/$/, '')}/api`;
 
 export default defineConfig({
   plugins: [
     localWebApp({ appId: plotterAppIdentity.id, basePath }),
     react(),
   ],
-  server: e2eServiceUrl ? {
+  envDir: process.env.PLOTTER_ENV_DIR,
+  server: {
     proxy: {
-      [`${basePath.replace(/\/$/, '')}/api`]: {
-        target: e2eServiceUrl,
+      [serviceProxyPath]: {
+        target: serviceUrl,
         changeOrigin: false,
         rewrite: (path) => path.replace(basePath.replace(/\/$/, ''), ''),
       },
     },
-  } : undefined,
+  },
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
