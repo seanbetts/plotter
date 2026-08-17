@@ -1,14 +1,15 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openPlotterDatabase } from '../../server/database';
 import { acquireDataDirectoryOwnership } from '../../server/maintenanceLock';
 import { createPlotterStorageRuntime } from '../../server/storageRuntime';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { KNOWN_SOURCE_SCHEMA } from './source';
-import { loadFixtureSource, parseMigrationArguments, runMigration } from './cli';
+import { loadFixtureSource, main, parseMigrationArguments, parsePublicTableSchema, runMigration } from './cli';
 
 const fixturePath = join(import.meta.dirname, 'fixtures', 'complete-project.json');
 const temporaryDirectories: string[] = [];
@@ -32,17 +33,83 @@ describe('Supabase migration CLI', () => {
   });
 
   it('runs a credential-free fixture dry-run and retains its passing archive outside canonical state', async () => {
+    const stagingParent = mkdtempSync(join(tmpdir(), 'plotter-fixture-staging-'));
+    temporaryDirectories.push(stagingParent);
     const result = await runMigration({ mode: 'dry-run', fixturePath }, {
       environment: new Proxy({}, { get() { throw new Error('fixture mode read environment'); } }),
       runCommand: async () => { throw new Error('fixture mode invoked CLI'); },
       createClient: () => { throw new Error('fixture mode created a network client'); },
+      createTemporaryStagingParent: async () => stagingParent,
     });
-    temporaryDirectories.push(result.stagingParent);
+    const stagingRoot = join(stagingParent, result.stagingId);
     expect(result.report.passed).toBe(true);
     expect(result.applied).toBe(false);
-    expect(existsSync(join(result.stagingRoot, 'report.json'))).toBe(true);
-    expect(existsSync(join(result.stagingRoot, 'raw', 'schema.sql'))).toBe(true);
+    expect(result.stagingLabel).toBe(`temporary/${result.stagingId}`);
+    expect(existsSync(join(stagingRoot, 'report.json'))).toBe(true);
+    expect(existsSync(join(stagingRoot, 'raw', 'schema.sql'))).toBe(true);
     expect(result.sourceFingerprintDigest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('retains realistic fixture schema and COPY dumps that agree with the structured fixture', async () => {
+    const loaded = await loadFixtureSource(fixturePath);
+
+    expect(parsePublicTableSchema(loaded.rawSchemaSql)).toEqual(loaded.schema);
+    for (const [table, rows] of Object.entries(loaded.source.tables)) {
+      expect(loaded.rawDataSql).toContain(`COPY "public"."${table}"`);
+      const copy = new RegExp(`COPY "public"\\."${table}"[^;]+;\\n([\\s\\S]*?)\\n\\\\\\.`, 'm')
+        .exec(loaded.rawDataSql);
+      expect(copy?.[1]?.split('\n')).toHaveLength(rows.length);
+    }
+  });
+
+  it('rejects fixture raw dumps that disagree with the structured fixture', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-fixture-consistency-'));
+    temporaryDirectories.push(root);
+    const inconsistentPath = join(root, 'fixture.json');
+    const inconsistent = JSON.parse(readFileSync(fixturePath, 'utf8')) as Record<string, unknown>;
+    inconsistent.rawDataSql = '-- no COPY records';
+    writeFileSync(inconsistentPath, JSON.stringify(inconsistent));
+
+    await expect(loadFixtureSource(inconsistentPath))
+      .rejects.toThrow('Supabase migration fixture raw dumps are inconsistent.');
+
+    inconsistent.rawDataSql = (JSON.parse(readFileSync(fixturePath, 'utf8')) as { rawDataSql: string })
+      .rawDataSql.replace('Synthetic migration trip', 'Different migration trip');
+    writeFileSync(inconsistentPath, JSON.stringify(inconsistent));
+    await expect(loadFixtureSource(inconsistentPath))
+      .rejects.toThrow('Supabase migration fixture raw dumps are inconsistent.');
+  });
+
+  it('does not reveal absolute fixture or data roots in normal CLI output', async () => {
+    const dataDirectory = canonicalRoot();
+    let stdout = '';
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation((value) => {
+      stdout += String(value);
+      return true;
+    });
+    try {
+      await main(['--dry-run', '--fixture', fixturePath, '--data-dir', dataDirectory]);
+    } finally {
+      output.mockRestore();
+    }
+
+    expect(stdout).not.toContain(fixturePath);
+    expect(stdout).not.toContain(dataDirectory);
+    expect(stdout).not.toContain('stagingRoot');
+    expect(stdout).toContain('stagingLabel');
+  });
+
+  it('sanitizes absolute fixture paths from entrypoint filesystem errors', () => {
+    const missingFixture = join(tmpdir(), 'plotter-sensitive-fixture-root', 'missing.json');
+    const result = spawnSync(process.execPath, [
+      '--import', 'tsx', join(import.meta.dirname, '..', 'migrate-supabase.ts'),
+      '--dry-run', '--fixture', missingFixture,
+    ], { encoding: 'utf8' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain(missingFixture);
+    expect(result.stderr).not.toContain(tmpdir());
+    expect(result.stderr).toContain('Supabase migration failed.');
   });
 
   it('uses disabled auth persistence and only authenticated linked public schema/COPY dump commands in live mode', async () => {
@@ -139,12 +206,22 @@ describe('Supabase migration CLI', () => {
       },
     })).rejects.toThrow('Supabase source changed after staging.');
     expect(existsSync(join(dataDirectory, 'backups'))).toBe(false);
+    const imports = readdirSync(join(dataDirectory, 'imports'));
+    expect(imports).toHaveLength(1);
+    const retainedReport = JSON.parse(readFileSync(
+      join(dataDirectory, 'imports', imports[0]!, 'report.json'),
+      'utf8',
+    )) as { passed: boolean; failures: Array<{ gate: string; message: string }> };
+    expect(retainedReport.passed).toBe(false);
+    expect(retainedReport.failures).toContainEqual({
+      gate: 'source-stability',
+      message: 'Supabase source changed after staging.',
+    });
   });
 
   it('applies only to disposable canonical state through named backup and hardened restore, repeatably', async () => {
     const dataDirectory = canonicalRoot();
-    const dryRun = await runMigration({ mode: 'dry-run', fixturePath });
-    temporaryDirectories.push(dryRun.stagingParent);
+    const dryRun = await runMigration({ mode: 'dry-run', fixturePath, dataDirectory });
     const first = await runMigration({
       mode: 'apply', fixturePath, dataDirectory,
       confirmSourceFingerprint: dryRun.sourceFingerprintDigest,
@@ -170,6 +247,8 @@ describe('Supabase migration CLI', () => {
       confirmSourceFingerprint: dryRun.sourceFingerprintDigest,
     });
     expect(second.sourceFingerprintDigest).toBe(first.sourceFingerprintDigest);
+    expect(JSON.parse(readFileSync(join(dataDirectory, second.stagingLabel, 'report.json'), 'utf8')))
+      .toMatchObject({ passed: true, failures: [] });
     database = new DatabaseSync(join(dataDirectory, 'plotter.sqlite3'), { readOnly: true });
     expect((database.prepare('SELECT COUNT(*) AS count FROM trips').get() as { count: number }).count).toBe(1);
     expect((database.prepare('SELECT COUNT(*) AS count FROM media_assets').get() as { count: number }).count).toBe(1);
@@ -179,8 +258,7 @@ describe('Supabase migration CLI', () => {
   it('fails apply while a service owns the data root and leaves canonical bytes untouched', async () => {
     const dataDirectory = canonicalRoot();
     const before = readFileSync(join(dataDirectory, 'plotter.sqlite3'));
-    const dryRun = await runMigration({ mode: 'dry-run', fixturePath });
-    temporaryDirectories.push(dryRun.stagingParent);
+    const dryRun = await runMigration({ mode: 'dry-run', fixturePath, dataDirectory });
     const service = acquireDataDirectoryOwnership(dataDirectory, 'service');
     try {
       await expect(runMigration({
@@ -196,8 +274,7 @@ describe('Supabase migration CLI', () => {
 
   it('recovers an interrupted pre-commit portable restore under ownership before apply opens canonical state', async () => {
     const dataDirectory = canonicalRoot();
-    const dryRun = await runMigration({ mode: 'dry-run', fixturePath });
-    temporaryDirectories.push(dryRun.stagingParent);
+    const dryRun = await runMigration({ mode: 'dry-run', fixturePath, dataDirectory });
     const transactionId = '00000000-0000-4000-8000-000000000099';
     const transaction = join(dataDirectory, `.portable-restore-${transactionId}`);
     mkdirSync(join(transaction, 'rollback'), { recursive: true, mode: 0o700 });

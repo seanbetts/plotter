@@ -159,6 +159,20 @@ function assertStorageSegment(name: string): void {
   ) throw new Error('Source storage path is invalid.');
 }
 
+export function validateStorageObjectBytes(
+  listing: SourceStorageEntry,
+  bytes: Uint8Array,
+): void {
+  if (listing.metadata === null || !Object.hasOwn(listing.metadata, 'size')) return;
+  const size = listing.metadata.size;
+  if (!Number.isSafeInteger(size) || (size as number) < 0) {
+    throw new Error('Source storage listing size is invalid.');
+  }
+  if (bytes.byteLength !== size) {
+    throw new Error('Source storage download size does not match listing metadata.');
+  }
+}
+
 export function assertSourceStoragePath(path: string): void {
   if (
     path.length === 0
@@ -246,6 +260,9 @@ async function readStorage(
       if (!isRecord(entry) || typeof entry.name !== 'string') {
         throw new Error('Source storage response is invalid.');
       }
+      if (entry.metadata !== null && !isRecord(entry.metadata)) {
+        throw new Error('Source storage response is invalid.');
+      }
       assertStorageSegment(entry.name);
       const path = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
       assertSourceStoragePath(path);
@@ -266,6 +283,7 @@ async function readStorage(
   for (const file of files) {
     const bytes = await backend.download({ bucket: 'trip-media', path: file.path });
     if (!(bytes instanceof Uint8Array)) throw new Error('Source storage download is invalid.');
+    validateStorageObjectBytes(file.listing, bytes);
     objects.push({ path: file.path, listing: file.listing, bytes });
   }
   return objects;

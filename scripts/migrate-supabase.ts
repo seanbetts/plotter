@@ -1,8 +1,8 @@
-import { main } from './supabase-migration/cli';
+import { formatMigrationError, main } from './supabase-migration/cli';
 
 try {
   await main();
 } catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : 'Supabase migration failed.'}\n`);
+  process.stderr.write(`${formatMigrationError(error)}\n`);
   process.exitCode = 1;
 }

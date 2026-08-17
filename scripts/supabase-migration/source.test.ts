@@ -183,6 +183,68 @@ describe('read-only Supabase source inventory', () => {
     ]);
   });
 
+  it('rejects downloaded bytes that disagree with authoritative listing size, including unreferenced objects', async () => {
+    const { backend } = strictBackend({
+      directories: {
+        '': [{ name: 'unreferenced.bin', id: 'object', metadata: { size: 5 } }],
+      },
+      bytes: { 'unreferenced.bin': 'four' },
+    });
+
+    await expect(readSourceSnapshot(backend))
+      .rejects.toThrow('Source storage download size does not match listing metadata.');
+  });
+
+  it('still enforces listing size when the referencing legacy media row has nullable size metadata', async () => {
+    const { backend } = strictBackend({
+      tables: {
+        media_assets: [{
+          id: '00000000-0000-4000-8000-000000000006',
+          object_path: 'legacy.png',
+          size_bytes: null,
+        }],
+      },
+      directories: {
+        '': [{ name: 'legacy.png', id: 'object', metadata: { size: 7 } }],
+      },
+      bytes: { 'legacy.png': 'legacy' },
+    });
+
+    await expect(readSourceSnapshot(backend))
+      .rejects.toThrow('Source storage download size does not match listing metadata.');
+  });
+
+  it.each(['5', -1, 1.5])('rejects ambiguous listing size metadata %p', async (size) => {
+    const { backend } = strictBackend({
+      directories: {
+        '': [{ name: 'ambiguous.bin', id: 'object', metadata: { size } }],
+      },
+      bytes: { 'ambiguous.bin': 'value' },
+    });
+
+    await expect(readSourceSnapshot(backend))
+      .rejects.toThrow('Source storage listing size is invalid.');
+  });
+
+  it.each([null, { mimetype: 'application/octet-stream' }])(
+    'preserves an object when listing size metadata is unavailable (%p)',
+    async (metadata) => {
+      const { backend } = strictBackend({
+        directories: {
+          '': [{ name: 'legacy.bin', id: 'object', metadata }],
+        },
+        bytes: { 'legacy.bin': 'legacy' },
+      });
+
+      const snapshot = await readSourceSnapshot(backend);
+
+      expect(snapshot.storage[0]).toMatchObject({
+        path: 'legacy.bin', listing: { metadata },
+      });
+      expect(new TextDecoder().decode(snapshot.storage[0]!.bytes)).toBe('legacy');
+    },
+  );
+
   it('fails closed when a full page reaches the configured page ceiling', async () => {
     const { backend } = strictBackend({ tables: { trips: [row('trip-a'), row('trip-b')] } });
     await expect(readSourceSnapshot(backend, { pageSize: 1, maxPages: 2 }))

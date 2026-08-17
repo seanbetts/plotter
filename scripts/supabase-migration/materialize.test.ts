@@ -96,6 +96,191 @@ describe('Supabase source materialization', () => {
     }
   });
 
+  it('accepts complete canonical nested destination, routing, and activity domain values', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-complete-domain-'));
+    temporaryDirectories.push(root);
+    const loaded = await fixture();
+    const destination = loaded.source.tables.destinations[0]!;
+    destination.routing_anchors = {
+      'driving-car': {
+        profile: 'driving-car',
+        coordinates: { lat: 51, lng: -0.1 },
+        originalCoordinates: { lat: 51, lng: -0.1 },
+        snapDistanceKm: 0,
+        provider: 'openrouteservice',
+        resolvedAt: '2026-01-01T00:00:00.000Z',
+      },
+    };
+    destination.media = [{
+      id: '00000000-0000-4000-8000-000000000030',
+      url: 'https://example.invalid/image',
+      thumbnailUrl: 'https://example.invalid/thumb',
+      caption: 'Nested media', credit: '', sortOrder: 0,
+      bucketId: 'trip-media', objectPath: 'nested/image.png',
+      contentType: 'image/png', sizeBytes: 1,
+      uploadedAt: '2026-01-01T00:00:00.000Z',
+    }];
+    destination.research = {
+      notes: '',
+      links: [{
+        id: '00000000-0000-4000-8000-000000000031', title: 'Research',
+        url: 'https://example.invalid/research', domain: 'example.invalid', sortOrder: 0,
+        previewFetchedAt: '2026-01-01T00:00:00.000Z',
+      }],
+      bookReferences: [{
+        id: '00000000-0000-4000-8000-000000000032', source: 'Other',
+        reference: 'Chapter', note: '',
+      }],
+    };
+    destination.activities = { items: [{
+      id: '00000000-0000-4000-8000-000000000033', label: 'Legacy item',
+      category: 'other', notes: '',
+    }] };
+    const waypoint = {
+      id: '00000000-0000-4000-8000-000000000034', order: 0, name: 'Waypoint',
+      coordinates: { lat: 52, lng: -1 },
+      location: {
+        placeName: 'Waypoint', regionName: 'England', countryName: 'United Kingdom',
+        sourceLabel: 'Waypoint, England', sourceProvider: 'maptiler', sourceFeatureId: 'feature',
+      },
+      notes: '',
+      links: [{
+        id: '00000000-0000-4000-8000-000000000035', title: 'Waypoint link',
+        url: 'https://example.invalid/waypoint', domain: 'example.invalid', sortOrder: 0,
+      }],
+    };
+    const route = loaded.source.tables.route_legs[0]!;
+    route.geometry = { type: 'LineString', coordinates: [[-0.1, 51], [-3, 56]] };
+    route.waypoints = [waypoint];
+    route.sections = [{ kind: 'road', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 10 }];
+    route.warnings = [{
+      code: 'ROUTE_INTENT_REASSIGNMENT_REQUIRED', message: 'Review intent',
+      context: {
+        sourceRouteLegId: '00000000-0000-4000-8000-000000000004',
+        unresolvedIntent: {
+          movement: 'drive', calculation: 'manual', ferryPolicy: 'avoid',
+          waypoints: [waypoint], notes: '',
+        },
+      },
+    }];
+    route.provider_diagnostic = {
+      provider: 'openrouteservice', httpStatus: 429, code: 2010,
+      providerMessage: 'Retry', coordinateIndex: 0,
+      requestedProfile: 'driving-car', actualProfile: 'driving-hgv',
+      retryAfterMs: 1000, attempts: 2, retryAttempts: 1,
+    };
+    loaded.source.tables.activities[0]!.location = {
+      name: 'Trail', address: '', coordinates: { lat: 51.1, lng: -0.2 },
+      sourceProvider: 'manual', sourceFeatureId: 'manual-location',
+    };
+    loaded.source.tables.activities[0]!.links = [{
+      id: '00000000-0000-4000-8000-000000000036', title: 'Activity link',
+      url: 'https://example.invalid/activity', domain: 'example.invalid', sortOrder: 0,
+    }];
+
+    const materialized = await materializeSource({
+      destinationRoot: root,
+      archiveRelativePath: 'imports/synthetic',
+      source: loaded.source,
+      fingerprint: fingerprintSourceSnapshot(loaded.source, loaded.schema),
+      importedAt: '2026-08-17T12:00:00.000Z',
+    });
+
+    expect(materialized.failures).toEqual([]);
+    expect(materialized.promotable).toBe(true);
+    expect(() => materialized.validate()).not.toThrow();
+  });
+
+  it.each([
+    ['vehicle restrictions', (source: SourceSnapshot) => {
+      source.tables.trips[0]!.vehicle_restrictions = { height: 'too-tall' };
+    }],
+    ['destination location', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.location = {
+        placeName: 'First stop', regionName: 'England', countryName: 'United Kingdom',
+        sourceLabel: 'First stop, England', sourceProvider: 'unknown-provider',
+      };
+    }],
+    ['routing anchor', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.routing_anchors = {
+        'driving-car': {
+          profile: 'driving-car', coordinates: { lat: '51', lng: -0.1 },
+          originalCoordinates: { lat: 51, lng: -0.1 }, snapDistanceKm: 0,
+          provider: 'openrouteservice', resolvedAt: '2026-01-01T00:00:00.000Z',
+        },
+      };
+    }],
+    ['destination media item', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.media = [{
+        id: 'media', url: 'https://example.invalid/image', caption: 3, credit: '',
+      }];
+    }],
+    ['research link', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.research = {
+        notes: '', links: [{ id: 'link', title: 'Link', url: 3, domain: 'example.invalid', sortOrder: 0 }],
+        bookReferences: [],
+      };
+    }],
+    ['book reference', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.research = {
+        notes: '', links: [], bookReferences: [{ id: 'book', source: 'Invalid', reference: '', note: '' }],
+      };
+    }],
+    ['legacy activity item', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.activities = {
+        items: [{ id: 'activity', label: 3, category: 'other', notes: '' }],
+      };
+    }],
+    ['route geometry', (source: SourceSnapshot) => {
+      source.tables.route_legs[0]!.geometry = { type: 'LineString', coordinates: [[-0.1]] };
+    }],
+    ['route waypoint', (source: SourceSnapshot) => {
+      source.tables.route_legs[0]!.waypoints = [{
+        id: 'waypoint', order: 0, name: 'Waypoint', coordinates: { lat: 51, lng: -0.1 },
+        location: { placeName: 'Waypoint' }, notes: '', links: [],
+      }];
+    }],
+    ['route section', (source: SourceSnapshot) => {
+      source.tables.route_legs[0]!.sections = [{
+        kind: 'tunnel', startGeometryIndex: 0, endGeometryIndex: 1, distanceKm: 1,
+      }];
+    }],
+    ['route warning', (source: SourceSnapshot) => {
+      source.tables.route_legs[0]!.warnings = [{ code: 'UNKNOWN', message: 'bad' }];
+    }],
+    ['provider diagnostic', (source: SourceSnapshot) => {
+      source.tables.route_legs[0]!.provider_diagnostic = {
+        provider: 'unknown', httpStatus: '500', providerMessage: 'bad',
+      };
+    }],
+    ['activity location', (source: SourceSnapshot) => {
+      source.tables.activities[0]!.location = {
+        name: 'Place', address: '', coordinates: { lat: '51', lng: -0.1 },
+      };
+    }],
+    ['activity link', (source: SourceSnapshot) => {
+      source.tables.activities[0]!.links = [{
+        id: 'link', title: 'Link', url: 'https://example.invalid', domain: 'example.invalid',
+        sortOrder: 'first',
+      }];
+    }],
+  ])('fails closed on malformed nested %s domain data', async (_label, mutate) => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-nested-domain-'));
+    temporaryDirectories.push(root);
+    const loaded = await fixture();
+    mutate(loaded.source);
+    const materialized = await materializeSource({
+      destinationRoot: root,
+      archiveRelativePath: 'imports/synthetic',
+      source: loaded.source,
+      fingerprint: fingerprintSourceSnapshot(loaded.source, loaded.schema),
+      importedAt: '2026-08-17T12:00:00.000Z',
+    });
+
+    expect(materialized.failures.some((failure) => failure.gate === 'domain')).toBe(true);
+    expect(materialized.promotable).toBe(false);
+  });
+
   it('detects changed materialized media bytes before promotion', async () => {
     const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-changed-'));
     temporaryDirectories.push(root);

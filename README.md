@@ -97,7 +97,9 @@ linked to the same project reference as the URL. Migration validates those
 conditions before issuing read-only public-schema and data-only COPY dumps.
 The JavaScript source pass uses exact, paged `select`, Storage `list`, and
 Storage `download` calls only; it disables session persistence, token refresh,
-and URL-session detection.
+and URL-session detection. Every downloaded object is checked against the
+listing byte size when Supabase supplies one; absent legacy size metadata is
+preserved, while malformed or contradictory size metadata fails the run.
 
 ```bash
 npm run migrate:supabase -- --dry-run --data-dir user-data
@@ -108,7 +110,10 @@ bytes, materialized candidate, inventory, and reconciliation report under
 `imports/`. It does not change `plotter.sqlite3`, `media/`, `backups/`, service
 state, or local-web state. Review the report and its complete 64-character
 source fingerprint. A second complete source pass must still match before the
-run can pass.
+run can pass. A changed or failed second pass leaves an explicit failed
+`source-stability` report instead of a passing report. CLI output identifies
+retained staging with a safe relative label and ID; it does not print absolute
+fixture, staging, or data-root paths.
 
 Apply requires a separately approved maintenance window, the stopped Plotter
 service, the reviewed fingerprint, and the exact explicit confirmation:
@@ -125,7 +130,9 @@ removing it. Apply creates a named `pre-supabase-import-*` backup and promotes
 the validated database/media pair through the same crash-recoverable portable
 restore transaction used by normal recovery. The Supabase source remains
 read-only and remains an independent rollback source. Repeating the same
-fixture does not merge or duplicate IDs or media.
+fixture does not merge or duplicate IDs or media. Structured destination,
+route, activity, and media domain fields are validated recursively before a
+candidate can pass reconciliation.
 
 These commands are implementation and fixture gates only. They do not claim
 that a live Supabase project has been read, that personal `user-data/` has been

@@ -14,11 +14,14 @@ import { createRawArchive } from './archive';
 import { materializeSource } from './materialize';
 import { reconcileMaterialization, type ReconciliationReport } from './reconcile';
 import {
+  SOURCE_TABLES,
+  canonicalJson,
   createSupabaseSourceBackend,
   fingerprintSourceSnapshot,
   readSourceSnapshot,
   sourceFingerprintDigest,
   validateSourceSchema,
+  validateStorageObjectBytes,
   type SourceSchema,
   type SourceSnapshot,
   type SourceStorageEntry,
@@ -35,8 +38,8 @@ export type MigrationArguments = {
 
 export type MigrationRunResult = {
   applied: boolean;
-  stagingParent: string;
-  stagingRoot: string;
+  stagingId: string;
+  stagingLabel: string;
   sourceFingerprintDigest: string;
   report: ReconciliationReport;
   preImportBackupId?: string;
@@ -51,6 +54,7 @@ type RunDependencies = {
   createClient?(url: string, key: string, options: Record<string, unknown>): SupabaseClient;
   loadFixture?(path: string): Promise<LoadedFixtureSource>;
   readLinkedProjectReference?(repositoryRoot: string): Promise<string>;
+  createTemporaryStagingParent?(): Promise<string>;
   log?(message: string): void;
 };
 
@@ -92,18 +96,21 @@ export async function loadFixtureSource(path: string): Promise<LoadedFixtureSour
       || typeof value.base64 !== 'string') throw new Error('Supabase migration fixture is invalid.');
     const bytes = Buffer.from(value.base64, 'base64');
     if (bytes.toString('base64') !== value.base64) throw new Error('Supabase migration fixture is invalid.');
+    validateStorageObjectBytes(value.listing as SourceStorageEntry, bytes);
     return {
       path: value.path,
       listing: value.listing as SourceStorageEntry,
       bytes: new Uint8Array(bytes),
     };
   });
-  return {
+  const loaded = {
     schema,
     source: { tables, storage },
     rawSchemaSql: parsed.rawSchemaSql,
     rawDataSql: parsed.rawDataSql,
   };
+  validateFixtureRawDumps(loaded);
+  return loaded;
 }
 
 export type ParsedMigrationArguments = MigrationArguments | { help: true };
@@ -235,6 +242,116 @@ export function parsePublicTableSchema(sql: string): SourceSchema {
   }
   validateSourceSchema(schema);
   return schema;
+}
+
+const fixtureJsonColumns: Partial<Record<(typeof SOURCE_TABLES)[number], Set<string>>> = {
+  trips: new Set(['metadata', 'vehicle_restrictions']),
+  destinations: new Set([
+    'location', 'timing', 'why', 'media', 'research', 'activities', 'route_context',
+    'routing_anchors',
+  ]),
+  route_legs: new Set(['geometry', 'waypoints', 'sections', 'warnings', 'provider_diagnostic']),
+  activities: new Set(['location', 'links']),
+};
+
+const fixtureTextArrayColumns: Partial<Record<(typeof SOURCE_TABLES)[number], Set<string>>> = {
+  destinations: new Set(['tags']),
+  activities: new Set(['tags']),
+};
+
+function decodeCopyText(value: string): string {
+  const replacements: Record<string, string> = {
+    b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\',
+  };
+  return value.replace(/\\([bfnrtv\\])/g, (_match, escaped: string) => replacements[escaped]!);
+}
+
+function encodePostgresTextArray(value: unknown[]): string {
+  return `{${value.map((item) => {
+    if (typeof item !== 'string') throw new Error('invalid text array');
+    return /^[a-zA-Z0-9_-]+$/.test(item)
+      ? item
+      : `"${item.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+  }).join(',')}}`;
+}
+
+function fixtureCopyCellMatches(
+  table: (typeof SOURCE_TABLES)[number],
+  column: string,
+  rawValue: string,
+  expectedValue: unknown,
+): boolean {
+  if (expectedValue === null) return rawValue === '\\N';
+  if (rawValue === '\\N') return false;
+  const value = decodeCopyText(rawValue);
+  if (fixtureJsonColumns[table]?.has(column)) {
+    try {
+      return canonicalJson(JSON.parse(value)) === canonicalJson(expectedValue);
+    } catch {
+      return false;
+    }
+  }
+  if (fixtureTextArrayColumns[table]?.has(column)) {
+    return Array.isArray(expectedValue) && value === encodePostgresTextArray(expectedValue);
+  }
+  if (typeof expectedValue === 'number') {
+    return Number.isFinite(expectedValue) && Number(value) === expectedValue;
+  }
+  if (typeof expectedValue !== 'string') return false;
+  if (column.endsWith('_at')) {
+    return !Number.isNaN(Date.parse(value)) && Date.parse(value) === Date.parse(expectedValue);
+  }
+  return value === expectedValue;
+}
+
+function validateFixtureRawDumps(fixture: LoadedFixtureSource): void {
+  try {
+    const rawSchema = parsePublicTableSchema(fixture.rawSchemaSql);
+    for (const table of Object.keys(fixture.schema) as Array<keyof SourceSchema>) {
+      if (JSON.stringify(rawSchema[table]) !== JSON.stringify(fixture.schema[table])) {
+        throw new Error('schema mismatch');
+      }
+    }
+    const inventories = new Map<string, { columns: string[]; rows: string[][] }>();
+    const copyPattern = /COPY\s+(?:"public"|public)\.(?:"([^"]+)"|([a-zA-Z_][a-zA-Z0-9_]*))\s*\(([^)]*)\)\s+FROM stdin;\r?\n([\s\S]*?)\r?\n\\\.\r?(?:\n|$)/g;
+    for (const match of fixture.rawDataSql.matchAll(copyPattern)) {
+      const table = match[1] ?? match[2]!;
+      if (inventories.has(table)) throw new Error('duplicate COPY');
+      const columns = match[3]!.split(',').map((column) => {
+        const trimmed = column.trim();
+        return trimmed.startsWith('"') && trimmed.endsWith('"')
+          ? trimmed.slice(1, -1).replaceAll('""', '"')
+          : trimmed;
+      });
+      inventories.set(table, {
+        columns,
+        rows: match[4]!.length === 0
+          ? []
+          : match[4]!.split(/\r?\n/).map((row) => row.split('\t')),
+      });
+    }
+    if (inventories.size !== SOURCE_TABLES.length) throw new Error('COPY count mismatch');
+    for (const table of SOURCE_TABLES) {
+      const inventory = inventories.get(table);
+      if (!inventory
+        || JSON.stringify(inventory.columns) !== JSON.stringify(fixture.schema[table])
+        || inventory.rows.length !== fixture.source.tables[table].length) {
+        throw new Error('COPY inventory mismatch');
+      }
+      for (const [rowIndex, rawRow] of inventory.rows.entries()) {
+        const structuredRow = fixture.source.tables[table][rowIndex]!;
+        if (rawRow.length !== inventory.columns.length
+          || inventory.columns.some((column, columnIndex) => !fixtureCopyCellMatches(
+            table,
+            column,
+            rawRow[columnIndex]!,
+            structuredRow[column],
+          ))) throw new Error('COPY row mismatch');
+      }
+    }
+  } catch {
+    throw new Error('Supabase migration fixture raw dumps are inconsistent.');
+  }
 }
 
 async function captureLiveSource(
@@ -436,7 +553,9 @@ export async function runMigration(
     dataRoot = realpathSync(resolve(arguments_.dataDirectory));
     stagingParent = ensureDirectory(join(dataRoot, 'imports'), dataRoot);
   } else {
-    stagingParent = await mkdtemp(join(tmpdir(), 'plotter-supabase-fixture-'));
+    stagingParent = dependencies.createTemporaryStagingParent
+      ? await dependencies.createTemporaryStagingParent()
+      : await mkdtemp(join(tmpdir(), 'plotter-supabase-fixture-'));
   }
   const archive = await createRawArchive({
     stagingParent,
@@ -459,23 +578,41 @@ export async function runMigration(
     fingerprint: firstFingerprint,
     importedAt: new Date().toISOString(),
   });
-  const report = reconcileMaterialization({
+  const reconciliationReport = reconcileMaterialization({
     source: first.source,
     fingerprint: firstFingerprint,
     materialized,
   });
+  let report = reconciliationReport;
+  try {
+    const second = await load();
+    const secondDigest = sourceFingerprintDigest(
+      fingerprintSourceSnapshot(second.source, second.schema),
+    );
+    if (secondDigest !== digest) throw new Error('Supabase source changed after staging.');
+  } catch (error) {
+    const message = error instanceof Error && error.message === 'Supabase source changed after staging.'
+      ? error.message
+      : 'Second Supabase source acquisition failed.';
+    report = {
+      ...reconciliationReport,
+      passed: false,
+      failures: [
+        ...reconciliationReport.failures,
+        { gate: 'source-stability', message },
+      ],
+    };
+    await writePrivateJson(join(archive.root, 'report.json'), report);
+    throw new Error(message, { cause: error });
+  }
   await writePrivateJson(join(archive.root, 'report.json'), report);
-
-  const second = await load();
-  const secondDigest = sourceFingerprintDigest(
-    fingerprintSourceSnapshot(second.source, second.schema),
-  );
-  if (secondDigest !== digest) throw new Error('Supabase source changed after staging.');
   if (!report.passed) throw new Error('Supabase migration reconciliation failed.');
+  const stagingId = basename(archive.root);
+  const stagingLabel = dataRoot ? relative(dataRoot, archive.root) : `temporary/${stagingId}`;
   if (arguments_.mode === 'dry-run') {
     dependencies.log?.(`Supabase migration dry-run passed fingerprint=${digest}`);
     return {
-      applied: false, stagingParent, stagingRoot: archive.root,
+      applied: false, stagingId, stagingLabel,
       sourceFingerprintDigest: digest, report,
     };
   }
@@ -488,12 +625,20 @@ export async function runMigration(
     const preImportBackupId = await promoteWithPortableRestore(dataRoot!, materialized);
     dependencies.log?.(`Supabase migration apply passed fingerprint=${digest}`);
     return {
-      applied: true, stagingParent, stagingRoot: archive.root,
+      applied: true, stagingId, stagingLabel,
       sourceFingerprintDigest: digest, report, preImportBackupId,
     };
   } finally {
     ownership.release();
   }
+}
+
+export function formatMigrationError(error: unknown): string {
+  if (!(error instanceof Error)) return 'Supabase migration failed.';
+  const message = error.message;
+  return message.includes('/') || message.includes('\\')
+    ? 'Supabase migration failed.'
+    : message;
 }
 
 export async function main(arguments_ = process.argv.slice(2)): Promise<void> {
@@ -505,7 +650,8 @@ export async function main(arguments_ = process.argv.slice(2)): Promise<void> {
   const result = await runMigration(parsed, { log: (message) => process.stdout.write(`${message}\n`) });
   process.stdout.write(`${JSON.stringify({
     applied: result.applied,
-    stagingRoot: result.stagingRoot,
+    stagingId: result.stagingId,
+    stagingLabel: result.stagingLabel,
     sourceFingerprint: result.sourceFingerprintDigest,
     passed: result.report.passed,
     ...(result.preImportBackupId === undefined ? {} : { preImportBackupId: result.preImportBackupId }),

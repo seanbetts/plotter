@@ -8,6 +8,8 @@ import { createMediaStore } from '../../server/mediaStore';
 import { createSqliteTripRepository } from '../../server/tripRepository';
 import type { WriteCoordinator } from '../../server/writeCoordinator';
 import { isCanonicalId } from '../../src/api/identifiers';
+import { validateRoutingAnchor } from '../../src/domain/routingAnchors';
+import type { Coordinates, RoutingAnchor, RoutingAnchorProfile } from '../../src/domain/types';
 import { sourceFingerprintDigest, type SourceFingerprint, type SourceSnapshot } from './source';
 
 export type MigrationFailure = { gate: string; message: string };
@@ -49,6 +51,22 @@ const routeStatuses = new Set(['pending', 'calculating', 'ready', 'failed', 'man
 const activityCategories = new Set(['food', 'culture', 'outdoors', 'street-art', 'ski', 'detour', 'logistics', 'other']);
 const activityStatuses = new Set(['idea', 'planned', 'booked', 'done', 'skipped']);
 const tripMemberRoles = new Set(['owner', 'editor', 'viewer']);
+const destinationLocationProviders = new Set(['maptiler', 'legacy']);
+const activityLocationProviders = new Set(['maptiler', 'manual']);
+const routeWarningCodes = new Set([
+  'SUSPICIOUS_DETOUR',
+  'FERRY_REQUIRED_NOT_FOUND',
+  'FERRY_AVOIDED_BUT_FOUND',
+  'ROUTING_ANCHOR_ADJUSTED',
+  'VEHICLE_PROFILE_FALLBACK',
+  'ROUTE_INTENT_REASSIGNMENT_REQUIRED',
+]);
+const bookReferenceSources = new Set([
+  'World Atlas of Street Art',
+  "Lonely Planet's Where to Go When",
+  'Powder',
+  'Other',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -85,6 +103,235 @@ function validStringArray(value: unknown): boolean {
   return Array.isArray(value) && value.every(stringValue);
 }
 
+function exactRecord(
+  value: unknown,
+  allowedKeys: readonly string[],
+  requiredKeys: readonly string[] = [],
+): value is Record<string, unknown> {
+  return isRecord(value)
+    && Object.keys(value).every((key) => allowedKeys.includes(key))
+    && requiredKeys.every((key) => Object.hasOwn(value, key));
+}
+
+function validOptionalString(value: unknown): boolean {
+  return value === undefined || stringValue(value);
+}
+
+function validOptionalTimestamp(value: unknown): boolean {
+  return value === undefined || validTimestamp(value);
+}
+
+function validOptionalNonNegativeInteger(value: unknown): boolean {
+  return value === undefined || nonNegativeInteger(value);
+}
+
+function validCoordinates(value: unknown): value is Coordinates {
+  return exactRecord(value, ['lat', 'lng'], ['lat', 'lng'])
+    && finiteNumber(value.lat) && value.lat >= -90 && value.lat <= 90
+    && finiteNumber(value.lng) && value.lng >= -180 && value.lng <= 180;
+}
+
+function validVehicleRestrictions(value: unknown): boolean {
+  if (!exactRecord(value, ['length', 'width', 'height', 'weight', 'axleLoad'])) return false;
+  return Object.values(value).every(finiteNumber);
+}
+
+function validDestinationLocation(value: unknown): boolean {
+  if (!exactRecord(
+    value,
+    ['placeName', 'regionName', 'countryName', 'countryCode', 'sourceLabel', 'sourceProvider', 'sourceFeatureId'],
+    ['placeName', 'regionName', 'countryName', 'sourceLabel', 'sourceProvider'],
+  )) return false;
+  return stringValue(value.placeName)
+    && stringValue(value.regionName)
+    && stringValue(value.countryName)
+    && validOptionalString(value.countryCode)
+    && stringValue(value.sourceLabel)
+    && destinationLocationProviders.has(String(value.sourceProvider))
+    && validOptionalString(value.sourceFeatureId);
+}
+
+function validResearchLink(value: unknown): boolean {
+  if (!exactRecord(
+    value,
+    ['id', 'title', 'url', 'domain', 'imageUrl', 'sortOrder', 'previewFetchedAt'],
+    ['id', 'title', 'url', 'domain', 'sortOrder'],
+  )) return false;
+  return isCanonicalId(value.id)
+    && stringValue(value.title)
+    && stringValue(value.url)
+    && stringValue(value.domain)
+    && validOptionalString(value.imageUrl)
+    && nonNegativeInteger(value.sortOrder)
+    && validOptionalTimestamp(value.previewFetchedAt);
+}
+
+function validMediaItem(value: unknown): boolean {
+  if (!exactRecord(
+    value,
+    [
+      'id', 'url', 'thumbnailUrl', 'previewUrl', 'fullUrl', 'caption', 'credit', 'sortOrder',
+      'bucketId', 'objectPath', 'contentType', 'sizeBytes', 'uploadedAt',
+    ],
+    ['id', 'url', 'caption', 'credit'],
+  )) return false;
+  return isCanonicalId(value.id)
+    && stringValue(value.url)
+    && validOptionalString(value.thumbnailUrl)
+    && validOptionalString(value.previewUrl)
+    && validOptionalString(value.fullUrl)
+    && stringValue(value.caption)
+    && stringValue(value.credit)
+    && validOptionalNonNegativeInteger(value.sortOrder)
+    && validOptionalString(value.bucketId)
+    && validOptionalString(value.objectPath)
+    && validOptionalString(value.contentType)
+    && validOptionalNonNegativeInteger(value.sizeBytes)
+    && validOptionalTimestamp(value.uploadedAt);
+}
+
+function validBookReference(value: unknown): boolean {
+  return exactRecord(value, ['id', 'source', 'reference', 'note'], ['id', 'source', 'reference', 'note'])
+    && isCanonicalId(value.id)
+    && bookReferenceSources.has(String(value.source))
+    && stringValue(value.reference)
+    && stringValue(value.note);
+}
+
+function validActivityItem(value: unknown): boolean {
+  return exactRecord(value, ['id', 'label', 'category', 'notes'], ['id', 'label', 'category', 'notes'])
+    && isCanonicalId(value.id)
+    && stringValue(value.label)
+    && activityCategories.has(String(value.category))
+    && stringValue(value.notes);
+}
+
+function validRoutingAnchors(
+  value: unknown,
+  canonicalCoordinates: Coordinates,
+): boolean {
+  if (!exactRecord(value, ['driving-car', 'driving-hgv'])) return false;
+  for (const profile of ['driving-car', 'driving-hgv'] as const) {
+    const candidate = value[profile];
+    if (candidate === undefined) continue;
+    if (!exactRecord(
+      candidate,
+      ['profile', 'coordinates', 'originalCoordinates', 'snapDistanceKm', 'provider', 'resolvedAt'],
+      ['profile', 'coordinates', 'originalCoordinates', 'snapDistanceKm', 'provider', 'resolvedAt'],
+    ) || !validCoordinates(candidate.coordinates)
+      || !validCoordinates(candidate.originalCoordinates)
+      || !finiteNumber(candidate.snapDistanceKm)
+      || candidate.snapDistanceKm < 0
+      || !validTimestamp(candidate.resolvedAt)) return false;
+    if (!validateRoutingAnchor({
+      anchor: candidate as RoutingAnchor,
+      canonicalCoordinates,
+      profile: profile as RoutingAnchorProfile,
+    })) return false;
+  }
+  return true;
+}
+
+function validRouteWaypoint(value: unknown): boolean {
+  return exactRecord(
+    value,
+    ['id', 'order', 'name', 'coordinates', 'location', 'notes', 'links'],
+    ['id', 'order', 'name', 'coordinates', 'location', 'notes', 'links'],
+  )
+    && isCanonicalId(value.id)
+    && nonNegativeInteger(value.order)
+    && stringValue(value.name)
+    && validCoordinates(value.coordinates)
+    && validDestinationLocation(value.location)
+    && stringValue(value.notes)
+    && Array.isArray(value.links)
+    && value.links.every(validResearchLink);
+}
+
+function validRouteIntent(value: unknown): boolean {
+  return exactRecord(
+    value,
+    ['movement', 'calculation', 'ferryPolicy', 'waypoints', 'notes'],
+    ['movement', 'calculation', 'ferryPolicy', 'waypoints', 'notes'],
+  )
+    && routeMovements.has(String(value.movement))
+    && calculationModes.has(String(value.calculation))
+    && ferryPolicies.has(String(value.ferryPolicy))
+    && Array.isArray(value.waypoints)
+    && value.waypoints.every(validRouteWaypoint)
+    && stringValue(value.notes);
+}
+
+function validRouteWarning(value: unknown): boolean {
+  if (!exactRecord(value, ['code', 'message', 'context'], ['code', 'message'])
+    || !routeWarningCodes.has(String(value.code))
+    || !stringValue(value.message)) return false;
+  if (value.context === undefined) return true;
+  return exactRecord(value.context, ['sourceRouteLegId', 'unresolvedIntent'], ['sourceRouteLegId', 'unresolvedIntent'])
+    && isCanonicalId(value.context.sourceRouteLegId)
+    && validRouteIntent(value.context.unresolvedIntent);
+}
+
+function validRouteSection(value: unknown): boolean {
+  return exactRecord(
+    value,
+    ['kind', 'startGeometryIndex', 'endGeometryIndex', 'distanceKm'],
+    ['kind', 'startGeometryIndex', 'endGeometryIndex', 'distanceKm'],
+  )
+    && (value.kind === 'road' || value.kind === 'ferry')
+    && nonNegativeInteger(value.startGeometryIndex)
+    && nonNegativeInteger(value.endGeometryIndex)
+    && value.endGeometryIndex >= value.startGeometryIndex
+    && finiteNumber(value.distanceKm)
+    && value.distanceKm >= 0;
+}
+
+function validRouteGeometry(value: unknown): boolean {
+  if (!exactRecord(value, ['type', 'coordinates'], ['type', 'coordinates'])
+    || value.type !== 'LineString'
+    || !Array.isArray(value.coordinates)
+    || value.coordinates.length < 2) return false;
+  return value.coordinates.every((position) => Array.isArray(position)
+    && position.length >= 2
+    && position.every(finiteNumber)
+    && position[0]! >= -180 && position[0]! <= 180
+    && position[1]! >= -90 && position[1]! <= 90);
+}
+
+function validProviderDiagnostic(value: unknown): boolean {
+  if (!exactRecord(
+    value,
+    [
+      'provider', 'httpStatus', 'code', 'providerMessage', 'coordinateIndex', 'requestedProfile',
+      'actualProfile', 'retryAfterMs', 'attempts', 'retryAttempts',
+    ],
+    ['provider', 'httpStatus', 'providerMessage'],
+  )) return false;
+  return value.provider === 'openrouteservice'
+    && nonNegativeInteger(value.httpStatus)
+    && (value.code === undefined || finiteNumber(value.code))
+    && stringValue(value.providerMessage)
+    && validOptionalNonNegativeInteger(value.coordinateIndex)
+    && (value.requestedProfile === undefined || vehicleProfiles.has(String(value.requestedProfile)))
+    && (value.actualProfile === undefined || vehicleProfiles.has(String(value.actualProfile)))
+    && validOptionalNonNegativeInteger(value.retryAfterMs)
+    && validOptionalNonNegativeInteger(value.attempts)
+    && validOptionalNonNegativeInteger(value.retryAttempts);
+}
+
+function validActivityLocation(value: unknown): boolean {
+  return exactRecord(
+    value,
+    ['name', 'address', 'coordinates', 'sourceProvider', 'sourceFeatureId'],
+    ['name', 'address'],
+  )
+    && stringValue(value.name)
+    && stringValue(value.address)
+    && (value.coordinates === undefined || validCoordinates(value.coordinates))
+    && (value.sourceProvider === undefined || activityLocationProviders.has(String(value.sourceProvider)))
+    && validOptionalString(value.sourceFeatureId);
+}
+
 function validTrip(row: Record<string, unknown>): boolean {
   return isCanonicalId(row.id)
     && isCanonicalId(row.owner_user_id)
@@ -94,7 +341,7 @@ function validTrip(row: Record<string, unknown>): boolean {
     && vehiclePresets.has(String(row.vehicle_preset))
     && vehicleProfiles.has(String(row.vehicle_profile))
     && (row.vehicle_type === null || row.vehicle_type === 'hgv')
-    && isRecord(row.vehicle_restrictions)
+    && validVehicleRestrictions(row.vehicle_restrictions)
     && validTimestamp(row.created_at)
     && validTimestamp(row.updated_at);
 }
@@ -108,14 +355,27 @@ function validTripMember(row: Record<string, unknown>): boolean {
 }
 
 function validDestination(row: Record<string, unknown>): boolean {
+  const canonicalCoordinates = { lat: row.lat, lng: row.lng };
   if (!(
     isCanonicalId(row.id) && isCanonicalId(row.trip_id) && stringValue(row.name)
-    && stringValue(row.country_region) && finiteNumber(row.lat) && finiteNumber(row.lng)
-    && isRecord(row.location) && nonNegativeInteger(row.stop_order)
+    && stringValue(row.country_region) && validCoordinates(canonicalCoordinates)
+    && validDestinationLocation(row.location) && nonNegativeInteger(row.stop_order)
     && destinationStatuses.has(String(row.status)) && priorities.has(String(row.priority))
-    && isRecord(row.timing) && isRecord(row.why) && Array.isArray(row.media)
-    && isRecord(row.research) && isRecord(row.activities) && isRecord(row.route_context)
-    && isRecord(row.routing_anchors) && validStringArray(row.tags)
+    && exactRecord(
+      row.timing,
+      ['idealMonths', 'expectedStayDays', 'provisionalStartDate', 'provisionalEndDate'],
+      ['idealMonths', 'expectedStayDays', 'provisionalStartDate', 'provisionalEndDate'],
+    )
+    && exactRecord(row.why, ['summary', 'highlights', 'personalRationale'], ['summary', 'highlights', 'personalRationale'])
+    && Array.isArray(row.media)
+    && exactRecord(row.research, ['notes', 'links', 'bookReferences'], ['notes', 'links', 'bookReferences'])
+    && exactRecord(row.activities, ['items'], ['items'])
+    && exactRecord(
+      row.route_context,
+      ['previousNextNotes', 'drivingNotes', 'borderShippingNotes', 'notes'],
+      ['previousNextNotes', 'drivingNotes', 'borderShippingNotes', 'notes'],
+    )
+    && validRoutingAnchors(row.routing_anchors, canonicalCoordinates) && validStringArray(row.tags)
     && validTimestamp(row.created_at) && validTimestamp(row.updated_at)
   )) return false;
   const timing = row.timing;
@@ -128,8 +388,11 @@ function validDestination(row: Record<string, unknown>): boolean {
     && stringValue(timing.provisionalStartDate)
     && stringValue(timing.provisionalEndDate)
     && stringValue(why.summary) && stringValue(why.highlights) && stringValue(why.personalRationale)
-    && stringValue(research.notes) && Array.isArray(research.links) && Array.isArray(research.bookReferences)
-    && Array.isArray(activities.items)
+    && stringValue(research.notes) && Array.isArray(research.links)
+    && research.links.every(validResearchLink)
+    && Array.isArray(research.bookReferences) && research.bookReferences.every(validBookReference)
+    && row.media.every(validMediaItem)
+    && Array.isArray(activities.items) && activities.items.every(validActivityItem)
     && stringValue(routeContext.previousNextNotes) && stringValue(routeContext.drivingNotes)
     && stringValue(routeContext.borderShippingNotes) && stringValue(routeContext.notes);
 }
@@ -139,17 +402,19 @@ function validRoute(row: Record<string, unknown>): boolean {
     && isCanonicalId(row.origin_destination_id) && isCanonicalId(row.target_destination_id)
     && routeMovements.has(String(row.movement)) && calculationModes.has(String(row.calculation_mode))
     && ferryPolicies.has(String(row.ferry_policy)) && Array.isArray(row.waypoints)
-    && Array.isArray(row.sections) && Array.isArray(row.warnings)
+    && row.waypoints.every(validRouteWaypoint)
+    && Array.isArray(row.sections) && row.sections.every(validRouteSection)
+    && Array.isArray(row.warnings) && row.warnings.every(validRouteWarning)
     && routeStatuses.has(String(row.status))
-    && (row.distance_km === null || finiteNumber(row.distance_km))
-    && (row.travel_time_hours === null || finiteNumber(row.travel_time_hours))
-    && (row.geometry === null || isRecord(row.geometry))
+    && (row.distance_km === null || (finiteNumber(row.distance_km) && row.distance_km >= 0))
+    && (row.travel_time_hours === null || (finiteNumber(row.travel_time_hours) && row.travel_time_hours >= 0))
+    && (row.geometry === null || validRouteGeometry(row.geometry))
     && (row.provider === null || stringValue(row.provider))
     && (row.profile === null || stringValue(row.profile))
     && (row.route_key === null || stringValue(row.route_key))
     && (row.calculated_at === null || validTimestamp(row.calculated_at))
     && (row.error === null || stringValue(row.error))
-    && (row.provider_diagnostic === null || isRecord(row.provider_diagnostic))
+    && (row.provider_diagnostic === null || validProviderDiagnostic(row.provider_diagnostic))
     && stringValue(row.notes) && validTimestamp(row.created_at) && validTimestamp(row.updated_at);
 }
 
@@ -157,8 +422,9 @@ function validActivity(row: Record<string, unknown>): boolean {
   return isCanonicalId(row.id) && isCanonicalId(row.trip_id) && isCanonicalId(row.destination_id)
     && nonNegativeInteger(row.activity_order) && stringValue(row.title) && stringValue(row.description)
     && activityCategories.has(String(row.category)) && activityStatuses.has(String(row.status))
-    && priorities.has(String(row.priority)) && (row.location === null || isRecord(row.location))
-    && Array.isArray(row.links) && stringValue(row.notes) && validStringArray(row.tags)
+    && priorities.has(String(row.priority)) && (row.location === null || validActivityLocation(row.location))
+    && Array.isArray(row.links) && row.links.every(validResearchLink)
+    && stringValue(row.notes) && validStringArray(row.tags)
     && validTimestamp(row.created_at) && validTimestamp(row.updated_at);
 }
 
