@@ -14,9 +14,12 @@ export type DirectorySnapshot = {
 };
 
 export class TripStorageConflictError extends Error {
-  constructor(public readonly currentRevision: number) {
+  public readonly currentRevision: number;
+
+  constructor(currentRevision: number) {
     super('Another device changed this data. Plotter reloaded the latest version.');
     this.name = 'TripStorageConflictError';
+    this.currentRevision = currentRevision;
   }
 }
 
