@@ -210,6 +210,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     realtime,
   } = useTripWorkspace();
   const directoryRevisionRef = useRef(directoryRevision);
+  const pendingDirectoryRevisionRef = useRef<number | null>(null);
 
   useEffect(() => {
     directoryRevisionRef.current = directoryRevision;
@@ -221,8 +222,24 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     return realtime.subscribeToDirectory((revision) => {
       const currentRevision = directoryRevisionRef.current;
       if (currentRevision !== null && revision <= currentRevision) return;
-      directoryRevisionRef.current = revision;
-      void refreshTrips();
+      const pendingRevision = pendingDirectoryRevisionRef.current;
+      if (pendingRevision !== null && revision <= pendingRevision) return;
+      pendingDirectoryRevisionRef.current = revision;
+      void refreshTrips()
+        .then((appliedRevision) => {
+          if (appliedRevision === undefined) return;
+          const acknowledgedRevision = appliedRevision ?? revision;
+          const applied = directoryRevisionRef.current;
+          if (applied === null || acknowledgedRevision > applied) {
+            directoryRevisionRef.current = acknowledgedRevision;
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (pendingDirectoryRevisionRef.current === revision) {
+            pendingDirectoryRevisionRef.current = null;
+          }
+        });
     });
   }, [refreshTrips, realtime]);
 
@@ -351,6 +368,7 @@ function TripWorkspace({
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
   const [routeAlternativesState, setRouteAlternativesState] = useState<RouteAlternativesState | null>(null);
   const tripRevisionRef = useRef(revision);
+  const pendingTripRevisionRef = useRef<number | null>(null);
   const selectedDestinationIdRef = useRef<string | null>(null);
   const selectedActivityIdRef = useRef<string | null>(null);
   const routeLegsRef = useRef(routeLegs);
@@ -451,8 +469,24 @@ function TripWorkspace({
     return realtime.subscribeToTrip(activeTripId, (nextRevision) => {
       const currentRevision = tripRevisionRef.current;
       if (currentRevision !== null && nextRevision <= currentRevision) return;
-      tripRevisionRef.current = nextRevision;
-      void reload();
+      const pendingRevision = pendingTripRevisionRef.current;
+      if (pendingRevision !== null && nextRevision <= pendingRevision) return;
+      pendingTripRevisionRef.current = nextRevision;
+      void reload()
+        .then((appliedRevision) => {
+          if (appliedRevision === undefined) return;
+          const acknowledgedRevision = appliedRevision ?? nextRevision;
+          const applied = tripRevisionRef.current;
+          if (applied === null || acknowledgedRevision > applied) {
+            tripRevisionRef.current = acknowledgedRevision;
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (pendingTripRevisionRef.current === nextRevision) {
+            pendingTripRevisionRef.current = null;
+          }
+        });
     });
   }, [activeTripId, realtime, reload]);
 

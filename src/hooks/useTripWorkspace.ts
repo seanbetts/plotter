@@ -70,6 +70,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
   const [directoryRevision, setDirectoryRevision] = useState<number | null>(null);
   const [retryAttempt, setRetryAttempt] = useState(0);
   const activeTripRef = useRef<TripSummary | null>(null);
+  const refreshSequenceRef = useRef(0);
 
   const activateTrip = useCallback((nextStorage: AppTripStorage, nextTrip: TripSummary) => {
     writeStorageValue(localStorage ?? null, selectedTripStorageKey, nextTrip.id);
@@ -241,31 +242,45 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
   }, [activateTrip, recoverDirectoryConflict, storage, trips]);
 
   const refreshTrips = useCallback(async () => {
-    if (!storage) return;
+    if (!storage) return undefined;
 
-    const directorySnapshot = storage.directory.loadDirectory
-      ? await storage.directory.loadDirectory()
-      : null;
-    let nextTrips = directorySnapshot?.trips ?? await storage.directory.listTrips();
-    if (nextTrips.length === 0) {
-      const replacementTrip = await storage.directory.createTrip({ name: defaultTripName });
-      nextTrips = [replacementTrip];
-    }
+    const sequence = refreshSequenceRef.current + 1;
+    refreshSequenceRef.current = sequence;
+    const isCurrentRefresh = () => refreshSequenceRef.current === sequence;
+    setActionError(null);
 
-    const currentActive = activeTripRef.current;
-    const nextActive = currentActive
-      ? nextTrips.find((trip) => trip.id === currentActive.id) ?? nextTrips[0] ?? null
-      : nextTrips[0] ?? null;
+    try {
+      const directorySnapshot = storage.directory.loadDirectory
+        ? await storage.directory.loadDirectory()
+        : null;
+      let nextTrips = directorySnapshot?.trips ?? await storage.directory.listTrips();
+      if (!isCurrentRefresh()) return undefined;
+      if (nextTrips.length === 0) {
+        const replacementTrip = await storage.directory.createTrip({ name: defaultTripName });
+        if (!isCurrentRefresh()) return undefined;
+        nextTrips = [replacementTrip];
+      }
 
-    setTrips(nextTrips);
-    setDirectoryRevision(directorySnapshot?.revision ?? null);
-    setActiveTrip(nextActive);
-    activeTripRef.current = nextActive;
-    setRepository(nextActive ? storage.createTripRepository(nextActive.id) : null);
-    if (nextActive) {
-      writeStorageValue(localStorage ?? null, selectedTripStorageKey, nextActive.id);
-    } else {
-      removeStorageValue(localStorage ?? null, selectedTripStorageKey);
+      const currentActive = activeTripRef.current;
+      const nextActive = currentActive
+        ? nextTrips.find((trip) => trip.id === currentActive.id) ?? nextTrips[0] ?? null
+        : nextTrips[0] ?? null;
+
+      setTrips(nextTrips);
+      setDirectoryRevision(directorySnapshot?.revision ?? null);
+      setActiveTrip(nextActive);
+      activeTripRef.current = nextActive;
+      setRepository(nextActive ? storage.createTripRepository(nextActive.id) : null);
+      if (nextActive) {
+        writeStorageValue(localStorage ?? null, selectedTripStorageKey, nextActive.id);
+      } else {
+        removeStorageValue(localStorage ?? null, selectedTripStorageKey);
+      }
+      return directorySnapshot?.revision ?? null;
+    } catch (caught) {
+      if (!isCurrentRefresh()) return undefined;
+      setActionError(formatRepositoryError(caught).message);
+      throw caught;
     }
   }, [localStorage, storage]);
 

@@ -8,6 +8,16 @@ import { useTripWorkspace } from './useTripWorkspace';
 import { PlotterApiError } from '../api/client';
 import { TripStorageConflictError } from '../storage/revision';
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function createTrip(name: string, id: string = crypto.randomUUID()): TripSummary {
   return {
     id,
@@ -122,6 +132,52 @@ describe('useTripWorkspace', () => {
     expect(result.current.directoryRevision).toBe(11);
     expect(directory.loadDirectory).toHaveBeenCalledTimes(1);
     expect(directory.listTrips).not.toHaveBeenCalled();
+  });
+
+  it('does not commit an older directory refresh after a newer refresh completes', async () => {
+    const initialTrip = createTrip('Initial trip', 'trip-1');
+    const olderTrip = { ...initialTrip, name: 'Older response' };
+    const newerTrip = { ...initialTrip, name: 'Newer response' };
+    const olderRefresh = createDeferred<{ revision: number; trips: TripSummary[] }>();
+    const newerRefresh = createDeferred<{ revision: number; trips: TripSummary[] }>();
+    const loadDirectory = vi
+      .fn()
+      .mockResolvedValueOnce({ revision: 1, trips: [initialTrip] })
+      .mockImplementationOnce(() => olderRefresh.promise)
+      .mockImplementationOnce(() => newerRefresh.promise);
+    const directory: TripDirectoryRepository = {
+      loadDirectory,
+      listTrips: vi.fn(),
+      createTrip: vi.fn(),
+      updateTrip: vi.fn(),
+      deleteTrip: vi.fn(),
+    };
+    const { result } = renderHook(() => useTripWorkspace({
+      createStorage: async () => ({ directory, createTripRepository: () => createRepository() }),
+      localStorage: createLocalStorage(null),
+    }));
+    await waitFor(() => expect(result.current.directoryRevision).toBe(1));
+
+    let olderPromise!: ReturnType<typeof result.current.refreshTrips>;
+    let newerPromise!: ReturnType<typeof result.current.refreshTrips>;
+    act(() => {
+      olderPromise = result.current.refreshTrips();
+      newerPromise = result.current.refreshTrips();
+    });
+    await act(async () => {
+      newerRefresh.resolve({ revision: 3, trips: [newerTrip] });
+      await newerPromise;
+    });
+    await waitFor(() => expect(result.current.directoryRevision).toBe(3));
+
+    await act(async () => {
+      olderRefresh.resolve({ revision: 2, trips: [olderTrip] });
+      await olderPromise;
+    });
+
+    expect(result.current.directoryRevision).toBe(3);
+    expect(result.current.trips).toEqual([newerTrip]);
+    expect(result.current.activeTrip).toEqual(newerTrip);
   });
 
   it('shows shared storage unavailable and retries the same service storage path', async () => {

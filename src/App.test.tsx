@@ -701,6 +701,59 @@ describe('App', () => {
     expect(realtime.reconcile).toHaveBeenCalledTimes(1);
   });
 
+  it('retries the same directory revision after its authoritative reload fails', async () => {
+    const refreshTrips = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Directory reload failed.'))
+      .mockResolvedValueOnce(5);
+    const directoryChanges: Array<(revision: number) => void> = [];
+    const realtime = {
+      subscribeToDirectory: vi.fn((onChange: (revision: number) => void) => {
+        directoryChanges.push(onChange);
+        return vi.fn();
+      }),
+      subscribeToTrip: vi.fn(() => vi.fn()),
+      reconcile: vi.fn(async () => undefined),
+    };
+    mockTripWorkspace({ refreshTrips, directoryRevision: 4, realtime });
+    render(<App />);
+    await waitFor(() => expect(directoryChanges).toHaveLength(1));
+
+    act(() => directoryChanges[0](5));
+    await waitFor(() => expect(refreshTrips).toHaveBeenCalledTimes(1));
+    act(() => directoryChanges[0](5));
+
+    await waitFor(() => expect(refreshTrips).toHaveBeenCalledTimes(2));
+  });
+
+  it('retries the same trip revision after its authoritative reload fails', async () => {
+    const tripChanges: Array<(revision: number) => void> = [];
+    const realtime = {
+      subscribeToDirectory: vi.fn(() => vi.fn()),
+      subscribeToTrip: vi.fn((_tripId: string, onChange: (revision: number) => void) => {
+        tripChanges.push(onChange);
+        return vi.fn();
+      }),
+      reconcile: vi.fn(async () => undefined),
+    };
+    repositoryMock.loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce({ revision: 6, destinations: [], routeLegs: [], activities: [] })
+      .mockRejectedValueOnce(new Error('Trip reload failed.'))
+      .mockResolvedValueOnce({ revision: 7, destinations: [], routeLegs: [], activities: [] });
+    mockTripWorkspace({ realtime });
+    render(<App />);
+    await waitFor(() => expect(tripChanges).toHaveLength(1));
+    await waitForTripReady();
+
+    act(() => tripChanges[0](7));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Trip reload failed.');
+    act(() => tripChanges[0](7));
+
+    await waitFor(() => expect(repositoryMock.loadSnapshot).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.queryByText('Trip reload failed.')).not.toBeInTheDocument());
+  });
+
   it('recalculates routes exactly once when the active trip vehicle is saved', async () => {
     const origin = createDestination({ name: 'Origin', coordinates: { lat: 50, lng: 1 }, order: 0 });
     const target = createDestination({ name: 'Target', coordinates: { lat: 51, lng: 2 }, order: 1 });

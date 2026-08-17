@@ -84,6 +84,29 @@ describe('service realtime', () => {
     expect(harness.source.close).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps duplicate callback registrations independently disposable', () => {
+    const harness = createEventSourceHarness();
+    const realtime = createServiceRealtime({
+      baseUrl: '/',
+      client: createClient(),
+      createEventSource: harness.createEventSource,
+    });
+    const onDirectory = vi.fn();
+
+    const unsubscribeFirst = realtime.subscribeToDirectory(onDirectory);
+    const unsubscribeSecond = realtime.subscribeToDirectory(onDirectory);
+    harness.emit({ scope: 'directory', revision: 1 });
+    expect(onDirectory).toHaveBeenCalledTimes(1);
+
+    unsubscribeFirst();
+    harness.emit({ scope: 'directory', revision: 2 });
+    expect(onDirectory).toHaveBeenCalledTimes(2);
+    expect(harness.source.close).not.toHaveBeenCalled();
+
+    unsubscribeSecond();
+    expect(harness.source.close).toHaveBeenCalledTimes(1);
+  });
+
   it('reconciles the directory and every subscribed trip against authoritative snapshots', async () => {
     const harness = createEventSourceHarness();
     const client = createClient();

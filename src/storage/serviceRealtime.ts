@@ -26,8 +26,8 @@ export type CreateServiceRealtimeOptions = {
 export function createServiceRealtime(
   options: CreateServiceRealtimeOptions,
 ): ServiceRealtimeSubscriptions {
-  const directorySubscribers = new Set<(revision: number) => void>();
-  const tripSubscribers = new Map<string, Set<(revision: number) => void>>();
+  const directorySubscribers = new Map<(revision: number) => void, number>();
+  const tripSubscribers = new Map<string, Map<(revision: number) => void, number>>();
   const latestStreamRevision = new Map<string, number>();
   const createEventSource = options.createEventSource
     ?? ((url: string) => new EventSource(url) as unknown as EventSourceLike);
@@ -66,10 +66,10 @@ export function createServiceRealtime(
 
   function publish(event: RevisionEvent): void {
     if (event.scope === 'directory') {
-      directorySubscribers.forEach((subscriber) => subscriber(event.revision));
+      directorySubscribers.forEach((_count, subscriber) => subscriber(event.revision));
       return;
     }
-    tripSubscribers.get(event.tripId)?.forEach((subscriber) => subscriber(event.revision));
+    tripSubscribers.get(event.tripId)?.forEach((_count, subscriber) => subscriber(event.revision));
   }
 
   const onRevision = (message: MessageEvent<string>) => {
@@ -132,26 +132,31 @@ export function createServiceRealtime(
 
   return {
     subscribeToDirectory(onInvalidate) {
-      directorySubscribers.add(onInvalidate);
+      directorySubscribers.set(onInvalidate, (directorySubscribers.get(onInvalidate) ?? 0) + 1);
       ensureSource();
       let subscribed = true;
       return () => {
         if (!subscribed) return;
         subscribed = false;
-        directorySubscribers.delete(onInvalidate);
+        const registrationCount = directorySubscribers.get(onInvalidate) ?? 0;
+        if (registrationCount <= 1) directorySubscribers.delete(onInvalidate);
+        else directorySubscribers.set(onInvalidate, registrationCount - 1);
         closeIfUnused();
       };
     },
     subscribeToTrip(tripId, onInvalidate) {
-      const subscribers = tripSubscribers.get(tripId) ?? new Set<(revision: number) => void>();
-      subscribers.add(onInvalidate);
+      const subscribers = tripSubscribers.get(tripId)
+        ?? new Map<(revision: number) => void, number>();
+      subscribers.set(onInvalidate, (subscribers.get(onInvalidate) ?? 0) + 1);
       tripSubscribers.set(tripId, subscribers);
       ensureSource();
       let subscribed = true;
       return () => {
         if (!subscribed) return;
         subscribed = false;
-        subscribers.delete(onInvalidate);
+        const registrationCount = subscribers.get(onInvalidate) ?? 0;
+        if (registrationCount <= 1) subscribers.delete(onInvalidate);
+        else subscribers.set(onInvalidate, registrationCount - 1);
         if (subscribers.size === 0) tripSubscribers.delete(tripId);
         closeIfUnused();
       };

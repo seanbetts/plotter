@@ -430,6 +430,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       isActiveGeneration(generation) && reloadSequenceRef.current === sequence;
 
     const isInitialLoad = !hasCompletedInitialLoadRef.current;
+    let appliedRevision: number | null | undefined;
     if (isInitialLoad) setIsLoading(true);
     setError(null);
     try {
@@ -492,6 +493,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         replaceRouteLegs(reconciled.routeLegs);
         replaceActivitiesByDestinationId(Object.fromEntries(loadedActivities));
         if (authoritativeSnapshot) setRevision(authoritativeSnapshot.revision);
+        appliedRevision = authoritativeSnapshot?.revision ?? null;
       });
     } catch (caught) {
       if (!isCurrentReload()) return;
@@ -507,6 +509,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
     hasCompletedInitialLoadRef.current = true;
     setIsLoading(false);
+    return appliedRevision;
   }, [
     enqueueRouteLegMutations,
     isActiveGeneration,
