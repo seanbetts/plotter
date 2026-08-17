@@ -44,7 +44,7 @@ function joinServiceUrl(baseUrl: string, path: string): string {
   }
 }
 
-function hasFormDataBody(body: BodyInit | null | undefined): boolean {
+function hasFormDataBody(body: RequestInit['body']): boolean {
   return typeof FormData !== 'undefined' && body instanceof FormData;
 }
 
@@ -70,6 +70,14 @@ function isApiErrorCode(value: unknown): value is ApiErrorCode {
     || value === 'internal-error';
 }
 
+function codeMatchesStatus(code: ApiErrorCode, status: number): boolean {
+  return (code === 'invalid-request' && status === 400)
+    || (code === 'not-found' && status === 404)
+    || (code === 'conflict' && status === 409)
+    || (code === 'storage-unavailable' && status === 503)
+    || (code === 'internal-error' && status === 500);
+}
+
 function structuredError(value: unknown, status: number): {
   code: ApiErrorCode;
   message: string;
@@ -79,7 +87,7 @@ function structuredError(value: unknown, status: number): {
   const body = value as Record<string, unknown>;
   if (body.status !== status || !body.error || typeof body.error !== 'object' || Array.isArray(body.error)) return undefined;
   const error = body.error as Record<string, unknown>;
-  if (!isApiErrorCode(error.code) || typeof error.message !== 'string' || !error.message.trim()) return undefined;
+  if (!isApiErrorCode(error.code) || !codeMatchesStatus(error.code, status) || typeof error.message !== 'string' || !error.message.trim()) return undefined;
   if (error.code === 'conflict') {
     if (!Number.isSafeInteger(error.currentRevision) || (error.currentRevision as number) < 0) return undefined;
     return { code: error.code, message: error.message, currentRevision: error.currentRevision as number };

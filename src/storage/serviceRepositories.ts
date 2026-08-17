@@ -10,8 +10,8 @@ import type {
   UpdateTripRequest,
 } from '../api/contracts';
 import type { PlotterApiClient } from '../api/client';
-import type { MediaItem, MediaRollupItem } from '../domain/types';
-import type { TripDirectoryRepository } from './tripDirectoryRepository';
+import type { Activity, Destination, MediaItem, MediaRollupItem, RouteLeg, TripRoutingVehicle } from '../domain/types';
+import type { TripDirectoryRepository, TripSummary } from './tripDirectoryRepository';
 import type { TripRepository } from './tripRepository';
 
 const READ_REQUIRED_MESSAGE = 'Load the latest Plotter data before making changes.';
@@ -32,20 +32,117 @@ function revisionFrom(value: { revision: unknown }): number {
   return revision;
 }
 
-function requiredValue<T>(value: T | undefined, message: string): T {
-  if (value === undefined) throw new Error(message);
-  return value;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isTripRoutingVehicle(value: unknown): value is TripRoutingVehicle {
+  if (!isRecord(value) || !isRecord(value.restrictions)) return false;
+  if (value.preset !== 'standard' && value.preset !== 'large-camper' && value.preset !== 'expedition-truck') return false;
+  if (value.profile !== 'driving-car' && value.profile !== 'driving-hgv') return false;
+  return value.vehicleType === undefined || value.vehicleType === 'hgv';
+}
+
+function isTripSummary(value: unknown): value is TripSummary {
+  return isRecord(value)
+    && isString(value.id)
+    && isString(value.name)
+    && isString(value.description)
+    && isString(value.createdAt)
+    && isString(value.updatedAt)
+    && isTripRoutingVehicle(value.routingVehicle);
+}
+
+function isActivity(value: unknown): value is Activity {
+  return isRecord(value)
+    && isString(value.id)
+    && isString(value.destinationId)
+    && isFiniteNumber(value.order)
+    && isString(value.title)
+    && isString(value.description)
+    && isString(value.category)
+    && isString(value.status)
+    && isString(value.priority)
+    && Array.isArray(value.links)
+    && isString(value.notes)
+    && Array.isArray(value.tags)
+    && isString(value.createdAt)
+    && isString(value.updatedAt);
+}
+
+function isMediaItem(value: unknown): value is MediaItem {
+  return isRecord(value)
+    && isString(value.id)
+    && isString(value.url)
+    && isString(value.caption)
+    && isString(value.credit)
+    && (value.thumbnailUrl === undefined || isString(value.thumbnailUrl))
+    && (value.previewUrl === undefined || isString(value.previewUrl))
+    && (value.fullUrl === undefined || isString(value.fullUrl));
+}
+
+function isDestination(value: unknown): value is Destination {
+  return isRecord(value)
+    && isString(value.id)
+    && isString(value.name)
+    && isString(value.countryRegion)
+    && isRecord(value.coordinates)
+    && isFiniteNumber(value.coordinates.lat)
+    && isFiniteNumber(value.coordinates.lng)
+    && isFiniteNumber(value.order)
+    && isString(value.createdAt)
+    && isString(value.updatedAt);
+}
+
+function isRouteLeg(value: unknown): value is RouteLeg {
+  return isRecord(value)
+    && isString(value.id)
+    && isString(value.originDestinationId)
+    && isString(value.targetDestinationId)
+    && isString(value.movement)
+    && isString(value.calculation)
+    && isString(value.status)
+    && isString(value.notes)
+    && isString(value.createdAt)
+    && isString(value.updatedAt);
+}
+
+function requiredObject<T extends object>(value: unknown, validate: (value: unknown) => value is T, message: string): T {
+  if (!validate(value)) throw new Error(message);
+  return value as T;
+}
+
+function requiredObjectArray<T extends object>(value: unknown, validate: (value: unknown) => value is T, message: string): T[] {
+  if (!Array.isArray(value) || value.some((item) => !validate(item))) throw new Error(message);
+  return value as T[];
 }
 
 function directorySnapshotRevision(snapshot: DirectoryReadResponse): number {
   const revision = revisionFrom(snapshot);
-  if (!Array.isArray(snapshot.trips)) throw new Error('Plotter service returned an invalid directory snapshot.');
+  if (!Array.isArray(snapshot.trips) || snapshot.trips.some((trip) => !isTripSummary(trip))) {
+    throw new Error('Plotter service returned an invalid directory snapshot.');
+  }
   return revision;
 }
 
 function tripSnapshotRevision(snapshot: TripReadResponse): number {
   const revision = revisionFrom(snapshot);
-  if (!Array.isArray(snapshot.destinations) || !Array.isArray(snapshot.routeLegs) || !Array.isArray(snapshot.activities)) {
+  if (
+    !Array.isArray(snapshot.destinations)
+    || !Array.isArray(snapshot.routeLegs)
+    || !Array.isArray(snapshot.activities)
+    || snapshot.destinations.some((destination) => !isDestination(destination))
+    || snapshot.routeLegs.some((routeLeg) => !isRouteLeg(routeLeg))
+    || snapshot.activities.some((activity) => !isActivity(activity))
+  ) {
     throw new Error('Plotter service returned an invalid trip snapshot.');
   }
   return revision;
@@ -98,7 +195,7 @@ export function createServiceRepositories(client: PlotterApiClient): {
     async createTrip(input) {
       const request: CreateTripRequest = { expectedRevision: requireDirectoryRevision(), ...input };
       const response = await client.request<DirectoryWriteResponse>('/api/v1/trips', jsonRequest('POST', request));
-      const created = requiredValue(response.trip, 'Plotter service did not return the created trip.');
+      const created = requiredObject<NonNullable<DirectoryWriteResponse['trip']>>(response.trip, isTripSummary, 'Plotter service did not return the created trip.');
       directoryRevision = revisionFrom(response);
       return created;
     },
@@ -108,7 +205,7 @@ export function createServiceRepositories(client: PlotterApiClient): {
         `/api/v1/trips/${routePart(tripId)}`,
         jsonRequest('PATCH', request),
       );
-      const updated = requiredValue(response.trip, 'Plotter service did not return the updated trip.');
+      const updated = requiredObject<NonNullable<DirectoryWriteResponse['trip']>>(response.trip, isTripSummary, 'Plotter service did not return the updated trip.');
       directoryRevision = revisionFrom(response);
       return updated;
     },
@@ -136,45 +233,51 @@ export function createServiceRepositories(client: PlotterApiClient): {
       return snapshot;
     }
 
-    async function mutate(mutation: TripMutationRequest): Promise<TripWriteResponse> {
-      const response = await client.request<TripWriteResponse>(
+    function commitTripRevision(response: { revision: unknown }): void {
+      tripRevision = revisionFrom(response);
+    }
+
+    async function requestMutation(mutation: TripMutationRequest): Promise<TripWriteResponse> {
+      return client.request<TripWriteResponse>(
         `${tripPath}/mutations`,
         jsonRequest('POST', { expectedRevision: requireTripRevision(), mutation }),
       );
-      tripRevision = revisionFrom(response);
-      return response;
     }
 
-    async function mediaMutation(path: string, method: 'PATCH' | 'DELETE' | 'POST', body: unknown): Promise<MediaWriteResponse> {
-      const response = await client.request<MediaWriteResponse>(path, jsonRequest(method, {
+    async function requestMediaMutation(path: string, method: 'PATCH' | 'DELETE' | 'POST', body: unknown): Promise<MediaWriteResponse> {
+      return client.request<MediaWriteResponse>(path, jsonRequest(method, {
         expectedRevision: requireTripRevision(),
         ...body as object,
       }));
-      tripRevision = revisionFrom(response);
-      return response;
     }
 
     return {
       loadSnapshot,
       async listDestinations() { return (await loadSnapshot()).destinations; },
-      async saveDestination(destination) { await mutate({ type: 'save-destination', destination }); },
-      async deleteDestination(destinationId) { await mutate({ type: 'delete-destination', destinationId }); },
-      async deleteDestinations(destinationIds) { await mutate({ type: 'delete-destinations', destinationIds }); },
+      async saveDestination(destination) { commitTripRevision(await requestMutation({ type: 'save-destination', destination })); },
+      async deleteDestination(destinationId) { commitTripRevision(await requestMutation({ type: 'delete-destination', destinationId })); },
+      async deleteDestinations(destinationIds) { commitTripRevision(await requestMutation({ type: 'delete-destinations', destinationIds })); },
       async prepareDestinationDeletion(destinationIds) {
-        return async () => { await mutate({ type: 'delete-destinations', destinationIds }); };
+        return async () => { commitTripRevision(await requestMutation({ type: 'delete-destinations', destinationIds })); };
       },
       async listActivities(destinationId) {
         return (await loadSnapshot()).activities.filter((activity) => activity.destinationId === destinationId);
       },
       async createActivity(input) {
-        return requiredValue((await mutate({ type: 'create-activity', input })).activity, 'Plotter service did not return the created activity.');
+        const response = await requestMutation({ type: 'create-activity', input });
+        const activity = requiredObject<NonNullable<TripWriteResponse['activity']>>(response.activity, isActivity, 'Plotter service did not return the created activity.');
+        commitTripRevision(response);
+        return activity;
       },
       async updateActivity(activityId, patch) {
-        return requiredValue((await mutate({ type: 'update-activity', activityId, patch })).activity, 'Plotter service did not return the updated activity.');
+        const response = await requestMutation({ type: 'update-activity', activityId, patch });
+        const activity = requiredObject<NonNullable<TripWriteResponse['activity']>>(response.activity, isActivity, 'Plotter service did not return the updated activity.');
+        commitTripRevision(response);
+        return activity;
       },
-      async deleteActivity(activityId) { await mutate({ type: 'delete-activity', activityId }); },
+      async deleteActivity(activityId) { commitTripRevision(await requestMutation({ type: 'delete-activity', activityId })); },
       async reorderActivities(destinationId, orderedActivityIds) {
-        await mutate({ type: 'reorder-activities', destinationId, orderedActivityIds });
+        commitTripRevision(await requestMutation({ type: 'reorder-activities', destinationId, orderedActivityIds }));
         return (await loadSnapshot()).activities.filter((activity) => activity.destinationId === destinationId);
       },
       async listDestinationMedia(destinationId) {
@@ -188,23 +291,31 @@ export function createServiceRepositories(client: PlotterApiClient): {
         const response = await client.upload<MediaWriteResponse>(
           `${tripPath}/destinations/${routePart(input.destinationId)}/media`, form, requireTripRevision(),
         );
-        tripRevision = revisionFrom(response);
-        return serviceRelativeMediaItem(requiredValue(response.mediaItem, 'Plotter service did not return the uploaded media.'));
+        const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the uploaded media.');
+        commitTripRevision(response);
+        return serviceRelativeMediaItem(mediaItem);
       },
       async importDestinationMediaFromSearch(input) {
         const body: DestinationMediaImportRequest = { expectedRevision: requireTripRevision(), result: input.result };
         const response = await client.request<MediaWriteResponse>(
           `${tripPath}/destinations/${routePart(input.destinationId)}/media/import`, jsonRequest('POST', body),
         );
-        tripRevision = revisionFrom(response);
-        return serviceRelativeMediaItem(requiredValue(response.mediaItem, 'Plotter service did not return the imported media.'));
+        const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the imported media.');
+        commitTripRevision(response);
+        return serviceRelativeMediaItem(mediaItem);
       },
       async updateDestinationMedia(mediaId, patch) {
-        return serviceRelativeMediaItem(requiredValue((await mediaMutation(`${tripPath}/destination-media/${routePart(mediaId)}`, 'PATCH', { patch })).mediaItem, 'Plotter service did not return the updated media.'));
+        const response = await requestMediaMutation(`${tripPath}/destination-media/${routePart(mediaId)}`, 'PATCH', { patch });
+        const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the updated media.');
+        commitTripRevision(response);
+        return serviceRelativeMediaItem(mediaItem);
       },
-      async deleteDestinationMedia(mediaId) { await mediaMutation(`${tripPath}/destination-media/${routePart(mediaId)}`, 'DELETE', {}); },
+      async deleteDestinationMedia(mediaId) { commitTripRevision(await requestMediaMutation(`${tripPath}/destination-media/${routePart(mediaId)}`, 'DELETE', {})); },
       async reorderDestinationMedia(destinationId, orderedMediaIds) {
-        return serviceRelativeMediaItems(requiredValue((await mediaMutation(`${tripPath}/destinations/${routePart(destinationId)}/media/reorder`, 'POST', { orderedMediaIds })).mediaItems, 'Plotter service did not return reordered media.'));
+        const response = await requestMediaMutation(`${tripPath}/destinations/${routePart(destinationId)}/media/reorder`, 'POST', { orderedMediaIds });
+        const mediaItems = requiredObjectArray<MediaItem>(response.mediaItems, isMediaItem, 'Plotter service did not return reordered media.');
+        commitTripRevision(response);
+        return serviceRelativeMediaItems(mediaItems);
       },
       async listDestinationMediaRollup(destinationId) {
         return (await client.request<{ media: MediaRollupItem[] }>(`${tripPath}/destinations/${routePart(destinationId)}/media-rollup`)).media
@@ -221,29 +332,37 @@ export function createServiceRepositories(client: PlotterApiClient): {
         const response = await client.upload<MediaWriteResponse>(
           `${tripPath}/destinations/${routePart(input.destinationId)}/activities/${routePart(input.activityId)}/media`, form, requireTripRevision(),
         );
-        tripRevision = revisionFrom(response);
-        return serviceRelativeMediaItem(requiredValue(response.mediaItem, 'Plotter service did not return the uploaded media.'));
+        const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the uploaded media.');
+        commitTripRevision(response);
+        return serviceRelativeMediaItem(mediaItem);
       },
       async importActivityMediaFromSearch(input) {
         const body: DestinationMediaImportRequest = { expectedRevision: requireTripRevision(), result: input.result };
         const response = await client.request<MediaWriteResponse>(
           `${tripPath}/destinations/${routePart(input.destinationId)}/activities/${routePart(input.activityId)}/media/import`, jsonRequest('POST', body),
         );
-        tripRevision = revisionFrom(response);
-        return serviceRelativeMediaItem(requiredValue(response.mediaItem, 'Plotter service did not return the imported media.'));
+        const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the imported media.');
+        commitTripRevision(response);
+        return serviceRelativeMediaItem(mediaItem);
       },
       async updateActivityMedia(mediaId, patch) {
-        return serviceRelativeMediaItem(requiredValue((await mediaMutation(`${tripPath}/activity-media/${routePart(mediaId)}`, 'PATCH', { patch })).mediaItem, 'Plotter service did not return the updated media.'));
+        const response = await requestMediaMutation(`${tripPath}/activity-media/${routePart(mediaId)}`, 'PATCH', { patch });
+        const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the updated media.');
+        commitTripRevision(response);
+        return serviceRelativeMediaItem(mediaItem);
       },
-      async deleteActivityMedia(mediaId) { await mediaMutation(`${tripPath}/activity-media/${routePart(mediaId)}`, 'DELETE', {}); },
+      async deleteActivityMedia(mediaId) { commitTripRevision(await requestMediaMutation(`${tripPath}/activity-media/${routePart(mediaId)}`, 'DELETE', {})); },
       async reorderActivityMedia(activityId, orderedMediaIds) {
-        return serviceRelativeMediaItems(requiredValue((await mediaMutation(`${tripPath}/activities/${routePart(activityId)}/media/reorder`, 'POST', { orderedMediaIds })).mediaItems, 'Plotter service did not return reordered media.'));
+        const response = await requestMediaMutation(`${tripPath}/activities/${routePart(activityId)}/media/reorder`, 'POST', { orderedMediaIds });
+        const mediaItems = requiredObjectArray<MediaItem>(response.mediaItems, isMediaItem, 'Plotter service did not return reordered media.');
+        commitTripRevision(response);
+        return serviceRelativeMediaItems(mediaItems);
       },
       async listRouteLegs() { return (await loadSnapshot()).routeLegs; },
-      async saveRouteLeg(routeLeg) { await mutate({ type: 'save-route-leg', routeLeg }); },
-      async deleteRouteLeg(routeLegId) { await mutate({ type: 'delete-route-leg', routeLegId }); },
-      async applyTripMutation(delta) { await mutate({ type: 'apply-trip-mutation', delta }); },
-      async replaceTripData(snapshot) { await mutate({ type: 'replace-trip-data', snapshot }); },
+      async saveRouteLeg(routeLeg) { commitTripRevision(await requestMutation({ type: 'save-route-leg', routeLeg })); },
+      async deleteRouteLeg(routeLegId) { commitTripRevision(await requestMutation({ type: 'delete-route-leg', routeLegId })); },
+      async applyTripMutation(delta) { commitTripRevision(await requestMutation({ type: 'apply-trip-mutation', delta })); },
+      async replaceTripData(snapshot) { commitTripRevision(await requestMutation({ type: 'replace-trip-data', snapshot })); },
     } satisfies TripRepository;
   }
 

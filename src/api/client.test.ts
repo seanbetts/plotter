@@ -107,6 +107,22 @@ describe('Plotter API client', () => {
     expect(caught).toMatchObject({ name: 'TripStorageConflictError', currentRevision: 8 });
   });
 
+  it.each([
+    [500, 'not-found'],
+    [409, 'storage-unavailable'],
+  ] as const)('redacts the malformed %i/%s status-code pair', async (status, code) => {
+    const harness = fetchReturning(response({
+      status,
+      error: { code, message: '/private/plotter.sqlite3' },
+    }, status));
+    const client = createPlotterApiClient({ fetcher: harness.fetcher });
+
+    await expect(client.request('/api/v1/trips')).rejects.toMatchObject({
+      name: 'PlotterApiError',
+      message: 'Plotter service request failed.',
+    });
+  });
+
   it('redacts malformed and unstructured failures', async () => {
     const malformed = fetchReturning(response({ error: { message: '/private/plotter.sqlite3' } }, 500));
     const client = createPlotterApiClient({ fetcher: malformed.fetcher });
