@@ -18,6 +18,10 @@ export type BackupStore = {
   createAutomaticBackup(connection: DatabaseSync, revision: number): Promise<string>;
 };
 
+export type BackupStoreOptions = {
+  removeAutomaticBackup?: (path: string) => void;
+};
+
 function filenameTimestamp(date: Date): string {
   return date.toISOString().replaceAll(/[-:.]/g, '');
 }
@@ -32,7 +36,10 @@ function removeBackupArtifacts(path: string): void {
   }
 }
 
-function rotateAutomaticBackups(backupsDirectory: string): void {
+function rotateAutomaticBackups(
+  backupsDirectory: string,
+  removeAutomaticBackup: (path: string) => void,
+): void {
   const automaticBackups = readdirSync(backupsDirectory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /^automatic-.*\.sqlite3$/.test(entry.name))
     .map((entry) => {
@@ -42,11 +49,16 @@ function rotateAutomaticBackups(backupsDirectory: string): void {
     .sort((left, right) => right.modifiedAt - left.modifiedAt || right.name.localeCompare(left.name));
 
   for (const expired of automaticBackups.slice(AUTOMATIC_BACKUP_RETENTION)) {
-    rmSync(expired.path);
+    removeAutomaticBackup(expired.path);
   }
 }
 
-export function createBackupStore(backupsDirectory: string): BackupStore {
+export function createBackupStore(
+  backupsDirectory: string,
+  options: BackupStoreOptions = {},
+): BackupStore {
+  const removeAutomaticBackup = options.removeAutomaticBackup ?? ((path: string) => rmSync(path));
+
   return {
     async createAutomaticBackup(connection, revision) {
       const identifier = randomUUID();
@@ -54,6 +66,7 @@ export function createBackupStore(backupsDirectory: string): BackupStore {
       const temporaryPath = join(backupsDirectory, `.${stem}.tmp`);
       const finalPath = join(backupsDirectory, `${stem}.sqlite3`);
       let validationConnection: DatabaseSync | undefined;
+      let finalCreated = false;
 
       try {
         mkdirSync(backupsDirectory, { recursive: true });
@@ -65,13 +78,17 @@ export function createBackupStore(backupsDirectory: string): BackupStore {
         rmSync(`${temporaryPath}-shm`, { force: true });
         rmSync(`${temporaryPath}-wal`, { force: true });
         renameSync(temporaryPath, finalPath);
-        rotateAutomaticBackups(backupsDirectory);
+        finalCreated = true;
+        rotateAutomaticBackups(backupsDirectory, removeAutomaticBackup);
         return finalPath;
       } catch {
         try {
           validationConnection?.close();
         } catch {
           // Preserve the stable backup error.
+        }
+        if (finalCreated) {
+          removeBackupArtifacts(finalPath);
         }
         removeBackupArtifacts(temporaryPath);
         throw new AutomaticBackupError();

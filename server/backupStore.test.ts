@@ -110,6 +110,33 @@ describe('createBackupStore', () => {
     fixture.database.close();
   });
 
+  it('removes the new backup when post-rename rotation fails', async () => {
+    const fixture = createFixture();
+    mkdirSync(fixture.backupDirectory);
+    const automaticNames = Array.from({ length: 5 }, (_, index) => `automatic-retained-${index}.sqlite3`);
+    for (const [index, name] of automaticNames.entries()) {
+      const path = join(fixture.backupDirectory, name);
+      writeFileSync(path, `retained-${index}`);
+      const timestamp = new Date(`2026-08-17T10:0${index}:00.000Z`);
+      utimesSync(path, timestamp, timestamp);
+    }
+    writeFileSync(join(fixture.backupDirectory, 'pre-operation.sqlite3'), 'named');
+    const before = readdirSync(fixture.backupDirectory).sort();
+
+    await expect(createBackupStore(fixture.backupDirectory, {
+      removeAutomaticBackup(path) {
+        if (basename(path) === 'automatic-retained-0.sqlite3') {
+          throw new Error(`cannot remove ${path}`);
+        }
+        rmSync(path);
+      },
+    }).createAutomaticBackup(fixture.database.connection, 5))
+      .rejects.toThrow('Automatic database backup failed.');
+
+    expect(readdirSync(fixture.backupDirectory).sort()).toEqual(before);
+    fixture.database.close();
+  });
+
   it('reports filesystem failures without exposing a path', async () => {
     const fixture = createFixture();
     writeFileSync(fixture.backupDirectory, 'not a directory');
