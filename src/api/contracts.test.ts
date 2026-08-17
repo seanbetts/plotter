@@ -38,10 +38,24 @@ const conflict: Extract<ApiErrorResponse, { status: 409 }> = {
   },
 };
 
+const mediaContentRoute: Extract<PlotterApiRoute, { path: '/api/v1/media/:mediaId/content' }> = {
+  method: 'GET',
+  path: '/api/v1/media/:mediaId/content',
+  response: {
+    status: 200,
+    contentType: 'image/webp',
+    contentLength: 1234,
+    bytes: (async function* () {
+      yield new Uint8Array([1, 2, 3]);
+    })(),
+  },
+};
+
 describe('Plotter API contracts', () => {
   it('requires revisions for uploads and exposes typed media reads and conflicts', () => {
     expect(uploadFields.expectedRevision).toBe(7);
     expect(mediaReadRoutes).toHaveLength(3);
     expect(conflict.error.currentRevision).toBe(8);
+    expect(mediaContentRoute.response.status).toBe(200);
   });
 });

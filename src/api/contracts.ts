@@ -137,6 +137,16 @@ export type DestinationMediaReadResponse = { mediaItems: MediaItem[] };
 export type ActivityMediaReadResponse = { mediaItems: MediaItem[] };
 export type DestinationMediaRollupReadResponse = { media: MediaRollupItem[] };
 
+/** Binary media is streamed directly rather than encoded as a JSON success body. */
+export type MediaContentSuccessResponse = {
+  status: 200;
+  contentType: string;
+  contentLength: number;
+  bytes: AsyncIterable<Uint8Array>;
+};
+
+export type MediaContentRouteResponse = MediaContentSuccessResponse | ApiErrorResponse;
+
 export type LinkPreviewRequest = { url: string };
 export type LinkPreviewResponse = { preview: LinkPreviewResult };
 export type ImageSearchRequest = { query: string; context: WebImageSearchStopContext };
@@ -189,7 +199,7 @@ export type PlotterApiRoute =
   | { method: 'DELETE'; path: '/api/v1/trips/:tripId/activity-media/:mediaId'; request: DeleteMediaRequest; response: ApiRouteResponse<MediaWriteResponse> }
   | { method: 'POST'; path: '/api/v1/trips/:tripId/activities/:activityId/media/reorder'; request: ReorderMediaRequest; response: ApiRouteResponse<MediaWriteResponse> }
   | { method: 'GET'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media-rollup'; response: ApiRouteResponse<DestinationMediaRollupReadResponse> }
-  | { method: 'GET'; path: '/api/v1/media/:mediaId/content'; response: ApiRouteResponse<undefined, 204> }
+  | { method: 'GET'; path: '/api/v1/media/:mediaId/content'; response: MediaContentRouteResponse }
   | { method: 'POST'; path: '/api/v1/link-preview'; request: LinkPreviewRequest; response: ApiRouteResponse<LinkPreviewResponse> }
   | { method: 'POST'; path: '/api/v1/image-search'; request: ImageSearchRequest; response: ApiRouteResponse<ImageSearchResponse> }
   | { method: 'GET'; path: '/api/v1/events'; response: ApiRouteResponse<RevisionEvent> }
