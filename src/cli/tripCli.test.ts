@@ -135,12 +135,17 @@ describe('resolvePlotterBaseUrl', () => {
     expect(() => resolvePlotterBaseUrl({ PLOTTER_BASE_URL: value })).toThrow('Plotter CLI configuration is invalid.');
   });
 
-  it.each(['http://127.0.0.1/custom', 'https://plotter.example/nested/path'])(
+  it.each([
+    ['http://127.0.0.1/custom', 'http://127.0.0.1/custom/'],
+    ['http://127.0.0.1/custom///', 'http://127.0.0.1/custom/'],
+    ['https://plotter.example/nested/path////', 'https://plotter.example/nested/path/'],
+    ['https://plotter.example/', 'https://plotter.example/'],
+  ])(
     'accepts http(s) overrides and normalizes their path for API joins',
-    (value) => {
+    (value, expectedBaseUrl) => {
       const baseUrl = resolvePlotterBaseUrl({ PLOTTER_BASE_URL: value });
-      expect(baseUrl.pathname).toMatch(/\/$/);
-      expect(new URL('api/v1/trips', baseUrl).toString()).toBe(`${value}/api/v1/trips`);
+      expect(baseUrl.toString()).toBe(expectedBaseUrl);
+      expect(new URL('api/v1/trips', baseUrl).toString()).toBe(`${expectedBaseUrl}api/v1/trips`);
     },
   );
 });
@@ -580,6 +585,51 @@ describe('runTripCli', () => {
     expect(exitCode).toBe(1);
     expect(harness.calls.map(({ path }) => path)).toEqual(['/api/v1/trips', '/api/v1/trips']);
     expect(requestBody(harness.calls[1]!)).toMatchObject({ expectedRevision: 4, name: 'Simple' });
+  });
+
+  it('keeps legacy injected creation independent from list reads without an HTTP revision seam', async () => {
+    const listTrips = vi.fn(async () => {
+      throw new Error('Legacy list is unavailable.');
+    });
+    const createTrip = vi.fn(async () => createdTrip('legacy-trip', 'Legacy'));
+    const replaceTripData = vi.fn(async () => undefined);
+    const service = createTripDataService({
+      directory: {
+        listTrips,
+        createTrip,
+        updateTrip: vi.fn(),
+        deleteTrip: vi.fn(),
+      },
+      createTripRepository: vi.fn(() => ({ replaceTripData }) as unknown as TripRepository),
+    });
+
+    const result = await service.createTrip({ name: 'Legacy' });
+
+    expect(result).toMatchObject({ ok: true, trip: { id: 'legacy-trip' } });
+    expect(listTrips).not.toHaveBeenCalled();
+    expect(createTrip).toHaveBeenCalledWith({ name: 'Legacy' });
+    expect(replaceTripData).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves dry-run creation independent from the optional directory revision seam', async () => {
+    const loadDirectory = vi.fn(async () => ({ revision: 4, trips: [] }));
+    const createTrip = vi.fn(async () => createdTrip('unused-trip', 'Dry run'));
+    const service = createTripDataService({
+      directory: {
+        loadDirectory,
+        listTrips: vi.fn(async () => []),
+        createTrip,
+        updateTrip: vi.fn(),
+        deleteTrip: vi.fn(),
+      },
+      createTripRepository: vi.fn(),
+    });
+
+    const result = await service.createTrip({ name: 'Dry run' }, { dryRun: true });
+
+    expect(result).toMatchObject({ ok: true, trip: { id: 'dry-run-trip' } });
+    expect(loadDirectory).not.toHaveBeenCalled();
+    expect(createTrip).not.toHaveBeenCalled();
   });
 
   it('routes audit and preserves its issues in summary output', async () => {

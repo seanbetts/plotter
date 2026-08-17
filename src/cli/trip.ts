@@ -64,7 +64,7 @@ export function resolvePlotterBaseUrl(environment: NodeJS.ProcessEnv): URL {
     throw new Error(configurationErrorMessage);
   }
 
-  if (!baseUrl.pathname.endsWith('/')) baseUrl.pathname = `${baseUrl.pathname}/`;
+  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/`;
   return baseUrl;
 }
 

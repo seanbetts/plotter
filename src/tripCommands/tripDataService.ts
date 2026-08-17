@@ -682,7 +682,7 @@ async function createTripWithPrimedDirectory(
   dependencies: Pick<TripDataServiceDependencies, 'directory' | 'createTripRepository'>,
   input: Parameters<TripDataServiceDependencies['directory']['createTrip']>[0],
 ) {
-  await dependencies.directory.listTrips();
+  await dependencies.directory.loadDirectory?.();
   const trip = await dependencies.directory.createTrip(input);
   const repository = dependencies.createTripRepository(trip.id);
   return { trip, repository };
