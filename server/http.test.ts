@@ -1,4 +1,4 @@
-import { createServer, type Server } from 'node:http';
+import { createServer, get as httpGet, type Server } from 'node:http';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -136,6 +136,22 @@ async function start(values: ReturnType<typeof dependencies>['values']) {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('HTTP test server did not bind.');
   return `http://127.0.0.1:${address.port}`;
+}
+
+async function startObserved(values: ReturnType<typeof dependencies>['values']) {
+  let settled = false;
+  const handler = createPlotterHttpHandler(values);
+  const server = createServer((request, response) => {
+    void handler(request, response).finally(() => { settled = true; });
+  });
+  servers.push(server);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('HTTP test server did not bind.');
+  return { base: `http://127.0.0.1:${address.port}`, settled: () => settled };
 }
 
 async function jsonRequest(url: string, method: string, body?: unknown, write = false) {
@@ -307,6 +323,48 @@ describe('Plotter HTTP media and provider routes', () => {
     expect((await jsonRequest(`${base}/api/v1/trips/trip-1/activities/activity-1/media/reorder`, 'POST', { expectedRevision: 4, orderedMediaIds: [] }, true)).status).toBe(200);
   });
 
+  it('closes the media iterator and settles the handler when a backpressured client disconnects', async () => {
+    const harness = dependencies();
+    let returned = false;
+    let nextCount = 0;
+    const iterator: AsyncIterator<Uint8Array> = {
+      async next() {
+        if (nextCount++ === 0) {
+          return { done: false, value: new Uint8Array(8 * 1024 * 1024) };
+        }
+        return new Promise<IteratorResult<Uint8Array>>(() => undefined);
+      },
+      async return() {
+        returned = true;
+        return { done: true, value: undefined };
+      },
+    };
+    harness.values.mediaContent.open = async () => ({
+      contentType: 'image/png',
+      contentLength: 8 * 1024 * 1024,
+      bytes: { [Symbol.asyncIterator]: () => iterator },
+    });
+    const observed = await startObserved(harness.values);
+
+    await new Promise<void>((resolve, reject) => {
+      const request = httpGet(`${observed.base}/api/v1/media/media-1/content`, (response) => {
+        response.once('data', () => {
+          response.destroy();
+          request.destroy();
+          resolve();
+        });
+        response.once('error', resolve);
+      });
+      request.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ECONNRESET') resolve();
+        else reject(error);
+      });
+    });
+
+    await expect.poll(() => returned, { timeout: 1_000 }).toBe(true);
+    await expect.poll(observed.settled, { timeout: 1_000 }).toBe(true);
+  });
+
   it('supports activity multipart upload and remote import through the same bounded media pipeline', async () => {
     const harness = dependencies();
     const trip = harness.values.tripRepository('trip-1');
@@ -415,6 +473,34 @@ describe('Plotter HTTP transport and safety', () => {
       body: JSON.stringify({ expectedRevision: 0, name: 'x'.repeat(1_048_576) }),
     });
     expect(response.status).toBe(400);
+  });
+
+  it('accepts only application/json with an optional single UTF-8 charset', async () => {
+    const harness = dependencies();
+    const base = await start(harness.values);
+    for (const contentType of [
+      'application/problem+json',
+      'application/json; invalid-parameter',
+      'application/json;',
+      'application/json; charset=iso-8859-1',
+      'application/json; charset=utf-8; charset=utf-8',
+      'application/json; charset=utf-8; profile=private',
+    ]) {
+      const response = await fetch(`${base}/api/v1/trips`, {
+        method: 'POST',
+        headers: { 'content-type': contentType, 'x-plotter-write': '1' },
+        body: JSON.stringify({ expectedRevision: 0, name: 'Strict JSON' }),
+      });
+      expect(response.status, contentType).toBe(400);
+      expect(response.headers.get('content-type')).toContain('application/json');
+    }
+
+    const accepted = await fetch(`${base}/api/v1/trips`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json; charset=UTF-8', 'x-plotter-write': '1' },
+      body: JSON.stringify({ expectedRevision: 0, name: 'UTF-8 JSON' }),
+    });
+    expect(accepted.status).toBe(201);
   });
 
   it('rejects malformed and oversized multipart media before repository writes', async () => {
@@ -538,5 +624,19 @@ describe('Plotter HTTP transport and safety', () => {
     expect(await head.text()).toBe('');
     expect((await fetch(`${base}/..%2F..%2Fetc%2Fpasswd`)).status).toBe(400);
     expect((await fetch(`${base}/trip/trip-1`, { method: 'POST' })).status).toBe(404);
+  });
+
+  it('never serves frontend HTML for the exact API namespace root', async () => {
+    const harness = dependencies();
+    const base = await start(harness.values);
+    const miss = await fetch(`${base}/api`);
+    expect(miss.status).toBe(404);
+    expect(miss.headers.get('content-type')).toContain('application/json');
+    expect(await miss.text()).not.toContain('<title>Plotter</title>');
+
+    const queried = await fetch(`${base}/api?fallback=html`);
+    expect(queried.status).toBe(400);
+    expect(queried.headers.get('content-type')).toContain('application/json');
+    expect(await queried.text()).not.toContain('<title>Plotter</title>');
   });
 });

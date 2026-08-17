@@ -522,7 +522,10 @@ async function readBody(request: IncomingMessage, maximum: number): Promise<Buff
 function requireContentType(request: IncomingMessage, expected: 'json' | 'multipart'): string {
   const value = request.headers['content-type'];
   if (typeof value !== 'string') invalid();
-  if (expected === 'json' && !/^application\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(value)) invalid();
+  if (
+    expected === 'json'
+    && !/^[ \t]*application\/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?[ \t]*$/i.test(value)
+  ) invalid();
   if (expected === 'multipart' && !/^multipart\/form-data\s*;.*\bboundary=/i.test(value)) invalid();
   return value;
 }
@@ -577,8 +580,8 @@ function errorBody(status: 400 | 404 | 503 | 500, code: 'invalid-request' | 'not
 }
 
 function sendCaughtError(response: ServerResponse, error: unknown): void {
-  if (response.headersSent) {
-    response.destroy();
+  if (response.destroyed || response.headersSent) {
+    if (!response.destroyed) response.destroy();
     return;
   }
   if (error instanceof TripStorageConflictError) {
@@ -661,12 +664,86 @@ function requestAbort(request: IncomingMessage, response: ServerResponse): { sig
   };
 }
 
-async function writeBinary(response: ServerResponse, content: BinaryContent): Promise<void> {
-  for await (const chunk of content.bytes) {
-    if (!(chunk instanceof Uint8Array)) throw new Error('Media stream is invalid.');
-    if (!response.write(chunk)) await new Promise<void>((resolveDrain) => response.once('drain', resolveDrain));
+class ResponseDisconnectedError extends Error {
+  constructor() {
+    super('Response disconnected.');
+    this.name = 'ResponseDisconnectedError';
   }
-  response.end();
+}
+
+function responseLifecycle(request: IncomingMessage, response: ServerResponse) {
+  const controller = new AbortController();
+  const abort = () => {
+    if (!controller.signal.aborted) controller.abort(new ResponseDisconnectedError());
+  };
+  request.once('aborted', abort);
+  response.once('close', abort);
+  response.once('error', abort);
+  if (request.aborted || response.destroyed) abort();
+  return {
+    signal: controller.signal,
+    cleanup() {
+      request.off('aborted', abort);
+      response.off('close', abort);
+      response.off('error', abort);
+    },
+  };
+}
+
+function abortable<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolvePromise, reject) => {
+    const aborted = () => {
+      cleanup();
+      reject(signal.reason);
+    };
+    const cleanup = () => signal.removeEventListener('abort', aborted);
+    signal.addEventListener('abort', aborted, { once: true });
+    Promise.resolve(operation).then(
+      (value) => { cleanup(); resolvePromise(value); },
+      (error) => { cleanup(); reject(error); },
+    );
+  });
+}
+
+function waitForDrain(response: ServerResponse, signal: AbortSignal): Promise<void> {
+  if (signal.aborted || response.destroyed || !response.writable) {
+    return Promise.reject(signal.reason ?? new ResponseDisconnectedError());
+  }
+  return new Promise<void>((resolvePromise, reject) => {
+    const drained = () => { cleanup(); resolvePromise(); };
+    const aborted = () => { cleanup(); reject(signal.reason); };
+    const cleanup = () => {
+      response.off('drain', drained);
+      signal.removeEventListener('abort', aborted);
+    };
+    response.once('drain', drained);
+    signal.addEventListener('abort', aborted, { once: true });
+  });
+}
+
+async function writeBinary(request: IncomingMessage, response: ServerResponse, content: BinaryContent): Promise<void> {
+  const lifecycle = responseLifecycle(request, response);
+  const iterator = content.bytes[Symbol.asyncIterator]();
+  let complete = false;
+  try {
+    while (true) {
+      const result = await abortable(iterator.next(), lifecycle.signal);
+      if (result.done) {
+        complete = true;
+        response.end();
+        return;
+      }
+      if (!(result.value instanceof Uint8Array)) throw new Error('Media stream is invalid.');
+      if (lifecycle.signal.aborted || response.destroyed || !response.writable) {
+        throw lifecycle.signal.reason ?? new ResponseDisconnectedError();
+      }
+      if (!response.write(result.value)) await waitForDrain(response, lifecycle.signal);
+    }
+  } finally {
+    lifecycle.cleanup();
+    if (!complete && iterator.return) await iterator.return();
+  }
 }
 
 function safeFilename(filename: string | undefined, mediaId: string): string {
@@ -674,7 +751,7 @@ function safeFilename(filename: string | undefined, mediaId: string): string {
   return safe || mediaId;
 }
 
-function sendMedia(response: ServerResponse, mediaId: string, content: BinaryContent): Promise<void> {
+function sendMedia(request: IncomingMessage, response: ServerResponse, mediaId: string, content: BinaryContent): Promise<void> {
   if (!Number.isSafeInteger(content.contentLength) || content.contentLength < 0 || !/^image\/(?:jpeg|png|webp|gif)$/.test(content.contentType)) {
     throw new Error('Stored media metadata is invalid.');
   }
@@ -685,7 +762,7 @@ function sendMedia(response: ServerResponse, mediaId: string, content: BinaryCon
     'x-content-type-options': 'nosniff',
     'cache-control': 'private, max-age=31536000, immutable',
   });
-  return writeBinary(response, content);
+  return writeBinary(request, response, content);
 }
 
 function uploadFields(form: FormData): { expectedRevision: number; caption?: string; credit?: string; file: File } {
@@ -858,7 +935,7 @@ function pathnameFrom(request: IncomingMessage): string {
   if (/%(?:2e|2f|5c)/i.test(raw)) invalid();
   try {
     const parsed = new URL(raw, 'http://127.0.0.1');
-    if ((parsed.pathname.startsWith('/api/') || parsed.pathname === '/healthz') && parsed.search !== '') invalid();
+    if ((parsed.pathname === '/api' || parsed.pathname.startsWith('/api/') || parsed.pathname === '/healthz') && parsed.search !== '') invalid();
     return parsed.pathname;
   } catch {
     return invalid();
@@ -1062,7 +1139,7 @@ export function createPlotterHttpHandler(dependencies: PlotterHttpDependencies) 
       if (contentMatch && method === 'GET') {
         ensureReady(dependencies);
         const mediaId = decodedId(contentMatch[1]);
-        await sendMedia(response, mediaId, await dependencies.mediaContent.open(mediaId));
+        await sendMedia(request, response, mediaId, await dependencies.mediaContent.open(mediaId));
         return;
       }
 
@@ -1120,7 +1197,7 @@ export function createPlotterHttpHandler(dependencies: PlotterHttpDependencies) 
         return;
       }
 
-      if (pathname.startsWith('/api/') || pathname === '/healthz') {
+      if (pathname === '/api' || pathname.startsWith('/api/') || pathname === '/healthz') {
         throw new HttpError(404, NOT_FOUND_MESSAGE);
       }
       await frontend(request, response, dependencies.publicRoot, pathname);
