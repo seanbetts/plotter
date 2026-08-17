@@ -175,6 +175,7 @@ export function createServiceRepositories(client: PlotterApiClient): {
   createTripRepository(tripId: string): TripRepository;
 } {
   let directoryRevision: number | undefined;
+  let directoryReadSequence = 0;
 
   function requireDirectoryRevision(): number {
     if (directoryRevision === undefined) throw new Error(READ_REQUIRED_MESSAGE);
@@ -182,9 +183,17 @@ export function createServiceRepositories(client: PlotterApiClient): {
   }
 
   async function loadDirectory() {
+    const readSequence = directoryReadSequence + 1;
+    directoryReadSequence = readSequence;
     const snapshot = await client.request<DirectoryReadResponse>('/api/v1/trips');
-    directoryRevision = directorySnapshotRevision(snapshot);
+    const revision = directorySnapshotRevision(snapshot);
+    if (directoryReadSequence === readSequence) directoryRevision = revision;
     return snapshot;
+  }
+
+  function commitDirectoryRevision(response: { revision: unknown }): void {
+    directoryReadSequence += 1;
+    directoryRevision = revisionFrom(response);
   }
 
   const directory: TripDirectoryRepository = {
@@ -196,7 +205,7 @@ export function createServiceRepositories(client: PlotterApiClient): {
       const request: CreateTripRequest = { expectedRevision: requireDirectoryRevision(), ...input };
       const response = await client.request<DirectoryWriteResponse>('/api/v1/trips', jsonRequest('POST', request));
       const created = requiredObject<NonNullable<DirectoryWriteResponse['trip']>>(response.trip, isTripSummary, 'Plotter service did not return the created trip.');
-      directoryRevision = revisionFrom(response);
+      commitDirectoryRevision(response);
       return created;
     },
     async updateTrip(tripId, patch) {
@@ -206,7 +215,7 @@ export function createServiceRepositories(client: PlotterApiClient): {
         jsonRequest('PATCH', request),
       );
       const updated = requiredObject<NonNullable<DirectoryWriteResponse['trip']>>(response.trip, isTripSummary, 'Plotter service did not return the updated trip.');
-      directoryRevision = revisionFrom(response);
+      commitDirectoryRevision(response);
       return updated;
     },
     async deleteTrip(tripId) {
@@ -214,12 +223,13 @@ export function createServiceRepositories(client: PlotterApiClient): {
         `/api/v1/trips/${routePart(tripId)}`,
         jsonRequest('DELETE', { expectedRevision: requireDirectoryRevision() }),
       );
-      directoryRevision = revisionFrom(response);
+      commitDirectoryRevision(response);
     },
   };
 
   function createTripRepository(tripId: string): TripRepository {
     let tripRevision: number | undefined;
+    let tripReadSequence = 0;
     const tripPath = `/api/v1/trips/${routePart(tripId)}`;
 
     function requireTripRevision(): number {
@@ -228,12 +238,16 @@ export function createServiceRepositories(client: PlotterApiClient): {
     }
 
     async function loadSnapshot() {
+      const readSequence = tripReadSequence + 1;
+      tripReadSequence = readSequence;
       const snapshot = await client.request<TripReadResponse>(tripPath);
-      tripRevision = tripSnapshotRevision(snapshot);
+      const revision = tripSnapshotRevision(snapshot);
+      if (tripReadSequence === readSequence) tripRevision = revision;
       return snapshot;
     }
 
     function commitTripRevision(response: { revision: unknown }): void {
+      tripReadSequence += 1;
       tripRevision = revisionFrom(response);
     }
 

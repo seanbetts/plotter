@@ -5,6 +5,16 @@ import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { TripSummary } from './tripDirectoryRepository';
 import { createServiceRepositories } from './serviceRepositories';
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function trip(id = 'trip-1'): TripSummary {
   return {
     id,
@@ -42,6 +52,41 @@ function responseBody(call: { init?: RequestInit }) {
 }
 
 describe('service repositories', () => {
+  it('does not let older overlapping reads roll directory or trip mutation revisions back', async () => {
+    const directoryHarness = recordingClient();
+    const directory = createServiceRepositories(directoryHarness.client).directory;
+    const olderDirectoryRead = createDeferred<{ revision: number; trips: TripSummary[] }>();
+    const newerDirectoryRead = createDeferred<{ revision: number; trips: TripSummary[] }>();
+    directoryHarness.responses.push(olderDirectoryRead.promise, newerDirectoryRead.promise);
+
+    const olderDirectoryPromise = directory.loadDirectory?.();
+    const newerDirectoryPromise = directory.loadDirectory?.();
+    newerDirectoryRead.resolve({ revision: 9, trips: [trip()] });
+    await newerDirectoryPromise;
+    olderDirectoryRead.resolve({ revision: 8, trips: [trip()] });
+    await olderDirectoryPromise;
+    directoryHarness.responses.push({ revision: 10 });
+    await directory.deleteTrip('trip-1');
+    expect(responseBody(directoryHarness.calls[2]!)).toEqual({ expectedRevision: 9 });
+
+    const tripHarness = recordingClient();
+    const repository = createServiceRepositories(tripHarness.client).createTripRepository('trip-1');
+    const destination = createDestination({ name: 'Aosta', coordinates: { lat: 45.737, lng: 7.32 } });
+    const olderTripRead = createDeferred<{ revision: number; destinations: Array<typeof destination>; routeLegs: []; activities: [] }>();
+    const newerTripRead = createDeferred<{ revision: number; destinations: Array<typeof destination>; routeLegs: []; activities: [] }>();
+    tripHarness.responses.push(olderTripRead.promise, newerTripRead.promise);
+
+    const olderTripPromise = repository.loadSnapshot?.();
+    const newerTripPromise = repository.loadSnapshot?.();
+    newerTripRead.resolve({ revision: 12, destinations: [destination], routeLegs: [], activities: [] });
+    await newerTripPromise;
+    olderTripRead.resolve({ revision: 11, destinations: [destination], routeLegs: [], activities: [] });
+    await olderTripPromise;
+    tripHarness.responses.push({ revision: 13 });
+    await repository.saveDestination(destination);
+    expect(responseBody(tripHarness.calls[2]!)).toMatchObject({ expectedRevision: 12 });
+  });
+
   it('does not let malformed directory or trip reads prime a mutation revision', async () => {
     const directoryHarness = recordingClient();
     const directory = createServiceRepositories(directoryHarness.client).directory;

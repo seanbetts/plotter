@@ -524,7 +524,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       deferredReloadRef.current = true;
       return;
     }
-    await startReload(repositoryToken);
+    return startReload(repositoryToken);
   }, [repositoryToken, startReload]);
 
   const applyDestinationRecipe = useCallback(

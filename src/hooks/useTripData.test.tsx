@@ -303,6 +303,36 @@ describe('useTripData', () => {
     expect(loadSnapshot).toHaveBeenCalledTimes(1);
   });
 
+  it('returns the applied service revision from a successful reload', async () => {
+    const loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce({ revision: 4, destinations: [], routeLegs: [], activities: [] })
+      .mockResolvedValueOnce({ revision: 5, destinations: [], routeLegs: [], activities: [] });
+    const repository = createMemoryRepository(Promise.resolve([]), { loadSnapshot });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.revision).toBe(4));
+
+    let appliedRevision: number | null | undefined;
+    await act(async () => {
+      appliedRevision = await result.current.reload();
+    });
+
+    expect(appliedRevision).toBe(5);
+  });
+
+  it('returns a successful legacy reload acknowledgement without inventing a revision', async () => {
+    const repository = createMemoryRepository(Promise.resolve([]));
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let appliedRevision: number | null | undefined;
+    await act(async () => {
+      appliedRevision = await result.current.reload();
+    });
+
+    expect(appliedRevision).toBeNull();
+  });
+
   it('shows the shared storage unavailable message when the initial service snapshot is unavailable', async () => {
     const loadSnapshot = vi
       .fn()
@@ -3057,7 +3087,7 @@ describe('useTripData', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     let recalculatePromise!: Promise<void>;
-    let reloadPromise!: Promise<void>;
+    let reloadPromise!: Promise<number | null | undefined>;
     await act(async () => {
       recalculatePromise = result.current.recalculateForVehicle(resolveVehiclePreset('expedition-truck'));
       await waitFor(() => expect(calculateRoute).toHaveBeenCalledTimes(1));
@@ -3680,14 +3710,14 @@ describe('useTripData', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     storedRouteLeg = legacyRouteLeg;
-    let firstReload!: Promise<void>;
+    let firstReload!: Promise<number | null | undefined>;
     await act(async () => {
       firstReload = result.current.reload();
       await waitFor(() => expect(saveRouteLeg).toHaveBeenCalledTimes(1));
     });
 
     let secondReloadSettled = false;
-    let secondReload!: Promise<void>;
+    let secondReload!: Promise<number | null | undefined>;
     act(() => {
       secondReload = result.current.reload();
       void secondReload.then(() => { secondReloadSettled = true; });
@@ -3751,7 +3781,7 @@ describe('useTripData', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     storedOldRouteLeg = legacyOldRouteLeg;
-    let oldReload!: Promise<void>;
+    let oldReload!: Promise<number | null | undefined>;
     await act(async () => {
       oldReload = result.current.reload();
       await waitFor(() => expect(saveOldRouteLeg).toHaveBeenCalledTimes(1));

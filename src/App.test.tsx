@@ -754,6 +754,34 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByText('Trip reload failed.')).not.toBeInTheDocument());
   });
 
+  it('acknowledges a successful legacy reload so the same trip revision stays deduplicated', async () => {
+    const tripChanges: Array<(revision: number) => void> = [];
+    const realtime = {
+      subscribeToDirectory: vi.fn(() => vi.fn()),
+      subscribeToTrip: vi.fn((_tripId: string, onChange: (revision: number) => void) => {
+        tripChanges.push(onChange);
+        return vi.fn();
+      }),
+      reconcile: vi.fn(async () => undefined),
+    };
+    repositoryMock.loadSnapshot = undefined;
+    mockTripWorkspace({ realtime });
+    render(<App />);
+    await waitFor(() => expect(tripChanges).toHaveLength(1));
+    await waitForTripReady();
+    repositoryMock.listDestinations.mockClear();
+    repositoryMock.listRouteLegs.mockClear();
+
+    act(() => tripChanges[0](7));
+    await waitFor(() => expect(repositoryMock.listDestinations).toHaveBeenCalledTimes(1));
+    await act(async () => { await Promise.resolve(); });
+    act(() => tripChanges[0](7));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(repositoryMock.listDestinations).toHaveBeenCalledTimes(1);
+    expect(repositoryMock.listRouteLegs).toHaveBeenCalledTimes(1);
+  });
+
   it('recalculates routes exactly once when the active trip vehicle is saved', async () => {
     const origin = createDestination({ name: 'Origin', coordinates: { lat: 50, lng: 1 }, order: 0 });
     const target = createDestination({ name: 'Target', coordinates: { lat: 51, lng: 2 }, order: 1 });
