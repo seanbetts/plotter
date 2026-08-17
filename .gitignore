@@ -3,6 +3,10 @@
 node_modules/
 dist/
 build/
+server-dist/
+release/
+user-data/
+tests/.tmp/
 test-results/
 playwright-report/
 .playwright-cli/
