@@ -1,31 +1,50 @@
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import {
+  existsSync,
+  fstatSync,
+  fsyncSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { get } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'vitest';
 import type { E2eService } from './start-service';
 
 type StartOptions = {
   temporaryRoot: string;
   port: number;
-  isProcessAlive?: (pid: number) => boolean;
+  lockOperations?: {
+    write(fileDescriptor: number, contents: string, lockPath: string): void;
+    sync(fileDescriptor: number): void;
+    identify(fileDescriptor: number): { device: number; inode: number };
+  };
 };
 
 type SignalTarget = {
-  once(signal: NodeJS.Signals, listener: () => void): unknown;
+  on(signal: NodeJS.Signals, listener: () => void): unknown;
   removeListener(signal: NodeJS.Signals, listener: () => void): unknown;
 };
 
+type Stoppable = { stop(): Promise<void> };
+
 type HarnessModule = {
   createE2eServiceLifecycle(
-    owner: Pick<E2eService, 'stop'>,
+    startOwner: () => Promise<Stoppable>,
     options: {
       signalTarget: SignalTarget;
       replaySignal(signal: NodeJS.Signals): void;
     },
   ): {
+    started: Promise<Stoppable>;
     teardown(): Promise<void>;
     handleSignal(signal: NodeJS.Signals): Promise<void>;
   };
@@ -35,6 +54,8 @@ type HarnessModule = {
 
 const roots: string[] = [];
 const services: E2eService[] = [];
+const children: ChildProcess[] = [];
+const testDirectory = dirname(fileURLToPath(import.meta.url));
 
 async function loadHarness(): Promise<HarnessModule> {
   return import('./start-service') as unknown as Promise<HarnessModule>;
@@ -65,6 +86,9 @@ async function expectTripsAvailable(baseUrl: string): Promise<void> {
 }
 
 afterEach(async () => {
+  for (const child of children.splice(0).reverse()) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  }
   for (const service of services.splice(0).reverse()) {
     await service.stop().catch(() => undefined);
   }
@@ -72,6 +96,25 @@ afterEach(async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+async function independentContender(root: string): Promise<{
+  begin(): void;
+  result: Promise<{ status: 'rejected' | 'started'; message?: string }>;
+}> {
+  const child = spawn(process.execPath, [
+    '--import', 'tsx', join(testDirectory, 'e2e-service-contender.ts'), root,
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+  children.push(child);
+  const lines = createInterface({ input: child.stdout! });
+  const nextLine = () => new Promise<string>((resolve) => lines.once('line', resolve));
+  expect(await nextLine()).toBe('ready');
+  return {
+    begin() { child.stdin!.end('begin\n'); },
+    result: nextLine().then((line) => JSON.parse(line) as {
+      status: 'rejected' | 'started'; message?: string;
+    }),
+  };
+}
 
 describe.sequential('disposable E2E service ownership', () => {
   test('rejects a second in-process owner and releases the first owner cleanly', async () => {
@@ -121,28 +164,32 @@ describe.sequential('disposable E2E service ownership', () => {
     expect(readFileSync(lockPath, 'utf8')).toBe(lockContents);
   });
 
-  test('recovers a stale lock and releases only the newly owned lock', async () => {
-    const { startE2eService } = await loadHarness();
+  test('two independent ephemeral-port contenders fail closed on one pre-existing lock', async () => {
     const root = await temporaryRoot();
+    const dataDir = join(root, 'e2e-user-data');
+    mkdirSync(dataDir);
+    const sentinel = join(dataDir, 'prior-owner.txt');
+    writeFileSync(sentinel, 'prior bytes stay intact');
     const lockPath = join(root, '.e2e-user-data.lock');
-    writeFileSync(lockPath, JSON.stringify({
+    const staleContents = JSON.stringify({
       version: 1,
       pid: 123,
       nonce: '00000000-0000-4000-8000-000000000001',
-    }));
-
-    const service = await startE2eService({
-      temporaryRoot: root,
-      port: 0,
-      isProcessAlive: () => false,
     });
-    services.push(service);
-    await expectTripsAvailable(service.baseUrl);
+    writeFileSync(lockPath, staleContents);
 
-    await service.stop();
-    services.pop();
-    expectMissing(lockPath);
-    expectMissing(service.dataDir);
+    const [first, second] = await Promise.all([
+      independentContender(root), independentContender(root),
+    ]);
+    first.begin();
+    second.begin();
+    const outcomes = await Promise.all([first.result, second.result]);
+
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(['rejected', 'rejected']);
+    expect(outcomes.every((outcome) => outcome.message?.includes('confirm no Plotter E2E process or listener')))
+      .toBe(true);
+    expect(readFileSync(lockPath, 'utf8')).toBe(staleContents);
+    expect(readFileSync(sentinel, 'utf8')).toBe('prior bytes stay intact');
   });
 
   test('a port collision cleans only the failed owner and leaves the listening owner intact', async () => {
@@ -153,6 +200,13 @@ describe.sequential('disposable E2E service ownership', () => {
     mkdirSync(failedData);
     const unrelatedSentinel = join(failedData, 'unrelated-owner.txt');
     writeFileSync(unrelatedSentinel, 'unrelated owner');
+    const failedLock = join(failedRoot, '.e2e-user-data.lock');
+    const failedLockContents = JSON.stringify({
+      version: 1,
+      pid: process.pid,
+      nonce: '00000000-0000-4000-8000-000000000004',
+    });
+    writeFileSync(failedLock, failedLockContents);
     const first = await startE2eService({ temporaryRoot: firstRoot, port: 0 });
     services.push(first);
     const occupiedPort = Number(new URL(first.baseUrl).port);
@@ -162,7 +216,78 @@ describe.sequential('disposable E2E service ownership', () => {
 
     await expectTripsAvailable(first.baseUrl);
     expect(readFileSync(unrelatedSentinel, 'utf8')).toBe('unrelated owner');
-    expectMissing(join(failedRoot, '.e2e-user-data.lock'));
+    expect(readFileSync(failedLock, 'utf8')).toBe(failedLockContents);
+  });
+
+  test.each(['write', 'sync', 'identify'] as const)(
+    'removes only its exact partial lock when the %s phase fails',
+    async (failurePhase) => {
+      const { startE2eService } = await loadHarness();
+      const root = await temporaryRoot();
+      const dataDir = join(root, 'e2e-user-data');
+      mkdirSync(dataDir);
+      const sentinel = join(dataDir, 'pre-lock-failure.txt');
+      writeFileSync(sentinel, 'not reset');
+      let started: E2eService | undefined;
+      let startupError: unknown;
+      try {
+        started = await startE2eService({
+          temporaryRoot: root,
+          port: 0,
+          lockOperations: {
+            write(fileDescriptor, contents) {
+              if (failurePhase === 'write') throw new Error('injected write failure');
+              writeFileSync(fileDescriptor, contents);
+            },
+            sync(fileDescriptor) {
+              if (failurePhase === 'sync') throw new Error('injected sync failure');
+              fsyncSync(fileDescriptor);
+            },
+            identify(fileDescriptor) {
+              if (failurePhase === 'identify') throw new Error('injected identify failure');
+              const stats = fstatSync(fileDescriptor);
+              return { device: stats.dev, inode: stats.ino };
+            },
+          },
+        });
+      } catch (error) {
+        startupError = error;
+      }
+      if (started) services.push(started);
+
+      expect(started).toBeUndefined();
+      expect(startupError).toBeInstanceOf(Error);
+      expect((startupError as Error).message).toContain(`injected ${failurePhase} failure`);
+      expectMissing(join(root, '.e2e-user-data.lock'));
+      expect(readFileSync(sentinel, 'utf8')).toBe('not reset');
+    },
+  );
+
+  test('partial-lock cleanup refuses to unlink a replacement path inode', async () => {
+    const { startE2eService } = await loadHarness();
+    const root = await temporaryRoot();
+    const lockPath = join(root, '.e2e-user-data.lock');
+    const replacementContents = 'replacement lock must remain';
+
+    await expect(startE2eService({
+      temporaryRoot: root,
+      port: 0,
+      lockOperations: {
+        write(fileDescriptor, contents, path) {
+          writeFileSync(fileDescriptor, contents);
+          renameSync(path, join(root, 'owned-partial-lock'));
+          writeFileSync(path, replacementContents);
+          throw new Error('injected replacement race');
+        },
+        sync: fsyncSync,
+        identify(fileDescriptor) {
+          const stats = fstatSync(fileDescriptor);
+          return { device: stats.dev, inode: stats.ino };
+        },
+      },
+    })).rejects.toThrow('partial ownership lock because its path was replaced');
+
+    expect(readFileSync(lockPath, 'utf8')).toBe(replacementContents);
   });
 
   test('teardown refuses to delete a replacement data-directory inode', async () => {
@@ -231,7 +356,7 @@ describe.sequential('E2E process lifecycle', () => {
     return {
       emitter,
       target: {
-        once: emitter.once.bind(emitter),
+        on: emitter.on.bind(emitter),
         removeListener: emitter.removeListener.bind(emitter),
       } as SignalTarget,
     };
@@ -242,37 +367,70 @@ describe.sequential('E2E process lifecycle', () => {
     expect(typeof module.createE2eServiceLifecycle).toBe('function');
     const { emitter, target } = signalTarget();
     let stops = 0;
-    const lifecycle = module.createE2eServiceLifecycle({
+    const lifecycle = module.createE2eServiceLifecycle(async () => ({
       async stop() { stops += 1; },
-    }, {
+    }), {
       signalTarget: target,
       replaySignal() { throw new Error('normal teardown must not replay a signal'); },
     });
 
+    await lifecycle.started;
     await Promise.all([lifecycle.teardown(), lifecycle.teardown()]);
 
     expect(stops).toBe(1);
     expect(emitter.eventNames()).toEqual([]);
   });
 
-  test('signal cleanup is idempotent and replays the first signal after closing', async () => {
+  test('signals emitted during deferred startup join one cleanup and replay only the first', async () => {
     const { createE2eServiceLifecycle } = await loadHarness();
     const { emitter, target } = signalTarget();
     const events: string[] = [];
-    const lifecycle = createE2eServiceLifecycle({
-      async stop() { events.push('stopped'); },
-    }, {
+    let resolveStartup!: (owner: Stoppable) => void;
+    const deferredStartup = new Promise<Stoppable>((resolve) => { resolveStartup = resolve; });
+    const lifecycle = createE2eServiceLifecycle(() => deferredStartup, {
       signalTarget: target,
       replaySignal(signal) { events.push(`replayed:${signal}`); },
     });
 
-    await Promise.all([
-      lifecycle.handleSignal('SIGTERM'),
-      lifecycle.handleSignal('SIGHUP'),
-      lifecycle.teardown(),
-    ]);
+    expect(emitter.emit('SIGTERM')).toBe(true);
+    expect(emitter.emit('SIGHUP')).toBe(true);
+    expect(emitter.listenerCount('SIGTERM')).toBe(1);
+    expect(emitter.listenerCount('SIGHUP')).toBe(1);
+    resolveStartup({ async stop() { events.push('stopped'); } });
+    await lifecycle.handleSignal('SIGTERM');
 
     expect(events).toEqual(['stopped', 'replayed:SIGTERM']);
+    expect(emitter.eventNames()).toEqual([]);
+  });
+
+  test('repeated emitted signals stay intercepted throughout a deferred stop', async () => {
+    const { createE2eServiceLifecycle } = await loadHarness();
+    const { emitter, target } = signalTarget();
+    const events: string[] = [];
+    let resolveStop!: () => void;
+    let markStopStarted!: () => void;
+    const stopStarted = new Promise<void>((resolve) => { markStopStarted = resolve; });
+    const lifecycle = createE2eServiceLifecycle(async () => ({
+      stop() {
+        events.push('stop-started');
+        markStopStarted();
+        return new Promise<void>((resolve) => { resolveStop = resolve; });
+      },
+    }), {
+      signalTarget: target,
+      replaySignal(signal) { events.push(`replayed:${signal}`); },
+    });
+    await lifecycle.started;
+
+    expect(emitter.emit('SIGINT')).toBe(true);
+    await stopStarted;
+    expect(emitter.emit('SIGINT')).toBe(true);
+    expect(emitter.emit('SIGHUP')).toBe(true);
+    expect(emitter.listenerCount('SIGINT')).toBe(1);
+    resolveStop();
+    await lifecycle.handleSignal('SIGINT');
+
+    expect(events).toEqual(['stop-started', 'replayed:SIGINT']);
     expect(emitter.eventNames()).toEqual([]);
   });
 
@@ -281,16 +439,18 @@ describe.sequential('E2E process lifecycle', () => {
     const { emitter, target } = signalTarget();
     const replayed: NodeJS.Signals[] = [];
     let stops = 0;
-    const lifecycle = createE2eServiceLifecycle({
+    const lifecycle = createE2eServiceLifecycle(async () => ({
       async stop() {
         stops += 1;
         throw new Error('cleanup failed');
       },
-    }, {
+    }), {
       signalTarget: target,
       replaySignal(signal) { replayed.push(signal); },
     });
 
+    await lifecycle.started;
+    expect(emitter.emit('SIGINT')).toBe(true);
     await expect(lifecycle.handleSignal('SIGINT')).rejects.toThrow('cleanup failed');
     await expect(lifecycle.teardown()).rejects.toThrow('cleanup failed');
 

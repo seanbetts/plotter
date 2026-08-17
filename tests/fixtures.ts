@@ -1,37 +1,154 @@
-import { expect, test as base, type APIRequestContext, type Page } from '@playwright/test';
+import {
+  expect,
+  test as base,
+  type APIRequestContext,
+  type Page,
+  type Response,
+} from '@playwright/test';
 
 export async function gotoServiceApp(
   page: Page,
   options?: Parameters<Page['goto']>[1],
 ) {
-  let eventStreamOpened = false;
-  let reconciliationDirectoryRead = false;
-  let tripReadsAfterReconciliation = 0;
+  let eventStreamGeneration = 0;
+  let responseSequence = 0;
+  let settled = false;
   let finishReconciliation!: () => void;
-  const reconciliationFinished = new Promise<void>((resolve) => {
+  let failReconciliation!: (error: Error) => void;
+  const reconciliationFinished = new Promise<void>((resolve, reject) => {
     finishReconciliation = resolve;
+    failReconciliation = reject;
   });
-  const onResponse = (response: Awaited<ReturnType<Page['waitForResponse']>>) => {
+  const boundaries = new Map<string, {
+    eventStreamGeneration: number;
+    directoryResponseSequence?: number;
+    selectedTripId?: string;
+    tripResponseSequences: Map<string, number>;
+  }>();
+  const appliedDirectories: Array<{
+    responseSequence: number;
+    selectedTripId: string;
+  }> = [];
+  const appliedTrips: Array<{
+    responseSequence: number;
+    tripId: string;
+  }> = [];
+  const boundary = (reconciliationId: string, generation: number) => {
+    const existing = boundaries.get(reconciliationId);
+    if (existing) return existing;
+    const created = {
+      eventStreamGeneration: generation,
+      tripResponseSequences: new Map<string, number>(),
+    };
+    boundaries.set(reconciliationId, created);
+    return created;
+  };
+  const tryFinish = (reconciliationId: string) => {
+    const candidate = boundaries.get(reconciliationId);
+    if (
+      !candidate?.selectedTripId
+      || candidate.eventStreamGeneration !== eventStreamGeneration
+      || candidate.directoryResponseSequence === undefined
+    ) return;
+    const tripResponseSequence = candidate.tripResponseSequences.get(candidate.selectedTripId);
+    if (tripResponseSequence === undefined) return;
+    const appliedDirectory = appliedDirectories.find((response) =>
+      response.selectedTripId === candidate.selectedTripId
+      && response.responseSequence > candidate.directoryResponseSequence!,
+    );
+    if (!appliedDirectory) return;
+    const appliedTrip = appliedTrips.find((response) =>
+      response.tripId === candidate.selectedTripId
+      && response.responseSequence > tripResponseSequence
+      && response.responseSequence > appliedDirectory.responseSequence,
+    );
+    if (!appliedTrip) return;
+    settled = true;
+    finishReconciliation();
+  };
+  const tryFinishCurrentBoundaries = () => {
+    boundaries.forEach((_candidate, reconciliationId) => tryFinish(reconciliationId));
+  };
+  const selectedTripFromDirectory = async (response: Response) => {
+    const directory = await response.json() as { trips?: Array<{ id?: unknown }> };
+    if (!Array.isArray(directory.trips) || directory.trips.length !== 1) {
+      throw new Error('Plotter E2E readiness requires exactly one selected service trip.');
+    }
+    const selectedTripId = directory.trips[0]?.id;
+    if (typeof selectedTripId !== 'string' || selectedTripId.length === 0) {
+      throw new Error('Plotter E2E readiness received an invalid selected trip identity.');
+    }
+    return selectedTripId;
+  };
+  const recordReconciliationDirectory = async (
+    response: Response,
+    reconciliationId: string,
+    generation: number,
+    sequence: number,
+  ) => {
+    try {
+      const selectedTripId = await selectedTripFromDirectory(response);
+      const candidate = boundary(reconciliationId, generation);
+      candidate.directoryResponseSequence = sequence;
+      candidate.selectedTripId = selectedTripId;
+      tryFinish(reconciliationId);
+    } catch (error) {
+      if (!settled) failReconciliation(error instanceof Error ? error : new Error(String(error)));
+    }
+  };
+  const recordAppliedDirectory = async (response: Response, sequence: number) => {
+    try {
+      appliedDirectories.push({
+        responseSequence: sequence,
+        selectedTripId: await selectedTripFromDirectory(response),
+      });
+      tryFinishCurrentBoundaries();
+    } catch (error) {
+      if (!settled) failReconciliation(error instanceof Error ? error : new Error(String(error)));
+    }
+  };
+  const onResponse = (response: Response) => {
     if (response.request().method() !== 'GET' || !response.ok()) return;
     const pathname = new URL(response.url()).pathname;
     if (pathname === '/plotter/api/v1/events') {
-      eventStreamOpened = true;
+      eventStreamGeneration += 1;
       return;
     }
-    if (eventStreamOpened && pathname === '/plotter/api/v1/trips') {
-      reconciliationDirectoryRead = true;
-      tripReadsAfterReconciliation = 0;
+    if (eventStreamGeneration === 0) return;
+    const sequence = ++responseSequence;
+    const reconciliationId = response.request().headers()['x-plotter-reconciliation'];
+    if (pathname === '/plotter/api/v1/trips') {
+      if (reconciliationId) {
+        boundary(reconciliationId, eventStreamGeneration).directoryResponseSequence = sequence;
+        void recordReconciliationDirectory(
+          response,
+          reconciliationId,
+          eventStreamGeneration,
+          sequence,
+        );
+      } else {
+        void recordAppliedDirectory(response, sequence);
+      }
       return;
     }
-    if (reconciliationDirectoryRead && /^\/plotter\/api\/v1\/trips\/[^/]+$/.test(pathname)) {
-      tripReadsAfterReconciliation += 1;
-      if (tripReadsAfterReconciliation >= 2) finishReconciliation();
+    const tripMatch = pathname.match(/^\/plotter\/api\/v1\/trips\/([^/]+)$/);
+    if (!tripMatch) return;
+    const tripId = decodeURIComponent(tripMatch[1]!);
+    if (reconciliationId) {
+      boundary(reconciliationId, eventStreamGeneration).tripResponseSequences.set(tripId, sequence);
+      tryFinish(reconciliationId);
+    } else {
+      appliedTrips.push({ responseSequence: sequence, tripId });
+      tryFinishCurrentBoundaries();
     }
   };
   page.on('response', onResponse);
   try {
     const navigation = await page.goto('./', options);
     await reconciliationFinished;
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    }));
     return navigation;
   } finally {
     page.off('response', onResponse);

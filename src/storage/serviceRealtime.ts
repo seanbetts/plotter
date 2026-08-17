@@ -23,6 +23,8 @@ type DirectoryReconciliation = {
   promise: Promise<void>;
 };
 
+const reconciliationHeader = 'x-plotter-reconciliation';
+
 type EventSourceLike = {
   addEventListener(type: 'revision', listener: RevisionMessageListener): void;
   removeEventListener(type: 'revision', listener: RevisionMessageListener): void;
@@ -256,6 +258,7 @@ export function createServiceRealtime(
     try {
       request = options.client.request<TripReadResponse>(
         `/api/v1/trips/${encodeURIComponent(tripId)}`,
+        { headers: { [reconciliationHeader]: resetId } },
       );
     } catch (error) {
       request = Promise.reject(error);
@@ -283,7 +286,9 @@ export function createServiceRealtime(
     };
     let request: Promise<DirectoryReadResponse>;
     try {
-      request = options.client.request<DirectoryReadResponse>('/api/v1/trips');
+      request = options.client.request<DirectoryReadResponse>('/api/v1/trips', {
+        headers: { [reconciliationHeader]: resetId },
+      });
     } catch (error) {
       request = Promise.reject(error);
     }

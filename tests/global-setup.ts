@@ -1,7 +1,6 @@
-import { createE2eServiceLifecycle, startE2eService } from './start-service';
+import { startE2eService, startE2eServiceLifecycle } from './start-service';
 
 export default async function globalSetup() {
-  const service = await startE2eService();
-  const lifecycle = createE2eServiceLifecycle(service);
+  const lifecycle = await startE2eServiceLifecycle(() => startE2eService());
   return () => lifecycle.teardown();
 }

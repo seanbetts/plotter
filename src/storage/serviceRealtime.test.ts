@@ -198,10 +198,33 @@ describe('service realtime', () => {
 
     await realtime.reconcile();
 
-    expect(client.request).toHaveBeenCalledWith('/api/v1/trips');
-    expect(client.request).toHaveBeenCalledWith('/api/v1/trips/trip-1');
+    expect(client.request).toHaveBeenCalledWith('/api/v1/trips', {
+      headers: { 'x-plotter-reconciliation': 'reconcile-1' },
+    });
+    expect(client.request).toHaveBeenCalledWith('/api/v1/trips/trip-1', {
+      headers: { 'x-plotter-reconciliation': 'reconcile-1' },
+    });
     expect(directoryRevisions).toEqual([{ kind: 'restore-reset', resetId: 'reconcile-1' }]);
     expect(tripRevisions).toEqual([{ kind: 'restore-reset', resetId: 'reconcile-1' }]);
+  });
+
+  it('correlates one directory and its subscribed-trip reconciliation requests with a primitive id', async () => {
+    const harness = createEventSourceHarness();
+    const client = createClient();
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client, createEventSource: harness.createEventSource,
+    });
+    realtime.subscribeToDirectory(vi.fn());
+    realtime.subscribeToTrip('trip-1', vi.fn());
+
+    await realtime.reconcile();
+
+    expect(client.request).toHaveBeenCalledWith('/api/v1/trips', {
+      headers: { 'x-plotter-reconciliation': 'reconcile-1' },
+    });
+    expect(client.request).toHaveBeenCalledWith('/api/v1/trips/trip-1', {
+      headers: { 'x-plotter-reconciliation': 'reconcile-1' },
+    });
   });
 
   it('still resets the directory and other trips when a removed subscribed trip returns 404', async () => {
@@ -373,7 +396,10 @@ describe('service realtime', () => {
     const replacement = vi.fn();
     const unsubscribe = realtime.subscribeToTrip('trip-changing', original);
     const reconciliation = realtime.reconcile();
-    await vi.waitFor(() => expect(client.request).toHaveBeenCalledWith('/api/v1/trips/trip-changing'));
+    await vi.waitFor(() => expect(client.request).toHaveBeenCalledWith(
+      '/api/v1/trips/trip-changing',
+      { headers: { 'x-plotter-reconciliation': 'reconcile-1' } },
+    ));
 
     unsubscribe();
     realtime.subscribeToTrip('trip-changing', replacement);

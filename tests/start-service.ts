@@ -33,17 +33,25 @@ export type E2eService = {
 export type StartE2eServiceOptions = {
   temporaryRoot?: string;
   port?: number;
-  isProcessAlive?: (pid: number) => boolean;
+  lockOperations?: E2eLockOperations;
 };
 
 type SignalTarget = {
-  once(signal: NodeJS.Signals, listener: () => void): unknown;
+  on(signal: NodeJS.Signals, listener: () => void): unknown;
   removeListener(signal: NodeJS.Signals, listener: () => void): unknown;
 };
 
 type E2eLifecycleOptions = {
   signalTarget?: SignalTarget;
   replaySignal?(signal: NodeJS.Signals): void;
+};
+
+type Stoppable = { stop(): Promise<void> };
+
+export type E2eLockOperations = {
+  write(fileDescriptor: number, contents: string, lockPath: string): void;
+  sync(fileDescriptor: number): void;
+  identify(fileDescriptor: number): { device: number; inode: number };
 };
 
 type DirectoryIdentity = {
@@ -97,8 +105,8 @@ export function createE2eViteEnvironment(
   };
 }
 
-export function createE2eServiceLifecycle(
-  owner: Pick<E2eService, 'stop'>,
+export function createE2eServiceLifecycle<Owner extends Stoppable>(
+  startOwner: () => Owner | Promise<Owner>,
   options: E2eLifecycleOptions = {},
 ) {
   const signalTarget = options.signalTarget ?? process;
@@ -106,19 +114,41 @@ export function createE2eServiceLifecycle(
     process.kill(process.pid, signal);
   });
   const handlers = new Map<NodeJS.Signals, () => void>();
+  let owner: Owner | undefined;
+  let ownerStopPromise: Promise<void> | undefined;
+  let cleanupPromise: Promise<void> | undefined;
   let teardownPromise: Promise<void> | undefined;
   let signalPromise: Promise<void> | undefined;
+  let cleanupRequested = false;
+
+  const started = Promise.resolve().then(startOwner).then(async (startedOwner) => {
+    owner = startedOwner;
+    if (cleanupRequested) await stopOwner();
+    return startedOwner;
+  });
 
   function removeSignalHandlers(): void {
     for (const [signal, handler] of handlers) signalTarget.removeListener(signal, handler);
     handlers.clear();
   }
 
+  function stopOwner(): Promise<void> {
+    if (!owner) return Promise.resolve();
+    ownerStopPromise ??= Promise.resolve().then(() => owner!.stop());
+    return ownerStopPromise;
+  }
+
+  function cleanup(): Promise<void> {
+    cleanupRequested = true;
+    cleanupPromise ??= (async () => {
+      await started;
+      await stopOwner();
+    })();
+    return cleanupPromise;
+  }
+
   function teardown(): Promise<void> {
-    if (!teardownPromise) {
-      removeSignalHandlers();
-      teardownPromise = Promise.resolve().then(() => owner.stop());
-    }
+    teardownPromise ??= cleanup().finally(removeSignalHandlers);
     return teardownPromise;
   }
 
@@ -126,10 +156,11 @@ export function createE2eServiceLifecycle(
     signalPromise ??= (async () => {
       let cleanupError: unknown;
       try {
-        await teardown();
+        await cleanup();
       } catch (error) {
         cleanupError = error;
       }
+      removeSignalHandlers();
       try {
         replaySignal(signal);
       } catch (error) {
@@ -143,10 +174,24 @@ export function createE2eServiceLifecycle(
   for (const signal of lifecycleSignals) {
     const handler = () => { void handleSignal(signal).catch(() => undefined); };
     handlers.set(signal, handler);
-    signalTarget.once(signal, handler);
+    signalTarget.on(signal, handler);
   }
 
-  return { teardown, handleSignal };
+  return { started, teardown, handleSignal };
+}
+
+export async function startE2eServiceLifecycle<Owner extends Stoppable>(
+  startOwner: () => Owner | Promise<Owner>,
+  options: E2eLifecycleOptions = {},
+) {
+  const lifecycle = createE2eServiceLifecycle(startOwner, options);
+  try {
+    const owner = await lifecycle.started;
+    return { owner, teardown: lifecycle.teardown, handleSignal: lifecycle.handleSignal };
+  } catch (startupError) {
+    await lifecycle.teardown().catch(() => undefined);
+    throw startupError;
+  }
 }
 
 function validateContainedDataPath(temporaryRoot: string, dataDir: string): void {
@@ -187,16 +232,6 @@ function assertDirectoryIdentity(identity: DirectoryIdentity, label: string): vo
     || current.inode !== identity.inode
   ) {
     throw new Error(`Refusing to remove a replaced ${label}.`);
-  }
-}
-
-function defaultIsProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    return true;
   }
 }
 
@@ -246,44 +281,132 @@ function sameLock(left: LockIdentity, right: LockIdentity): boolean {
     && left.nonce === right.nonce;
 }
 
+function descriptorIdentity(fileDescriptor: number): { device: number; inode: number } {
+  const stats = fstatSync(fileDescriptor);
+  if (!stats.isFile()) throw new Error('The Plotter E2E ownership lock is not a regular file.');
+  return { device: stats.dev, inode: stats.ino };
+}
+
+const defaultLockOperations: E2eLockOperations = {
+  write(fileDescriptor, contents) {
+    writeFileSync(fileDescriptor, contents, 'utf8');
+  },
+  sync(fileDescriptor) {
+    fsyncSync(fileDescriptor);
+  },
+  identify: descriptorIdentity,
+};
+
+function syncDirectory(path: string): void {
+  const fileDescriptor = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY);
+  try {
+    fsyncSync(fileDescriptor);
+  } finally {
+    closeSync(fileDescriptor);
+  }
+}
+
+function removeExactPartialLock(
+  temporaryRootIdentity: DirectoryIdentity,
+  lockPath: string,
+  createdIdentity: { device: number; inode: number },
+): void {
+  assertDirectoryIdentity(temporaryRootIdentity, 'Plotter E2E temporary directory');
+  let current;
+  try {
+    current = lstatSync(lockPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (
+    !current.isFile()
+    || current.isSymbolicLink()
+    || current.dev !== createdIdentity.device
+    || current.ino !== createdIdentity.inode
+  ) {
+    throw new Error('Refusing to remove a partial ownership lock because its path was replaced.');
+  }
+  unlinkSync(lockPath);
+  syncDirectory(temporaryRootIdentity.path);
+}
+
 function acquireOwnershipLock(
   temporaryRootIdentity: DirectoryIdentity,
-  isProcessAlive: (pid: number) => boolean,
+  operations: E2eLockOperations,
 ): LockIdentity {
   const lockPath = resolve(temporaryRootIdentity.path, lockFileName);
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    assertDirectoryIdentity(temporaryRootIdentity, 'Plotter E2E temporary directory');
-    const nonce = randomUUID();
-    const contents = JSON.stringify({ version: 1, pid: process.pid, nonce } satisfies LockContents);
-    let fileDescriptor: number | undefined;
-    try {
-      fileDescriptor = openSync(
-        lockPath,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-        0o600,
-      );
-      writeFileSync(fileDescriptor, contents, 'utf8');
-      fsyncSync(fileDescriptor);
-      const stats = fstatSync(fileDescriptor);
-      if (!stats.isFile()) throw new Error('The Plotter E2E ownership lock is not a regular file.');
-      return { path: lockPath, contents, device: stats.dev, inode: stats.ino, nonce };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const staleCandidate = readLockSnapshot(lockPath);
-      if (isProcessAlive(staleCandidate.owner.pid)) {
-        throw new Error(`Plotter E2E storage is already owned by process ${staleCandidate.owner.pid}.`, {
-          cause: error,
-        });
-      }
-      assertDirectoryIdentity(temporaryRootIdentity, 'Plotter E2E temporary directory');
-      const beforeUnlink = readLockSnapshot(lockPath);
-      if (!sameLock(staleCandidate, beforeUnlink)) continue;
-      unlinkSync(lockPath);
-    } finally {
-      if (fileDescriptor !== undefined) closeSync(fileDescriptor);
+  assertDirectoryIdentity(temporaryRootIdentity, 'Plotter E2E temporary directory');
+  const nonce = randomUUID();
+  const contents = JSON.stringify({ version: 1, pid: process.pid, nonce } satisfies LockContents);
+  let fileDescriptor: number | undefined;
+  let createdIdentity: { device: number; inode: number } | undefined;
+  try {
+    fileDescriptor = openSync(
+      lockPath,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+      0o600,
+    );
+    createdIdentity = descriptorIdentity(fileDescriptor);
+    operations.write(fileDescriptor, contents, lockPath);
+    operations.sync(fileDescriptor);
+    const verifiedIdentity = operations.identify(fileDescriptor);
+    if (
+      verifiedIdentity.device !== createdIdentity.device
+      || verifiedIdentity.inode !== createdIdentity.inode
+    ) {
+      throw new Error('The Plotter E2E ownership lock identity changed during creation.');
     }
+    syncDirectory(temporaryRootIdentity.path);
+    closeSync(fileDescriptor);
+    fileDescriptor = undefined;
+    return {
+      path: lockPath,
+      contents,
+      device: createdIdentity.device,
+      inode: createdIdentity.inode,
+      nonce,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(
+        `Plotter E2E storage is already owned or its ownership lock remains at ${lockPath}. Another harness may be active; after an abnormal hard kill, confirm no Plotter E2E process or listener is active before removing that exact lock.`,
+        { cause: error },
+      );
+    }
+    const cleanupErrors: unknown[] = [];
+    if (fileDescriptor !== undefined) {
+      if (!createdIdentity) {
+        try {
+          createdIdentity = descriptorIdentity(fileDescriptor);
+        } catch (identityError) {
+          cleanupErrors.push(identityError);
+        }
+      }
+      try {
+        closeSync(fileDescriptor);
+      } catch (closeError) {
+        cleanupErrors.push(closeError);
+      }
+      if (createdIdentity) {
+        try {
+          removeExactPartialLock(temporaryRootIdentity, lockPath, createdIdentity);
+        } catch (removeError) {
+          cleanupErrors.push(removeError);
+        }
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      const messages = cleanupErrors.map((cleanupError) =>
+        cleanupError instanceof Error ? cleanupError.message : String(cleanupError));
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        `Plotter E2E ownership lock creation failed: ${error instanceof Error ? error.message : String(error)} ${messages.join(' ')}`,
+        { cause: error },
+      );
+    }
+    throw error;
   }
-  throw new Error('Unable to acquire the Plotter E2E ownership lock safely.');
 }
 
 function releaseOwnershipLock(
@@ -296,6 +419,7 @@ function releaseOwnershipLock(
     throw new Error('Refusing to release a replaced Plotter E2E ownership lock.');
   }
   unlinkSync(ownedLock.path);
+  syncDirectory(temporaryRootIdentity.path);
 }
 
 function prepareDataDirectory(
@@ -441,49 +565,43 @@ export async function startE2eService(options: StartE2eServiceOptions = {}): Pro
       processOwnedTemporaryRoots.delete(temporaryRoot);
     }
   };
-  let temporaryRootIdentity: DirectoryIdentity;
-  let ownedLock: LockIdentity;
+  const sockets = new Set<Socket>();
+  let requestHandler: ReturnType<typeof createPlotterHttpHandler> | undefined;
+  let server: Server | undefined;
+  let baseUrl: string | undefined;
+  let temporaryRootIdentity: DirectoryIdentity | undefined;
+  let ownedLock: LockIdentity | undefined;
+  let dataIdentity: DirectoryIdentity | undefined;
+  let storage: PlotterStorageRuntime | undefined;
   try {
+    server = createServer((request, response) => {
+      if (!requestHandler) {
+        response.writeHead(503, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ status: 503, error: { code: 'starting', message: 'Plotter E2E service is starting.' } }));
+        return;
+      }
+      if (request.method === 'GET' && request.url === fakeImagePath) {
+        response.writeHead(200, {
+          'content-type': 'image/png',
+          'content-length': fakeImageBytes.byteLength,
+          'cache-control': 'no-store',
+        });
+        response.end(fakeImageBytes);
+        return;
+      }
+      void requestHandler(request, response);
+    });
+    server.on('connection', (socket) => {
+      sockets.add(socket);
+      socket.once('close', () => sockets.delete(socket));
+    });
+    baseUrl = await listen(server, options.port ?? defaultServicePort);
     mkdirSync(temporaryRoot, { recursive: true });
     temporaryRootIdentity = captureDirectoryIdentity(temporaryRoot, 'Plotter E2E temporary directory');
     ownedLock = acquireOwnershipLock(
       temporaryRootIdentity,
-      options.isProcessAlive ?? defaultIsProcessAlive,
+      options.lockOperations ?? defaultLockOperations,
     );
-  } catch (error) {
-    releaseProcessOwnership();
-    throw error;
-  }
-
-  const sockets = new Set<Socket>();
-  let requestHandler: ReturnType<typeof createPlotterHttpHandler> | undefined;
-  const server = createServer((request, response) => {
-    if (!requestHandler) {
-      response.writeHead(503, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ status: 503, error: { code: 'starting', message: 'Plotter E2E service is starting.' } }));
-      return;
-    }
-    if (request.method === 'GET' && request.url === fakeImagePath) {
-      response.writeHead(200, {
-        'content-type': 'image/png',
-        'content-length': fakeImageBytes.byteLength,
-        'cache-control': 'no-store',
-      });
-      response.end(fakeImageBytes);
-      return;
-    }
-    void requestHandler(request, response);
-  });
-  server.on('connection', (socket) => {
-    sockets.add(socket);
-    socket.once('close', () => sockets.delete(socket));
-  });
-
-  let baseUrl: string | undefined;
-  let dataIdentity: DirectoryIdentity | undefined;
-  let storage: PlotterStorageRuntime | undefined;
-  try {
-    baseUrl = await listen(server, options.port ?? defaultServicePort);
     dataIdentity = prepareDataDirectory(temporaryRootIdentity, dataDir);
     seedInitialTrip(dataDir);
     storage = await createPlotterStorageRuntime({ dataDirectory: dataDir });
@@ -527,13 +645,16 @@ export async function startE2eService(options: StartE2eServiceOptions = {}): Pro
       operations: storage.operations,
       publicRoot: resolve(repositoryRoot, 'dist'),
     });
+    if (!requestHandler) throw new Error('The disposable Plotter service handler did not become ready.');
   } catch (error) {
     const startupError = error;
     await runCleanupSteps([
-      () => closeServer(server, sockets),
+      ...(server ? [() => closeServer(server, sockets)] : []),
       () => storage?.close(),
-      ...(dataIdentity ? [() => deleteOwnedDataDirectory(temporaryRootIdentity, dataIdentity)] : []),
-      () => releaseOwnershipLock(temporaryRootIdentity, ownedLock),
+      ...(temporaryRootIdentity && dataIdentity
+        ? [() => deleteOwnedDataDirectory(temporaryRootIdentity, dataIdentity)] : []),
+      ...(temporaryRootIdentity && ownedLock
+        ? [() => releaseOwnershipLock(temporaryRootIdentity, ownedLock)] : []),
       releaseProcessOwnership,
     ]).catch((cleanupError) => {
       throw new AggregateError([startupError, cleanupError], 'Plotter E2E startup and cleanup failed.');
@@ -541,6 +662,9 @@ export async function startE2eService(options: StartE2eServiceOptions = {}): Pro
     throw startupError;
   }
 
+  if (!server || !baseUrl || !temporaryRootIdentity || !ownedLock || !dataIdentity || !storage) {
+    throw new Error('The disposable Plotter service did not finish startup.');
+  }
   const ownedDataIdentity = dataIdentity;
   const ownedStorage = storage;
   const ownedBaseUrl = baseUrl;
@@ -572,25 +696,27 @@ function waitForChild(child: ChildProcess): Promise<number> {
 }
 
 async function runE2eDevelopmentServer(): Promise<void> {
-  const service = await startE2eService();
-  const vite = spawn(resolve(repositoryRoot, 'node_modules', '.bin', 'vite'), [
-    '--host', '127.0.0.1',
-    '--port', '5174',
-    '--strictPort',
-  ], {
-    cwd: repositoryRoot,
-    env: createE2eViteEnvironment(process.env, service.baseUrl),
-    stdio: 'inherit',
-  });
-
-  const lifecycle = createE2eServiceLifecycle({
-    async stop() {
-      if (vite.exitCode === null && vite.signalCode === null) vite.kill('SIGTERM');
-      await service.stop();
-    },
+  const lifecycle = await startE2eServiceLifecycle(async () => {
+    const service = await startE2eService();
+    const vite = spawn(resolve(repositoryRoot, 'node_modules', '.bin', 'vite'), [
+      '--host', '127.0.0.1',
+      '--port', '5174',
+      '--strictPort',
+    ], {
+      cwd: repositoryRoot,
+      env: createE2eViteEnvironment(process.env, service.baseUrl),
+      stdio: 'inherit',
+    });
+    return {
+      vite,
+      async stop() {
+        if (vite.exitCode === null && vite.signalCode === null) vite.kill('SIGTERM');
+        await service.stop();
+      },
+    };
   });
   try {
-    process.exitCode = await waitForChild(vite);
+    process.exitCode = await waitForChild(lifecycle.owner.vite);
   } finally {
     await lifecycle.teardown();
   }
