@@ -883,7 +883,10 @@ function sse(request: IncomingMessage, response: ServerResponse, events: Revisio
   response.write(': heartbeat\n\n');
   const unsubscribe = events.subscribe((event) => {
     if (!response.destroyed && !response.writableEnded) {
-      const id = event.scope === 'directory' ? `directory:${event.revision}` : `trip:${event.tripId}:${event.revision}`;
+      const scopeId = event.scope === 'directory' ? 'directory' : `trip:${event.tripId}`;
+      const id = event.kind === 'revision'
+        ? `revision:${event.epoch}:${scopeId}:${event.revision}`
+        : `restore-reset:${event.epoch}:${scopeId}`;
       response.write(`id: ${id}\nevent: revision\ndata: ${JSON.stringify(event)}\n\n`);
     }
   });

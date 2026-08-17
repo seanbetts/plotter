@@ -499,9 +499,22 @@ describe('Plotter HTTP transport and safety', () => {
     const reader = response.body!.getReader();
     const initial = await reader.read();
     expect(new TextDecoder().decode(initial.value)).toContain(': heartbeat');
-    harness.publish({ scope: 'trip', tripId: 'trip-1', revision: 5 });
+    harness.publish({
+      kind: 'revision', epoch: '00000000-0000-4000-8000-000000000001',
+      scope: 'trip', tripId: 'trip-1', revision: 5,
+    });
     const event = await reader.read();
-    expect(new TextDecoder().decode(event.value)).toContain('data: {"scope":"trip","tripId":"trip-1","revision":5}');
+    expect(new TextDecoder().decode(event.value)).toContain(
+      'data: {"kind":"revision","epoch":"00000000-0000-4000-8000-000000000001","scope":"trip","tripId":"trip-1","revision":5}',
+    );
+    harness.publish({
+      kind: 'restore-reset', epoch: '00000000-0000-4000-8000-000000000002',
+      scope: 'trip', tripId: 'trip-1',
+    });
+    const reset = await reader.read();
+    expect(new TextDecoder().decode(reset.value)).toContain(
+      'id: restore-reset:00000000-0000-4000-8000-000000000002:trip:trip-1\nevent: revision\ndata: {"kind":"restore-reset","epoch":"00000000-0000-4000-8000-000000000002","scope":"trip","tripId":"trip-1"}',
+    );
     controller.abort();
     await expect.poll(() => harness.subscribed()).toBe(false);
   });

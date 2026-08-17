@@ -701,6 +701,53 @@ describe('App', () => {
     expect(realtime.reconcile).toHaveBeenCalledTimes(1);
   });
 
+  it('reloads lower restored state once for each directory and trip reset token', async () => {
+    const refreshTrips = vi.fn(async () => 2);
+    const directoryChanges: Array<(invalidation: unknown) => void> = [];
+    const tripChanges: Array<(invalidation: unknown) => void> = [];
+    const realtime = {
+      subscribeToDirectory: vi.fn((onChange: (invalidation: unknown) => void) => {
+        directoryChanges.push(onChange);
+        return vi.fn();
+      }),
+      subscribeToTrip: vi.fn((_tripId: string, onChange: (invalidation: unknown) => void) => {
+        tripChanges.push(onChange);
+        return vi.fn();
+      }),
+      reconcile: vi.fn(async () => undefined),
+    };
+    repositoryMock.loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce({ revision: 6, destinations: [], routeLegs: [], activities: [] })
+      .mockResolvedValue({ revision: 2, destinations: [], routeLegs: [], activities: [] });
+    mockTripWorkspace({ refreshTrips, directoryRevision: 6, realtime });
+    render(<App />);
+    await waitFor(() => expect(directoryChanges).toHaveLength(1));
+    await waitFor(() => expect(tripChanges).toHaveLength(1));
+    await waitForTripReady();
+    const reset = {
+      kind: 'restore-reset' as const,
+      resetId: '00000000-0000-4000-8000-000000000002',
+    };
+
+    act(() => directoryChanges[0](reset));
+    await waitFor(() => expect(refreshTrips).toHaveBeenCalledTimes(1));
+    act(() => directoryChanges[0](reset));
+    await act(async () => { await Promise.resolve(); });
+    act(() => directoryChanges[0](3));
+    await waitFor(() => expect(refreshTrips).toHaveBeenCalledTimes(2));
+
+    act(() => tripChanges[0](reset));
+    await waitFor(() => expect(repositoryMock.loadSnapshot).toHaveBeenCalledTimes(2));
+    act(() => tripChanges[0](reset));
+    await act(async () => { await Promise.resolve(); });
+    act(() => tripChanges[0](3));
+    await waitFor(() => expect(repositoryMock.loadSnapshot).toHaveBeenCalledTimes(3));
+
+    expect(refreshTrips).toHaveBeenCalledTimes(2);
+    expect(repositoryMock.loadSnapshot).toHaveBeenCalledTimes(3);
+  });
+
   it('retries the same directory revision after its authoritative reload fails', async () => {
     const refreshTrips = vi
       .fn()

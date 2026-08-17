@@ -44,7 +44,9 @@ function createRepositoryHarness() {
   const database = openPlotterDatabase(join(directory, 'plotter.sqlite3'));
   openDatabases.push(database);
   const events: RevisionEvent[] = [];
-  const eventBus = createRevisionEventBus();
+  const eventBus = createRevisionEventBus({
+    initialEpoch: '00000000-0000-4000-8000-000000000001',
+  });
   eventBus.subscribe((event) => events.push(event));
   const writes = createWriteCoordinator(
     database,
@@ -493,8 +495,14 @@ describe('revisioned media metadata and filesystem coordination', () => {
       expect(readFileSync(join(harness.dataDirectory, row.relative_path as string))).toBeTruthy();
     }
     expect(harness.events.slice(-2)).toEqual([
-      { scope: 'trip', tripId: trip.id, revision: 3 },
-      { scope: 'trip', tripId: trip.id, revision: 4 },
+      {
+        kind: 'revision', epoch: '00000000-0000-4000-8000-000000000001',
+        scope: 'trip', tripId: trip.id, revision: 3,
+      },
+      {
+        kind: 'revision', epoch: '00000000-0000-4000-8000-000000000001',
+        scope: 'trip', tripId: trip.id, revision: 4,
+      },
     ]);
   });
 

@@ -1,10 +1,10 @@
 import type { DirectoryReadResponse, TripReadResponse } from '../api/contracts';
 import type { PlotterApiClient } from '../api/client';
-import type { RevisionEvent } from './revision';
+import type { RevisionEvent, ServiceInvalidation } from './revision';
 
 export type ServiceRealtimeSubscriptions = {
-  subscribeToDirectory(onInvalidate: (revision: number) => void): () => void;
-  subscribeToTrip(tripId: string, onInvalidate: (revision: number) => void): () => void;
+  subscribeToDirectory(onInvalidate: (invalidation: ServiceInvalidation) => void): () => void;
+  subscribeToTrip(tripId: string, onInvalidate: (invalidation: ServiceInvalidation) => void): () => void;
   reconcile(): Promise<void>;
 };
 
@@ -26,12 +26,16 @@ export type CreateServiceRealtimeOptions = {
 export function createServiceRealtime(
   options: CreateServiceRealtimeOptions,
 ): ServiceRealtimeSubscriptions {
-  const directorySubscribers = new Map<(revision: number) => void, number>();
-  const tripSubscribers = new Map<string, Map<(revision: number) => void, number>>();
+  const directorySubscribers = new Map<(invalidation: ServiceInvalidation) => void, number>();
+  const tripSubscribers = new Map<string, Map<(invalidation: ServiceInvalidation) => void, number>>();
   const latestStreamRevision = new Map<string, number>();
+  const observedResetScopes = new Set<string>();
+  const retiredEpochs = new Set<string>();
   const createEventSource = options.createEventSource
     ?? ((url: string) => new EventSource(url) as unknown as EventSourceLike);
   let source: EventSourceLike | null = null;
+  let currentEpoch: string | null = null;
+  let reconciliationSequence = 0;
 
   function revisionKey(event: RevisionEvent): string {
     return event.scope === 'directory' ? 'directory' : `trip:${event.tripId}`;
@@ -39,6 +43,22 @@ export function createServiceRealtime(
 
   function validRevision(value: unknown): value is number {
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  }
+
+  function exactKeys(record: Record<string, unknown>, expected: string[]): boolean {
+    const keys = Object.keys(record).sort();
+    const expectedKeys = [...expected].sort();
+    return keys.length === expectedKeys.length
+      && keys.every((key, index) => key === expectedKeys[index]);
+  }
+
+  function validEpoch(value: unknown): value is string {
+    return typeof value === 'string'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+  }
+
+  function validTripId(value: unknown): value is string {
+    return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
   }
 
   function parseRevisionEvent(data: string): RevisionEvent | null {
@@ -50,36 +70,84 @@ export function createServiceRealtime(
     }
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const record = value as Record<string, unknown>;
-    if (record.scope === 'directory' && validRevision(record.revision)) {
-      return { scope: 'directory', revision: record.revision };
-    }
     if (
-      record.scope === 'trip'
-      && typeof record.tripId === 'string'
-      && record.tripId.length > 0
+      record.kind === 'revision'
+      && record.scope === 'directory'
+      && exactKeys(record, ['kind', 'epoch', 'scope', 'revision'])
+      && validEpoch(record.epoch)
       && validRevision(record.revision)
     ) {
-      return { scope: 'trip', tripId: record.tripId, revision: record.revision };
+      return {
+        kind: 'revision', epoch: record.epoch, scope: 'directory', revision: record.revision,
+      };
+    }
+    if (
+      record.kind === 'revision'
+      && record.scope === 'trip'
+      && exactKeys(record, ['kind', 'epoch', 'scope', 'tripId', 'revision'])
+      && validEpoch(record.epoch)
+      && validTripId(record.tripId)
+      && validRevision(record.revision)
+    ) {
+      return {
+        kind: 'revision', epoch: record.epoch, scope: 'trip',
+        tripId: record.tripId, revision: record.revision,
+      };
+    }
+    if (
+      record.kind === 'restore-reset'
+      && record.scope === 'directory'
+      && exactKeys(record, ['kind', 'epoch', 'scope'])
+      && validEpoch(record.epoch)
+    ) {
+      return { kind: 'restore-reset', epoch: record.epoch, scope: 'directory' };
+    }
+    if (
+      record.kind === 'restore-reset'
+      && record.scope === 'trip'
+      && exactKeys(record, ['kind', 'epoch', 'scope', 'tripId'])
+      && validEpoch(record.epoch)
+      && validTripId(record.tripId)
+    ) {
+      return {
+        kind: 'restore-reset', epoch: record.epoch, scope: 'trip', tripId: record.tripId,
+      };
     }
     return null;
   }
 
-  function publish(event: RevisionEvent): void {
+  function publish(event: RevisionEvent, invalidation: ServiceInvalidation): void {
     if (event.scope === 'directory') {
-      directorySubscribers.forEach((_count, subscriber) => subscriber(event.revision));
+      directorySubscribers.forEach((_count, subscriber) => subscriber(invalidation));
       return;
     }
-    tripSubscribers.get(event.tripId)?.forEach((_count, subscriber) => subscriber(event.revision));
+    tripSubscribers.get(event.tripId)?.forEach((_count, subscriber) => subscriber(invalidation));
   }
 
   const onRevision = (message: MessageEvent<string>) => {
     const event = parseRevisionEvent(message.data);
     if (!event) return;
+    if (event.kind === 'restore-reset') {
+      if (event.epoch !== currentEpoch) {
+        if (retiredEpochs.has(event.epoch)) return;
+        if (currentEpoch) retiredEpochs.add(currentEpoch);
+        currentEpoch = event.epoch;
+        latestStreamRevision.clear();
+        observedResetScopes.clear();
+      }
+      const resetKey = revisionKey(event);
+      if (observedResetScopes.has(resetKey)) return;
+      observedResetScopes.add(resetKey);
+      publish(event, { kind: 'restore-reset', resetId: event.epoch });
+      return;
+    }
+    if (currentEpoch === null) currentEpoch = event.epoch;
+    if (event.epoch !== currentEpoch) return;
     const key = revisionKey(event);
     const priorRevision = latestStreamRevision.get(key);
     if (priorRevision !== undefined && event.revision <= priorRevision) return;
     latestStreamRevision.set(key, event.revision);
-    publish(event);
+    publish(event, event.revision);
   };
 
   function eventUrl(): string {
@@ -96,7 +164,13 @@ export function createServiceRealtime(
     if (source) return;
     const nextSource = createEventSource(eventUrl());
     nextSource.addEventListener('revision', onRevision);
-    nextSource.onopen = () => { void reconcile().catch(() => undefined); };
+    nextSource.onopen = () => {
+      currentEpoch = null;
+      latestStreamRevision.clear();
+      observedResetScopes.clear();
+      retiredEpochs.clear();
+      void reconcile().catch(() => undefined);
+    };
     source = nextSource;
   }
 
@@ -112,7 +186,10 @@ export function createServiceRealtime(
     closingSource.onopen = null;
     closingSource.removeEventListener('revision', onRevision);
     closingSource.close();
+    currentEpoch = null;
     latestStreamRevision.clear();
+    observedResetScopes.clear();
+    retiredEpochs.clear();
   }
 
   async function reconcile(): Promise<void> {
@@ -123,10 +200,21 @@ export function createServiceRealtime(
         options.client.request<TripReadResponse>(`/api/v1/trips/${encodeURIComponent(tripId)}`)),
     ]);
     if (!validRevision(directory.revision)) throw new Error('Plotter service returned an invalid revision.');
-    publish({ scope: 'directory', revision: directory.revision });
+    const resetId = `reconcile-${++reconciliationSequence}`;
+    const directoryReset: RevisionEvent = {
+      kind: 'restore-reset',
+      epoch: '00000000-0000-4000-8000-000000000000',
+      scope: 'directory',
+    };
+    publish(directoryReset, { kind: 'restore-reset', resetId });
     trips.forEach((trip, index) => {
       if (!validRevision(trip.revision)) throw new Error('Plotter service returned an invalid revision.');
-      publish({ scope: 'trip', tripId: tripIds[index], revision: trip.revision });
+      publish({
+        kind: 'restore-reset',
+        epoch: '00000000-0000-4000-8000-000000000000',
+        scope: 'trip',
+        tripId: tripIds[index],
+      }, { kind: 'restore-reset', resetId });
     });
   }
 
@@ -146,7 +234,7 @@ export function createServiceRealtime(
     },
     subscribeToTrip(tripId, onInvalidate) {
       const subscribers = tripSubscribers.get(tripId)
-        ?? new Map<(revision: number) => void, number>();
+        ?? new Map<(invalidation: ServiceInvalidation) => void, number>();
       subscribers.set(onInvalidate, (subscribers.get(onInvalidate) ?? 0) + 1);
       tripSubscribers.set(tripId, subscribers);
       ensureSource();

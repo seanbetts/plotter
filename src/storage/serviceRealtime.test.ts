@@ -49,6 +49,79 @@ function createClient(): PlotterApiClient {
 }
 
 describe('service realtime', () => {
+  it('forces reset reloads across lower revisions and ignores stale events from retired epochs', () => {
+    const harness = createEventSourceHarness();
+    const realtime = createServiceRealtime({
+      baseUrl: '/',
+      client: createClient(),
+      createEventSource: harness.createEventSource,
+    });
+    const directoryInvalidations: unknown[] = [];
+    const removedTripInvalidations: unknown[] = [];
+    realtime.subscribeToDirectory((invalidation: unknown) => directoryInvalidations.push(invalidation));
+    realtime.subscribeToTrip(
+      'trip-removed',
+      (invalidation: unknown) => removedTripInvalidations.push(invalidation),
+    );
+
+    harness.emit({
+      kind: 'revision', epoch: '00000000-0000-4000-8000-000000000001',
+      scope: 'directory', revision: 10,
+    });
+    harness.emit({
+      kind: 'restore-reset', epoch: '00000000-0000-4000-8000-000000000002',
+      scope: 'directory',
+    });
+    harness.emit({
+      kind: 'restore-reset', epoch: '00000000-0000-4000-8000-000000000002',
+      scope: 'directory',
+    });
+    harness.emit({
+      kind: 'restore-reset', epoch: '00000000-0000-4000-8000-000000000002',
+      scope: 'trip', tripId: 'trip-removed',
+    });
+    harness.emit({
+      kind: 'revision', epoch: '00000000-0000-4000-8000-000000000001',
+      scope: 'directory', revision: 11,
+    });
+    harness.emit({
+      kind: 'revision', epoch: '00000000-0000-4000-8000-000000000002',
+      scope: 'directory', revision: 3,
+    });
+
+    expect(directoryInvalidations).toEqual([
+      10,
+      { kind: 'restore-reset', resetId: '00000000-0000-4000-8000-000000000002' },
+      3,
+    ]);
+    expect(removedTripInvalidations).toEqual([
+      { kind: 'restore-reset', resetId: '00000000-0000-4000-8000-000000000002' },
+    ]);
+  });
+
+  it('rejects non-exact revision and restore-reset wire payloads', () => {
+    const harness = createEventSourceHarness();
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client: createClient(), createEventSource: harness.createEventSource,
+    });
+    const invalidations: unknown[] = [];
+    realtime.subscribeToDirectory((invalidation: unknown) => invalidations.push(invalidation));
+
+    harness.emit({
+      kind: 'revision', epoch: '00000000-0000-4000-8000-000000000001',
+      scope: 'directory', revision: 1, extra: true,
+    });
+    harness.emit({
+      kind: 'restore-reset', epoch: 'not-an-epoch', scope: 'directory',
+    });
+    harness.emit({
+      kind: 'restore-reset', epoch: '00000000-0000-4000-8000-000000000001',
+      scope: 'directory', revision: 0,
+    });
+
+    expect(invalidations).toEqual([]);
+  });
+
   it('shares one hosted-path EventSource, filters duplicate revisions, and closes it once', () => {
     const harness = createEventSourceHarness();
     const realtime = createServiceRealtime({
@@ -56,8 +129,8 @@ describe('service realtime', () => {
       client: createClient(),
       createEventSource: harness.createEventSource,
     });
-    const directoryRevisions: number[] = [];
-    const tripRevisions: number[] = [];
+    const directoryRevisions: unknown[] = [];
+    const tripRevisions: unknown[] = [];
 
     const unsubscribeDirectory = realtime.subscribeToDirectory((revision) => directoryRevisions.push(revision));
     const unsubscribeTrip = realtime.subscribeToTrip('trip-1', (revision) => tripRevisions.push(revision));
@@ -65,14 +138,15 @@ describe('service realtime', () => {
     expect(harness.createEventSource).toHaveBeenCalledTimes(1);
     expect(harness.createEventSource).toHaveBeenCalledWith('/plotter/api/v1/events');
 
-    harness.emit({ scope: 'directory', revision: 4 });
-    harness.emit({ scope: 'directory', revision: 4 });
-    harness.emit({ scope: 'directory', revision: 3 });
-    harness.emit({ scope: 'trip', tripId: 'trip-1', revision: 7 });
-    harness.emit({ scope: 'trip', tripId: 'trip-2', revision: 9 });
-    harness.emit({ scope: 'trip', tripId: 'trip-1', revision: 6 });
+    const epoch = '00000000-0000-4000-8000-000000000001';
+    harness.emit({ kind: 'revision', epoch, scope: 'directory', revision: 4 });
+    harness.emit({ kind: 'revision', epoch, scope: 'directory', revision: 4 });
+    harness.emit({ kind: 'revision', epoch, scope: 'directory', revision: 3 });
+    harness.emit({ kind: 'revision', epoch, scope: 'trip', tripId: 'trip-1', revision: 7 });
+    harness.emit({ kind: 'revision', epoch, scope: 'trip', tripId: 'trip-2', revision: 9 });
+    harness.emit({ kind: 'revision', epoch, scope: 'trip', tripId: 'trip-1', revision: 6 });
     harness.emitRaw('{');
-    harness.emit({ scope: 'trip', tripId: 'trip-1', revision: -1 });
+    harness.emit({ kind: 'revision', epoch, scope: 'trip', tripId: 'trip-1', revision: -1 });
 
     expect(directoryRevisions).toEqual([4]);
     expect(tripRevisions).toEqual([7]);
@@ -95,11 +169,12 @@ describe('service realtime', () => {
 
     const unsubscribeFirst = realtime.subscribeToDirectory(onDirectory);
     const unsubscribeSecond = realtime.subscribeToDirectory(onDirectory);
-    harness.emit({ scope: 'directory', revision: 1 });
+    const epoch = '00000000-0000-4000-8000-000000000001';
+    harness.emit({ kind: 'revision', epoch, scope: 'directory', revision: 1 });
     expect(onDirectory).toHaveBeenCalledTimes(1);
 
     unsubscribeFirst();
-    harness.emit({ scope: 'directory', revision: 2 });
+    harness.emit({ kind: 'revision', epoch, scope: 'directory', revision: 2 });
     expect(onDirectory).toHaveBeenCalledTimes(2);
     expect(harness.source.close).not.toHaveBeenCalled();
 
@@ -115,8 +190,8 @@ describe('service realtime', () => {
       client,
       createEventSource: harness.createEventSource,
     });
-    const directoryRevisions: number[] = [];
-    const tripRevisions: number[] = [];
+    const directoryRevisions: unknown[] = [];
+    const tripRevisions: unknown[] = [];
     realtime.subscribeToDirectory((revision) => directoryRevisions.push(revision));
     realtime.subscribeToTrip('trip-1', (revision) => tripRevisions.push(revision));
 
@@ -124,8 +199,8 @@ describe('service realtime', () => {
 
     expect(client.request).toHaveBeenCalledWith('/api/v1/trips');
     expect(client.request).toHaveBeenCalledWith('/api/v1/trips/trip-1');
-    expect(directoryRevisions).toEqual([8]);
-    expect(tripRevisions).toEqual([13]);
+    expect(directoryRevisions).toEqual([{ kind: 'restore-reset', resetId: 'reconcile-1' }]);
+    expect(tripRevisions).toEqual([{ kind: 'restore-reset', resetId: 'reconcile-1' }]);
   });
 
   it('reconciles after EventSource opens so reconnects recover missed events', async () => {
@@ -140,8 +215,11 @@ describe('service realtime', () => {
     realtime.subscribeToDirectory(onDirectory);
 
     harness.open();
-    await vi.waitFor(() => expect(onDirectory).toHaveBeenCalledWith(8));
+    await vi.waitFor(() => expect(onDirectory).toHaveBeenCalledWith({
+      kind: 'restore-reset', resetId: 'reconcile-1',
+    }));
     harness.open();
     await vi.waitFor(() => expect(onDirectory).toHaveBeenCalledTimes(2));
+    expect(onDirectory).toHaveBeenLastCalledWith({ kind: 'restore-reset', resetId: 'reconcile-2' });
   });
 });

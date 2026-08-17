@@ -154,7 +154,7 @@ try {
     currentDatabase: () => requireRuntime().database,
     closeStorage: closeStorageRuntime,
     openStorage: openStorageRuntime,
-    publish: (event) => events.publish(event),
+    publishRestoreReset: (input) => events.restoreReset(input),
   });
 } catch {
   try { closeStorageRuntime(); } catch { /* Readiness remains false. */ }

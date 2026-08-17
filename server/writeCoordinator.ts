@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { TripStorageConflictError, type RevisionEvent } from '../src/storage/revision';
+import { TripStorageConflictError, type RevisionChange } from '../src/storage/revision';
 import type { BackupStore } from './backupStore';
 import type { PlotterDatabase } from './database';
 import type { RevisionEventBus } from './events';
@@ -59,7 +59,7 @@ function incrementRevision(connection: DatabaseSync, scope: WriteScope, revision
   }
 }
 
-function revisionEvent(scope: WriteScope, revision: number): RevisionEvent {
+function revisionEvent(scope: WriteScope, revision: number): RevisionChange {
   return scope.kind === 'directory'
     ? { scope: 'directory', revision }
     : { scope: 'trip', tripId: scope.tripId, revision };

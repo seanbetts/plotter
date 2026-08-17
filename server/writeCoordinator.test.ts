@@ -68,7 +68,9 @@ describe('createWriteCoordinator', () => {
       },
     };
     const events = createRevisionEventBus();
-    events.subscribe((event) => order.push(`event:${event.revision}`));
+    events.subscribe((event) => {
+      if (event.kind === 'revision') order.push(`event:${event.revision}`);
+    });
     const writes = createWriteCoordinator(database, backups, events);
 
     const first = writes.run({ kind: 'directory', expectedRevision: 0 }, () => {
@@ -104,7 +106,7 @@ describe('createWriteCoordinator', () => {
     const database = createDatabase();
     let mutated = false;
     const events: RevisionEvent[] = [];
-    const bus = createRevisionEventBus();
+    const bus = createRevisionEventBus({ initialEpoch: '00000000-0000-4000-8000-000000000001' });
     bus.subscribe((event) => events.push(event));
     const writes = createWriteCoordinator(database, {
       async createAutomaticBackup() {
@@ -155,7 +157,7 @@ describe('createWriteCoordinator', () => {
     const database = createDatabase();
     seedTrip(database.connection, 'trip-aurora', 4);
     const observed: Array<{ event: RevisionEvent; committedRevision: number }> = [];
-    const bus = createRevisionEventBus();
+    const bus = createRevisionEventBus({ initialEpoch: '00000000-0000-4000-8000-000000000001' });
     bus.subscribe((event) => {
       const committedRevision = event.scope === 'directory'
         ? (database.connection.prepare(
@@ -174,8 +176,20 @@ describe('createWriteCoordinator', () => {
       .resolves.toEqual({ value: 'trip', revision: 5 });
 
     expect(observed).toEqual([
-      { event: { scope: 'directory', revision: 1 }, committedRevision: 1 },
-      { event: { scope: 'trip', tripId: 'trip-aurora', revision: 5 }, committedRevision: 5 },
+      {
+        event: {
+          kind: 'revision', epoch: '00000000-0000-4000-8000-000000000001',
+          scope: 'directory', revision: 1,
+        },
+        committedRevision: 1,
+      },
+      {
+        event: {
+          kind: 'revision', epoch: '00000000-0000-4000-8000-000000000001',
+          scope: 'trip', tripId: 'trip-aurora', revision: 5,
+        },
+        committedRevision: 5,
+      },
     ]);
   });
 

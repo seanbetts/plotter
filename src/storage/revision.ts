@@ -23,6 +23,16 @@ export class TripStorageConflictError extends Error {
   }
 }
 
-export type RevisionEvent =
+export type RevisionChange =
   | { scope: 'directory'; revision: number }
   | { scope: 'trip'; tripId: string; revision: number };
+
+export type RevisionEvent =
+  | { kind: 'revision'; epoch: string; scope: 'directory'; revision: number }
+  | { kind: 'revision'; epoch: string; scope: 'trip'; tripId: string; revision: number }
+  | { kind: 'restore-reset'; epoch: string; scope: 'directory' }
+  | { kind: 'restore-reset'; epoch: string; scope: 'trip'; tripId: string };
+
+export type ServiceInvalidation =
+  | number
+  | { kind: 'restore-reset'; resetId: string };

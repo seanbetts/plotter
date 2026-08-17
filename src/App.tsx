@@ -46,6 +46,7 @@ import type {
   WebImageSearchStopContext,
 } from './services/webImageSearchClient';
 import type { TripSummary } from './storage/tripDirectoryRepository';
+import type { ServiceInvalidation } from './storage/revision';
 import type { ServiceRealtimeSubscriptions } from './storage/serviceRealtime';
 import type { TripRepository } from './storage/tripRepository';
 import { getBrowserStorage, readMigratedStorageValue, writeStorageValue } from './storage/localPreferences';
@@ -211,6 +212,9 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
   } = useTripWorkspace();
   const directoryRevisionRef = useRef(directoryRevision);
   const pendingDirectoryRevisionRef = useRef<number | null>(null);
+  const pendingDirectoryResetRef = useRef<string | null>(null);
+  const appliedDirectoryResetRef = useRef<string | null>(null);
+  const queuedDirectoryRevisionRef = useRef<number | null>(null);
 
   useEffect(() => {
     directoryRevisionRef.current = directoryRevision;
@@ -219,7 +223,14 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
   useEffect(() => {
     if (!realtime) return undefined;
 
-    return realtime.subscribeToDirectory((revision) => {
+    const applyRevision = (revision: number) => {
+      if (pendingDirectoryResetRef.current !== null) {
+        queuedDirectoryRevisionRef.current = Math.max(
+          queuedDirectoryRevisionRef.current ?? revision,
+          revision,
+        );
+        return;
+      }
       const currentRevision = directoryRevisionRef.current;
       if (currentRevision !== null && revision <= currentRevision) return;
       const pendingRevision = pendingDirectoryRevisionRef.current;
@@ -240,6 +251,34 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
             pendingDirectoryRevisionRef.current = null;
           }
         });
+    };
+
+    const applyReset = (resetId: string) => {
+      if (
+        appliedDirectoryResetRef.current === resetId
+        || pendingDirectoryResetRef.current === resetId
+      ) return;
+      pendingDirectoryResetRef.current = resetId;
+      void refreshTrips()
+        .then((appliedRevision) => {
+          if (appliedRevision === undefined) return;
+          directoryRevisionRef.current = appliedRevision;
+          appliedDirectoryResetRef.current = resetId;
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (pendingDirectoryResetRef.current === resetId) {
+            pendingDirectoryResetRef.current = null;
+          }
+          const queuedRevision = queuedDirectoryRevisionRef.current;
+          queuedDirectoryRevisionRef.current = null;
+          if (queuedRevision !== null) applyRevision(queuedRevision);
+        });
+    };
+
+    return realtime.subscribeToDirectory((invalidation: ServiceInvalidation) => {
+      if (typeof invalidation === 'number') applyRevision(invalidation);
+      else applyReset(invalidation.resetId);
     });
   }, [refreshTrips, realtime]);
 
@@ -369,6 +408,9 @@ function TripWorkspace({
   const [routeAlternativesState, setRouteAlternativesState] = useState<RouteAlternativesState | null>(null);
   const tripRevisionRef = useRef(revision);
   const pendingTripRevisionRef = useRef<number | null>(null);
+  const pendingTripResetRef = useRef<string | null>(null);
+  const appliedTripResetRef = useRef<string | null>(null);
+  const queuedTripRevisionRef = useRef<number | null>(null);
   const selectedDestinationIdRef = useRef<string | null>(null);
   const selectedActivityIdRef = useRef<string | null>(null);
   const routeLegsRef = useRef(routeLegs);
@@ -466,7 +508,14 @@ function TripWorkspace({
   useEffect(() => {
     if (!realtime || !activeTripId) return undefined;
 
-    return realtime.subscribeToTrip(activeTripId, (nextRevision) => {
+    const applyRevision = (nextRevision: number) => {
+      if (pendingTripResetRef.current !== null) {
+        queuedTripRevisionRef.current = Math.max(
+          queuedTripRevisionRef.current ?? nextRevision,
+          nextRevision,
+        );
+        return;
+      }
       const currentRevision = tripRevisionRef.current;
       if (currentRevision !== null && nextRevision <= currentRevision) return;
       const pendingRevision = pendingTripRevisionRef.current;
@@ -487,6 +536,29 @@ function TripWorkspace({
             pendingTripRevisionRef.current = null;
           }
         });
+    };
+
+    const applyReset = (resetId: string) => {
+      if (appliedTripResetRef.current === resetId || pendingTripResetRef.current === resetId) return;
+      pendingTripResetRef.current = resetId;
+      void reload()
+        .then((appliedRevision) => {
+          if (appliedRevision === undefined) return;
+          tripRevisionRef.current = appliedRevision;
+          appliedTripResetRef.current = resetId;
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (pendingTripResetRef.current === resetId) pendingTripResetRef.current = null;
+          const queuedRevision = queuedTripRevisionRef.current;
+          queuedTripRevisionRef.current = null;
+          if (queuedRevision !== null) applyRevision(queuedRevision);
+        });
+    };
+
+    return realtime.subscribeToTrip(activeTripId, (invalidation: ServiceInvalidation) => {
+      if (typeof invalidation === 'number') applyRevision(invalidation);
+      else applyReset(invalidation.resetId);
     });
   }, [activeTripId, realtime, reload]);
 
