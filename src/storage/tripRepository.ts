@@ -11,6 +11,7 @@ import { createLegacyLocation } from '../domain/locations';
 import { sortResearchLinks } from '../domain/researchLinks';
 import type { WebImageSearchResult } from '../services/webImageSearchClient';
 import type { StoredActivity, StoredActivityMediaRecord, StoredDestination, StoredRouteLeg, TripDb } from './tripDb';
+import type { TripSnapshot } from './revision';
 
 export type TripMutationDelta = {
   destinationsToUpsert: Destination[];
@@ -20,6 +21,7 @@ export type TripMutationDelta = {
 };
 
 export type TripRepository = {
+  loadSnapshot?(): Promise<TripSnapshot>;
   listDestinations(): Promise<Destination[]>;
   saveDestination(destination: Destination): Promise<void>;
   deleteDestination(destinationId: string): Promise<void>;

@@ -1,7 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { TripRoutingVehicle, VehiclePreset } from '../domain/types';
+import type { TripRoutingVehicle } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
+import {
+  routingVehicleToPersistedColumns,
+  tripSummaryFromPersistedRow,
+  type PersistedTripRow as SupabaseTripRow,
+} from './persistedRows';
 import type { TripDb } from './tripDb';
+import type { DirectorySnapshot } from './revision';
 
 export type TripSummary = {
   id: string;
@@ -13,23 +19,11 @@ export type TripSummary = {
 };
 
 export type TripDirectoryRepository = {
+  loadDirectory?(): Promise<DirectorySnapshot>;
   listTrips(): Promise<TripSummary[]>;
   createTrip(input: { name: string; routingVehicle?: TripRoutingVehicle }): Promise<TripSummary>;
   updateTrip(tripId: string, patch: { name?: string; description?: string; routingVehicle?: TripRoutingVehicle }): Promise<TripSummary>;
   deleteTrip(tripId: string): Promise<void>;
-};
-
-type SupabaseTripRow = {
-  id: string;
-  owner_user_id: string;
-  name: string;
-  description: string | null;
-  vehicle_preset?: VehiclePreset;
-  vehicle_profile?: TripRoutingVehicle['profile'];
-  vehicle_type?: TripRoutingVehicle['vehicleType'] | null;
-  vehicle_restrictions?: TripRoutingVehicle['restrictions'];
-  created_at: string;
-  updated_at: string;
 };
 
 type SupabaseMediaReferenceRow = {
@@ -64,33 +58,7 @@ function assertSupabaseWriteSucceeded(response: SupabaseWriteResponse, fallbackM
   }
 }
 
-function tripFromSupabaseRow(row: SupabaseTripRow): TripSummary {
-  const defaultVehicle = resolveVehiclePreset('standard');
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description ?? '',
-    routingVehicle: {
-      preset: row.vehicle_preset ?? defaultVehicle.preset,
-      profile: row.vehicle_profile ?? defaultVehicle.profile,
-      ...(row.vehicle_type ? { vehicleType: row.vehicle_type } : {}),
-      restrictions: row.vehicle_restrictions ?? defaultVehicle.restrictions,
-    },
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
 const tripColumns = 'id, owner_user_id, name, description, vehicle_preset, vehicle_profile, vehicle_type, vehicle_restrictions, created_at, updated_at';
-
-function routingVehicleToSupabaseColumns(routingVehicle: TripRoutingVehicle) {
-  return {
-    vehicle_preset: routingVehicle.preset,
-    vehicle_profile: routingVehicle.profile,
-    vehicle_type: routingVehicle.vehicleType ?? null,
-    vehicle_restrictions: routingVehicle.restrictions,
-  };
-}
 
 function createTimestamp() {
   return new Date().toISOString();
@@ -110,7 +78,7 @@ export function createSupabaseTripDirectoryRepository(
         'Unable to load trips.',
       );
 
-      return rows.map(tripFromSupabaseRow);
+      return rows.map(tripSummaryFromPersistedRow);
     },
 
     async createTrip(input) {
@@ -128,14 +96,14 @@ export function createSupabaseTripDirectoryRepository(
             owner_user_id: user.id,
             name: input.name,
             description: '',
-            ...routingVehicleToSupabaseColumns(routingVehicle),
+            ...routingVehicleToPersistedColumns(routingVehicle),
           })
           .select(tripColumns)
           .single(),
         'Unable to create trip.',
       );
 
-      return tripFromSupabaseRow(row);
+      return tripSummaryFromPersistedRow(row);
     },
 
     async updateTrip(tripId, patch) {
@@ -145,7 +113,7 @@ export function createSupabaseTripDirectoryRepository(
           .from('trips')
           .update({
             ...tripPatch,
-            ...(routingVehicle ? routingVehicleToSupabaseColumns(routingVehicle) : {}),
+            ...(routingVehicle ? routingVehicleToPersistedColumns(routingVehicle) : {}),
           })
           .eq('id', tripId)
           .select(tripColumns)
@@ -153,7 +121,7 @@ export function createSupabaseTripDirectoryRepository(
         'Unable to update trip.',
       );
 
-      return tripFromSupabaseRow(row);
+      return tripSummaryFromPersistedRow(row);
     },
 
     async deleteTrip(tripId) {
