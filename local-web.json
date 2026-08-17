@@ -45,6 +45,7 @@
       "/usr/bin/env",
       "node",
       "{release}/server/service.mjs",
+      "--",
       "--port",
       "{port}",
       "--data-dir",

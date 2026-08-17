@@ -17,7 +17,7 @@
 
 - `npm run dev` remains loopback development only.
 - Permanent hosting builds the committed revision with `VITE_PUBLIC_BASE_PATH=/plotter/`.
-- Caddy serves `dist`, so no persistent Node process is required.
+- Local-web runs the persistent Node service; Caddy serves its immutable `release/public/` frontend and proxies `/plotter/api` and health traffic to that service.
 - `SERPAPI_API_KEY` is not a browser build variable.
 - Trip data reads and writes still use the existing `npm run trip -- <command>` CLI.
 

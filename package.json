@@ -9,9 +9,9 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:e2e": "tsx tests/start-service.ts",
-    "dev:service": "tsx server/service.ts --port 5175 --data-dir user-data --env-file .env",
+    "dev:service": "node --env-file-if-exists=.env --import tsx server/service.ts --port ${PLOTTER_SERVICE_PORT:-5175} --data-dir ${PLOTTER_SERVICE_DATA_DIR:-user-data}",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build && npm run build:service && npm run build:release",
-    "build:service": "esbuild server/service.ts --bundle --platform=node --format=esm --outfile=server-dist/service.mjs",
+    "build:service": "node scripts/build-service.mjs",
     "build:release": "node scripts/assemble-release.mjs",
     "lint": "eslint . --ignore-pattern server-dist/",
     "test": "VITE_MAPTILER_API_KEY=e2e-test-key vitest run && npm run test:server",

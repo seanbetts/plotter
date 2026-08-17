@@ -2,14 +2,15 @@ import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseServiceArguments } from './args';
+import { parseServiceArguments, resolveServiceRepositoryRoot } from './args';
 import { createPlotterHttpHandler } from './http';
 import { searchWebImages } from './providers/imageSearch';
 import { fetchLinkPreview } from './providers/linkPreview';
 import { fetchRemoteImage } from './providers/remoteImage';
 import { createPlotterStorageRuntime } from './storageRuntime';
 
-const repositoryRoot = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+const moduleDirectory = realpathSync(dirname(fileURLToPath(import.meta.url)));
+const repositoryRoot = resolveServiceRepositoryRoot(process.argv.slice(2), moduleDirectory);
 const serviceArguments = parseServiceArguments(process.argv.slice(2), repositoryRoot);
 
 if (!existsSync(serviceArguments.dataDir)) {
@@ -23,8 +24,12 @@ if (!existsSync(serviceArguments.dataDir)) {
 if (serviceArguments.envFile !== undefined) {
   try {
     process.loadEnvFile(serviceArguments.envFile);
-  } catch {
-    throw new Error('The service env file could not be loaded.');
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      // The manifest always supplies the repository .env path, but provider keys are optional.
+    } else {
+      throw new Error('The service env file could not be loaded.', { cause: error });
+    }
   }
 }
 

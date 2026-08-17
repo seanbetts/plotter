@@ -1,7 +1,8 @@
 import { createServer } from 'node:net';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { afterEach, expect, it } from 'vitest';
 
 const repositoryRoot = realpathSync(resolve(import.meta.dirname, '..'));
@@ -22,6 +23,39 @@ async function reservePort(): Promise<number> {
     server.close((error) => error ? reject(error) : resolvePromise());
   });
   return address.port;
+}
+
+async function expectReady(port: number, child?: ChildProcess, errors: string[] = []): Promise<void> {
+  await expect.poll(async () => {
+    if (child?.exitCode !== null && child?.exitCode !== undefined) {
+      return `exited ${child.exitCode}: ${errors.join('')}`;
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/healthz`);
+      return { status: response.status, body: await response.json() };
+    } catch {
+      return null;
+    }
+  }, { interval: 50, timeout: 3_000 }).toEqual({
+    status: 200,
+    body: { ready: true },
+  });
+}
+
+async function stopProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) {
+    return;
+  }
+  const exited = new Promise<void>((resolvePromise) => {
+    child.once('exit', () => resolvePromise());
+  });
+  child.kill('SIGTERM');
+  await Promise.race([
+    exited,
+    new Promise<void>((_resolvePromise, reject) => {
+      setTimeout(() => reject(new Error('The service process did not stop cleanly.')), 3_000);
+    }),
+  ]);
 }
 
 afterEach(() => {
@@ -101,6 +135,67 @@ it('starts the bundled service with an existing env file without exposing its co
     body: { ready: true },
   });
 });
+
+it.each([
+  ['server-dist', 'server-dist/service.mjs'],
+  ['release', 'release/server/service.mjs'],
+])('starts the manifest-style %s service against its repository user data without an env file', async (_layout, modulePath) => {
+  const environmentDirectory = mkdtempSync(join(import.meta.dirname, '..', 'tests', '.tmp', 'service-release-env-'));
+  temporaryDirectories.push(environmentDirectory);
+  execFileSync('npm', ['run', 'build'], {
+    cwd: repositoryRoot,
+    env: { ...process.env, PLOTTER_ENV_DIR: environmentDirectory },
+    stdio: 'ignore',
+  });
+
+  const disposableRepository = mkdtempSync(join(tmpdir(), 'plotter-service-release-'));
+  temporaryDirectories.push(disposableRepository);
+  const sourceDirectory = modulePath.startsWith('release/') ? 'release' : 'server-dist';
+  cpSync(join(repositoryRoot, sourceDirectory), join(disposableRepository, sourceDirectory), { recursive: true });
+  if (sourceDirectory === 'release') {
+    expect(existsSync(join(disposableRepository, 'release', 'public', 'index.html'))).toBe(true);
+  }
+
+  const port = await reservePort();
+  const child = spawn(process.execPath, [
+    join(disposableRepository, modulePath),
+    '--',
+    '--port', String(port),
+    '--data-dir', join(disposableRepository, 'user-data'),
+    '--env-file', join(disposableRepository, '.env'),
+  ], { cwd: disposableRepository, stdio: ['ignore', 'ignore', 'pipe'] });
+  processes.push(child);
+  const errors: string[] = [];
+  child.stderr?.on('data', (chunk: Buffer) => { errors.push(chunk.toString()); });
+
+  await expectReady(port, child, errors);
+}, 15_000);
+
+it('runs dev:service without a repository .env using disposable user data', async () => {
+  expect(existsSync(join(repositoryRoot, '.env'))).toBe(false);
+  const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
+  mkdirSync(testDataParent, { recursive: true });
+  const dataDirectory = mkdtempSync(resolve(testDataParent, 'service-dev-no-env-'));
+  temporaryDirectories.push(dataDirectory);
+  const port = await reservePort();
+  const child = spawn('npm', ['run', 'dev:service'], {
+    cwd: repositoryRoot,
+    env: {
+      PATH: process.env.PATH ?? '',
+      PLOTTER_SERVICE_PORT: String(port),
+      PLOTTER_SERVICE_DATA_DIR: dataDirectory,
+    },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  const errors: string[] = [];
+  child.stderr?.on('data', (chunk: Buffer) => { errors.push(chunk.toString()); });
+
+  try {
+    await expectReady(port, child, errors);
+  } finally {
+    await stopProcess(child);
+  }
+}, 10_000);
 
 it('stays reachable with redacted readiness when the canonical database is invalid', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');

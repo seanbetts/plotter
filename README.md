@@ -30,10 +30,12 @@ that release.
 
 ## Environment and service data
 
-Copy `.env.example` to the ignored `.env` only when development needs the map
-keys or the service-side `SERPAPI_API_KEY`. Keep the file readable only by the
-account that runs Plotter (for example, `chmod 600 .env`); never use a `VITE_`
-prefix for service or migration secrets.
+`.env` is optional: `npm run dev:service` and the hosted service tolerate its
+absence. Copy `.env.example` only when development needs the map keys or the
+service-side `SERPAPI_API_KEY`; these provider keys are runtime-only and may be
+left unset. Keep the file readable only by the account that runs Plotter (for
+example, `chmod 600 .env`); never use a `VITE_` prefix for service or migration
+secrets.
 
 The service receives `user-data/` from the local-web manifest. It is Git-ignored
 and must stay owned by the service account; use restrictive owner-only

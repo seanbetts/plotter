@@ -2,7 +2,12 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseServiceArguments } from './args';
+import * as serviceArguments from './args';
+
+const { parseServiceArguments } = serviceArguments;
+const resolveServiceRepositoryRoot = (serviceArguments as typeof serviceArguments & {
+  resolveServiceRepositoryRoot: (argv: string[], moduleRoot: string) => string;
+}).resolveServiceRepositoryRoot;
 
 const repositoryRoot = realpathSync(join(import.meta.dirname, '..'));
 const temporaryDirectories: string[] = [];
@@ -90,5 +95,67 @@ describe('parseServiceArguments', () => {
       dataDir: repositoryDataDir,
       envFile,
     });
+  });
+
+  it('uses an absolute optional env-file parent as the trusted root for relocated releases', () => {
+    const repositoryDirectory = createOutsideDirectory();
+    const moduleRoot = join(repositoryDirectory, 'release');
+    const dataDirectory = join(repositoryDirectory, 'user-data');
+    const envFile = join(repositoryDirectory, '.env');
+    mkdirSync(moduleRoot);
+
+    const resolvedRepositoryRoot = resolveServiceRepositoryRoot([
+      '--port', '5175',
+      '--data-dir', dataDirectory,
+      '--env-file', envFile,
+    ], moduleRoot);
+
+    expect(resolvedRepositoryRoot).toBe(realpathSync(repositoryDirectory));
+    expect(parseServiceArguments([
+      '--port', '5175',
+      '--data-dir', dataDirectory,
+      '--env-file', envFile,
+    ], resolvedRepositoryRoot)).toEqual({
+      port: 5175,
+      dataDir: join(realpathSync(repositoryDirectory), 'user-data'),
+      envFile: join(realpathSync(repositoryDirectory), '.env'),
+    });
+  });
+
+  it('accepts a missing optional env file while rejecting relative and outside-root data paths', () => {
+    const repositoryDirectory = createOutsideDirectory();
+    const moduleRoot = join(repositoryDirectory, 'release');
+    const dataDirectory = join(repositoryDirectory, 'user-data');
+    const envFile = join(repositoryDirectory, '.env');
+    const outsideDirectory = createOutsideDirectory();
+    mkdirSync(moduleRoot);
+
+    expect(() => resolveServiceRepositoryRoot([
+      '--port', '5175', '--data-dir', dataDirectory, '--env-file', '.env',
+    ], moduleRoot)).toThrow('The service env file must be an absolute path.');
+
+    const resolvedRepositoryRoot = resolveServiceRepositoryRoot([
+      '--port', '5175', '--data-dir', dataDirectory, '--env-file', envFile,
+    ], moduleRoot);
+    expect(() => parseServiceArguments([
+      '--port', '5175', '--data-dir', outsideDirectory, '--env-file', envFile,
+    ], resolvedRepositoryRoot)).toThrow('The service data directory is outside the Plotter repository.');
+  });
+
+  it('falls back to the module root when no env-file is supplied', () => {
+    const repositoryDirectory = createOutsideDirectory();
+    const moduleRoot = join(repositoryDirectory, 'server-dist');
+    mkdirSync(moduleRoot);
+
+    expect(resolveServiceRepositoryRoot(['--port', '5175', '--data-dir', 'user-data'], moduleRoot))
+      .toBe(realpathSync(repositoryDirectory));
+  });
+
+  it('accepts the standard Node argument separator before service options', () => {
+    const repositoryDataDir = createRepositoryDirectory();
+
+    expect(parseServiceArguments([
+      '--', '--port', '5175', '--data-dir', repositoryDataDir,
+    ], repositoryRoot)).toEqual({ port: 5175, dataDir: repositoryDataDir });
   });
 });

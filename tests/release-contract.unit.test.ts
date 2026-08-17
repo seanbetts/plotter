@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'vite';
@@ -50,7 +50,7 @@ describe('Plotter local-web service release contract', () => {
         frontendOutput: 'public',
         proxyPaths: ['/api'],
         startCommand: [
-          '/usr/bin/env', 'node', '{release}/server/service.mjs', '--port', '{port}',
+          '/usr/bin/env', 'node', '{release}/server/service.mjs', '--', '--port', '{port}',
           '--data-dir', '{repository}/user-data', '--env-file', '{repository}/.env',
         ],
       },
@@ -90,11 +90,18 @@ describe('Plotter local-web service release contract', () => {
     expect(fetcher).toHaveBeenCalledWith('/plotter/api/v1/trips', expect.any(Object));
   });
 
-  it('assembles only public browser assets and server code without browser Supabase sentinels', () => {
+  it('replaces stale generated artifacts and keeps synthetic Supabase and SerpApi secrets out of the release', () => {
     const environmentDirectory = mkdtempSync(join(tmpdir(), 'plotter-build-env-'));
     temporaryDirectories.push(environmentDirectory);
     const supabaseUrl = 'https://build-sentinel.supabase.invalid';
     const supabaseKey = 'build-sentinel-supabase-key';
+    const serpApiKey = 'build-sentinel-serpapi-key';
+    mkdirSync(join(repositoryRoot, 'server-dist'), { recursive: true });
+    mkdirSync(join(repositoryRoot, 'release', 'public'), { recursive: true });
+    mkdirSync(join(repositoryRoot, 'release', 'server'), { recursive: true });
+    writeFileSync(join(repositoryRoot, 'server-dist', 'stale-server-sentinel.mjs'), 'stale server output');
+    writeFileSync(join(repositoryRoot, 'release', 'public', 'stale-public-sentinel.txt'), 'stale public output');
+    writeFileSync(join(repositoryRoot, 'release', 'server', 'stale-release-sentinel.mjs'), 'stale release output');
     execFileSync('npm', ['run', 'build'], {
       cwd: repositoryRoot,
       env: {
@@ -105,14 +112,23 @@ describe('Plotter local-web service release contract', () => {
         VITE_OPENROUTESERVICE_API_KEY: 'build-sentinel-routing-key',
         VITE_SUPABASE_URL: supabaseUrl,
         VITE_SUPABASE_PUBLISHABLE_KEY: supabaseKey,
-        SERPAPI_API_KEY: 'build-sentinel-serpapi-key',
+        SERPAPI_API_KEY: serpApiKey,
       },
       stdio: 'pipe',
     });
 
     expect(readFileSync(join(repositoryRoot, 'release', 'public', 'index.html'), 'utf8')).toContain('/plotter/');
     expect(readFileSync(join(repositoryRoot, 'release', 'server', 'service.mjs'), 'utf8')).not.toBe('');
-    expect(readReleaseFiles(join(repositoryRoot, 'release', 'public')).join('\n')).not.toContain(supabaseUrl);
-    expect(readReleaseFiles(join(repositoryRoot, 'release', 'public')).join('\n')).not.toContain(supabaseKey);
+    expect(existsSync(join(repositoryRoot, 'server-dist', 'stale-server-sentinel.mjs'))).toBe(false);
+    expect(existsSync(join(repositoryRoot, 'release', 'public', 'stale-public-sentinel.txt'))).toBe(false);
+    expect(existsSync(join(repositoryRoot, 'release', 'server', 'stale-release-sentinel.mjs'))).toBe(false);
+    const publicAssets = readReleaseFiles(join(repositoryRoot, 'release', 'public')).join('\n');
+    const serverBundle = readReleaseFiles(join(repositoryRoot, 'release', 'server')).join('\n');
+    expect(publicAssets).not.toContain(supabaseUrl);
+    expect(publicAssets).not.toContain(supabaseKey);
+    expect(publicAssets).not.toContain(serpApiKey);
+    expect(serverBundle).not.toContain(supabaseUrl);
+    expect(serverBundle).not.toContain(supabaseKey);
+    expect(serverBundle).not.toContain(serpApiKey);
   });
 });
