@@ -108,6 +108,31 @@ afterEach(() => {
 });
 
 describe('atomic media store', () => {
+  it('rejects an existing media-root symlink before writing through it', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'plotter-media-root-link-'));
+    const outside = mkdtempSync(join(tmpdir(), 'plotter-media-root-outside-'));
+    temporaryDirectories.push(directory, outside);
+    symlinkSync(outside, join(directory, 'media'));
+
+    expect(() => createMediaStore(directory)).toThrow(
+      'Media path escapes its storage boundary.',
+    );
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it('rejects a staging-root symlink swapped in after construction before opening a file', async () => {
+    const harness = createHarness();
+    const outside = mkdtempSync(join(tmpdir(), 'plotter-media-staging-outside-'));
+    temporaryDirectories.push(outside);
+    rmSync(join(harness.directory, 'media', '.staging'), { recursive: true });
+    symlinkSync(outside, join(harness.directory, 'media', '.staging'));
+
+    await expect(harness.media.stage(imageStream('escape'), 'image/png')).rejects.toThrow(
+      'Media path escapes its storage boundary.',
+    );
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
   it.each(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])(
     'stages allowed %s bytes with their exact size and SHA-256',
     async (contentType) => {
@@ -187,6 +212,26 @@ describe('atomic media store', () => {
     expect(lstatSync(join(harness.directory, committed.relativePath)).isFile()).toBe(true);
   });
 
+  it('atomically rejects one of two concurrent commits for the same media identity', async () => {
+    const harness = createHarness();
+    const first = await harness.media.stage(imageStream('first contender'), 'image/png');
+    const second = await harness.media.stage(imageStream('second contender'), 'image/png');
+
+    const results = await Promise.allSettled([
+      harness.media.commit(first, 'same-media'),
+      harness.media.commit(second, 'same-media'),
+    ]);
+
+    expect(results.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    expect((results.find(({ status }) => status === 'rejected') as PromiseRejectedResult).reason)
+      .toMatchObject({ message: 'Media identity already exists.' });
+    expect(['first contender', 'second contender']).toContain(
+      readFileSync(join(harness.directory, 'media', 'same-media.png'), 'utf8'),
+    );
+    expect(readdirSync(join(harness.directory, 'media', '.staging'))).toEqual([]);
+  });
+
   it('rejects forged stage paths, media path traversal, and symlink escapes', async () => {
     const harness = createHarness();
     const staged = await harness.media.stage(bytesStream(new Uint8Array([1])), 'image/png');
@@ -243,6 +288,37 @@ describe('atomic media store', () => {
     await restore();
     expect(readFileSync(join(harness.directory, committed.relativePath), 'utf8')).toBe('keep me');
     expect(readdirSync(join(harness.directory, 'trash'))).toEqual([]);
+  });
+
+  it('atomically rejects one of two concurrent restores targeting the same active identity', async () => {
+    const harness = createHarness();
+    const original = await harness.media.commit(
+      await harness.media.stage(imageStream('original'), 'image/jpeg'),
+      'restore-collision',
+    );
+    const restoreOriginal = await harness.media.moveToTrash(
+      original.relativePath,
+      'restore-collision',
+    );
+    const replacement = await harness.media.commit(
+      await harness.media.stage(imageStream('replacement'), 'image/jpeg'),
+      'restore-collision',
+    );
+    const restoreReplacement = await harness.media.moveToTrash(
+      replacement.relativePath,
+      'restore-collision',
+    );
+
+    const results = await Promise.allSettled([restoreOriginal(), restoreReplacement()]);
+
+    expect(results.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    expect((results.find(({ status }) => status === 'rejected') as PromiseRejectedResult).reason)
+      .toMatchObject({ message: 'Media identity already exists.' });
+    expect(['original', 'replacement']).toContain(
+      readFileSync(join(harness.directory, original.relativePath), 'utf8'),
+    );
+    expect(readdirSync(join(harness.directory, 'trash'))).toHaveLength(1);
   });
 
   it('rejects missing active bytes and active-path symlink escapes', async () => {

@@ -199,9 +199,10 @@ export function createSqliteDirectoryRepository(
 
     async delete(expectedRevision, tripId) {
       const restores: Array<() => Promise<void>> = [];
+      const rows = mediaForTrip.all(tripId) as Array<{ id: string; relative_path: string }>;
+      if (rows.length > 0 && !mediaStore) throw new Error('Media storage is unavailable.');
       if (mediaStore) {
         try {
-          const rows = mediaForTrip.all(tripId) as Array<{ id: string; relative_path: string }>;
           for (const row of rows) {
             restores.push(await mediaStore.moveToTrash(row.relative_path, row.id));
           }

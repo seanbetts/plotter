@@ -112,7 +112,7 @@ describe('SQLite directory repository contract', () => {
     ).get(created.trip!.id)).toEqual({ revision: 0 });
   });
 
-  it('deletes trip-owned metadata through schema cascades and removes its revision', async () => {
+  it('fails closed without media storage, then permits a media-free trip cascade', async () => {
     const harness = createHarness();
     const trip = await createTrip(harness);
     const repository = harness.trip(trip.id);
@@ -138,6 +138,15 @@ describe('SQLite directory repository contract', () => {
       '2026-08-17T10:00:00.000Z', '2026-08-17T10:00:00.000Z',
     );
 
+    await expect(harness.directory.delete(1, trip.id)).rejects.toThrow(
+      'Media storage is unavailable.',
+    );
+    expect(harness.database.connection.prepare('SELECT directory_revision FROM store_metadata').get())
+      .toEqual({ directory_revision: 1 });
+    expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM trips').get()).toEqual({ count: 1 });
+    expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM media_assets').get()).toEqual({ count: 1 });
+
+    harness.database.connection.prepare('DELETE FROM media_assets WHERE trip_id = ?').run(trip.id);
     await expect(harness.directory.delete(1, trip.id)).resolves.toEqual({ revision: 2 });
     expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM trips').get()).toEqual({ count: 0 });
     expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM destinations').get()).toEqual({ count: 0 });
@@ -179,6 +188,43 @@ describe('SQLite trip repository contract', () => {
       routeLegs: [],
       activities: [],
     });
+  });
+
+  it('fails closed without media storage, then permits a media-free destination cascade', async () => {
+    const harness = createHarness();
+    const trip = await createTrip(harness);
+    const repository = harness.trip(trip.id);
+    const destination = createDestination({
+      name: 'Bergen',
+      coordinates: { lat: 60.3913, lng: 5.3221 },
+    });
+    await repository.mutate(0, { type: 'save-destination', destination });
+    harness.database.connection.prepare(`
+      INSERT INTO media_assets (
+        id, trip_id, destination_id, activity_id, bucket_id, object_path,
+        caption, credit, sort_order, uploaded_by, relative_path, sha256,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, NULL, ?, ?, '', '', 0, 'local', ?, ?, ?, ?)
+    `).run(
+      'bergen-media', trip.id, destination.id, 'trip-media', 'bergen.jpg',
+      'media/bergen.jpg', 'b'.repeat(64),
+      '2026-08-17T10:00:00.000Z', '2026-08-17T10:00:00.000Z',
+    );
+
+    await expect(repository.mutate(1, {
+      type: 'delete-destination', destinationId: destination.id,
+    })).rejects.toThrow('Media storage is unavailable.');
+    await expect(repository.load()).resolves.toMatchObject({
+      revision: 1,
+      destinations: [{ id: destination.id }],
+    });
+    expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM media_assets').get())
+      .toEqual({ count: 1 });
+
+    harness.database.connection.prepare('DELETE FROM media_assets WHERE id = ?').run('bergen-media');
+    await expect(repository.mutate(1, {
+      type: 'delete-destination', destinationId: destination.id,
+    })).resolves.toEqual({ revision: 2 });
   });
 
   it('preserves normalized destination and route data in an ordered revisioned snapshot', async () => {

@@ -519,7 +519,8 @@ export function createSqliteTripRepository(
   }
 
   async function moveMediaRowsToTrash(rows: MediaRow[]): Promise<Array<() => Promise<void>>> {
-    if (!mediaStore) return [];
+    if (rows.length === 0) return [];
+    if (!mediaStore) throw new Error('Media storage is unavailable.');
     const restores: Array<() => Promise<void>> = [];
     try {
       for (const row of rows) {

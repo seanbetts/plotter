@@ -3,10 +3,12 @@ import {
   constants,
   createReadStream,
   existsSync,
+  lstatSync,
   mkdirSync,
   realpathSync,
+  statSync,
 } from 'node:fs';
-import { open, realpath, rename, unlink } from 'node:fs/promises';
+import { link, open, realpath, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const MAX_MEDIA_BYTES = 52_428_800;
@@ -48,6 +50,40 @@ function assertContained(path: string, root: string): void {
   if (!isContained(path, root)) throw new Error(CONTAINMENT_ERROR);
 }
 
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function ensureContainedDirectory(path: string, parentRoot: string): string {
+  if (!pathExists(path)) mkdirSync(path);
+  let canonical: string;
+  try {
+    canonical = realpathSync(path);
+  } catch (error) {
+    throw new Error(CONTAINMENT_ERROR, { cause: error });
+  }
+  assertContained(canonical, parentRoot);
+  if (!statSync(canonical).isDirectory()) throw new Error(CONTAINMENT_ERROR);
+  return canonical;
+}
+
+async function assertCanonicalDirectory(path: string, parentRoot: string): Promise<void> {
+  let canonical: string;
+  try {
+    canonical = await realpath(path);
+  } catch (error) {
+    throw new Error(CONTAINMENT_ERROR, { cause: error });
+  }
+  if (canonical !== path) throw new Error(CONTAINMENT_ERROR);
+  assertContained(canonical, parentRoot);
+}
+
 function extensionFor(contentType: string): string {
   const extension = CONTENT_TYPE_EXTENSIONS.get(contentType);
   if (!extension) throw new Error(CONTENT_TYPE_ERROR);
@@ -85,20 +121,42 @@ async function digestFile(path: string): Promise<{ byteCount: number; sha256: st
   return { byteCount, sha256: hash.digest('hex') };
 }
 
+async function installNoClobber(
+  sourcePath: string,
+  targetPath: string,
+  discardSourceOnCollision: boolean,
+): Promise<void> {
+  try {
+    await link(sourcePath, targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    if (discardSourceOnCollision) await unlink(sourcePath);
+    throw new Error('Media identity already exists.', { cause: error });
+  }
+
+  try {
+    await unlink(sourcePath);
+  } catch (error) {
+    try {
+      await unlink(targetPath);
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        'Media installation cleanup failed.',
+        { cause: rollbackError },
+      );
+    }
+    throw error;
+  }
+}
+
 export function createMediaStore(dataDirectory: string): AtomicMediaStore {
   if (!existsSync(dataDirectory)) mkdirSync(dataDirectory, { recursive: true });
   const dataRoot = realpathSync(dataDirectory);
   const mediaPath = join(dataRoot, 'media');
-  const stagingPath = join(mediaPath, '.staging');
-  const trashPath = join(dataRoot, 'trash');
-  mkdirSync(stagingPath, { recursive: true });
-  mkdirSync(trashPath, { recursive: true });
-  const mediaRoot = realpathSync(mediaPath);
-  const stagingRoot = realpathSync(stagingPath);
-  const trashRoot = realpathSync(trashPath);
-  assertContained(mediaRoot, dataRoot);
-  assertContained(stagingRoot, mediaRoot);
-  assertContained(trashRoot, dataRoot);
+  const mediaRoot = ensureContainedDirectory(mediaPath, dataRoot);
+  const stagingRoot = ensureContainedDirectory(join(mediaRoot, '.staging'), mediaRoot);
+  const trashRoot = ensureContainedDirectory(join(dataRoot, 'trash'), dataRoot);
 
   function absoluteMetadataPath(relativePath: string): string {
     if (isAbsolute(relativePath)) throw new Error(CONTAINMENT_ERROR);
@@ -119,6 +177,7 @@ export function createMediaStore(dataDirectory: string): AtomicMediaStore {
   return {
     async stage(input, contentType) {
       extensionFor(contentType);
+      await assertCanonicalDirectory(stagingRoot, mediaRoot);
       const temporaryName = `${randomUUID()}.tmp`;
       const temporaryPath = join(stagingRoot, temporaryName);
       const relativePath = relative(dataRoot, temporaryPath);
@@ -191,8 +250,7 @@ export function createMediaStore(dataDirectory: string): AtomicMediaStore {
 
       const activePath = join(mediaRoot, `${mediaId}.${extension}`);
       assertContained(await realpath(dirname(activePath)), mediaRoot);
-      if (existsSync(activePath)) throw new Error('Media identity already exists.');
-      await rename(canonicalStagedPath, activePath);
+      await installNoClobber(canonicalStagedPath, activePath, true);
       return { ...staged, relativePath: relative(dataRoot, activePath) };
     },
 
@@ -202,6 +260,7 @@ export function createMediaStore(dataDirectory: string): AtomicMediaStore {
       const canonicalActivePath = await resolveActivePath(relativePath);
       const extension = extname(canonicalActivePath);
       const trashedPath = join(trashRoot, `${mediaId}-${randomUUID()}${extension}`);
+      await assertCanonicalDirectory(trashRoot, dataRoot);
       await rename(canonicalActivePath, trashedPath);
       let restored = false;
 
@@ -209,8 +268,7 @@ export function createMediaStore(dataDirectory: string): AtomicMediaStore {
         if (restored) return;
         const canonicalTrashPath = await resolveExistingContainedPath(trashedPath, trashRoot);
         assertContained(await realpath(dirname(activePath)), mediaRoot);
-        if (existsSync(activePath)) throw new Error('Media identity already exists.');
-        await rename(canonicalTrashPath, activePath);
+        await installNoClobber(canonicalTrashPath, activePath, false);
         restored = true;
       };
     },
