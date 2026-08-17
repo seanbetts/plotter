@@ -24,8 +24,8 @@ same versioned service contract. Neither opens the database directly.
 
 This is a clean cutover, not a continuing synchronization bridge. There is one
 canonical store after cutover. Browser IndexedDB remains available only for
-isolated E2E tests and, if needed, explicit legacy import; it is never a fallback
-source of truth.
+existing repository unit coverage and, if needed, explicit legacy import; it is
+never an application or Playwright E2E source of truth.
 
 ## Scope
 
