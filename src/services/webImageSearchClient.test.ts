@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildWebImageProviderQuery,
+  createHttpWebImageSearchClient,
   createLocalWebImageSearchClient,
-  createSupabaseWebImageSearchClient,
   normalizeWebImageSearchResults,
 } from './webImageSearchClient';
+import type { PlotterApiClient } from '../api/client';
 import type { WebImageSearchResult, WebImageSearchStopContext } from './webImageSearchClient';
 
 const parisContext: WebImageSearchStopContext = {
@@ -154,10 +155,9 @@ describe('webImageSearchClient', () => {
     ]);
   });
 
-  it('invokes the Supabase image-search function with visible query and context', async () => {
-    const invoke = vi.fn(async () => ({
-      data: {
-        results: [
+  it('posts image searches to the shared service route with visible query and context', async () => {
+    const request = vi.fn(async () => ({
+      results: [
           {
             id: 'paris-1',
             title: 'Paris mural',
@@ -168,48 +168,27 @@ describe('webImageSearchClient', () => {
             width: 1600,
             height: 1000,
           },
-        ],
-      },
-      error: null,
+      ],
     }));
-    const client = createSupabaseWebImageSearchClient({ functions: { invoke } });
+    const client = createHttpWebImageSearchClient({ request } as Pick<PlotterApiClient, 'request'>);
 
     await expect(client.searchImages('mural', parisContext)).resolves.toHaveLength(1);
-    expect(invoke).toHaveBeenCalledWith('image-search', {
-      body: {
+    expect(request).toHaveBeenCalledWith('/api/v1/image-search', {
+      method: 'POST',
+      body: JSON.stringify({
         query: 'mural',
         context: parisContext,
-      },
+      }),
     });
   });
 
-  it('rejects with the Supabase function error message', async () => {
-    const invoke = vi.fn(async () => ({
-      data: null,
-      error: { message: 'Provider failed' },
-    }));
-    const client = createSupabaseWebImageSearchClient({ functions: { invoke } });
+  it('preserves the shared API client error', async () => {
+    const client = createHttpWebImageSearchClient({
+      request: vi.fn().mockRejectedValue(new Error('Provider failed')),
+    } as Pick<PlotterApiClient, 'request'>);
 
     await expect(client.searchImages('mural', parisContext)).rejects.toThrow('Provider failed');
   });
-
-  it.each(['context', 'response'] as const)(
-    'rejects with an error message from a JSON %s response body',
-    async (errorResponseKey) => {
-      const invoke = vi.fn(async () => ({
-        data: null,
-        error: {
-          message: 'Function failed',
-          [errorResponseKey]: new Response(JSON.stringify({ error: 'Quota exceeded' }), {
-            headers: { 'content-type': 'application/json' },
-          }),
-        },
-      }));
-      const client = createSupabaseWebImageSearchClient({ functions: { invoke } });
-
-      await expect(client.searchImages('mural', parisContext)).rejects.toThrow('Quota exceeded');
-    },
-  );
 
   it('returns deterministic local results for e2e-local mode', async () => {
     const client = createLocalWebImageSearchClient();

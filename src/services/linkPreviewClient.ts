@@ -1,5 +1,5 @@
 import { deriveLinkDomain, normalizeResearchLinkUrl } from '../domain/researchLinks';
-import { createBrowserSupabaseClient } from '../storage/supabaseClient';
+import { createPlotterApiClient, type PlotterApiClient } from '../api/client';
 
 export type LinkPreviewResult = {
   url: string;
@@ -19,48 +19,7 @@ type LinkPreviewFunctionData = {
   imageUrl?: string | null;
 };
 
-type LinkPreviewFunctionResponse = {
-  data?: LinkPreviewFunctionData | null;
-  error?: LinkPreviewFunctionError | null;
-};
-
-type LinkPreviewFunctionError = {
-  message?: string;
-  context?: unknown;
-  response?: unknown;
-};
-
-type LinkPreviewSupabaseClient = {
-  functions: {
-    invoke(
-      functionName: 'link-preview',
-      options: { body: { url: string } },
-    ): Promise<LinkPreviewFunctionResponse>;
-  };
-};
-
 const fallbackErrorMessage = 'Unable to fetch link preview.';
-
-function getResponseFromErrorTarget(target: unknown): Response | undefined {
-  return target instanceof Response ? target : undefined;
-}
-
-async function extractFunctionErrorMessage(error: LinkPreviewFunctionError): Promise<string> {
-  const response = getResponseFromErrorTarget(error.context) ?? getResponseFromErrorTarget(error.response);
-
-  if (response) {
-    try {
-      const body = (await response.clone().json()) as { error?: unknown };
-      if (typeof body.error === 'string' && body.error.trim()) {
-        return body.error;
-      }
-    } catch {
-      // Fall through to the Supabase error message when the body is not readable JSON.
-    }
-  }
-
-  return error.message || fallbackErrorMessage;
-}
 
 function normalizePreviewData(data: LinkPreviewFunctionData): LinkPreviewResult {
   if (!data.url) {
@@ -79,22 +38,17 @@ function normalizePreviewData(data: LinkPreviewFunctionData): LinkPreviewResult 
   };
 }
 
-export function createSupabaseLinkPreviewClient(supabase: LinkPreviewSupabaseClient): LinkPreviewClient {
+export function createHttpLinkPreviewClient(client: Pick<PlotterApiClient, 'request'>): LinkPreviewClient {
   return {
     async fetchPreview(rawUrl) {
-      const response = await supabase.functions.invoke('link-preview', {
-        body: { url: rawUrl },
+      const response = await client.request<{ preview?: LinkPreviewFunctionData }>('/api/v1/link-preview', {
+        method: 'POST',
+        body: JSON.stringify({ url: rawUrl }),
       });
-
-      if (response.error) {
-        throw new Error(await extractFunctionErrorMessage(response.error));
-      }
-
-      if (!response.data) {
+      if (!response.preview) {
         throw new Error(fallbackErrorMessage);
       }
-
-      return normalizePreviewData(response.data);
+      return normalizePreviewData(response.preview);
     },
   };
 }
@@ -120,5 +74,5 @@ export function createAppLinkPreviewClient(): LinkPreviewClient {
     return createLocalLinkPreviewClient();
   }
 
-  return createSupabaseLinkPreviewClient(createBrowserSupabaseClient());
+  return createHttpLinkPreviewClient(createPlotterApiClient({ baseUrl: import.meta.env.BASE_URL }));
 }

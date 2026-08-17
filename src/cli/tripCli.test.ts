@@ -4,7 +4,7 @@ import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import { createTripDataService } from '../tripCommands/tripDataService';
-import { parseTripCliArgs, runTripCli, runTripProgram } from './trip';
+import { parseTripCliArgs, resolvePlotterBaseUrl, runTripCli, runTripProgram } from './trip';
 
 type MockService = Record<string, ReturnType<typeof vi.fn>>;
 
@@ -73,6 +73,15 @@ describe('parseTripCliArgs', () => {
         yes: true,
       },
     });
+  });
+});
+
+describe('resolvePlotterBaseUrl', () => {
+  it('uses the stable Plotter loopback route by default and accepts an explicit override', () => {
+    expect(resolvePlotterBaseUrl({})).toEqual(new URL('http://127.0.0.1/plotter/'));
+    expect(resolvePlotterBaseUrl({ PLOTTER_BASE_URL: 'http://localhost:9123/custom/' })).toEqual(
+      new URL('http://localhost:9123/custom/'),
+    );
   });
 });
 
@@ -685,16 +694,15 @@ describe('runTripCli', () => {
     });
   });
 
-  it('writes structured JSON and returns non-zero when startup fails', async () => {
+  it('writes a concise service-unavailable error when startup fails', async () => {
     const write = vi.fn();
     const writeError = vi.fn();
 
     const exitCode = await runTripProgram({
       argv: ['list'],
       createService: vi.fn(() => {
-        throw new Error('No Supabase.');
+        throw new Error('connect ECONNREFUSED 127.0.0.1:80');
       }),
-      ensureSession: vi.fn(),
       readFile: vi.fn(),
       write,
       writeError,
@@ -707,8 +715,27 @@ describe('runTripCli', () => {
       ok: false,
       error: {
         code: 'COMMAND_FAILED',
-        message: 'No Supabase.',
+        message: 'Plotter service is unavailable.',
       },
     });
+  });
+
+  it('prints local help without creating a service connection', async () => {
+    const write = vi.fn();
+    const createService = vi.fn(() => {
+      throw new Error('A service connection should not be needed for help.');
+    });
+
+    const exitCode = await runTripProgram({
+      argv: ['help'],
+      createService,
+      write,
+      writeError: vi.fn(),
+      setExitCode: vi.fn(),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(createService).not.toHaveBeenCalled();
+    expect(write.mock.calls[0]?.[0]).toContain('list');
   });
 });

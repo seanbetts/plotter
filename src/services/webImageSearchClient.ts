@@ -1,4 +1,4 @@
-import { createBrowserSupabaseClient } from '../storage/supabaseClient';
+import { createPlotterApiClient, type PlotterApiClient } from '../api/client';
 
 export type WebImageSearchStopContext = {
   stopName: string;
@@ -25,32 +25,6 @@ export type WebImageSearchResult = {
 export type WebImageSearchClient = {
   searchImages(query: string, context: WebImageSearchStopContext): Promise<WebImageSearchResult[]>;
 };
-
-type ImageSearchFunctionData = {
-  results?: unknown;
-};
-
-type ImageSearchFunctionError = {
-  message?: string;
-  context?: unknown;
-  response?: unknown;
-};
-
-type ImageSearchFunctionResponse = {
-  data?: ImageSearchFunctionData | null;
-  error?: ImageSearchFunctionError | null;
-};
-
-type ImageSearchSupabaseClient = {
-  functions: {
-    invoke(
-      functionName: 'image-search',
-      options: { body: { query: string; context: WebImageSearchStopContext } },
-    ): Promise<ImageSearchFunctionResponse>;
-  };
-};
-
-const fallbackErrorMessage = 'Unable to search web images.';
 
 function wordsForDeduplication(value: string) {
   return value
@@ -163,39 +137,14 @@ export function normalizeWebImageSearchResults(value: unknown): WebImageSearchRe
   });
 }
 
-function getResponseFromErrorTarget(target: unknown): Response | undefined {
-  return target instanceof Response ? target : undefined;
-}
-
-async function extractFunctionErrorMessage(error: ImageSearchFunctionError): Promise<string> {
-  const response = getResponseFromErrorTarget(error.context) ?? getResponseFromErrorTarget(error.response);
-
-  if (response) {
-    try {
-      const body = (await response.clone().json()) as { error?: unknown };
-      if (typeof body.error === 'string' && body.error.trim()) {
-        return body.error;
-      }
-    } catch {
-      // Fall through to the Supabase error message when the body is not readable JSON.
-    }
-  }
-
-  return error.message || fallbackErrorMessage;
-}
-
-export function createSupabaseWebImageSearchClient(supabase: ImageSearchSupabaseClient): WebImageSearchClient {
+export function createHttpWebImageSearchClient(client: Pick<PlotterApiClient, 'request'>): WebImageSearchClient {
   return {
     async searchImages(query, context) {
-      const response = await supabase.functions.invoke('image-search', {
-        body: { query, context },
+      const response = await client.request<{ results?: unknown }>('/api/v1/image-search', {
+        method: 'POST',
+        body: JSON.stringify({ query, context }),
       });
-
-      if (response.error) {
-        throw new Error(await extractFunctionErrorMessage(response.error));
-      }
-
-      return normalizeWebImageSearchResults(response.data?.results);
+      return normalizeWebImageSearchResults(response.results);
     },
   };
 }
@@ -228,5 +177,5 @@ export function createAppWebImageSearchClient(): WebImageSearchClient {
     return createLocalWebImageSearchClient();
   }
 
-  return createSupabaseWebImageSearchClient(createBrowserSupabaseClient());
+  return createHttpWebImageSearchClient(createPlotterApiClient({ baseUrl: import.meta.env.BASE_URL }));
 }

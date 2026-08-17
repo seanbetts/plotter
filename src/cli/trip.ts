@@ -1,14 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { calculateOpenRouteServiceRoute } from '../adapters/openRouteService';
-import { createSupabaseLinkPreviewClient } from '../services/linkPreviewClient';
-import { createSupabaseTripDirectoryRepository } from '../storage/tripDirectoryRepository';
-import { createSupabaseTripRepository } from '../storage/supabaseTripRepository';
+import { createPlotterApiClient, PlotterApiError, type PlotterApiClient } from '../api/client';
+import { createHttpLinkPreviewClient } from '../services/linkPreviewClient';
+import { createServiceRepositories } from '../storage/serviceRepositories';
 import { createLinkEnricher } from '../tripCommands/linkEnrichment';
 import { createPlaceResolver } from '../tripCommands/placeResolver';
 import { createTripDataService } from '../tripCommands/tripDataService';
 import type { TripDataService } from '../tripCommands/tripDataService';
-import { createNodeSupabaseClient, ensureNodeAnonymousSession } from './nodeSupabase';
 
 type ParsedArgs = {
   command: string;
@@ -32,6 +31,23 @@ type CliResult = {
 };
 
 type JsonRecord = Record<string, unknown>;
+
+const defaultPlotterBaseUrl = 'http://127.0.0.1/plotter/';
+const serviceUnavailableMessage = 'Plotter service is unavailable.';
+const tripCliHelp = {
+  ok: true,
+  summary: 'Plotter trip CLI commands.',
+  commands: [
+    'list', 'get', 'audit', 'recalculate-failed-routes', 'set-vehicle', 'update-route-leg',
+    'create', 'delete', 'rename', 'replace-stops', 'insert-stop', 'update-stop', 'delete-stop', 'reorder-stops',
+    'add-stop-link', 'delete-stop-link', 'list-activities', 'create-activity', 'update-activity', 'delete-activity',
+    'reorder-activities', 'add-activity-link', 'delete-activity-link',
+  ],
+};
+
+export function resolvePlotterBaseUrl(environment: NodeJS.ProcessEnv): URL {
+  return new URL(environment.PLOTTER_BASE_URL?.trim() || defaultPlotterBaseUrl);
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -204,6 +220,9 @@ export async function runTripCli(input: RunTripCliInput) {
     let result: unknown;
 
     switch (command) {
+      case 'help':
+        result = tripCliHelp;
+        break;
       case 'list':
         result = await input.service.listTrips();
         break;
@@ -411,14 +430,39 @@ export async function runTripCli(input: RunTripCliInput) {
   }
 }
 
-function createCliService() {
-  const supabase = createNodeSupabaseClient();
+function rethrowServiceUnavailable(error: unknown): never {
+  if (error instanceof PlotterApiError && (error.status === undefined || error.status === 503)) {
+    throw new Error(serviceUnavailableMessage);
+  }
+  throw error;
+}
 
+function createCliApiClient(baseUrl: URL): PlotterApiClient {
+  const client = createPlotterApiClient({ baseUrl: baseUrl.toString() });
   return {
-    supabase,
-    service: createTripDataService({
-      directory: createSupabaseTripDirectoryRepository(supabase),
-      createTripRepository: (tripId) => createSupabaseTripRepository(supabase, tripId),
+    async request<T>(path: string, init?: RequestInit) {
+      try {
+        return await client.request<T>(path, init);
+      } catch (error) {
+        return rethrowServiceUnavailable(error);
+      }
+    },
+    async upload<T>(path: string, form: FormData, expectedRevision: number) {
+      try {
+        return await client.upload<T>(path, form, expectedRevision);
+      } catch (error) {
+        return rethrowServiceUnavailable(error);
+      }
+    },
+  };
+}
+
+function createCliService(environment: NodeJS.ProcessEnv = process.env) {
+  const client = createCliApiClient(resolvePlotterBaseUrl(environment));
+  const repositories = createServiceRepositories(client);
+
+  return createTripDataService({
+      ...repositories,
       calculateRoute: process.env.VITE_OPENROUTESERVICE_API_KEY
         ? (routeInput) => calculateOpenRouteServiceRoute({
             ...routeInput,
@@ -426,15 +470,13 @@ function createCliService() {
           })
         : undefined,
       resolvePlace: createPlaceResolver({ apiKey: process.env.VITE_MAPTILER_API_KEY }),
-      enrichLink: createLinkEnricher(createSupabaseLinkPreviewClient(supabase)),
-    }),
-  };
+      enrichLink: createLinkEnricher(createHttpLinkPreviewClient(client)),
+    });
 }
 
 type RunTripProgramInput = {
   argv?: string[];
   createService?: typeof createCliService;
-  ensureSession?: typeof ensureNodeAnonymousSession;
   readFile?: (path: string) => Promise<string>;
   write?: (value: string) => void;
   writeError?: (value: string) => void;
@@ -446,7 +488,6 @@ type RunTripProgramInput = {
 export async function runTripProgram(input: RunTripProgramInput = {}) {
   try {
     const createService = input.createService ?? createCliService;
-    const ensureSession = input.ensureSession ?? ensureNodeAnonymousSession;
     const readFileImpl = input.readFile ?? ((path: string) => readFile(path, 'utf8'));
     const write = input.write ?? ((value: string) => {
       process.stdout.write(value);
@@ -458,11 +499,23 @@ export async function runTripProgram(input: RunTripProgramInput = {}) {
       process.exitCode = code;
     });
 
-    const { supabase, service } = createService();
-    await ensureSession(supabase);
+    const argv = input.argv ?? process.argv.slice(2);
+    if (parseTripCliArgs(argv).command === 'help') {
+      const exitCode = await runTripCli({
+        argv,
+        service: undefined as never,
+        readFile: readFileImpl,
+        write,
+        writeError,
+      });
+      setExitCode(exitCode);
+      return exitCode;
+    }
+
+    const service = createService();
 
     const exitCode = await runTripCli({
-      argv: input.argv ?? process.argv.slice(2),
+      argv,
       service,
       readFile: readFileImpl,
       write,
@@ -470,14 +523,14 @@ export async function runTripProgram(input: RunTripProgramInput = {}) {
     });
     setExitCode(exitCode);
     return exitCode;
-  } catch (caught) {
+  } catch {
     const writeError = input.writeError ?? ((value: string) => {
       process.stderr.write(value);
     });
     const setExitCode = input.setExitCode ?? ((code: number) => {
       process.exitCode = code;
     });
-    writeStructuredError(writeError, errorMessage(caught));
+    writeStructuredError(writeError, serviceUnavailableMessage);
     setExitCode(1);
     return 1;
   }
