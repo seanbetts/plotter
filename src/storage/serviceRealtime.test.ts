@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PlotterApiClient } from '../api/client';
+import type { DirectoryReadResponse, TripReadResponse } from '../api/contracts';
 import { createServiceRealtime } from './serviceRealtime';
 
 type EventListener = (event: MessageEvent<string>) => void;
@@ -286,6 +287,136 @@ describe('service realtime', () => {
     await reconciliation;
 
     expect(publishedBeforeTripSettled).toBe(true);
+  });
+
+  it('publishes each successful trip and resolves at the directory boundary while another trip never settles', async () => {
+    const neverSettles = new Promise<never>(() => undefined);
+    const client: PlotterApiClient = {
+      request: vi.fn(async (path: string) => {
+        if (path === '/api/v1/trips') return { revision: 12, trips: [] };
+        if (path === '/api/v1/trips/trip-hung') return neverSettles;
+        if (path === '/api/v1/trips/trip-ready') {
+          return { revision: 4, destinations: [], routeLegs: [], activities: [] };
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      }) as PlotterApiClient['request'],
+      upload: vi.fn(),
+    };
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client, createEventSource: createEventSourceHarness().createEventSource,
+    });
+    const directory = vi.fn();
+    const hung = vi.fn();
+    const ready = vi.fn();
+    realtime.subscribeToDirectory(directory);
+    realtime.subscribeToTrip('trip-hung', hung);
+    realtime.subscribeToTrip('trip-ready', ready);
+
+    let reconciliationSettled = false;
+    void realtime.reconcile().then(() => { reconciliationSettled = true; });
+    await vi.waitFor(() => expect(directory).toHaveBeenCalledWith({
+      kind: 'restore-reset', resetId: 'reconcile-1',
+    }));
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledWith({
+      kind: 'restore-reset', resetId: 'reconcile-1',
+    }));
+
+    expect(reconciliationSettled).toBe(true);
+    expect(hung).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates a hung trip only while its subscription identity is unchanged', async () => {
+    const neverSettles = new Promise<never>(() => undefined);
+    let tripRequests = 0;
+    const client: PlotterApiClient = {
+      request: vi.fn(async (path: string) => {
+        if (path === '/api/v1/trips') return { revision: 13, trips: [] };
+        if (path === '/api/v1/trips/trip-hung') {
+          tripRequests += 1;
+          return neverSettles;
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      }) as PlotterApiClient['request'],
+      upload: vi.fn(),
+    };
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client, createEventSource: createEventSourceHarness().createEventSource,
+    });
+    const unsubscribe = realtime.subscribeToTrip('trip-hung', vi.fn());
+
+    void realtime.reconcile().catch(() => undefined);
+    void realtime.reconcile().catch(() => undefined);
+    await vi.waitFor(() => expect(tripRequests).toBeGreaterThan(0));
+    expect(tripRequests).toBe(1);
+
+    unsubscribe();
+    realtime.subscribeToTrip('trip-hung', vi.fn());
+    void realtime.reconcile().catch(() => undefined);
+    await vi.waitFor(() => expect(tripRequests).toBe(2));
+  });
+
+  it('does not deliver an in-flight trip result to an unsubscribed or replacement registration', async () => {
+    let resolveTrip: ((value: TripReadResponse) => void) | undefined;
+    const trip = new Promise<TripReadResponse>((resolve) => { resolveTrip = resolve; });
+    const client: PlotterApiClient = {
+      request: vi.fn(async (path: string) => {
+        if (path === '/api/v1/trips') return { revision: 14, trips: [] };
+        if (path === '/api/v1/trips/trip-changing') return trip;
+        throw new Error(`Unexpected request: ${path}`);
+      }) as PlotterApiClient['request'],
+      upload: vi.fn(),
+    };
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client, createEventSource: createEventSourceHarness().createEventSource,
+    });
+    const original = vi.fn();
+    const replacement = vi.fn();
+    const unsubscribe = realtime.subscribeToTrip('trip-changing', original);
+    const reconciliation = realtime.reconcile();
+    await vi.waitFor(() => expect(client.request).toHaveBeenCalledWith('/api/v1/trips/trip-changing'));
+
+    unsubscribe();
+    realtime.subscribeToTrip('trip-changing', replacement);
+    resolveTrip?.({ revision: 6, destinations: [], routeLegs: [], activities: [] });
+    await reconciliation;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(original).not.toHaveBeenCalled();
+    expect(replacement).not.toHaveBeenCalled();
+  });
+
+  it('coalesces concurrent directory reconciliation and observes rejected trip work', async () => {
+    let resolveDirectory: ((value: DirectoryReadResponse) => void) | undefined;
+    const directory = new Promise<DirectoryReadResponse>((resolve) => { resolveDirectory = resolve; });
+    let directoryRequests = 0;
+    const client: PlotterApiClient = {
+      request: vi.fn(async (path: string) => {
+        if (path === '/api/v1/trips') {
+          directoryRequests += 1;
+          return directory;
+        }
+        if (path === '/api/v1/trips/trip-failed') throw new Error('controlled trip failure');
+        throw new Error(`Unexpected request: ${path}`);
+      }) as PlotterApiClient['request'],
+      upload: vi.fn(),
+    };
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client, createEventSource: createEventSourceHarness().createEventSource,
+    });
+    const onDirectory = vi.fn();
+    const onTrip = vi.fn();
+    realtime.subscribeToDirectory(onDirectory);
+    realtime.subscribeToTrip('trip-failed', onTrip);
+
+    const first = realtime.reconcile();
+    const second = realtime.reconcile();
+    await vi.waitFor(() => expect(directoryRequests).toBeGreaterThan(0));
+    expect(directoryRequests).toBe(1);
+    resolveDirectory?.({ revision: 15, trips: [] });
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+
+    expect(onDirectory).toHaveBeenCalledTimes(1);
+    expect(onTrip).not.toHaveBeenCalled();
   });
 
   it('reconciles after EventSource opens so reconnects recover missed events', async () => {

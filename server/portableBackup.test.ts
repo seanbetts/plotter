@@ -162,6 +162,7 @@ function writeSelfConsistentMediaVariant(
 function createHarness(input: {
   ids?: string[];
   durability?: PortableBackupDurability;
+  failCloseAt?: number;
 } = {}) {
   const dataDirectory = mkdtempSync(join(tmpdir(), 'plotter-portable-backup-'));
   temporaryDirectories.push(dataDirectory);
@@ -203,8 +204,10 @@ function createHarness(input: {
     },
     async closeStorage() {
       closeCount += 1;
-      database?.close();
+      const closing = database;
       database = undefined;
+      closing?.close();
+      if (closeCount === input.failCloseAt) throw new Error('controlled close failure');
     },
     async openStorage() {
       openCount += 1;
@@ -958,8 +961,9 @@ describe('portable restore', () => {
     await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
       .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
 
-    expect((harness.database()!.connection.prepare('SELECT name FROM trips').get() as { name: string }).name)
-      .toBe('Original');
+    expect(harness.database()).toBeUndefined();
+    expect(harness.closeCount()).toBe(2);
+    expect(harness.openCount()).toBe(1);
     expect(readdirSync(harness.dataDirectory).filter((name) => /^\.portable-restore-[0-9a-f-]+$/.test(name)))
       .toHaveLength(1);
 
@@ -970,6 +974,42 @@ describe('portable restore', () => {
     reopened.close();
     expect(readdirSync(harness.dataDirectory).some((name) => name.startsWith('.portable-restore-')))
       .toBe(false);
+  });
+
+  it('keeps storage unavailable when closing after ambiguous marker invalidation reports failure', async () => {
+    let failMarkerPublication = true;
+    const harness = createHarness({
+      failCloseAt: 2,
+      durability: {
+        async syncDirectory(_path, phase) {
+          if (phase === 'restore-marker-published' && failMarkerPublication) {
+            failMarkerPublication = false;
+            throw new Error('controlled marker publication sync failure');
+          }
+          if (phase === 'restore-marker-invalidated') {
+            throw new Error('controlled marker invalidation sync failure');
+          }
+        },
+      },
+    });
+    const seeded = await seedTrip(harness);
+    const backup = await harness.operations.create();
+    await seeded.directory.update(1, seeded.trip.id, {
+      expectedRevision: 1, patch: { name: 'Keep current' },
+    });
+
+    await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
+      .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
+
+    expect(harness.database()).toBeUndefined();
+    expect(harness.closeCount()).toBe(2);
+    expect(harness.openCount()).toBe(1);
+
+    await recoverInterruptedPortableRestore(harness.dataDirectory);
+    const reopened = new DatabaseSync(harness.databasePath, { readOnly: true });
+    expect((reopened.prepare('SELECT name FROM trips').get() as { name: string }).name)
+      .toBe('Keep current');
+    reopened.close();
   });
 
   it('does not roll back when the pre-commit marker cannot be unlinked', async () => {
@@ -994,10 +1034,10 @@ describe('portable restore', () => {
     await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
       .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
 
-    expect((harness.database()!.connection.prepare('SELECT name FROM trips').get() as { name: string }).name)
-      .toBe('Original');
+    expect(harness.database()).toBeUndefined();
+    expect(harness.closeCount()).toBe(2);
+    expect(harness.openCount()).toBe(1);
     expect(replacedMarker).toBe(true);
-    harness.close();
 
     await expect(recoverInterruptedPortableRestore(harness.dataDirectory))
       .rejects.toBeInstanceOf(PortableRestoreIncompleteError);

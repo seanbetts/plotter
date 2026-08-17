@@ -1385,9 +1385,13 @@ async function removeRestoreGarbage(
   durability: DurabilityController,
 ): Promise<void> {
   await validateRestoreTransaction(dataRoot, transaction, kind, durability, true);
-  // Node exposes no openat/renameat family. Revalidation immediately before
-  // mutation closes every operation-time swap seam available to tests; the
-  // remaining kernel-level path race is confined to this private 0700 root.
+  // Node exposes no descriptor-relative renameat/unlinkat API. Exact names,
+  // no-follow checks, private 0700 transaction directories, and revalidation
+  // reject archive-controlled paths, accidental/pre-existing symlinks, and
+  // hook-visible swaps. They are not a security boundary against an actively
+  // racing same-UID local actor, who can already mutate this personal app's
+  // data root, SQLite/media files, or executable code; that actor is outside
+  // the trusted-host threat model.
   assertPrivateRestoreTransaction(dataRoot, transaction, kind);
   await rm(transaction, { recursive: true, force: true });
   await durability.syncDirectories([dataRoot], 'restore-transaction-cleaned');
@@ -1720,12 +1724,12 @@ export function createPortableBackupOperations(options: PortableBackupOptions): 
               await invalidateRestoreCommitMarker(dataRoot, extracted.stageDirectory, durability);
               markerMayExist = false;
             } catch {
-              if (storageClosed) {
+              if (!storageClosed) {
                 try {
-                  await options.openStorage();
-                  storageClosed = false;
+                  await options.closeStorage();
                 } catch {
-                  // The stable incomplete error below also gates failed readiness.
+                  // closeStorage must revoke readiness before physical close;
+                  // ambiguity remains gated by the stable error below.
                 }
               }
               throw new PortableRestoreIncompleteError();

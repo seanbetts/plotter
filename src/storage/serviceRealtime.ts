@@ -10,6 +10,18 @@ export type ServiceRealtimeSubscriptions = {
 };
 
 type RevisionMessageListener = (event: MessageEvent<string>) => void;
+type TripInvalidationSubscriber = (invalidation: ServiceInvalidation) => void;
+type TripSubscriberRegistrations = Map<TripInvalidationSubscriber, Set<symbol>>;
+
+type TripReconciliation = {
+  generation: number;
+  promise: Promise<void>;
+};
+
+type DirectoryReconciliation = {
+  resetId: string;
+  promise: Promise<void>;
+};
 
 type EventSourceLike = {
   addEventListener(type: 'revision', listener: RevisionMessageListener): void;
@@ -28,7 +40,9 @@ export function createServiceRealtime(
   options: CreateServiceRealtimeOptions,
 ): ServiceRealtimeSubscriptions {
   const directorySubscribers = new Map<(invalidation: ServiceInvalidation) => void, number>();
-  const tripSubscribers = new Map<string, Map<(invalidation: ServiceInvalidation) => void, number>>();
+  const tripSubscribers = new Map<string, TripSubscriberRegistrations>();
+  const tripSubscriptionGenerations = new Map<string, number>();
+  const tripReconciliations = new Map<string, TripReconciliation>();
   const latestStreamRevision = new Map<string, number>();
   const observedResetScopes = new Set<string>();
   const retiredEpochs = new Set<string>();
@@ -37,6 +51,7 @@ export function createServiceRealtime(
   let source: EventSourceLike | null = null;
   let currentEpoch: string | null = null;
   let reconciliationSequence = 0;
+  let directoryReconciliation: DirectoryReconciliation | undefined;
 
   function revisionKey(event: RevisionEvent): string {
     return event.scope === 'directory' ? 'directory' : `trip:${event.tripId}`;
@@ -122,7 +137,7 @@ export function createServiceRealtime(
       directorySubscribers.forEach((_count, subscriber) => subscriber(invalidation));
       return;
     }
-    tripSubscribers.get(event.tripId)?.forEach((_count, subscriber) => subscriber(invalidation));
+    tripSubscribers.get(event.tripId)?.forEach((_registrations, subscriber) => subscriber(invalidation));
   }
 
   const onRevision = (message: MessageEvent<string>) => {
@@ -193,40 +208,107 @@ export function createServiceRealtime(
     retiredEpochs.clear();
   }
 
-  async function reconcile(): Promise<void> {
-    const tripIds = [...tripSubscribers.keys()];
-    const directoryRequest = options.client.request<DirectoryReadResponse>('/api/v1/trips');
-    const tripRequests = tripIds.map((tripId) =>
-      options.client.request<TripReadResponse>(`/api/v1/trips/${encodeURIComponent(tripId)}`));
-    const settledTripRequests = Promise.allSettled(tripRequests);
+  function tripGeneration(tripId: string): number {
+    return tripSubscriptionGenerations.get(tripId) ?? 0;
+  }
+
+  function advanceTripGeneration(tripId: string): void {
+    tripSubscriptionGenerations.set(tripId, tripGeneration(tripId) + 1);
+  }
+
+  function cleanUnusedTripIdentity(tripId: string): void {
+    if (!tripSubscribers.has(tripId) && !tripReconciliations.has(tripId)) {
+      tripSubscriptionGenerations.delete(tripId);
+    }
+  }
+
+  function snapshotTripSubscribers(tripId: string): TripSubscriberRegistrations {
+    const snapshot: TripSubscriberRegistrations = new Map();
+    tripSubscribers.get(tripId)?.forEach((registrations, subscriber) => {
+      snapshot.set(subscriber, new Set(registrations));
+    });
+    return snapshot;
+  }
+
+  function publishCapturedTrip(
+    tripId: string,
+    captured: TripSubscriberRegistrations,
+    invalidation: ServiceInvalidation,
+  ): void {
+    const current = tripSubscribers.get(tripId);
+    if (!current) return;
+    captured.forEach((capturedRegistrations, subscriber) => {
+      const currentRegistrations = current.get(subscriber);
+      if (
+        currentRegistrations
+        && [...capturedRegistrations].some((registration) => currentRegistrations.has(registration))
+      ) subscriber(invalidation);
+    });
+  }
+
+  function startTripReconciliation(tripId: string, resetId: string): void {
+    const subscribers = tripSubscribers.get(tripId);
+    if (!subscribers || subscribers.size === 0) return;
+    const generation = tripGeneration(tripId);
+    if (tripReconciliations.get(tripId)?.generation === generation) return;
+    const captured = snapshotTripSubscribers(tripId);
+    let request: Promise<TripReadResponse>;
+    try {
+      request = options.client.request<TripReadResponse>(
+        `/api/v1/trips/${encodeURIComponent(tripId)}`,
+      );
+    } catch (error) {
+      request = Promise.reject(error);
+    }
+    const promise = request.then((trip) => {
+      if (!validRevision(trip.revision)) return;
+      publishCapturedTrip(tripId, captured, { kind: 'restore-reset', resetId });
+    }).catch(() => undefined);
+    const reconciliation = { generation, promise };
+    tripReconciliations.set(tripId, reconciliation);
+    void promise.then(() => {
+      if (tripReconciliations.get(tripId) === reconciliation) {
+        tripReconciliations.delete(tripId);
+        cleanUnusedTripIdentity(tripId);
+      }
+    });
+  }
+
+  function startDirectoryReconciliation(): DirectoryReconciliation {
     const resetId = `reconcile-${++reconciliationSequence}`;
     const directoryReset: RevisionEvent = {
       kind: 'restore-reset',
       epoch: '00000000-0000-4000-8000-000000000000',
       scope: 'directory',
     };
-    let directory: DirectoryReadResponse;
+    let request: Promise<DirectoryReadResponse>;
     try {
-      directory = await directoryRequest;
+      request = options.client.request<DirectoryReadResponse>('/api/v1/trips');
     } catch (error) {
-      await settledTripRequests;
-      throw error;
+      request = Promise.reject(error);
     }
-    if (!validRevision(directory.revision)) {
-      await settledTripRequests;
-      throw new Error('Plotter service returned an invalid revision.');
-    }
-    publish(directoryReset, { kind: 'restore-reset', resetId });
-    const tripResults = await settledTripRequests;
-    tripResults.forEach((tripResult, index) => {
-      if (tripResult?.status !== 'fulfilled' || !validRevision(tripResult.value.revision)) return;
-      publish({
-        kind: 'restore-reset',
-        epoch: '00000000-0000-4000-8000-000000000000',
-        scope: 'trip',
-        tripId: tripIds[index],
-      }, { kind: 'restore-reset', resetId });
+    const reconciliation: DirectoryReconciliation = {
+      resetId,
+      promise: Promise.resolve(),
+    };
+    reconciliation.promise = request.then((directory) => {
+      if (!validRevision(directory.revision)) {
+        throw new Error('Plotter service returned an invalid revision.');
+      }
+      publish(directoryReset, { kind: 'restore-reset', resetId });
+    }).finally(() => {
+      if (directoryReconciliation === reconciliation) directoryReconciliation = undefined;
     });
+    directoryReconciliation = reconciliation;
+    return reconciliation;
+  }
+
+  function reconcile(): Promise<void> {
+    const directory = directoryReconciliation ?? startDirectoryReconciliation();
+    tripSubscribers.forEach((_subscribers, tripId) => {
+      startTripReconciliation(tripId, directory.resetId);
+    });
+    return directory.promise;
   }
 
   return {
@@ -245,18 +327,23 @@ export function createServiceRealtime(
     },
     subscribeToTrip(tripId, onInvalidate) {
       const subscribers = tripSubscribers.get(tripId)
-        ?? new Map<(invalidation: ServiceInvalidation) => void, number>();
-      subscribers.set(onInvalidate, (subscribers.get(onInvalidate) ?? 0) + 1);
+        ?? new Map<TripInvalidationSubscriber, Set<symbol>>();
+      const registrations = subscribers.get(onInvalidate) ?? new Set<symbol>();
+      const registration = Symbol(tripId);
+      registrations.add(registration);
+      subscribers.set(onInvalidate, registrations);
       tripSubscribers.set(tripId, subscribers);
+      advanceTripGeneration(tripId);
       ensureSource();
       let subscribed = true;
       return () => {
         if (!subscribed) return;
         subscribed = false;
-        const registrationCount = subscribers.get(onInvalidate) ?? 0;
-        if (registrationCount <= 1) subscribers.delete(onInvalidate);
-        else subscribers.set(onInvalidate, registrationCount - 1);
+        registrations.delete(registration);
+        if (registrations.size === 0) subscribers.delete(onInvalidate);
         if (subscribers.size === 0) tripSubscribers.delete(tripId);
+        advanceTripGeneration(tripId);
+        cleanUnusedTripIdentity(tripId);
         closeIfUnused();
       };
     },
