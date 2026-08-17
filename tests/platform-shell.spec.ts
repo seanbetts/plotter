@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect, gotoServiceApp, test } from './fixtures';
 
 type Box = NonNullable<Awaited<ReturnType<Locator['boundingBox']>>>;
 
@@ -92,14 +93,24 @@ async function openPopulatedRouteAlternatives(page: Page) {
     });
   });
 
-  await page.goto('/');
+  await gotoServiceApp(page);
   const search = page.getByLabel('Search for a destination');
+  await expect(search).toBeVisible();
+  await expect(page.getByRole('button', { name: /current trip:/i })).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
+  const routeSaveResponsePromise = page.waitForResponse((response) =>
+    response.request().method() === 'POST'
+    && /\/api\/v1\/trips\/[^/]+\/mutations$/.test(new URL(response.url()).pathname)
+    && response.request().postData()?.includes('"routeLegsToUpsert":[{') === true,
+  );
   for (const place of Object.values(places)) {
     await search.fill(place.text);
     await page.getByRole('option', { name: place.place_name }).click();
     await expect(search).toHaveValue('');
   }
 
+  const routeSaveResponse = await routeSaveResponsePromise;
+  expect(routeSaveResponse.ok(), await routeSaveResponse.text()).toBe(true);
   await expect(page.getByText('283 mi')).toBeVisible();
   await expect(page.getByRole('status', { name: 'Calculating Paris to London route' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Edit route from Paris to London' }).click();
@@ -114,7 +125,7 @@ test('serves the shared fallback theme and persists colour mode without changing
   expect(themeResponse.status()).toBe(200);
   expect(await themeResponse.text()).toContain('--lwp-colour-canvas');
 
-  await page.goto('/');
+  await gotoServiceApp(page);
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
 
   await expect(page.locator('main')).toHaveCount(1);
@@ -148,7 +159,7 @@ const requiredViewports = [
 for (const viewport of requiredViewports) {
   test(`fills the platform main track and keeps controls visible at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    await page.goto('/');
+    await gotoServiceApp(page);
 
     const actionableControls = [
       page.getByLabel('Search for a destination'),
@@ -250,9 +261,10 @@ test('contains every media-preview action within the platform main track in ligh
     });
   });
 
-  await page.goto('/');
+  await gotoServiceApp(page);
   const search = page.getByLabel('Search for a destination');
   await expect(search).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
   await search.fill('Paris');
   await page.getByRole('option', { name: 'Paris, France' }).click();
 

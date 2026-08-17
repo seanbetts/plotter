@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import type { BrowserContext, Locator, Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect, gotoServiceApp, test } from './fixtures';
 
 const parisResult = [
   {
@@ -11,16 +11,6 @@ const parisResult = [
     context: [{ id: 'country.1', text: 'France', short_code: 'fr' }],
   },
 ];
-
-async function clearIndexedDb(baseURL: string | undefined, context: BrowserContext, page: Page) {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
-
-  await cdpSession.send('Storage.clearDataForOrigin', {
-    origin,
-    storageTypes: 'indexeddb',
-  });
-}
 
 async function createParisStop(page: Page) {
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
@@ -34,10 +24,11 @@ async function createParisStop(page: Page) {
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
 
   await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
   await page.getByLabel('Search for a destination').fill('Paris');
   await page.getByRole('option', { name: 'Paris, France' }).click();
 
@@ -60,9 +51,8 @@ async function addLink(stopPanel: Locator, rawUrl: string) {
   await expect(linkForm.getByLabel('Add link URL')).not.toBeDisabled();
 }
 
-test('renders stop link preview cards with fallback metadata and card-level reordering', async ({ baseURL, context, page }) => {
+test('renders stop link preview cards with fallback metadata and card-level reordering', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await clearIndexedDb(baseURL, context, page);
 
   const stopPanel = await createParisStop(page);
   const linksRegion = stopPanel.getByRole('region', { name: 'Links' });

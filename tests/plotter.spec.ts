@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { APIRequestContext, Locator } from '@playwright/test';
+import { expect, gotoServiceApp, test } from './fixtures';
 
 async function stableCanvasPixels(canvas: Locator) {
   let previousHash: string | null = null;
@@ -47,26 +48,15 @@ const parisResult = [
   },
 ];
 
-async function seedNordkappExpedition(page: Page) {
+async function seedNordkappExpedition(request: APIRequestContext) {
   const timestamp = '2026-07-11T10:00:00.000Z';
-  const tripId = await page.evaluate(async () => {
-    const request = indexedDB.open('world-tour-planner');
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const transaction = db.transaction('trips', 'readonly');
-    const tripsRequest = transaction.objectStore('trips').getAll();
-    const trips = await new Promise<Array<{ id: string; name: string }>>((resolve, reject) => {
-      tripsRequest.onsuccess = () => resolve(tripsRequest.result);
-      tripsRequest.onerror = () => reject(tripsRequest.error);
-    });
-    db.close();
-
-    const trip = trips.find((candidate) => candidate.name === 'Nordkapp Expedition');
-    if (!trip) throw new Error('Nordkapp Expedition trip was not created.');
-    return trip.id;
-  });
+  const directoryResponse = await request.get('/plotter/api/v1/trips');
+  expect(directoryResponse.ok()).toBe(true);
+  const directory = await directoryResponse.json() as {
+    trips: Array<{ id: string; name: string }>;
+  };
+  const tripId = directory.trips.find((candidate) => candidate.name === 'Nordkapp Expedition')?.id;
+  if (!tripId) throw new Error('Nordkapp Expedition trip was not created.');
 
   const location = (placeName: string, countryName: string, countryCode: string) => ({
     placeName,
@@ -84,12 +74,11 @@ async function seedNordkappExpedition(page: Page) {
     order: number,
     coordinates: { lat: number; lng: number },
   ) => ({
-    id: `${tripId}:${id}`,
-    entityId: id,
-    tripId,
+    id,
     name,
     countryRegion: countryName,
     coordinates,
+    routingAnchors: {},
     location: location(name, countryName, countryCode),
     order,
     status: 'planned',
@@ -109,9 +98,7 @@ async function seedNordkappExpedition(page: Page) {
   const nordkapp = destination('nordkapp', 'Nordkapp', 'Norway', 'no', 2, { lat: 71.1725, lng: 25.784 });
   const routeLegs = [
     {
-      id: `${tripId}:hamburg-hirtshals`,
-      entityId: 'hamburg-hirtshals',
-      tripId,
+      id: 'hamburg-hirtshals',
       originDestinationId: 'hamburg',
       targetDestinationId: 'hirtshals',
       movement: 'drive',
@@ -133,9 +120,7 @@ async function seedNordkappExpedition(page: Page) {
       updatedAt: timestamp,
     },
     {
-      id: `${tripId}:hirtshals-nordkapp`,
-      entityId: 'hirtshals-nordkapp',
-      tripId,
+      id: 'hirtshals-nordkapp',
       originDestinationId: 'hirtshals',
       targetDestinationId: 'nordkapp',
       movement: 'drive',
@@ -173,29 +158,24 @@ async function seedNordkappExpedition(page: Page) {
     },
   ];
 
-  await page.evaluate(async ({ destinations, routeLegs }) => {
-    const request = indexedDB.open('world-tour-planner');
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const transaction = db.transaction(['destinations', 'routeLegs'], 'readwrite');
-    for (const record of destinations) transaction.objectStore('destinations').put(record);
-    for (const record of routeLegs) transaction.objectStore('routeLegs').put(record);
-    await new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-    db.close();
-  }, { destinations: [hamburg, hirtshals, nordkapp], routeLegs });
+  const snapshotResponse = await request.get(`/plotter/api/v1/trips/${encodeURIComponent(tripId)}`);
+  expect(snapshotResponse.ok()).toBe(true);
+  const snapshot = await snapshotResponse.json() as { revision: number };
+  const seedResponse = await request.post(`/plotter/api/v1/trips/${encodeURIComponent(tripId)}/mutations`, {
+    headers: { 'x-plotter-write': '1' },
+    data: {
+      expectedRevision: snapshot.revision,
+      mutation: {
+        type: 'replace-trip-data',
+        snapshot: { destinations: [hamburg, hirtshals, nordkapp], routeLegs },
+      },
+    },
+  });
+  expect(seedResponse.ok(), await seedResponse.text()).toBe(true);
+  return tripId;
 }
 
-test('preserves Nordkapp routing intent and calculates both legs around an ordinary map stop', async ({ baseURL, context, page }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
-  await cdpSession.send('Storage.clearDataForOrigin', { origin, storageTypes: 'indexeddb' });
-
+test('preserves Nordkapp routing intent and calculates both legs around an ordinary map stop', async ({ page, request }) => {
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -248,7 +228,7 @@ test('preserves Nordkapp routing intent and calculates both legs around an ordin
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
   await page.getByRole('button', { name: 'New trip' }).click();
   await page.getByLabel('Trip name').fill('Nordkapp Expedition');
@@ -258,25 +238,31 @@ test('preserves Nordkapp routing intent and calculates both legs around an ordin
   await page.getByRole('button', { name: 'Expedition truck' }).click();
   await expect(page.getByRole('button', { name: 'Expedition truck' })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Save trip' }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit trip' })).toHaveCount(0);
 
-  await seedNordkappExpedition(page);
+  const tripId = await seedNordkappExpedition(request);
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('button', { name: /current trip: Nordkapp Expedition/i })).toBeVisible();
+  await expect.poll(() => calculatedCoordinatePairs.length, {
+    message: 'seeded automatic routes should finish their initial service-backed reconciliation',
+    timeout: 15_000,
+  }).toBeGreaterThanOrEqual(2);
+  await expect(page.getByRole('button', { name: /current trip: Nordkapp Expedition/i })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByLabel('Route includes a ferry')).toBeVisible();
   await expect(page.getByLabel('1 route waypoint')).toBeVisible();
   await expect(page.getByLabel(/Route requires review/)).toBeVisible();
 
   await expect(page.getByRole('dialog', { name: /route settings/i })).toHaveCount(0);
   const mapContainer = page.getByTestId('map-container');
-  await page.waitForTimeout(1_000);
-  for (let zoomStep = 0; zoomStep < 3; zoomStep += 1) {
-    await page.getByRole('button', { name: 'Zoom in' }).click();
-    await page.waitForTimeout(200);
-  }
-  const mapBox = await mapContainer.boundingBox();
   const hirtshalsLabel = page.getByRole('button', { name: 'Open Hirtshals stop details' });
   const hamburgLabel = page.getByRole('button', { name: 'Open Hamburg stop details' });
-  await expect(hirtshalsLabel).toBeVisible();
+  const liveCanvas = page.locator('.maplibregl-canvas').first();
+  for (let zoomStep = 0; zoomStep < 3; zoomStep += 1) {
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+    await stableCanvasPixels(liveCanvas);
+  }
+  await expect(hirtshalsLabel).toBeVisible({ timeout: 15_000 });
+  await expect(hamburgLabel).toBeVisible({ timeout: 15_000 });
+  const mapBox = await mapContainer.boundingBox();
   const hirtshalsLabelBox = await hirtshalsLabel.boundingBox();
   const hamburgLabelBox = await hamburgLabel.boundingBox();
   const hirtshalsLabelIsAbove = await hirtshalsLabel.evaluate((element) =>
@@ -332,44 +318,31 @@ test('preserves Nordkapp routing intent and calculates both legs around an ordin
     .filter((coordinates) => coordinates.length === 2);
   expect(adjacentCalculations.length).toBeGreaterThanOrEqual(2);
   expect(adjacentCalculations.every((coordinates) => coordinates.length === 2)).toBe(true);
-  const readInsertedStopLegs = () => page.evaluate(async () => {
-    const request = indexedDB.open('world-tour-planner');
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const transaction = db.transaction(['destinations', 'routeLegs'], 'readonly');
-    const destinationsRequest = transaction.objectStore('destinations').getAll();
-    const routeLegsRequest = transaction.objectStore('routeLegs').getAll();
-    const [destinations, routeLegs] = await Promise.all([
-      new Promise<Array<{ entityId?: string; name: string }>>((resolve, reject) => {
-        destinationsRequest.onsuccess = () => resolve(destinationsRequest.result);
-        destinationsRequest.onerror = () => reject(destinationsRequest.error);
-      }),
-      new Promise<Array<{
+  const readInsertedStopLegs = async () => {
+    const response = await request.get(`/plotter/api/v1/trips/${encodeURIComponent(tripId)}`);
+    expect(response.ok()).toBe(true);
+    const snapshot = await response.json() as {
+      destinations: Array<{ id: string; name: string }>;
+      routeLegs: Array<{
         originDestinationId: string;
         targetDestinationId: string;
         movement: string;
         calculation?: string;
         status: string;
         provider?: string;
-      }>>((resolve, reject) => {
-        routeLegsRequest.onsuccess = () => resolve(routeLegsRequest.result);
-        routeLegsRequest.onerror = () => reject(routeLegsRequest.error);
-      }),
-    ]);
-    db.close();
-    const aalborg = destinations.find((destination) => destination.name === 'Aalborg');
-    if (!aalborg?.entityId) return [];
-    const namesById = new Map(destinations.map((destination) => [destination.entityId, destination.name]));
-    return routeLegs.filter((leg) =>
-      leg.originDestinationId === aalborg.entityId || leg.targetDestinationId === aalborg.entityId,
+      }>;
+    };
+    const aalborg = snapshot.destinations.find((destination) => destination.name === 'Aalborg');
+    if (!aalborg) return [];
+    const namesById = new Map(snapshot.destinations.map((destination) => [destination.id, destination.name]));
+    return snapshot.routeLegs.filter((leg) =>
+      leg.originDestinationId === aalborg.id || leg.targetDestinationId === aalborg.id,
     ).map((leg) => ({
       ...leg,
       originName: namesById.get(leg.originDestinationId),
       targetName: namesById.get(leg.targetDestinationId),
     })).sort((left) => left.originName === 'Hamburg' ? -1 : 1);
-  });
+  };
   await expect.poll(async () => (await readInsertedStopLegs()).length).toBe(2);
   const insertedStopLegs = await readInsertedStopLegs();
   expect(insertedStopLegs).toHaveLength(2);
@@ -397,11 +370,7 @@ test('preserves Nordkapp routing intent and calculates both legs around an ordin
   await expect(page.getByLabel(/Route requires review/)).toBeVisible();
 });
 
-test('recovers a manually added stop route and persists its adjusted endpoint warning', async ({ baseURL, context, page }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
-  await cdpSession.send('Storage.clearDataForOrigin', { origin, storageTypes: 'indexeddb' });
-
+test('recovers a manually added stop route and persists its adjusted endpoint warning', async ({ page }) => {
   const places = {
     Olderdalen: {
       id: 'place.olderdalen',
@@ -474,9 +443,10 @@ test('recovers a manually added stop route and persists its adjusted endpoint wa
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
   const searchInput = page.getByLabel('Search for a destination');
   await expect(searchInput).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
 
   await searchInput.fill('Olderdalen');
   await page.getByRole('option', { name: 'Olderdalen, Norway' }).click();
@@ -509,9 +479,7 @@ test('recovers a manually added stop route and persists its adjusted endpoint wa
   })).toBeVisible();
 });
 
-test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
+test('downloads a map-only PNG', async ({ page }) => {
   const galwayResult = [
     {
       id: 'place.galway',
@@ -532,11 +500,6 @@ test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
       context: [{ id: 'country.1', text: 'Ireland', short_code: 'ie' }],
     },
   ];
-
-  await cdpSession.send('Storage.clearDataForOrigin', {
-    origin,
-    storageTypes: 'indexeddb',
-  });
 
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
     const url = new URL(route.request().url());
@@ -579,7 +542,7 @@ test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
   const searchInput = page.getByLabel('Search for a destination');
   await expect(searchInput).toBeVisible();
 
@@ -587,12 +550,20 @@ test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
   await page.getByLabel('Trip name').fill('Wild Atlantic Way');
   await page.getByRole('button', { name: 'Create trip' }).click();
   await expect(page.getByRole('button', { name: /current trip: Wild Atlantic Way/i })).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
 
   await searchInput.fill('Galway');
   await page.getByRole('option', { name: 'Galway, Ireland' }).click();
   await expect(searchInput).toHaveValue('');
+  const routeSaveResponsePromise = page.waitForResponse((response) =>
+    response.request().method() === 'POST'
+    && /\/api\/v1\/trips\/[^/]+\/mutations$/.test(new URL(response.url()).pathname)
+    && response.request().postData()?.includes('"routeLegsToUpsert":[{') === true,
+  );
   await searchInput.fill('Cork');
   await page.getByRole('option', { name: 'Cork, Ireland' }).click();
+  const routeSaveResponse = await routeSaveResponsePromise;
+  expect(routeSaveResponse.ok(), await routeSaveResponse.text()).toBe(true);
   await expect(page.getByText('130 mi')).toBeVisible();
 
   const liveStopPills = page.locator('.map-destination-label-layer .map-destination-label');
@@ -617,9 +588,7 @@ test('downloads a map-only PNG', async ({ baseURL, context, page }) => {
   expect(liveMapAfter).toBe(liveMapBefore);
 });
 
-test('keeps the itinerary title row visible while scrolling the stop list', async ({ baseURL, context, page }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
+test('keeps the itinerary title row visible while scrolling the stop list', async ({ page }) => {
   const destinations = Array.from({ length: 12 }, (_, index) => {
     const stopNumber = index + 1;
 
@@ -631,11 +600,6 @@ test('keeps the itinerary title row visible while scrolling the stop list', asyn
       properties: { country_code: 'tc' },
       context: [{ id: 'country.1', text: 'Test Country', short_code: 'tc' }],
     };
-  });
-
-  await cdpSession.send('Storage.clearDataForOrigin', {
-    origin,
-    storageTypes: 'indexeddb',
   });
 
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
@@ -679,9 +643,10 @@ test('keeps the itinerary title row visible while scrolling the stop list', asyn
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
   const searchInput = page.getByLabel('Search for a destination');
   await expect(searchInput).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
 
   for (const destination of destinations) {
     await searchInput.fill(destination.text);
@@ -737,15 +702,7 @@ test('keeps the itinerary title row visible while scrolling the stop list', asyn
   await expect(page.getByRole('button', { name: 'Collapse itinerary panel' })).toBeInViewport();
 });
 
-test('creates and switches personal trips without Supabase', async ({ baseURL, context, page }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
-
-  await cdpSession.send('Storage.clearDataForOrigin', {
-    origin,
-    storageTypes: 'indexeddb',
-  });
-
+test('creates and switches personal trips without Supabase', async ({ page }) => {
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
     const url = new URL(route.request().url());
     const query = decodeURIComponent(url.pathname.replace('/geocoding/', '').replace('.json', ''));
@@ -768,7 +725,7 @@ test('creates and switches personal trips without Supabase', async ({ baseURL, c
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
 
   await page.getByRole('button', { name: 'New trip' }).click();
@@ -776,6 +733,7 @@ test('creates and switches personal trips without Supabase', async ({ baseURL, c
   await page.getByRole('button', { name: 'Create trip' }).click();
 
   await expect(page.getByRole('button', { name: /current trip: Japan winter/i })).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
 
   await page.getByLabel('Search for a destination').fill('Kyoto');
   await page.getByRole('option', { name: 'Kyoto, Japan' }).click();
@@ -793,15 +751,7 @@ test('creates and switches personal trips without Supabase', async ({ baseURL, c
   await expect(page.getByRole('button', { name: 'Kyoto, Japan' })).toBeVisible();
 });
 
-test('searches and saves an Istanbul destination profile', async ({ baseURL, context, page }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
-
-  await cdpSession.send('Storage.clearDataForOrigin', {
-    origin,
-    storageTypes: 'indexeddb',
-  });
-
+test('searches and saves an Istanbul destination profile', async ({ page }) => {
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -813,9 +763,10 @@ test('searches and saves an Istanbul destination profile', async ({ baseURL, con
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
 
   await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
 
   await page.getByLabel('Search for a destination').fill('Istanbul');
   await page.getByRole('option', { name: 'Istanbul, Turkey' }).click();
@@ -877,10 +828,11 @@ test('adds a stop from the map context menu', async ({ page }) => {
     });
   });
 
-  await page.goto('/');
+  await gotoServiceApp(page);
 
   await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
   const mapContainer = page.getByTestId('map-container');
   await expect(mapContainer).toBeVisible();
   await mapContainer.click({
@@ -900,15 +852,8 @@ test('adds a stop from the map context menu', async ({ page }) => {
   await expect(page.getByRole('complementary', { name: 'Map stop profile' })).toBeVisible();
 });
 
-test('opens an activity panel with image region beside the selected stop', async ({ baseURL, context, page }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
+test('opens an activity panel with image region beside the selected stop', async ({ page }) => {
   const activityTitle = 'Morning Louvre';
-
-  await cdpSession.send('Storage.clearDataForOrigin', {
-    origin,
-    storageTypes: 'indexeddb',
-  });
 
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
     const url = new URL(route.request().url());
@@ -919,10 +864,11 @@ test('opens an activity panel with image region beside the selected stop', async
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
 
   await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
   await page.getByLabel('Search for a destination').fill('Paris');
   await page.getByRole('option', { name: 'Paris, France' }).click();
 
@@ -953,7 +899,14 @@ test('opens an activity panel with image region beside the selected stop', async
   });
 
   await activityPanel.getByLabel('Search web images').fill('mural');
+  const importResponsePromise = page.waitForResponse((response) =>
+    response.request().method() === 'POST'
+    && response.url().includes('/activities/')
+    && response.url().endsWith('/media/import'),
+  );
   await activityPanel.getByRole('option', { name: 'Import mural in Morning Louvre from Local image search' }).click();
+  const importResponse = await importResponsePromise;
+  expect(importResponse.ok(), await importResponse.text()).toBe(true);
 
   await expect(activityPanel.getByRole('button', { name: 'Open full image: mural in Morning Louvre' })).toBeVisible();
   expect(openedFileChooser).toBe(false);
@@ -968,15 +921,7 @@ test('opens an activity panel with image region beside the selected stop', async
   expect(activityBox.x + activityBox.width).toBeLessThanOrEqual(stopBox.x);
 });
 
-test('imports a web image result into a stop carousel', async ({ baseURL, context, page }) => {
-  const origin = new URL(baseURL ?? 'http://127.0.0.1:5174').origin;
-  const cdpSession = await context.newCDPSession(page);
-
-  await cdpSession.send('Storage.clearDataForOrigin', {
-    origin,
-    storageTypes: 'indexeddb',
-  });
-
+test('imports a web image result into a stop carousel', async ({ page }) => {
   await page.route('https://api.maptiler.com/geocoding/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -988,10 +933,11 @@ test('imports a web image result into a stop carousel', async ({ baseURL, contex
     });
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoServiceApp(page, { waitUntil: 'domcontentloaded' });
 
   await expect(page.getByLabel('Interactive Plotter map')).toBeVisible();
   await expect(page.getByLabel('Search for a destination')).toBeVisible();
+  await expect(page.getByText('No stops in this trip yet')).toBeVisible();
   await page.getByLabel('Search for a destination').fill('Paris');
   await page.getByRole('option', { name: 'Paris, France' }).click();
 
