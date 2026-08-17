@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { PlotterApiClient } from '../api/client';
 import type { Activity, Destination, RouteLeg } from '../domain/types';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
+import { TripStorageConflictError } from '../storage/revision';
+import { createServiceRepositories } from '../storage/serviceRepositories';
 import type { TripRepository } from '../storage/tripRepository';
 import { createTripDataService } from '../tripCommands/tripDataService';
 import { parseTripCliArgs, resolvePlotterBaseUrl, runTripCli, runTripProgram } from './trip';
@@ -53,6 +56,44 @@ function createCliHarness(serviceOverrides?: Partial<MockService>) {
   return { service, readFile, write, writeError };
 }
 
+function createFreshHttpServiceHarness() {
+  const calls: Array<{ path: string; init?: RequestInit }> = [];
+  const responses: unknown[] = [];
+  const client: PlotterApiClient = {
+    async request<T>(path: string, init?: RequestInit) {
+      calls.push({ path, init });
+      const response = responses.shift();
+      if (response instanceof Error) throw response;
+      return response as T;
+    },
+    async upload() {
+      throw new Error('Uploads are not part of trip creation.');
+    },
+  };
+  const repositories = createServiceRepositories(client);
+  return {
+    calls,
+    responses,
+    service: createTripDataService(repositories),
+  };
+}
+
+function createdTrip(id: string, name: string): TripSummary {
+  return {
+    id,
+    name,
+    description: '',
+    routingVehicle: standardRoutingVehicle,
+    createdAt: '2026-08-17T10:00:00.000Z',
+    updatedAt: '2026-08-17T10:00:00.000Z',
+  };
+}
+
+function requestBody(call: { init?: RequestInit }) {
+  if (typeof call.init?.body !== 'string') throw new Error('Expected JSON request body.');
+  return JSON.parse(call.init.body) as Record<string, unknown>;
+}
+
 describe('parseTripCliArgs', () => {
   it('parses command flags and boolean switches', () => {
     expect(
@@ -83,6 +124,25 @@ describe('resolvePlotterBaseUrl', () => {
       new URL('http://localhost:9123/custom/'),
     );
   });
+
+  it.each([
+    'file:///tmp/plotter',
+    'http://user:secret@127.0.0.1/plotter/',
+    'http://127.0.0.1/plotter/?debug=true',
+    'https://plotter.example/plotter/#section',
+    'not a URL',
+  ])('rejects unsafe base URL configuration %s', (value) => {
+    expect(() => resolvePlotterBaseUrl({ PLOTTER_BASE_URL: value })).toThrow('Plotter CLI configuration is invalid.');
+  });
+
+  it.each(['http://127.0.0.1/custom', 'https://plotter.example/nested/path'])(
+    'accepts http(s) overrides and normalizes their path for API joins',
+    (value) => {
+      const baseUrl = resolvePlotterBaseUrl({ PLOTTER_BASE_URL: value });
+      expect(baseUrl.pathname).toMatch(/\/$/);
+      expect(new URL('api/v1/trips', baseUrl).toString()).toBe(`${value}/api/v1/trips`);
+    },
+  );
 });
 
 describe('runTripCli', () => {
@@ -395,6 +455,131 @@ describe('runTripCli', () => {
     expect(payload.audit).toEqual({ errors: 0, warnings: 0, issues: [] });
     expect(payload.trip).toEqual({ id: 'trip-nordkapp', name: 'Nordkapp', vehiclePreset: 'standard' });
     expect(write.mock.calls[0]?.[0]).not.toContain('coordinates');
+  });
+
+  it('creates a simple trip through fresh HTTP repositories with authoritative revisions', async () => {
+    const harness = createFreshHttpServiceHarness();
+    harness.responses.push(
+      { revision: 4, trips: [] },
+      { revision: 5, trip: createdTrip('trip-simple', 'Simple') },
+      { revision: 0, destinations: [], routeLegs: [], activities: [] },
+      { revision: 1 },
+    );
+    const write = vi.fn();
+
+    const exitCode = await runTripCli({
+      argv: ['create', '--input', '/tmp/simple.json'],
+      service: harness.service,
+      readFile: vi.fn(async () => JSON.stringify({ name: 'Simple' })),
+      write,
+      writeError: vi.fn(),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(write.mock.calls[0]?.[0] ?? '{}')).toMatchObject({ ok: true, trip: { id: 'trip-simple' } });
+    expect(harness.calls.map(({ path }) => path)).toEqual([
+      '/api/v1/trips',
+      '/api/v1/trips',
+      '/api/v1/trips/trip-simple',
+      '/api/v1/trips/trip-simple/mutations',
+    ]);
+    expect(requestBody(harness.calls[1]!)).toMatchObject({ expectedRevision: 4, name: 'Simple' });
+    expect(requestBody(harness.calls[3]!)).toMatchObject({ expectedRevision: 0, mutation: { type: 'replace-trip-data' } });
+  });
+
+  it('creates a manifest-backed trip through fresh HTTP repositories with authoritative revisions', async () => {
+    const harness = createFreshHttpServiceHarness();
+    harness.responses.push(
+      { revision: 8, trips: [] },
+      { revision: 9, trip: createdTrip('trip-manifest', 'Manifest') },
+      { revision: 0, destinations: [], routeLegs: [], activities: [] },
+      { revision: 1 },
+    );
+    const write = vi.fn();
+
+    const exitCode = await runTripCli({
+      argv: ['create', '--input', '/tmp/manifest.json'],
+      service: harness.service,
+      readFile: vi.fn(async () => JSON.stringify({
+        manifestVersion: 1,
+        name: 'Manifest',
+        stops: [{
+          key: 'home',
+          name: 'Home',
+          place: { coordinates: { lat: 51.0576, lng: -0.1342 } },
+          expectedStayDays: 1,
+        }],
+      })),
+      write,
+      writeError: vi.fn(),
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(write.mock.calls[0]?.[0] ?? '{}')).toMatchObject({ ok: true, trip: { id: 'trip-manifest' } });
+    expect(harness.calls.map(({ path }) => path)).toEqual([
+      '/api/v1/trips',
+      '/api/v1/trips',
+      '/api/v1/trips/trip-manifest',
+      '/api/v1/trips/trip-manifest/mutations',
+    ]);
+    expect(requestBody(harness.calls[1]!)).toMatchObject({ expectedRevision: 8, name: 'Manifest' });
+    expect(requestBody(harness.calls[3]!)).toMatchObject({ expectedRevision: 0, mutation: { type: 'replace-trip-data' } });
+  });
+
+  it('retains manifest cleanup when the newly created trip snapshot cannot be loaded', async () => {
+    const harness = createFreshHttpServiceHarness();
+    harness.responses.push(
+      { revision: 4, trips: [] },
+      { revision: 5, trip: createdTrip('trip-manifest', 'Manifest') },
+      new Error('snapshot unavailable'),
+      { revision: 6 },
+    );
+
+    const exitCode = await runTripCli({
+      argv: ['create', '--input', '/tmp/manifest.json'],
+      service: harness.service,
+      readFile: vi.fn(async () => JSON.stringify({
+        manifestVersion: 1,
+        name: 'Manifest',
+        stops: [{
+          key: 'home',
+          name: 'Home',
+          place: { coordinates: { lat: 51.0576, lng: -0.1342 } },
+          expectedStayDays: 1,
+        }],
+      })),
+      write: vi.fn(),
+      writeError: vi.fn(),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(harness.calls.map(({ path }) => path)).toEqual([
+      '/api/v1/trips',
+      '/api/v1/trips',
+      '/api/v1/trips/trip-manifest',
+      '/api/v1/trips/trip-manifest',
+    ]);
+    expect(requestBody(harness.calls[3]!)).toEqual({ expectedRevision: 5 });
+  });
+
+  it('does not bypass a directory revision conflict while creating through fresh HTTP repositories', async () => {
+    const harness = createFreshHttpServiceHarness();
+    harness.responses.push(
+      { revision: 4, trips: [] },
+      new TripStorageConflictError(5),
+    );
+
+    const exitCode = await runTripCli({
+      argv: ['create', '--input', '/tmp/simple.json'],
+      service: harness.service,
+      readFile: vi.fn(async () => JSON.stringify({ name: 'Simple' })),
+      write: vi.fn(),
+      writeError: vi.fn(),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(harness.calls.map(({ path }) => path)).toEqual(['/api/v1/trips', '/api/v1/trips']);
+    expect(requestBody(harness.calls[1]!)).toMatchObject({ expectedRevision: 4, name: 'Simple' });
   });
 
   it('routes audit and preserves its issues in summary output', async () => {
@@ -718,6 +903,32 @@ describe('runTripCli', () => {
         message: 'Plotter service is unavailable.',
       },
     });
+  });
+
+  it('keeps invalid base URL configuration distinct from service unavailability', async () => {
+    const originalBaseUrl = process.env.PLOTTER_BASE_URL;
+    process.env.PLOTTER_BASE_URL = 'file:///tmp/plotter';
+    const write = vi.fn();
+    const writeError = vi.fn();
+
+    try {
+      const exitCode = await runTripProgram({
+        argv: ['list'],
+        write,
+        writeError,
+        setExitCode: vi.fn(),
+      });
+
+      expect(exitCode).toBe(1);
+      expect(write).not.toHaveBeenCalled();
+      expect(JSON.parse(writeError.mock.calls[0]?.[0] ?? '{}')).toMatchObject({
+        ok: false,
+        error: { code: 'COMMAND_FAILED', message: 'Plotter CLI configuration is invalid.' },
+      });
+    } finally {
+      if (originalBaseUrl === undefined) delete process.env.PLOTTER_BASE_URL;
+      else process.env.PLOTTER_BASE_URL = originalBaseUrl;
+    }
   });
 
   it('prints local help without creating a service connection', async () => {

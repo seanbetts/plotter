@@ -678,6 +678,16 @@ async function withCommandHandling<T>(execute: () => Promise<CommandResult<T>>):
   }
 }
 
+async function createTripWithPrimedDirectory(
+  dependencies: Pick<TripDataServiceDependencies, 'directory' | 'createTripRepository'>,
+  input: Parameters<TripDataServiceDependencies['directory']['createTrip']>[0],
+) {
+  await dependencies.directory.listTrips();
+  const trip = await dependencies.directory.createTrip(input);
+  const repository = dependencies.createTripRepository(trip.id);
+  return { trip, repository };
+}
+
 export function createTripDataService(
   dependencies: TripDataServiceDependencies,
 ): TripDataService {
@@ -1077,12 +1087,12 @@ export function createTripDataService(
             });
           }
 
-          const trip = await dependencies.directory.createTrip({
+          const { trip, repository } = await createTripWithPrimedDirectory(dependencies, {
             name: manifest.name,
             routingVehicle: materialized.routingVehicle,
           });
-          const repository = dependencies.createTripRepository(trip.id);
           try {
+            await repository.loadSnapshot?.();
             await repository.replaceTripData({
               destinations: materialized.destinations,
               activities: materialized.activities,
@@ -1145,8 +1155,8 @@ export function createTripDataService(
           });
         }
 
-        const trip = await dependencies.directory.createTrip({ name });
-        const repository = dependencies.createTripRepository(trip.id);
+        const { trip, repository } = await createTripWithPrimedDirectory(dependencies, { name });
+        await repository.loadSnapshot?.();
         await repository.replaceTripData({
           destinations: calculatedStops,
           activities: [],

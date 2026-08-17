@@ -34,6 +34,7 @@ type JsonRecord = Record<string, unknown>;
 
 const defaultPlotterBaseUrl = 'http://127.0.0.1/plotter/';
 const serviceUnavailableMessage = 'Plotter service is unavailable.';
+const configurationErrorMessage = 'Plotter CLI configuration is invalid.';
 const tripCliHelp = {
   ok: true,
   summary: 'Plotter trip CLI commands.',
@@ -46,7 +47,25 @@ const tripCliHelp = {
 };
 
 export function resolvePlotterBaseUrl(environment: NodeJS.ProcessEnv): URL {
-  return new URL(environment.PLOTTER_BASE_URL?.trim() || defaultPlotterBaseUrl);
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(environment.PLOTTER_BASE_URL?.trim() || defaultPlotterBaseUrl);
+  } catch {
+    throw new Error(configurationErrorMessage);
+  }
+
+  if (
+    (baseUrl.protocol !== 'http:' && baseUrl.protocol !== 'https:')
+    || baseUrl.username
+    || baseUrl.password
+    || baseUrl.search
+    || baseUrl.hash
+  ) {
+    throw new Error(configurationErrorMessage);
+  }
+
+  if (!baseUrl.pathname.endsWith('/')) baseUrl.pathname = `${baseUrl.pathname}/`;
+  return baseUrl;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -523,14 +542,19 @@ export async function runTripProgram(input: RunTripProgramInput = {}) {
     });
     setExitCode(exitCode);
     return exitCode;
-  } catch {
+  } catch (caught) {
     const writeError = input.writeError ?? ((value: string) => {
       process.stderr.write(value);
     });
     const setExitCode = input.setExitCode ?? ((code: number) => {
       process.exitCode = code;
     });
-    writeStructuredError(writeError, serviceUnavailableMessage);
+    writeStructuredError(
+      writeError,
+      caught instanceof Error && caught.message === configurationErrorMessage
+        ? configurationErrorMessage
+        : serviceUnavailableMessage,
+    );
     setExitCode(1);
     return 1;
   }
