@@ -10,7 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "dev:e2e": "VITE_TRIP_STORAGE=e2e-local vite --host 127.0.0.1 --port 5174 --strictPort",
     "dev:service": "tsx server/service.ts --port 5175 --data-dir user-data --env-file .env",
-    "build": "tsc -b && vite build && npm run build:service",
+    "build": "tsc -b && tsc -p tsconfig.server.json && vite build && npm run build:service",
     "build:service": "esbuild server/service.ts --bundle --platform=node --format=esm --outfile=server-dist/service.mjs",
     "lint": "eslint . --ignore-pattern server-dist/",
     "test": "VITE_MAPTILER_API_KEY=e2e-test-key vitest run && npm run test:server",
