@@ -1,12 +1,14 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { PlotterApiError } from '../api/client';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, withRoutingAnchor } from '../domain/destinations';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
 import type { Activity, Destination, RouteLeg, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
 import { resolveVehiclePreset, standardRoutingVehicle } from '../domain/vehiclePresets';
 import { createTripDb } from '../storage/tripDb';
+import { TripStorageConflictError } from '../storage/revision';
 import { createTripRepository } from '../storage/tripRepository';
 import { createRouteResultFingerprint } from '../tripCommands/routeOrchestration';
 import { useTripData } from './useTripData';
@@ -262,6 +264,59 @@ describe('useTripData', () => {
     expect(result.current.activitiesByDestinationId[destination.id].map((activity) => activity.title)).toEqual([
       'Louvre',
     ]);
+  });
+
+  it('publishes destinations, route legs, and activities from one repository snapshot', async () => {
+    const destination = createDestination({
+      name: 'Paris',
+      coordinates: { lat: 48.8566, lng: 2.3522 },
+    });
+    const routeLeg = createRouteLeg({
+      originDestinationId: destination.id,
+      targetDestinationId: destination.id,
+    });
+    const activity = createActivityModel({
+      destinationId: destination.id,
+      title: 'Louvre',
+      order: 0,
+    });
+    const loadSnapshot = vi.fn(async () => ({
+      revision: 4,
+      destinations: [destination],
+      routeLegs: [routeLeg],
+      activities: [activity],
+    }));
+    const repository = createMemoryRepository(Promise.resolve([]), {
+      loadSnapshot,
+      listDestinations: async () => { throw new Error('split destination read used'); },
+      listRouteLegs: async () => { throw new Error('split route read used'); },
+      listActivities: async () => { throw new Error('split activity read used'); },
+    });
+
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.destinations).toEqual([destination]);
+    expect(result.current.routeLegs).toEqual([routeLeg]);
+    expect(result.current.activitiesByDestinationId).toEqual({ [destination.id]: [activity] });
+    expect(result.current.revision).toBe(4);
+    expect(loadSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the shared storage unavailable message when the initial service snapshot is unavailable', async () => {
+    const loadSnapshot = vi
+      .fn()
+      .mockRejectedValueOnce(new PlotterApiError('Unavailable', { status: 503, code: 'storage-unavailable' }))
+      .mockResolvedValue({ revision: 1, destinations: [], routeLegs: [], activities: [] });
+    const repository = createMemoryRepository(Promise.resolve([]), { loadSnapshot });
+    const { result } = renderHook(() => useTripData(repository));
+
+    await waitFor(() => expect(result.current.error).toBe('Shared trip storage is unavailable.'));
+    await act(async () => { await result.current.reload(); });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.revision).toBe(1);
+    expect(loadSnapshot).toHaveBeenCalledTimes(2);
   });
 
   it('recalculates and persists a legacy large-camper HGV route before publishing the loaded trip', async () => {
@@ -3256,6 +3311,59 @@ describe('useTripData', () => {
     expect(result.current.mutationError).toBe('trip mutation failed');
     expect(result.current.destinations).toEqual([origin, target]);
     expect(result.current.routeLegs).toEqual([priorLeg]);
+  });
+
+  it('discards stale optimistic state and reloads one canonical snapshot after a conflict', async () => {
+    const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53, lng: 8 }, order: 0 });
+    const canonical = createDestination({ name: 'Canonical Hamburg', coordinates: { lat: 54, lng: 9 }, order: 1 });
+    const loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce({ revision: 1, destinations: [origin], routeLegs: [], activities: [] })
+      .mockResolvedValue({ revision: 2, destinations: [origin, canonical], routeLegs: [], activities: [] });
+    const repository = createMemoryRepository(Promise.resolve([]), {
+      loadSnapshot,
+      applyTripMutation: async () => { throw new TripStorageConflictError(2); },
+    });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.revision).toBe(1));
+
+    await act(async () => {
+      await result.current.addDestination({ name: 'Stale optimistic stop', coordinates: { lat: 53.5, lng: 8.5 } });
+    });
+    await waitFor(() => expect(result.current.revision).toBe(2));
+
+    expect(result.current.destinations).toEqual([origin, canonical]);
+    expect(result.current.mutationError).toBe(
+      'Another device changed this trip. Plotter reloaded the latest version.',
+    );
+    expect(result.current.isMutatingStops).toBe(false);
+    expect(loadSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('reloads canonical data instead of retrying a stale non-topology mutation', async () => {
+    const destination = createDestination({ name: 'Paris', coordinates: { lat: 48.8, lng: 2.3 } });
+    const oldActivity = createActivityModel({ destinationId: destination.id, title: 'Old title', order: 0 });
+    const canonicalActivity = { ...oldActivity, title: 'Canonical title', updatedAt: '2026-08-17T13:00:00.000Z' };
+    const loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce({ revision: 4, destinations: [destination], routeLegs: [], activities: [oldActivity] })
+      .mockResolvedValue({ revision: 5, destinations: [destination], routeLegs: [], activities: [canonicalActivity] });
+    const updateActivity = vi.fn(async () => { throw new TripStorageConflictError(5); });
+    const repository = createMemoryRepository(Promise.resolve([]), { loadSnapshot, updateActivity });
+    const { result } = renderHook(() => useTripData(repository));
+    await waitFor(() => expect(result.current.revision).toBe(4));
+
+    await act(async () => {
+      await result.current.updateActivity(oldActivity.id, { title: 'Stale title' });
+    });
+    await waitFor(() => expect(result.current.revision).toBe(5));
+
+    expect(updateActivity).toHaveBeenCalledTimes(1);
+    expect(result.current.activitiesByDestinationId[destination.id]).toEqual([canonicalActivity]);
+    expect(result.current.mutationError).toBe(
+      'Another device changed this trip. Plotter reloaded the latest version.',
+    );
+    expect(loadSnapshot).toHaveBeenCalledTimes(2);
   });
 
   it('keeps UI state unchanged when an atomic destination update is rejected', async () => {

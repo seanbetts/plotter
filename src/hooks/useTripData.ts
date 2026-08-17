@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { PlotterApiError } from '../api/client';
 import { createActivity as createActivityModel } from '../domain/activities';
 import { createDestination, updateDestination as patchDestination, withRoutingAnchor } from '../domain/destinations';
 import {
@@ -10,6 +11,7 @@ import { createRouteLeg } from '../domain/routeLegs';
 import type { Activity, Coordinates, Destination, DestinationLocation, RouteCalculationMode, RouteLeg, RouteMovement, RoutingAnchor, TripRoutingVehicle } from '../domain/types';
 import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import type { TripMutationDelta, TripRepository } from '../storage/tripRepository';
+import { TripStorageConflictError, type TripSnapshot } from '../storage/revision';
 import {
   calculateAutomaticRouteLegs,
   createRouteResultFingerprint,
@@ -67,6 +69,12 @@ class TripMutationPersistenceError extends Error {
 
 const createTimestamp = () => new Date().toISOString();
 const allRouteMutationsQueueKey = '__all_route_mutations__';
+const tripConflictMessage = 'Another device changed this trip. Plotter reloaded the latest version.';
+
+function isTripStorageConflict(caught: unknown): boolean {
+  if (caught instanceof TripStorageConflictError) return true;
+  return caught instanceof Error && isTripStorageConflict(caught.cause);
+}
 
 function changedDestinationsByReference(currentDestinations: Destination[], nextDestinations: Destination[]) {
   const currentById = new Map(currentDestinations.map((destination) => [destination.id, destination]));
@@ -239,6 +247,7 @@ async function reconcileLoadedRoutesForVehicle(input: {
 }
 
 export function useTripData(repository: TripRepository, options: UseTripDataOptions = {}) {
+  const [repositoryGeneration, setRepositoryGeneration] = useState(0);
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [routeLegs, setRouteLegs] = useState<RouteLeg[]>([]);
   const [activitiesByDestinationId, setActivitiesByDestinationId] = useState<Record<string, Activity[]>>({});
@@ -246,6 +255,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const [error, setError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [pendingTopologyMutationCount, setPendingTopologyMutationCount] = useState(0);
+  const [revision, setRevision] = useState<number | null>(null);
   const destinationsRef = useRef<Destination[]>([]);
   const routeLegsRef = useRef<RouteLeg[]>([]);
   const activitiesByDestinationIdRef = useRef<Record<string, Activity[]>>({});
@@ -256,6 +266,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const nextTopologyMutationIdRef = useRef(0);
   const deferredReloadRef = useRef(false);
   const hasCompletedInitialLoadRef = useRef(false);
+  const preserveConflictMessageRef = useRef(false);
   const routeLegMutationQueuesByGenerationRef = useRef(
     new Map<object, Map<string, Promise<void>>>(),
   );
@@ -263,7 +274,10 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
   const calculateRouteRef = useRef(calculateRoute);
   const routingVehicle = options.routingVehicle ?? standardRoutingVehicle;
   const routingVehicleRef = useRef(routingVehicle);
-  const repositoryToken = useMemo(() => ({ repository }), [repository]);
+  const repositoryToken = useMemo(
+    () => ({ repository, repositoryGeneration }),
+    [repository, repositoryGeneration],
+  );
 
   useLayoutEffect(() => {
     calculateRouteRef.current = calculateRoute;
@@ -360,12 +374,14 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     deferredReloadRef.current = false;
     hasCompletedInitialLoadRef.current = false;
 
+    const preserveConflictMessage = preserveConflictMessageRef.current;
+    preserveConflictMessageRef.current = false;
     queueMicrotask(() => {
       if (isCancelled || activeRepositoryTokenRef.current !== repositoryToken) return;
 
       setPendingTopologyMutationCount(0);
       setIsLoading(true);
-      setMutationError(null);
+      if (!preserveConflictMessage) setMutationError(null);
     });
 
     return () => {
@@ -383,6 +399,28 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     [],
   );
 
+  const resetAfterConflict = useCallback((caught: unknown, generation: object) => {
+    if (!isTripStorageConflict(caught) || !isActiveGeneration(generation)) return false;
+    activeRepositoryTokenRef.current = null;
+    reloadSequenceRef.current += 1;
+    pendingTopologyMutationsRef.current = [];
+    routeLegMutationQueuesByGenerationRef.current.delete(generation);
+    deferredReloadRef.current = false;
+    hasCompletedInitialLoadRef.current = false;
+    destinationsRef.current = [];
+    routeLegsRef.current = [];
+    activitiesByDestinationIdRef.current = {};
+    setDestinations([]);
+    setRouteLegs([]);
+    setActivitiesByDestinationId({});
+    setPendingTopologyMutationCount(0);
+    setRevision(null);
+    preserveConflictMessageRef.current = true;
+    setMutationError(tripConflictMessage);
+    setRepositoryGeneration((current) => current + 1);
+    return true;
+  }, [isActiveGeneration]);
+
   const startReload = useCallback(async (generation: object) => {
     if (!isActiveGeneration(generation)) return;
 
@@ -395,10 +433,15 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     if (isInitialLoad) setIsLoading(true);
     setError(null);
     try {
-      const [initialDestinations, initialRouteLegs] = await Promise.all([
-        repository.listDestinations(),
-        repository.listRouteLegs(),
-      ]);
+      const initialSnapshot: TripSnapshot | null = repository.loadSnapshot
+        ? await repository.loadSnapshot()
+        : null;
+      const [initialDestinations, initialRouteLegs] = initialSnapshot
+        ? [initialSnapshot.destinations, initialSnapshot.routeLegs]
+        : await Promise.all([
+            repository.listDestinations(),
+            repository.listRouteLegs(),
+          ]);
 
       if (!isCurrentReload()) return;
 
@@ -408,11 +451,16 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       await enqueueRouteLegMutations([], async () => {
         if (!isCurrentReload()) return;
 
+        const refreshedSnapshot = mustRefreshAfterWaiting && repository.loadSnapshot
+          ? await repository.loadSnapshot()
+          : null;
         const [loadedDestinations, loadedRouteLegs] = mustRefreshAfterWaiting
-          ? await Promise.all([
-              repository.listDestinations(),
-              repository.listRouteLegs(),
-            ])
+          ? refreshedSnapshot
+            ? [refreshedSnapshot.destinations, refreshedSnapshot.routeLegs]
+            : await Promise.all([
+                repository.listDestinations(),
+                repository.listRouteLegs(),
+              ])
           : [initialDestinations, initialRouteLegs];
         if (!isCurrentReload()) return;
 
@@ -426,22 +474,33 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         });
         if (!reconciled || !isCurrentReload()) return;
 
-        const loadedActivities = await Promise.all(
-          reconciled.destinations.map(async (destination) => [
-            destination.id,
-            await repository.listActivities(destination.id),
-          ] as const),
-        );
+        const authoritativeSnapshot = refreshedSnapshot ?? initialSnapshot;
+        const loadedActivities = authoritativeSnapshot
+          ? reconciled.destinations.map((destination) => [
+              destination.id,
+              authoritativeSnapshot.activities.filter((activity) => activity.destinationId === destination.id),
+            ] as const)
+          : await Promise.all(
+              reconciled.destinations.map(async (destination) => [
+                destination.id,
+                await repository.listActivities(destination.id),
+              ] as const),
+            );
         if (!isCurrentReload()) return;
 
         replaceDestinations(reconciled.destinations);
         replaceRouteLegs(reconciled.routeLegs);
         replaceActivitiesByDestinationId(Object.fromEntries(loadedActivities));
+        if (authoritativeSnapshot) setRevision(authoritativeSnapshot.revision);
       });
     } catch (caught) {
       if (!isCurrentReload()) return;
 
-      setError(caught instanceof Error ? caught.message : 'Unable to load trip data');
+      const unavailable = caught instanceof PlotterApiError
+        && (caught.status === undefined || caught.status === 503);
+      setError(unavailable
+        ? 'Shared trip storage is unavailable.'
+        : caught instanceof Error ? caught.message : 'Unable to load trip data');
     }
 
     if (!isCurrentReload()) return;
@@ -538,6 +597,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
         baseDestinations = result.destinations;
         baseRouteLegs = result.routeLegs;
       } catch (caught) {
+        if (resetAfterConflict(caught, generation)) return;
         baseDestinations = caught instanceof TripMutationPersistenceError
           ? caught.priorDestinations
           : operation.fallbackDestinations;
@@ -577,6 +637,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     replaceDestinations,
     replaceRouteLegs,
     repositoryToken,
+    resetAfterConflict,
     startReload,
   ]);
 
@@ -600,7 +661,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       const generation = repositoryToken;
       const isActiveAction = () => isActiveGeneration(generation);
 
-      return {
+      const rawActions = {
         async addDestination(input: AddDestinationInput) {
           const destination = createDestination({
             ...input,
@@ -1115,6 +1176,36 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
 
         reload,
       };
+      const recoverAction = <Args extends unknown[], Result>(
+        action: (...args: Args) => Promise<Result>,
+      ) => async (...args: Args): Promise<Result> => {
+        try {
+          return await action(...args);
+        } catch (caught) {
+          if (resetAfterConflict(caught, generation)) return undefined as Result;
+          throw caught;
+        }
+      };
+
+      /* eslint-disable react-hooks/refs -- wrapped actions only read transient refs after user invocation */
+      const recovered = {
+        addDestination: recoverAction(rawActions.addDestination),
+        updateDestination: recoverAction(rawActions.updateDestination),
+        deleteDestination: recoverAction(rawActions.deleteDestination),
+        reorderDestinations: recoverAction(rawActions.reorderDestinations),
+        addRouteLeg: recoverAction(rawActions.addRouteLeg),
+        updateRouteLeg: recoverAction(rawActions.updateRouteLeg),
+        applyValidatedRouteLegResult: recoverAction(rawActions.applyValidatedRouteLegResult),
+        deleteRouteLeg: recoverAction(rawActions.deleteRouteLeg),
+        createActivity: recoverAction(rawActions.createActivity),
+        updateActivity: recoverAction(rawActions.updateActivity),
+        deleteActivity: recoverAction(rawActions.deleteActivity),
+        reorderActivities: recoverAction(rawActions.reorderActivities),
+        recalculateForVehicle: recoverAction(rawActions.recalculateForVehicle),
+        reload: recoverAction(rawActions.reload),
+      };
+      /* eslint-enable react-hooks/refs */
+      return recovered;
     },
     [
       calculateRoute,
@@ -1128,6 +1219,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
       replaceRouteLegs,
       repository,
       repositoryToken,
+      resetAfterConflict,
       updateActivitiesByDestinationId,
       updateRouteLegs,
     ],
@@ -1140,6 +1232,7 @@ export function useTripData(repository: TripRepository, options: UseTripDataOpti
     isLoading,
     error,
     mutationError,
+    revision,
     isMutatingStops: pendingTopologyMutationCount > 0,
     ...actions,
   };

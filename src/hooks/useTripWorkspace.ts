@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VehiclePreset } from '../domain/types';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import { defaultTripName } from '../domain/tripDefaults';
+import { PlotterApiError } from '../api/client';
 import {
+  type AppTripStorage,
   createAppTripStorage,
   legacySelectedTripStorageKey,
   selectedTripStorageKey,
@@ -13,15 +15,9 @@ import {
   removeStorageValue,
   writeStorageValue,
 } from '../storage/localPreferences';
-import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
-import type { TripRealtimeSubscriptions } from '../storage/tripRealtime';
+import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
-
-type AppTripStorage = {
-  directory: TripDirectoryRepository;
-  createTripRepository: (tripId: string) => TripRepository;
-  realtime?: TripRealtimeSubscriptions;
-};
+import { TripStorageConflictError } from '../storage/revision';
 
 type LocalStorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -35,20 +31,15 @@ type RepositoryError = {
   message: string;
 };
 
+const tripConflictMessage = 'Another device changed this trip. Plotter reloaded the latest version.';
+
 function formatRepositoryError(caught: unknown): RepositoryError {
   const message = caught instanceof Error ? caught.message : 'Unable to prepare trip storage';
 
-  if (message.includes('Supabase is not configured')) {
+  if (caught instanceof PlotterApiError && (caught.status === undefined || caught.status === 503)) {
     return {
-      title: 'Supabase is not configured',
-      message: 'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
-    };
-  }
-
-  if (message.includes('row-level security') || message.includes('permission denied')) {
-    return {
-      title: 'Supabase permission denied',
-      message,
+      title: 'Trip storage unavailable',
+      message: 'Shared trip storage is unavailable.',
     };
   }
 
@@ -76,6 +67,8 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<RepositoryError | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [directoryRevision, setDirectoryRevision] = useState<number | null>(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
   const activeTripRef = useRef<TripSummary | null>(null);
 
   const activateTrip = useCallback((nextStorage: AppTripStorage, nextTrip: TripSummary) => {
@@ -98,7 +91,10 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
 
       try {
         const nextStorage = await createStorage();
-        let nextTrips = await nextStorage.directory.listTrips();
+        const directorySnapshot = nextStorage.directory.loadDirectory
+          ? await nextStorage.directory.loadDirectory()
+          : null;
+        let nextTrips = directorySnapshot?.trips ?? await nextStorage.directory.listTrips();
         let selectedTrip = chooseInitialTrip(
           nextTrips,
           readMigratedStorageValue(
@@ -117,6 +113,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
 
         setStorage(nextStorage);
         setTrips(nextTrips);
+        setDirectoryRevision(directorySnapshot?.revision ?? null);
         activateTrip(nextStorage, selectedTrip);
       } catch (caught) {
         if (isCancelled) return;
@@ -135,7 +132,35 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     return () => {
       isCancelled = true;
     };
-  }, [activateTrip, createStorage, localStorage]);
+  }, [activateTrip, createStorage, localStorage, retryAttempt]);
+
+  const retryWorkspace = useCallback(() => {
+    setRetryAttempt((current) => current + 1);
+  }, []);
+
+  const recoverDirectoryConflict = useCallback(async (caught: unknown) => {
+    if (!(caught instanceof TripStorageConflictError) || !storage) return false;
+    const directorySnapshot = storage.directory.loadDirectory
+      ? await storage.directory.loadDirectory()
+      : null;
+    const nextTrips = directorySnapshot?.trips ?? await storage.directory.listTrips();
+    const currentActive = activeTripRef.current;
+    const nextActive = currentActive
+      ? nextTrips.find((trip) => trip.id === currentActive.id) ?? nextTrips[0] ?? null
+      : nextTrips[0] ?? null;
+    setTrips(nextTrips);
+    setDirectoryRevision(directorySnapshot?.revision ?? null);
+    setActiveTrip(nextActive);
+    activeTripRef.current = nextActive;
+    setRepository(nextActive ? storage.createTripRepository(nextActive.id) : null);
+    if (nextActive) {
+      writeStorageValue(localStorage ?? null, selectedTripStorageKey, nextActive.id);
+    } else {
+      removeStorageValue(localStorage ?? null, selectedTripStorageKey);
+    }
+    setActionError(tripConflictMessage);
+    return true;
+  }, [localStorage, storage]);
 
   const selectTrip = useCallback(async (tripId: string) => {
     if (!storage) return false;
@@ -158,10 +183,11 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
       activateTrip(storage, nextTrip);
       return true;
     } catch (caught) {
+      if (await recoverDirectoryConflict(caught)) return false;
       setActionError(caught instanceof Error ? caught.message : 'Unable to create trip');
       return false;
     }
-  }, [activateTrip, storage]);
+  }, [activateTrip, recoverDirectoryConflict, storage]);
 
   const updateTrip = useCallback(async (
     tripId: string,
@@ -185,10 +211,11 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
       });
       return updatedTrip;
     } catch (caught) {
+      if (await recoverDirectoryConflict(caught)) return false;
       setActionError(caught instanceof Error ? caught.message : 'Unable to update trip');
       return false;
     }
-  }, [storage]);
+  }, [recoverDirectoryConflict, storage]);
 
   const deleteTrip = useCallback(async (tripId: string) => {
     if (!storage) return false;
@@ -207,15 +234,19 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
       activateTrip(storage, nextTrips[0]);
       return true;
     } catch (caught) {
+      if (await recoverDirectoryConflict(caught)) return false;
       setActionError(caught instanceof Error ? caught.message : 'Unable to delete trip');
       return false;
     }
-  }, [activateTrip, storage, trips]);
+  }, [activateTrip, recoverDirectoryConflict, storage, trips]);
 
   const refreshTrips = useCallback(async () => {
     if (!storage) return;
 
-    let nextTrips = await storage.directory.listTrips();
+    const directorySnapshot = storage.directory.loadDirectory
+      ? await storage.directory.loadDirectory()
+      : null;
+    let nextTrips = directorySnapshot?.trips ?? await storage.directory.listTrips();
     if (nextTrips.length === 0) {
       const replacementTrip = await storage.directory.createTrip({ name: defaultTripName });
       nextTrips = [replacementTrip];
@@ -227,6 +258,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
       : nextTrips[0] ?? null;
 
     setTrips(nextTrips);
+    setDirectoryRevision(directorySnapshot?.revision ?? null);
     setActiveTrip(nextActive);
     activeTripRef.current = nextActive;
     setRepository(nextActive ? storage.createTripRepository(nextActive.id) : null);
@@ -242,6 +274,7 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     activeTrip,
     repository,
     realtime: storage?.realtime ?? null,
+    directoryRevision,
     isLoading,
     error,
     actionError,
@@ -250,16 +283,19 @@ export function useTripWorkspace(options: UseTripWorkspaceOptions = {}) {
     updateTrip,
     deleteTrip,
     refreshTrips,
+    retryWorkspace,
   }), [
     actionError,
     activeTrip,
     createTrip,
     deleteTrip,
+    directoryRevision,
     error,
     isLoading,
     repository,
     updateTrip,
     refreshTrips,
+    retryWorkspace,
     selectTrip,
     storage?.realtime,
     trips,

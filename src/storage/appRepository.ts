@@ -1,109 +1,65 @@
-import { createBrowserSupabaseClient, isSupabaseConfigured as defaultIsSupabaseConfigured } from './supabaseClient';
 import { defaultTripName } from '../domain/tripDefaults';
-import { createSupabaseTripRepository } from './supabaseTripRepository';
-import { tripDb } from './tripDb';
+import { createPlotterApiClient, type PlotterApiClient } from '../api/client';
+import type { TripDb } from './tripDb';
 import { createTripRepository } from './tripRepository';
 import type { TripRepository } from './tripRepository';
-import { createSupabaseTripRealtime, type TripRealtimeSubscriptions } from './tripRealtime';
+import { createServiceRealtime, type ServiceRealtimeSubscriptions } from './serviceRealtime';
+import { createServiceRepositories } from './serviceRepositories';
 import {
   createLocalTripDirectoryRepository,
-  createSupabaseTripDirectoryRepository,
   type TripDirectoryRepository,
 } from './tripDirectoryRepository';
-
-type BrowserSupabaseClient = ReturnType<typeof createBrowserSupabaseClient>;
-
-type SupabaseUser = {
-  id: string;
-};
-
-type SupabaseAuthResponse = {
-  data: {
-    user: SupabaseUser | null;
-  };
-  error: {
-    message: string;
-  } | null;
-};
-
-type SupabaseAuthClient = {
-  auth: {
-    getUser(): Promise<SupabaseAuthResponse>;
-    signInAnonymously(): Promise<SupabaseAuthResponse>;
-  };
-};
 
 export const selectedTripStorageKey = 'plotter:selected-trip-id';
 export const legacySelectedTripStorageKey = 'world-tour:selected-trip-id';
 
-type AppTripStorage = {
+export type AppTripStorage = {
   directory: TripDirectoryRepository;
   createTripRepository: (tripId: string) => TripRepository;
-  realtime?: TripRealtimeSubscriptions;
+  realtime?: ServiceRealtimeSubscriptions;
 };
 
-type CreateAppTripStorageOptions = {
+export type CreateAppTripStorageOptions = {
   isSupabaseConfigured?: boolean;
   tripStorageMode?: string;
+  baseUrl?: string;
+  serviceClient?: PlotterApiClient;
+  createRealtime?: typeof createServiceRealtime;
   localRepository?: TripRepository;
   localDirectory?: TripDirectoryRepository;
   createLocalRepository?: (tripId: string) => TripRepository;
-  createSupabaseClient?: () => SupabaseAuthClient;
-  createSupabaseDirectory?: (supabase: SupabaseAuthClient) => TripDirectoryRepository;
-  createSupabaseRepository?: (supabase: SupabaseAuthClient, tripId: string) => TripRepository;
+  loadLocalDb?: () => Promise<TripDb>;
+  createSupabaseClient?: () => unknown;
+  createSupabaseDirectory?: (...args: never[]) => TripDirectoryRepository;
+  createSupabaseRepository?: (...args: never[]) => TripRepository;
 };
-
-export async function ensureAnonymousSession(supabase: SupabaseAuthClient) {
-  const existingUser = await supabase.auth.getUser();
-
-  if (existingUser.data.user) {
-    return existingUser.data.user;
-  }
-
-  const anonymousUser = await supabase.auth.signInAnonymously();
-
-  if (anonymousUser.error || !anonymousUser.data.user) {
-    throw new Error(anonymousUser.error?.message || 'Unable to create an anonymous Supabase session.');
-  }
-
-  return anonymousUser.data.user;
-}
 
 export async function createAppTripStorage(
   options: CreateAppTripStorageOptions = {},
 ): Promise<AppTripStorage> {
-  const isSupabaseConfigured = options.isSupabaseConfigured ?? defaultIsSupabaseConfigured;
   const tripStorageMode = options.tripStorageMode ?? import.meta.env.VITE_TRIP_STORAGE;
-  const createLocalRepository =
-    options.createLocalRepository ??
-    ((tripId: string) => options.localRepository ?? createTripRepository(tripDb, tripId));
-  const localDirectory = options.localDirectory ?? createLocalTripDirectoryRepository(tripDb);
 
   if (tripStorageMode === 'e2e-local') {
+    const needsLocalDb = !options.localDirectory
+      || (!options.createLocalRepository && !options.localRepository);
+    const localDb = needsLocalDb
+      ? await (options.loadLocalDb ?? (async () => (await import('./tripDb')).tripDb))()
+      : null;
+    const createLocalRepository = options.createLocalRepository
+      ?? ((tripId: string) => options.localRepository ?? createTripRepository(localDb!, tripId));
+    const localDirectory = options.localDirectory
+      ?? createLocalTripDirectoryRepository(localDb!);
     return {
       directory: localDirectory,
       createTripRepository: createLocalRepository,
     };
   }
 
-  if (!isSupabaseConfigured) {
-    throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.');
-  }
-
-  const createSupabaseClient = options.createSupabaseClient ?? createBrowserSupabaseClient;
-  const supabase = createSupabaseClient();
-  await ensureAnonymousSession(supabase);
-
-  return {
-    directory: options.createSupabaseDirectory
-      ? options.createSupabaseDirectory(supabase)
-      : createSupabaseTripDirectoryRepository(supabase as BrowserSupabaseClient),
-    createTripRepository: (tripId: string) =>
-      options.createSupabaseRepository
-        ? options.createSupabaseRepository(supabase, tripId)
-        : createSupabaseTripRepository(supabase as BrowserSupabaseClient, tripId),
-    realtime: createSupabaseTripRealtime(supabase as BrowserSupabaseClient),
-  };
+  const baseUrl = options.baseUrl ?? import.meta.env.BASE_URL;
+  const client = options.serviceClient ?? createPlotterApiClient({ baseUrl });
+  const repositories = createServiceRepositories(client);
+  const realtime = (options.createRealtime ?? createServiceRealtime)({ baseUrl, client });
+  return { ...repositories, realtime };
 }
 
 export async function createAppTripRepository(options: CreateAppTripStorageOptions = {}) {

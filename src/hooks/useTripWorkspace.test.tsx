@@ -5,6 +5,8 @@ import { selectedTripStorageKey } from '../storage/appRepository';
 import type { TripDirectoryRepository, TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripRepository } from '../storage/tripRepository';
 import { useTripWorkspace } from './useTripWorkspace';
+import { PlotterApiError } from '../api/client';
+import { TripStorageConflictError } from '../storage/revision';
 
 function createTrip(name: string, id: string = crypto.randomUUID()): TripSummary {
   return {
@@ -102,6 +104,78 @@ function createLocalStorage(storedTripId: string | null) {
 }
 
 describe('useTripWorkspace', () => {
+  it('loads the directory atomically and publishes its revision', async () => {
+    const trip = createTrip('Atomic trip', 'atomic-trip');
+    const directory: TripDirectoryRepository = {
+      loadDirectory: vi.fn(async () => ({ revision: 11, trips: [trip] })),
+      listTrips: vi.fn(async () => { throw new Error('split directory read used'); }),
+      createTrip: vi.fn(),
+      updateTrip: vi.fn(),
+      deleteTrip: vi.fn(),
+    };
+    const { result } = renderHook(() => useTripWorkspace({
+      createStorage: async () => ({ directory, createTripRepository: () => createRepository() }),
+      localStorage: createLocalStorage(null),
+    }));
+
+    await waitFor(() => expect(result.current.activeTrip?.id).toBe(trip.id));
+    expect(result.current.directoryRevision).toBe(11);
+    expect(directory.loadDirectory).toHaveBeenCalledTimes(1);
+    expect(directory.listTrips).not.toHaveBeenCalled();
+  });
+
+  it('shows shared storage unavailable and retries the same service storage path', async () => {
+    const trip = createTrip('Recovered trip', 'recovered-trip');
+    const { storage } = createStorage([trip]);
+    const createStorageAttempt = vi
+      .fn()
+      .mockRejectedValueOnce(new PlotterApiError('Storage unavailable', { status: 503, code: 'storage-unavailable' }))
+      .mockResolvedValue(storage);
+    const { result } = renderHook(() => useTripWorkspace({
+      createStorage: createStorageAttempt,
+      localStorage: createLocalStorage(null),
+    }));
+
+    await waitFor(() => expect(result.current.error?.message).toBe('Shared trip storage is unavailable.'));
+    expect(result.current.repository).toBeNull();
+
+    act(() => result.current.retryWorkspace());
+
+    await waitFor(() => expect(result.current.activeTrip?.id).toBe(trip.id));
+    expect(createStorageAttempt).toHaveBeenCalledTimes(2);
+  });
+
+  it('reloads the canonical directory once when a trip mutation conflicts', async () => {
+    const oldTrip = createTrip('Old trip', 'trip-1');
+    const canonicalTrip = { ...oldTrip, name: 'Canonical trip', updatedAt: '2026-08-17T13:00:00.000Z' };
+    const loadDirectory = vi
+      .fn()
+      .mockResolvedValueOnce({ revision: 2, trips: [oldTrip] })
+      .mockResolvedValue({ revision: 3, trips: [canonicalTrip] });
+    const directory: TripDirectoryRepository = {
+      loadDirectory,
+      listTrips: vi.fn(),
+      createTrip: vi.fn(async () => { throw new TripStorageConflictError(3); }),
+      updateTrip: vi.fn(),
+      deleteTrip: vi.fn(),
+    };
+    const { result } = renderHook(() => useTripWorkspace({
+      createStorage: async () => ({ directory, createTripRepository: () => createRepository() }),
+      localStorage: createLocalStorage(null),
+    }));
+    await waitFor(() => expect(result.current.directoryRevision).toBe(2));
+
+    await act(async () => {
+      await result.current.createTrip('Stale new trip');
+    });
+
+    expect(loadDirectory).toHaveBeenCalledTimes(2);
+    expect(result.current.directoryRevision).toBe(3);
+    expect(result.current.trips).toEqual([canonicalTrip]);
+    expect(result.current.actionError).toBe(
+      'Another device changed this trip. Plotter reloaded the latest version.',
+    );
+  });
   it('restores a remembered selected trip', async () => {
     const remembered = createTrip('Remembered trip', 'remembered-trip');
     const other = createTrip('Other trip', 'other-trip');

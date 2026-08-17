@@ -4,9 +4,10 @@ import { standardRoutingVehicle } from '../domain/vehiclePresets';
 import {
   createAppTripRepository,
   createAppTripStorage,
-  ensureAnonymousSession,
   selectedTripStorageKey,
 } from './appRepository';
+import type { PlotterApiClient } from '../api/client';
+import type { TripDb } from './tripDb';
 import type { TripRepository } from './tripRepository';
 
 function createMockRepository(snapshot: {
@@ -47,86 +48,56 @@ function createMockRepository(snapshot: {
 }
 
 describe('app repository bootstrap', () => {
-  it('signs in anonymously when no Supabase user exists', async () => {
-    const user = { id: crypto.randomUUID() };
-    const supabase = {
-      auth: {
-        getUser: vi.fn(async () => ({ data: { user: null }, error: null })),
-        signInAnonymously: vi.fn(async () => ({ data: { user }, error: null })),
-      },
-    };
-
-    await expect(ensureAnonymousSession(supabase)).resolves.toBe(user);
-    expect(supabase.auth.signInAnonymously).toHaveBeenCalledTimes(1);
-  });
-
-  it('reuses an existing Supabase user session without creating a new anonymous user', async () => {
-    const user = { id: crypto.randomUUID() };
-    const supabase = {
-      auth: {
-        getUser: vi.fn(async () => ({ data: { user }, error: null })),
-        signInAnonymously: vi.fn(),
-      },
-    };
-
-    await expect(ensureAnonymousSession(supabase)).resolves.toBe(user);
-    expect(supabase.auth.signInAnonymously).not.toHaveBeenCalled();
-  });
-
-  it('requires Supabase configuration instead of falling back to local storage', async () => {
-    const localRepository = createMockRepository();
-
-    await expect(createAppTripRepository({
-      isSupabaseConfigured: false,
-      localRepository,
-      createSupabaseClient: vi.fn(),
-      createSupabaseRepository: vi.fn(),
-    })).rejects.toThrow('Supabase is not configured');
-
-    expect(localRepository.listDestinations).not.toHaveBeenCalled();
-  });
-
-  it('ignores the old local storage mode override', async () => {
-    const localRepository = createMockRepository();
-    const cloudRepository = createMockRepository();
-    const cloudDirectory = {
-      listTrips: vi.fn(async () => [{
+  it.each([undefined, 'e2e-service'])(
+    'uses service repositories in %s mode without checking Supabase or opening local storage',
+    async (tripStorageMode) => {
+      const trip = {
         id: 'trip-1',
         name: 'Example trip',
         description: '',
         routingVehicle: standardRoutingVehicle,
         createdAt: '2026-07-01T10:00:00.000Z',
         updatedAt: '2026-07-01T10:00:00.000Z',
-      }]),
-      createTrip: vi.fn(),
-      updateTrip: vi.fn(),
-      deleteTrip: vi.fn(),
-    };
-    const createSupabaseClient = vi.fn();
-    const user = { id: crypto.randomUUID() };
-    const supabase = {
-      auth: {
-        getUser: vi.fn(async () => ({ data: { user }, error: null })),
-        signInAnonymously: vi.fn(),
-      },
-    };
+      };
+      const client: PlotterApiClient = {
+        request: vi.fn(async (path: string) => {
+          if (path === '/api/v1/trips') return { revision: 3, trips: [trip] };
+          if (path === '/api/v1/trips/trip-1') {
+            return { revision: 7, destinations: [], routeLegs: [], activities: [] };
+          }
+          throw new Error(`Unexpected request: ${path}`);
+        }) as PlotterApiClient['request'],
+        upload: vi.fn(),
+      };
+      const createSupabaseClient = vi.fn();
+      const createLocalRepository = vi.fn();
+      const realtime = {
+        subscribeToDirectory: vi.fn(),
+        subscribeToTrip: vi.fn(),
+        reconcile: vi.fn(),
+      };
 
-    const repository = await createAppTripRepository({
-      isSupabaseConfigured: true,
-      tripStorageMode: 'local',
-      localRepository,
-      createSupabaseClient: () => {
-        createSupabaseClient();
-        return supabase;
-      },
-      createSupabaseDirectory: () => cloudDirectory,
-      createSupabaseRepository: () => cloudRepository,
-    });
+      const storage = await createAppTripStorage({
+        tripStorageMode,
+        isSupabaseConfigured: false,
+        createSupabaseClient,
+        createLocalRepository,
+        serviceClient: client,
+        createRealtime: () => realtime,
+      });
 
-    expect(repository).toBe(cloudRepository);
-    expect(createSupabaseClient).toHaveBeenCalledTimes(1);
-    expect(localRepository.listDestinations).not.toHaveBeenCalled();
-  });
+      await expect(storage.directory.listTrips()).resolves.toEqual([trip]);
+      await expect(storage.createTripRepository(trip.id).loadSnapshot?.()).resolves.toEqual({
+        revision: 7,
+        destinations: [],
+        routeLegs: [],
+        activities: [],
+      });
+      expect(storage.realtime).toBe(realtime);
+      expect(createSupabaseClient).not.toHaveBeenCalled();
+      expect(createLocalRepository).not.toHaveBeenCalled();
+    },
+  );
 
   it('uses the local repository for the explicit e2e storage mode', async () => {
     const localRepository = createMockRepository();
@@ -144,32 +115,15 @@ describe('app repository bootstrap', () => {
     expect(createSupabaseClient).not.toHaveBeenCalled();
   });
 
-  it('returns a trip directory and explicit Supabase trip repository factory', async () => {
-    const user = { id: crypto.randomUUID() };
-    const supabase = {
-      auth: {
-        getUser: vi.fn(async () => ({ data: { user }, error: null })),
-        signInAnonymously: vi.fn(),
-      },
-    };
-    const createSupabaseDirectory = vi.fn(() => ({
-      listTrips: vi.fn(),
-      createTrip: vi.fn(),
-      updateTrip: vi.fn(),
-      deleteTrip: vi.fn(),
-    }));
-    const createSupabaseRepository = vi.fn(() => createMockRepository());
+  it('loads the Dexie database only for the explicit e2e-local mode', async () => {
+    const loadLocalDb = vi.fn(async () => ({} as TripDb));
 
-    const storage = await createAppTripStorage({
-      isSupabaseConfigured: true,
-      createSupabaseClient: () => supabase,
-      createSupabaseDirectory,
-      createSupabaseRepository,
+    await createAppTripStorage({
+      tripStorageMode: 'e2e-local',
+      loadLocalDb,
     });
 
-    expect(createSupabaseDirectory).toHaveBeenCalledWith(supabase);
-    storage.createTripRepository('trip-1');
-    expect(createSupabaseRepository).toHaveBeenCalledWith(supabase, 'trip-1');
+    expect(loadLocalDb).toHaveBeenCalledTimes(1);
   });
 
   it('returns local directory and trip repository factory for e2e-local mode', async () => {
@@ -194,36 +148,6 @@ describe('app repository bootstrap', () => {
     expect(storage.createTripRepository('trip-1')).toBe(localRepository);
     expect(createSupabaseClient).not.toHaveBeenCalled();
     expect('realtime' in storage).toBe(false);
-  });
-
-  it('returns Supabase realtime subscriptions for Supabase storage', async () => {
-    const user = { id: crypto.randomUUID() };
-    const supabase = {
-      auth: {
-        getUser: vi.fn(async () => ({ data: { user }, error: null })),
-        signInAnonymously: vi.fn(),
-      },
-      channel: vi.fn(),
-      removeChannel: vi.fn(),
-    };
-    const createSupabaseDirectory = vi.fn(() => ({
-      listTrips: vi.fn(),
-      createTrip: vi.fn(),
-      updateTrip: vi.fn(),
-      deleteTrip: vi.fn(),
-    }));
-
-    const storage = await createAppTripStorage({
-      isSupabaseConfigured: true,
-      createSupabaseClient: () => supabase,
-      createSupabaseDirectory,
-      createSupabaseRepository: vi.fn(() => createMockRepository()),
-    });
-
-    expect((storage as { realtime?: unknown }).realtime).toEqual({
-      subscribeToTrips: expect.any(Function),
-      subscribeToTripData: expect.any(Function),
-    });
   });
 
   it('exports the selected trip storage key used by the app shell', () => {

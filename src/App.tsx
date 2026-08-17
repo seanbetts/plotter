@@ -46,7 +46,7 @@ import type {
   WebImageSearchStopContext,
 } from './services/webImageSearchClient';
 import type { TripSummary } from './storage/tripDirectoryRepository';
-import type { TripRealtimeSubscriptions } from './storage/tripRealtime';
+import type { ServiceRealtimeSubscriptions } from './storage/serviceRealtime';
 import type { TripRepository } from './storage/tripRepository';
 import { getBrowserStorage, readMigratedStorageValue, writeStorageValue } from './storage/localPreferences';
 import './styles.css';
@@ -205,16 +205,36 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     updateTrip,
     deleteTrip,
     refreshTrips,
+    retryWorkspace,
+    directoryRevision,
     realtime,
   } = useTripWorkspace();
+  const directoryRevisionRef = useRef(directoryRevision);
+
+  useEffect(() => {
+    directoryRevisionRef.current = directoryRevision;
+  }, [directoryRevision]);
 
   useEffect(() => {
     if (!realtime) return undefined;
 
-    return realtime.subscribeToTrips(() => {
+    return realtime.subscribeToDirectory((revision) => {
+      const currentRevision = directoryRevisionRef.current;
+      if (currentRevision !== null && revision <= currentRevision) return;
+      directoryRevisionRef.current = revision;
       void refreshTrips();
     });
   }, [refreshTrips, realtime]);
+
+  useEffect(() => {
+    if (!realtime) return undefined;
+    const reconcileVisibleWorkspace = () => {
+      if (document.visibilityState !== 'visible') return;
+      void realtime.reconcile().catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', reconcileVisibleWorkspace);
+    return () => document.removeEventListener('visibilitychange', reconcileVisibleWorkspace);
+  }, [realtime]);
 
   const workspace = !repository || !linkPreviewClient || !webImageSearchClient ? (
     <div className="app-shell">
@@ -230,6 +250,7 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
             status={error ? 'error' : 'loading'}
             title={error?.title ?? 'Loading Plotter'}
             message={error?.message ?? 'Preparing your trip map.'}
+            onRetry={error ? retryWorkspace : undefined}
           />
         </section>
     </div>
@@ -282,7 +303,7 @@ function TripWorkspace({
   ) => Promise<TripSummary | false> | TripSummary | false;
   onDeleteTrip: (tripId: string) => Promise<boolean | void> | boolean | void;
   isTripWorkspaceLoading: boolean;
-  realtime: TripRealtimeSubscriptions | null;
+  realtime: ServiceRealtimeSubscriptions | null;
 }) {
   const calculateRoute = useCallback(
     (input: Omit<Parameters<typeof calculateOpenRouteServiceRoute>[0], 'apiKey'>) =>
@@ -299,6 +320,7 @@ function TripWorkspace({
     isLoading,
     error,
     mutationError,
+    revision,
     addDestination,
     updateDestination,
     deleteDestination,
@@ -328,6 +350,7 @@ function TripWorkspace({
   const [destinationMediaRollupError, setDestinationMediaRollupError] = useState<string | null>(null);
   const [pendingMapStop, setPendingMapStop] = useState<PendingMapStop | null>(null);
   const [routeAlternativesState, setRouteAlternativesState] = useState<RouteAlternativesState | null>(null);
+  const tripRevisionRef = useRef(revision);
   const selectedDestinationIdRef = useRef<string | null>(null);
   const selectedActivityIdRef = useRef<string | null>(null);
   const routeLegsRef = useRef(routeLegs);
@@ -341,6 +364,10 @@ function TripWorkspace({
   const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedMapStopElementRef = useRef<HTMLElement | null>(null);
   const isInteractionLocked = isLoading || isTripWorkspaceLoading;
+
+  useEffect(() => {
+    tripRevisionRef.current = revision;
+  }, [revision]);
   const routeLegsById = useMemo(
     () => new Map(routeLegs.map((routeLeg) => [routeLeg.id, routeLeg])),
     [routeLegs],
@@ -417,13 +444,17 @@ function TripWorkspace({
     return updatedTrip;
   }, [activeTrip?.id, onUpdateTrip, recalculateForVehicle, trips]);
 
+  const activeTripId = activeTrip?.id;
   useEffect(() => {
-    if (!realtime || !activeTrip) return undefined;
+    if (!realtime || !activeTripId) return undefined;
 
-    return realtime.subscribeToTripData(activeTrip.id, () => {
+    return realtime.subscribeToTrip(activeTripId, (nextRevision) => {
+      const currentRevision = tripRevisionRef.current;
+      if (currentRevision !== null && nextRevision <= currentRevision) return;
+      tripRevisionRef.current = nextRevision;
       void reload();
     });
-  }, [activeTrip, realtime, reload]);
+  }, [activeTripId, realtime, reload]);
 
   const selectedDestination = useMemo(
     () => destinations.find((destination) => destination.id === selectedDestinationId) ?? null,

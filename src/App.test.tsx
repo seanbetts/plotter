@@ -108,6 +108,7 @@ const maplibreMock = vi.hoisted(() => {
 
 const repositoryMock = vi.hoisted(() => {
   const repository = {
+    loadSnapshot: undefined as TripRepository['loadSnapshot'],
     destinations: [] as Destination[],
     routeLegs: [] as RouteLeg[],
     initialDestinations: Promise.resolve([] as Destination[]),
@@ -259,6 +260,8 @@ function mockTripWorkspace(overrides: Partial<ReturnType<typeof useTripWorkspace
     updateTrip: vi.fn(),
     deleteTrip: vi.fn(),
     refreshTrips: vi.fn(),
+    retryWorkspace: vi.fn(),
+    directoryRevision: null,
     realtime: null,
     ...overrides,
   } as ReturnType<typeof useTripWorkspace>);
@@ -400,6 +403,7 @@ function createRouteAlternativesRaceFixture() {
 
 describe('App', () => {
   beforeEach(() => {
+    repositoryMock.loadSnapshot = undefined;
     repositoryMock.destinations = [];
     repositoryMock.routeLegs = [];
     repositoryMock.initialDestinations = Promise.resolve([]);
@@ -539,7 +543,7 @@ describe('App', () => {
       repository: null,
       error: {
         title: 'Trip storage unavailable',
-        message: 'Unable to create an anonymous Supabase session.',
+        message: 'Shared trip storage is unavailable.',
       },
     });
 
@@ -616,12 +620,14 @@ describe('App', () => {
   });
 
   it('shows a centered storage bootstrap error when the app repository cannot be prepared', async () => {
+    const retryWorkspace = vi.fn();
     mockTripWorkspace({
       repository: null,
       error: {
         title: 'Trip storage unavailable',
-        message: 'Unable to create an anonymous Supabase session.',
+        message: 'Shared trip storage is unavailable.',
       },
+      retryWorkspace,
     });
 
     render(<App />);
@@ -629,67 +635,70 @@ describe('App', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveClass('app-status-panel', 'app-status-panel--error');
     expect(alert).toHaveTextContent('Trip storage unavailable');
-    expect(alert).toHaveTextContent('Unable to create an anonymous Supabase session.');
+    expect(alert).toHaveTextContent('Shared trip storage is unavailable.');
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(retryWorkspace).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('Blank planning map')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Search for a destination')).not.toBeInTheDocument();
     expectNoStatusPlaceholderPin();
   });
 
-  it('shows Supabase setup guidance when storage configuration is missing', async () => {
-    mockTripWorkspace({
-      repository: null,
-      error: {
-        title: 'Supabase is not configured',
-        message: 'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
-      },
-    });
-
-    render(<App />);
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Supabase is not configured');
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.',
-    );
-  });
-
-  it('subscribes to trip realtime changes and cleans up channels', async () => {
+  it('reloads only for newer service revisions, reconciles on visibility, and cleans up listeners once', async () => {
     const refreshTrips = vi.fn(async () => undefined);
-    const unsubscribeTrips = vi.fn();
-    const unsubscribeTripData = vi.fn();
-    const tripsChanges: Array<() => void> = [];
-    const tripDataChanges: Array<() => void> = [];
+    const unsubscribeDirectory = vi.fn();
+    const unsubscribeTrip = vi.fn();
+    const directoryChanges: Array<(revision: number) => void> = [];
+    const tripChanges: Array<(revision: number) => void> = [];
     const realtime = {
-      subscribeToTrips: vi.fn((onChange: () => void) => {
-        tripsChanges.push(onChange);
-        return unsubscribeTrips;
+      subscribeToDirectory: vi.fn((onChange: (revision: number) => void) => {
+        directoryChanges.push(onChange);
+        return unsubscribeDirectory;
       }),
-      subscribeToTripData: vi.fn((tripId: string, onChange: () => void) => {
+      subscribeToTrip: vi.fn((tripId: string, onChange: (revision: number) => void) => {
         expect(tripId).toBe(tripsMock[0].id);
-        tripDataChanges.push(onChange);
-        return unsubscribeTripData;
+        tripChanges.push(onChange);
+        return unsubscribeTrip;
       }),
+      reconcile: vi.fn(async () => undefined),
     };
+    repositoryMock.loadSnapshot = vi.fn(async () => ({
+      revision: 6,
+      destinations: [],
+      routeLegs: [],
+      activities: [],
+    }));
     mockTripWorkspace({
       refreshTrips,
+      directoryRevision: 4,
       realtime,
     } as Partial<ReturnType<typeof useTripWorkspace>>);
 
     const { unmount } = render(<App />);
 
-    await waitFor(() => expect(realtime.subscribeToTrips).toHaveBeenCalledTimes(1));
-    expect(realtime.subscribeToTripData).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(realtime.subscribeToDirectory).toHaveBeenCalledTimes(1));
+    expect(realtime.subscribeToTrip).toHaveBeenCalledTimes(1);
 
-    tripsChanges[0]();
+    directoryChanges[0](5);
+    directoryChanges[0](5);
+    directoryChanges[0](3);
     expect(refreshTrips).toHaveBeenCalledTimes(1);
     expect(calculateOpenRouteServiceRoute).not.toHaveBeenCalled();
 
-    repositoryMock.listDestinations.mockClear();
-    tripDataChanges[0]();
-    await waitFor(() => expect(repositoryMock.listDestinations).toHaveBeenCalledTimes(1));
+    vi.mocked(repositoryMock.loadSnapshot).mockClear();
+    tripChanges[0](7);
+    tripChanges[0](7);
+    tripChanges[0](5);
+    await waitFor(() => expect(repositoryMock.loadSnapshot).toHaveBeenCalledTimes(1));
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await waitFor(() => expect(realtime.reconcile).toHaveBeenCalledTimes(1));
 
     unmount();
-    expect(unsubscribeTrips).toHaveBeenCalledTimes(1);
-    expect(unsubscribeTripData).toHaveBeenCalledTimes(1);
+    expect(unsubscribeDirectory).toHaveBeenCalledTimes(1);
+    expect(unsubscribeTrip).toHaveBeenCalledTimes(1);
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(realtime.reconcile).toHaveBeenCalledTimes(1);
   });
 
   it('recalculates routes exactly once when the active trip vehicle is saved', async () => {
@@ -849,6 +858,8 @@ describe('App', () => {
         updateTrip,
         deleteTrip: vi.fn(),
         refreshTrips: vi.fn(),
+        retryWorkspace: vi.fn(),
+        directoryRevision: null,
         realtime: null,
       } as ReturnType<typeof useTripWorkspace>;
     });
@@ -925,14 +936,15 @@ describe('App', () => {
 
   it('clears open route, panel, and preview surfaces when trip data reload fails', async () => {
     const user = userEvent.setup();
-    const tripDataChanges: Array<() => void> = [];
+    const tripDataChanges: Array<(revision: number) => void> = [];
     const realtime = {
-      subscribeToTrips: vi.fn(() => vi.fn()),
-      subscribeToTripData: vi.fn((tripId: string, onChange: () => void) => {
+      subscribeToDirectory: vi.fn(() => vi.fn()),
+      subscribeToTrip: vi.fn((tripId: string, onChange: (revision: number) => void) => {
         expect(tripId).toBe(tripsMock[0].id);
         tripDataChanges.push(onChange);
         return vi.fn();
       }),
+      reconcile: vi.fn(async () => undefined),
     };
     const paris = createDestination({
       name: 'Paris',
@@ -1001,7 +1013,7 @@ describe('App', () => {
 
     repositoryMock.listDestinations.mockRejectedValueOnce(new Error('Trip rows unavailable.'));
     act(() => {
-      tripDataChanges[0]?.();
+      tripDataChanges[0]?.(1);
     });
 
     const alert = await screen.findByRole('alert');
@@ -1026,14 +1038,15 @@ describe('App', () => {
   });
 
   it('closes pending map-stop confirmation when trip data reload fails', async () => {
-    const tripDataChanges: Array<() => void> = [];
+    const tripDataChanges: Array<(revision: number) => void> = [];
     const realtime = {
-      subscribeToTrips: vi.fn(() => vi.fn()),
-      subscribeToTripData: vi.fn((tripId: string, onChange: () => void) => {
+      subscribeToDirectory: vi.fn(() => vi.fn()),
+      subscribeToTrip: vi.fn((tripId: string, onChange: (revision: number) => void) => {
         expect(tripId).toBe(tripsMock[0].id);
         tripDataChanges.push(onChange);
         return vi.fn();
       }),
+      reconcile: vi.fn(async () => undefined),
     };
     const paris = createDestination({
       name: 'Paris',
@@ -1074,7 +1087,7 @@ describe('App', () => {
 
     repositoryMock.listDestinations.mockRejectedValueOnce(new Error('Trip rows unavailable.'));
     act(() => {
-      tripDataChanges[0]?.();
+      tripDataChanges[0]?.(1);
     });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Trip rows unavailable.');
@@ -1808,16 +1821,17 @@ describe('App', () => {
 
   it('keeps an open route alternatives panel usable during a background realtime reload', async () => {
     const user = userEvent.setup();
-    const tripDataChanges: Array<() => void> = [];
+    const tripDataChanges: Array<(revision: number) => void> = [];
     const reloadDestinations = createDeferred<Destination[]>();
     const reloadRouteLegs = createDeferred<RouteLeg[]>();
     const realtime = {
-      subscribeToTrips: vi.fn(() => vi.fn()),
-      subscribeToTripData: vi.fn((tripId: string, onChange: () => void) => {
+      subscribeToDirectory: vi.fn(() => vi.fn()),
+      subscribeToTrip: vi.fn((tripId: string, onChange: (revision: number) => void) => {
         expect(tripId).toBe(tripsMock[0].id);
         tripDataChanges.push(onChange);
         return vi.fn();
       }),
+      reconcile: vi.fn(async () => undefined),
     };
     vi.mocked(searchMapTilerPlaces)
       .mockResolvedValueOnce([
@@ -1867,7 +1881,7 @@ describe('App', () => {
     repositoryMock.listRouteLegs.mockImplementationOnce(async () => reloadRouteLegs.promise);
 
     act(() => {
-      tripDataChanges[0]?.();
+      tripDataChanges[0]?.(1);
     });
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
