@@ -232,6 +232,29 @@ describe('atomic media store', () => {
     expect(readdirSync(join(harness.directory, 'media', '.staging'))).toEqual([]);
   });
 
+  it('rejects one of two concurrent cross-content-type commits for the same media identity', async () => {
+    const harness = createHarness();
+    const png = await harness.media.stage(imageStream('png contender'), 'image/png');
+    const jpeg = await harness.media.stage(imageStream('jpeg contender'), 'image/jpeg');
+
+    const results = await Promise.allSettled([
+      harness.media.commit(png, 'cross-type-media'),
+      harness.media.commit(jpeg, 'cross-type-media'),
+    ]);
+
+    expect(results.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    expect((results.find(({ status }) => status === 'rejected') as PromiseRejectedResult).reason)
+      .toMatchObject({ message: 'Media identity already exists.' });
+    const activeFiles = readdirSync(join(harness.directory, 'media'))
+      .filter((name) => name.startsWith('cross-type-media.'));
+    expect(activeFiles).toHaveLength(1);
+    expect(['png contender', 'jpeg contender']).toContain(
+      readFileSync(join(harness.directory, 'media', activeFiles[0]), 'utf8'),
+    );
+    expect(readdirSync(join(harness.directory, 'media', '.staging'))).toEqual([]);
+  });
+
   it('rejects forged stage paths, media path traversal, and symlink escapes', async () => {
     const harness = createHarness();
     const staged = await harness.media.stage(bytesStream(new Uint8Array([1])), 'image/png');
@@ -319,6 +342,37 @@ describe('atomic media store', () => {
       readFileSync(join(harness.directory, original.relativePath), 'utf8'),
     );
     expect(readdirSync(join(harness.directory, 'trash'))).toHaveLength(1);
+  });
+
+  it('serializes a restore against a cross-content-type commit for the same media identity', async () => {
+    const harness = createHarness();
+    const original = await harness.media.commit(
+      await harness.media.stage(imageStream('original jpeg'), 'image/jpeg'),
+      'restore-commit-collision',
+    );
+    const restore = await harness.media.moveToTrash(
+      original.relativePath,
+      'restore-commit-collision',
+    );
+    const replacement = await harness.media.stage(imageStream('replacement png'), 'image/png');
+
+    const results = await Promise.allSettled([
+      restore(),
+      harness.media.commit(replacement, 'restore-commit-collision'),
+    ]);
+
+    expect(results.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    expect((results.find(({ status }) => status === 'rejected') as PromiseRejectedResult).reason)
+      .toMatchObject({ message: 'Media identity already exists.' });
+    const activeFiles = readdirSync(join(harness.directory, 'media'))
+      .filter((name) => name.startsWith('restore-commit-collision.'));
+    expect(activeFiles).toHaveLength(1);
+    const restoreWon = results[0].status === 'fulfilled';
+    expect(readFileSync(join(harness.directory, 'media', activeFiles[0]), 'utf8'))
+      .toBe(restoreWon ? 'original jpeg' : 'replacement png');
+    expect(readdirSync(join(harness.directory, 'media', '.staging'))).toEqual([]);
+    expect(readdirSync(join(harness.directory, 'trash'))).toHaveLength(restoreWon ? 0 : 1);
   });
 
   it('rejects missing active bytes and active-path symlink escapes', async () => {

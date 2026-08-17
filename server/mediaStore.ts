@@ -8,7 +8,7 @@ import {
   realpathSync,
   statSync,
 } from 'node:fs';
-import { link, open, realpath, rename, unlink } from 'node:fs/promises';
+import { open, realpath, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const MAX_MEDIA_BYTES = 52_428_800;
@@ -23,6 +23,7 @@ const CONTENT_TYPE_EXTENSIONS = new Map<string, string>([
 const CONTENT_TYPE_ERROR = 'Media content type is not allowed.';
 const CONTAINMENT_ERROR = 'Media path escapes its storage boundary.';
 const MISSING_BYTES_ERROR = 'Media bytes are missing.';
+const mediaIdentityTails = new Map<string, Promise<void>>();
 
 export type StoredMediaObject = {
   relativePath: string;
@@ -121,32 +122,15 @@ async function digestFile(path: string): Promise<{ byteCount: number; sha256: st
   return { byteCount, sha256: hash.digest('hex') };
 }
 
-async function installNoClobber(
-  sourcePath: string,
-  targetPath: string,
-  discardSourceOnCollision: boolean,
-): Promise<void> {
+async function withMediaIdentityLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const previous = mediaIdentityTails.get(key) ?? Promise.resolve();
+  const result = previous.then(operation);
+  const tail = result.then(() => undefined, () => undefined);
+  mediaIdentityTails.set(key, tail);
   try {
-    await link(sourcePath, targetPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    if (discardSourceOnCollision) await unlink(sourcePath);
-    throw new Error('Media identity already exists.', { cause: error });
-  }
-
-  try {
-    await unlink(sourcePath);
-  } catch (error) {
-    try {
-      await unlink(targetPath);
-    } catch (rollbackError) {
-      throw new AggregateError(
-        [error, rollbackError],
-        'Media installation cleanup failed.',
-        { cause: rollbackError },
-      );
-    }
-    throw error;
+    return await result;
+  } finally {
+    if (mediaIdentityTails.get(key) === tail) mediaIdentityTails.delete(key);
   }
 }
 
@@ -172,6 +156,26 @@ export function createMediaStore(dataDirectory: string): AtomicMediaStore {
       throw new Error(CONTAINMENT_ERROR);
     }
     return canonicalActivePath;
+  }
+
+  function activeIdentityExists(mediaId: string): boolean {
+    return [...CONTENT_TYPE_EXTENSIONS.values()]
+      .some((extension) => pathExists(join(mediaRoot, `${mediaId}.${extension}`)));
+  }
+
+  async function publishIdentity(
+    sourcePath: string,
+    targetPath: string,
+    mediaId: string,
+    discardSourceOnCollision: boolean,
+  ): Promise<void> {
+    await withMediaIdentityLock(join(mediaRoot, mediaId), async () => {
+      if (activeIdentityExists(mediaId)) {
+        if (discardSourceOnCollision) await unlink(sourcePath);
+        throw new Error('Media identity already exists.');
+      }
+      await rename(sourcePath, targetPath);
+    });
   }
 
   return {
@@ -250,7 +254,7 @@ export function createMediaStore(dataDirectory: string): AtomicMediaStore {
 
       const activePath = join(mediaRoot, `${mediaId}.${extension}`);
       assertContained(await realpath(dirname(activePath)), mediaRoot);
-      await installNoClobber(canonicalStagedPath, activePath, true);
+      await publishIdentity(canonicalStagedPath, activePath, mediaId, true);
       return { ...staged, relativePath: relative(dataRoot, activePath) };
     },
 
@@ -268,7 +272,7 @@ export function createMediaStore(dataDirectory: string): AtomicMediaStore {
         if (restored) return;
         const canonicalTrashPath = await resolveExistingContainedPath(trashedPath, trashRoot);
         assertContained(await realpath(dirname(activePath)), mediaRoot);
-        await installNoClobber(canonicalTrashPath, activePath, false);
+        await publishIdentity(canonicalTrashPath, activePath, mediaId, false);
         restored = true;
       };
     },
