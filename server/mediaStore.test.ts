@@ -108,6 +108,22 @@ afterEach(() => {
 });
 
 describe('atomic media store', () => {
+  it('opens committed bytes only through their contained metadata-derived relative path', async () => {
+    const harness = createHarness();
+    const staged = await harness.media.stage(imageStream('served image'), 'image/png');
+    const committed = await harness.media.commit(staged, 'media-open');
+
+    const opened = await harness.media.open(committed.relativePath);
+    const chunks: Buffer[] = [];
+    for await (const chunk of opened.bytes) chunks.push(Buffer.from(chunk));
+
+    expect(opened.contentLength).toBe(12);
+    expect(Buffer.concat(chunks).toString('utf8')).toBe('served image');
+    await expect(harness.media.open('../outside.png')).rejects.toThrow(
+      'Media path escapes its storage boundary.',
+    );
+  });
+
   it('rejects an existing media-root symlink before writing through it', () => {
     const directory = mkdtempSync(join(tmpdir(), 'plotter-media-root-link-'));
     const outside = mkdtempSync(join(tmpdir(), 'plotter-media-root-outside-'));

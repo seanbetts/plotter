@@ -33,7 +33,7 @@ afterEach(() => {
   }
 });
 
-it('reports initializing from the loopback health endpoint', async () => {
+it('reports ready after opening the canonical database and service stores', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
   mkdirSync(testDataParent, { recursive: true });
   const dataDirectory = mkdtempSync(resolve(testDataParent, 'service-health-'));
@@ -58,8 +58,8 @@ it('reports initializing from the loopback health endpoint', async () => {
       return null;
     }
   }, { interval: 50, timeout: 3_000 }).toEqual({
-    status: 503,
-    body: { status: 'initializing' },
+    status: 200,
+    body: { ready: true },
   });
 });
 
@@ -97,7 +97,133 @@ it('starts the bundled service with an existing env file without exposing its co
       return null;
     }
   }, { interval: 50, timeout: 3_000 }).toEqual({
-    status: 503,
-    body: { status: 'initializing' },
+    status: 200,
+    body: { ready: true },
   });
+});
+
+it('stays reachable with redacted readiness when the canonical database is invalid', async () => {
+  const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
+  mkdirSync(testDataParent, { recursive: true });
+  const dataDirectory = mkdtempSync(resolve(testDataParent, 'service-invalid-'));
+  temporaryDirectories.push(dataDirectory);
+  writeFileSync(resolve(dataDirectory, 'plotter.sqlite3'), 'not a sqlite database');
+  const port = await reservePort();
+  const child = spawn(process.execPath, [
+    resolve(repositoryRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    'server/service.ts',
+    '--port', String(port),
+    '--data-dir', dataDirectory,
+  ], {
+    cwd: repositoryRoot,
+    stdio: 'ignore',
+  });
+  processes.push(child);
+
+  await expect.poll(async () => {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/healthz`);
+      return { status: response.status, body: await response.json() };
+    } catch {
+      return null;
+    }
+  }, { interval: 50, timeout: 3_000 }).toEqual({
+    status: 503,
+    body: {
+      status: 503,
+      error: { code: 'storage-unavailable', message: 'Plotter storage is unavailable.' },
+    },
+  });
+});
+
+it('keeps portable backup routes unavailable until the backup task supplies mechanics', async () => {
+  const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
+  mkdirSync(testDataParent, { recursive: true });
+  const dataDirectory = mkdtempSync(resolve(testDataParent, 'service-backup-'));
+  temporaryDirectories.push(dataDirectory);
+  const port = await reservePort();
+  const child = spawn(process.execPath, [
+    resolve(repositoryRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    'server/service.ts',
+    '--port', String(port),
+    '--data-dir', dataDirectory,
+  ], {
+    cwd: repositoryRoot,
+    stdio: 'ignore',
+  });
+  processes.push(child);
+
+  await expect.poll(async () => {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/v1/backups`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-plotter-write': '1' },
+      });
+      return { status: response.status, body: await response.json() };
+    } catch {
+      return null;
+    }
+  }, { interval: 50, timeout: 3_000 }).toEqual({
+    status: 503,
+    body: {
+      status: 503,
+      error: { code: 'storage-unavailable', message: 'Portable backup operations are unavailable.' },
+    },
+  });
+});
+
+it('composes revisioned SQLite writes, atomic media, and ID-only content reads over HTTP', async () => {
+  const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
+  mkdirSync(testDataParent, { recursive: true });
+  const dataDirectory = mkdtempSync(resolve(testDataParent, 'service-wiring-'));
+  temporaryDirectories.push(dataDirectory);
+  const port = await reservePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, [
+    resolve(repositoryRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    'server/service.ts',
+    '--port', String(port),
+    '--data-dir', dataDirectory,
+  ], {
+    cwd: repositoryRoot,
+    stdio: 'ignore',
+  });
+  processes.push(child);
+
+  await expect.poll(async () => {
+    try { return (await fetch(`${baseUrl}/healthz`)).status; } catch { return 0; }
+  }, { interval: 50, timeout: 3_000 }).toBe(200);
+
+  const writeHeaders = { 'content-type': 'application/json', 'x-plotter-write': '1' };
+  const createdResponse = await fetch(`${baseUrl}/api/v1/trips`, {
+    method: 'POST', headers: writeHeaders, body: JSON.stringify({ expectedRevision: 0, name: 'Wiring' }),
+  });
+  expect(createdResponse.status).toBe(201);
+  const created = await createdResponse.json() as { trip: { id: string } };
+  const destination = {
+    id: 'destination-1', name: 'Oslo', countryRegion: 'Norway', coordinates: { lat: 59.9, lng: 10.7 },
+    routingAnchors: {}, location: { placeName: 'Oslo', regionName: 'Oslo', countryName: 'Norway', countryCode: 'NO', sourceLabel: 'Oslo', sourceProvider: 'maptiler' },
+    order: 0, status: 'planned', priority: 'high', timing: { idealMonths: ['March'], expectedStayDays: 2, provisionalStartDate: '', provisionalEndDate: '' },
+    why: { summary: '', highlights: '', personalRationale: '' }, media: [], research: { notes: '', links: [], bookReferences: [] },
+    activities: { items: [] }, routeContext: { previousNextNotes: '', drivingNotes: '', borderShippingNotes: '', notes: '' }, tags: [],
+    createdAt: '2026-08-17T00:00:00.000Z', updatedAt: '2026-08-17T00:00:00.000Z',
+  };
+  const mutation = await fetch(`${baseUrl}/api/v1/trips/${created.trip.id}/mutations`, {
+    method: 'POST', headers: writeHeaders,
+    body: JSON.stringify({ expectedRevision: 0, mutation: { type: 'save-destination', destination } }),
+  });
+  expect(mutation.status).toBe(200);
+
+  const form = new FormData();
+  form.set('expectedRevision', '1');
+  form.set('file', new File([new TextEncoder().encode('service image')], 'ignored.png', { type: 'image/png' }));
+  const uploadedResponse = await fetch(`${baseUrl}/api/v1/trips/${created.trip.id}/destinations/${destination.id}/media`, {
+    method: 'POST', headers: { 'x-plotter-write': '1' }, body: form,
+  });
+  expect(uploadedResponse.status).toBe(200);
+  const uploaded = await uploadedResponse.json() as { mediaItem: { id: string } };
+  const content = await fetch(`${baseUrl}/api/v1/media/${uploaded.mediaItem.id}/content`);
+  expect(content.status).toBe(200);
+  expect(content.headers.get('content-type')).toBe('image/png');
+  expect(await content.text()).toBe('service image');
 });

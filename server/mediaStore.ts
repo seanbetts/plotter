@@ -36,6 +36,10 @@ export type MediaStore = {
   stage(input: ReadableStream<Uint8Array>, contentType: string): Promise<StoredMediaObject>;
   commit(staged: StoredMediaObject, mediaId: string): Promise<StoredMediaObject>;
   moveToTrash(relativePath: string, mediaId: string): Promise<() => Promise<void>>;
+  open(relativePath: string): Promise<{
+    contentLength: number;
+    bytes: AsyncIterable<Uint8Array>;
+  }>;
 };
 
 export type AtomicMediaStore = MediaStore & {
@@ -179,6 +183,14 @@ export function createMediaStore(dataDirectory: string): AtomicMediaStore {
   }
 
   return {
+    async open(relativePath) {
+      const path = await resolveActivePath(relativePath);
+      return {
+        contentLength: statSync(path).size,
+        bytes: createReadStream(path),
+      };
+    },
+
     async stage(input, contentType) {
       extensionFor(contentType);
       await assertCanonicalDirectory(stagingRoot, mediaRoot);
