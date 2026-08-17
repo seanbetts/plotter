@@ -55,6 +55,9 @@ describe('fetchRemoteImage', () => {
   it.each([
     'ftp://example.com/file.jpg',
     'http://localhost/image.jpg',
+    'http://printer/image.jpg',
+    'http://router/image.jpg',
+    'http://metadata/image.jpg',
     'http://127.0.0.1/image.jpg',
     'http://10.0.0.1/image.jpg',
     'http://169.254.169.254/latest/meta-data',
@@ -71,6 +74,23 @@ describe('fetchRemoteImage', () => {
     await expect(createRemoteImageProvider(deps)({ url }, new AbortController().signal))
       .rejects.toThrow(/public image URL|http or https/);
     expect(deps.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a redirect to a single-label local-use name before resolving or fetching it', async () => {
+    const deps = dependencies({
+      fetch: vi.fn(async () => new Response(null, {
+        status: 302,
+        headers: { location: 'http://router/image.jpg' },
+      })),
+    });
+
+    await expect(createRemoteImageProvider(deps)(
+      { url: 'https://example.com/start.jpg' },
+      new AbortController().signal,
+    )).rejects.toThrow('Enter a public image URL.');
+    expect(deps.resolve).toHaveBeenCalledTimes(1);
+    expect(deps.resolve).toHaveBeenCalledWith('example.com');
+    expect(deps.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('resolves and validates every redirect target before requesting the next hop', async () => {
@@ -200,6 +220,43 @@ describe('fetchRemoteImage', () => {
       { url: 'https://example.com/empty.gif' },
       new AbortController().signal,
     )).rejects.toThrow('Selected image was empty.');
+  });
+
+  it('aborts and cancels when the body stalls before its first byte', async () => {
+    let deadline: (() => void) | undefined;
+    let sourceCanceled = false;
+    const deps = dependencies({
+      scheduleTimeout(callback) {
+        deadline = callback;
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      },
+      fetch: vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        pull() {
+          return new Promise(() => undefined);
+        },
+        cancel() {
+          sourceCanceled = true;
+        },
+      }), { headers: { 'content-type': 'image/jpeg' } })),
+    });
+    const providerResult = createRemoteImageProvider(deps)(
+      { url: 'https://example.com/stalled.jpg' },
+      new AbortController().signal,
+    ).then(
+      () => 'unexpected success',
+      (error: unknown) => error,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    deadline?.();
+
+    const result = await Promise.race([
+      providerResult,
+      new Promise<string>((resolve) => setTimeout(() => resolve('body remained pending'), 100)),
+    ]);
+    expect(result).toEqual(new Error('Unable to fetch image.'));
+    expect(sourceCanceled).toBe(true);
   });
 
   it('propagates consumer cancellation to the provider body', async () => {

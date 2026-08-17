@@ -54,23 +54,59 @@ async function boundedImageStream(
     throw new Error('Selected image was empty.');
   }
   const reader = response.body.getReader();
+  const releaseReader = () => {
+    try {
+      reader.releaseLock();
+    } catch {
+      // A pending read releases the lock after its cancellation settles.
+    }
+  };
   let first: { done: boolean; value?: Uint8Array };
   try {
-    first = await reader.read();
+    first = await new Promise((resolve, reject) => {
+      let settled = false;
+      const removeAbortListener = () => signal.removeEventListener('abort', abortInitialRead);
+      const abortInitialRead = () => {
+        if (settled) return;
+        settled = true;
+        removeAbortListener();
+        void reader.cancel().catch(() => undefined).finally(releaseReader);
+        reject(new Error(FETCH_ERROR));
+      };
+      signal.addEventListener('abort', abortInitialRead, { once: true });
+      if (signal.aborted) {
+        abortInitialRead();
+        return;
+      }
+      reader.read().then(
+        (result) => {
+          if (settled) return;
+          settled = true;
+          removeAbortListener();
+          resolve(result);
+        },
+        () => {
+          if (settled) return;
+          settled = true;
+          removeAbortListener();
+          reject(new Error(FETCH_ERROR));
+        },
+      );
+    });
   } catch {
-    reader.releaseLock();
+    releaseReader();
     cleanupBoundary();
     throw new Error(FETCH_ERROR);
   }
   if (first.done || !first.value || first.value.byteLength === 0) {
     await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
+    releaseReader();
     cleanupBoundary();
     throw new Error('Selected image was empty.');
   }
   if (first.value.byteLength > MAX_IMAGE_BYTES) {
     await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
+    releaseReader();
     cleanupBoundary();
     throw new Error('Selected image is too large.');
   }

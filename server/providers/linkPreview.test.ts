@@ -98,14 +98,29 @@ describe('fetchLinkPreview', () => {
     'http://[2001:db8::1]/',
     'http://[2002:7f00:1::]/',
     'http://[3fff::1]/',
+    'http://[4000::1]/',
     'http://[5f00::1]/',
+    'http://[fe00::1]/',
     'http://[::ffff:127.0.0.1]/',
+    'http://[::ffff:93.184.216.34]/',
+    'http://[::93.184.216.34]/',
   ])('rejects non-public target %s before requesting it', async (url) => {
     const deps = dependencies();
 
     await expect(createLinkPreviewProvider(deps)({ url }, new AbortController().signal))
       .rejects.toThrow(/public URL|http or https/);
     expect(deps.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'http://[2606:2800:220:1:248:1893:25c8:1946]/',
+    'http://[64:ff9b::5db8:d822]/',
+  ])('allows the explicitly global IPv6 target %s', async (url) => {
+    const deps = dependencies();
+
+    await expect(createLinkPreviewProvider(deps)({ url }, new AbortController().signal))
+      .resolves.toMatchObject({ title: 'Example' });
+    expect(deps.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a hostname when any resolved address is non-public', async () => {
@@ -122,6 +137,21 @@ describe('fetchLinkPreview', () => {
     )).rejects.toThrow('Enter a public URL.');
     expect(deps.fetch).not.toHaveBeenCalled();
   });
+
+  it.each(['4000::1', 'fe00::1'])(
+    'rejects the non-global IPv6 DNS answer %s',
+    async (address) => {
+      const deps = dependencies({
+        resolve: vi.fn(async () => [{ address, family: 6 as const }]),
+      });
+
+      await expect(createLinkPreviewProvider(deps)(
+        { url: 'https://example.com/non-global' },
+        new AbortController().signal,
+      )).rejects.toThrow('Enter a public URL.');
+      expect(deps.fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it('disables automatic redirects and validates DNS again before each hop', async () => {
     const events: string[] = [];

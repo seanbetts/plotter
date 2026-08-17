@@ -122,20 +122,28 @@ function isPublicIpv4(address: string): boolean {
   return !blocked.some(([prefix, bits]) => hasPrefix(bytes, prefix, bits));
 }
 
-function embeddedIpv4(bytes: Uint8Array): string | undefined {
-  const mapped = bytes.slice(0, 10).every((byte) => byte === 0)
-    && bytes[10] === 0xff && bytes[11] === 0xff;
-  const compatible = bytes.slice(0, 12).every((byte) => byte === 0);
-  const nat64 = hasPrefix(bytes, [0x00, 0x64, 0xff, 0x9b], 96);
-  if (!mapped && !compatible && !nat64) return undefined;
+function ipv4Tail(bytes: Uint8Array): string {
   return `${bytes[12]}.${bytes[13]}.${bytes[14]}.${bytes[15]}`;
 }
 
 function isPublicIpv6(address: string): boolean {
   const bytes = parseIpv6(address);
   if (!bytes) return false;
-  const embedded = embeddedIpv4(bytes);
-  if (embedded) return isPublicIpv4(embedded);
+  const mapped = bytes.slice(0, 10).every((byte) => byte === 0)
+    && bytes[10] === 0xff && bytes[11] === 0xff;
+  const compatible = bytes.slice(0, 12).every((byte) => byte === 0);
+  if (mapped || compatible) return false;
+
+  // The well-known NAT64 prefix is globally routable only when the embedded
+  // IPv4 destination is itself public. Other IPv6 space is allowed only from
+  // the positive global-unicast allocation below.
+  const nat64Prefix = [
+    0x00, 0x64, 0xff, 0x9b, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+  ];
+  if (hasPrefix(bytes, nat64Prefix, 96)) return isPublicIpv4(ipv4Tail(bytes));
+  if (!hasPrefix(bytes, [0x20], 3)) return false;
+
   const blocked: Array<[number[], number]> = [
     [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 128],
     [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 128],
@@ -149,10 +157,6 @@ function isPublicIpv6(address: string): boolean {
     [[0x20, 0x02], 16],
     [[0x3f, 0xff, 0x00], 20],
     [[0x5f, 0x00], 16],
-    [[0xfc], 7],
-    [[0xfe, 0x80], 10],
-    [[0xfe, 0xc0], 10],
-    [[0xff], 8],
   ];
   return !blocked.some(([prefix, bits]) => hasPrefix(bytes, prefix, bits));
 }
@@ -193,6 +197,9 @@ export async function validatePublicHttpUrl(
   }
 
   const literalFamily = isIP(hostname);
+  if (literalFamily === 0 && !hostname.includes('.')) {
+    throw new Error(messages.nonPublic);
+  }
   if (literalFamily === 4 || literalFamily === 6) {
     if (!isPublicAddress(hostname)) throw new Error(messages.nonPublic);
     return { url, addresses: [{ address: hostname, family: literalFamily }] };
