@@ -151,6 +151,72 @@ describe('resolvePlotterBaseUrl', () => {
 });
 
 describe('runTripCli', () => {
+  it('routes bounded portable backup create, list, inspect, and exact-token restore commands', async () => {
+    const { service, readFile, write, writeError } = createCliHarness();
+    const summary = {
+      id: 'portable-20260817T120000000Z-00000000-0000-4000-8000-000000000001',
+      createdAt: '2026-08-17T12:00:00.000Z',
+      schemaVersion: 1,
+      directoryRevision: 3,
+      tripRevisions: { 'trip-1': 7 },
+    };
+    const backups = {
+      create: vi.fn(async () => ({ backup: summary })),
+      list: vi.fn(async () => ({ backups: [summary] })),
+      inspect: vi.fn(async (backupId: string) => ({
+        backup: { ...summary, id: backupId, files: [] },
+      })),
+      restore: vi.fn(async (backupId: string, confirmation: string) => ({
+        restored: { ...summary, id: backupId }, confirmation,
+      })),
+    };
+
+    for (const argv of [
+      ['backup-create'],
+      ['backup-list'],
+      ['backup-inspect', '--backup-id', summary.id],
+      ['backup-restore', '--backup-id', summary.id, '--confirmation', `RESTORE ${summary.id}`],
+    ]) {
+      await expect(runTripCli({
+        argv,
+        service: service as never,
+        backups,
+        readFile,
+        write,
+        writeError,
+      })).resolves.toBe(0);
+    }
+
+    expect(backups.create).toHaveBeenCalledOnce();
+    expect(backups.list).toHaveBeenCalledOnce();
+    expect(backups.inspect).toHaveBeenCalledWith(summary.id);
+    expect(backups.restore).toHaveBeenCalledWith(summary.id, `RESTORE ${summary.id}`);
+    expect(write).toHaveBeenCalledTimes(4);
+    expect(writeError).not.toHaveBeenCalled();
+  });
+
+  it('requires explicit backup IDs and confirmation text for inspection and restore', async () => {
+    const { service, readFile, write, writeError } = createCliHarness();
+    const backups = {
+      create: vi.fn(), list: vi.fn(), inspect: vi.fn(), restore: vi.fn(),
+    };
+
+    await expect(runTripCli({
+      argv: ['backup-inspect'], service: service as never, backups, readFile, write, writeError,
+    })).resolves.toBe(1);
+    await expect(runTripCli({
+      argv: ['backup-restore', '--backup-id', 'portable-id'],
+      service: service as never, backups, readFile, write, writeError,
+    })).resolves.toBe(1);
+
+    expect(backups.inspect).not.toHaveBeenCalled();
+    expect(backups.restore).not.toHaveBeenCalled();
+    expect(writeError.mock.calls.map(([value]) => JSON.parse(value).error.message)).toEqual([
+      'Missing --backup-id.',
+      'Missing --confirmation.',
+    ]);
+  });
+
   it('prints compact JSON by default', async () => {
     const { service, readFile, write, writeError } = createCliHarness({
       listTrips: vi.fn(async () => ({

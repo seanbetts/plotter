@@ -20,6 +20,14 @@ import { buildWebImageProviderQuery, type WebImageSearchResult } from '../src/se
 import { TripStorageConflictError, type RevisionEvent } from '../src/storage/revision';
 import type { RevisionedDirectoryStore } from './directoryRepository';
 import { MAX_MEDIA_BYTES, type MediaStore } from './mediaStore';
+import {
+  PortableBackupCreateError,
+  PortableBackupInvalidError,
+  PortableRestoreConfirmationError,
+  PortableRestoreIncompleteError,
+  PortableRestoreRecoveredError,
+  type StorageOperationGate,
+} from './portableBackup';
 import type { RevisionedTripStore } from './tripRepository';
 
 const MAX_JSON_BYTES = 1_048_576;
@@ -80,6 +88,7 @@ export type PlotterHttpDependencies = {
   readiness(): { ready: boolean; reason?: string };
   providers: PlotterProviderOperations;
   backups: PlotterBackupOperations;
+  operations?: StorageOperationGate;
   publicRoot: string;
 };
 
@@ -597,6 +606,18 @@ function sendCaughtError(response: ServerResponse, error: unknown): void {
     json(response, 503, errorBody(503, 'storage-unavailable', 'Portable backup operations are unavailable.'));
     return;
   }
+  if (error instanceof PortableBackupInvalidError || error instanceof PortableRestoreConfirmationError) {
+    json(response, 400, errorBody(400, 'invalid-request', INVALID_REQUEST_MESSAGE));
+    return;
+  }
+  if (
+    error instanceof PortableBackupCreateError
+    || error instanceof PortableRestoreRecoveredError
+    || error instanceof PortableRestoreIncompleteError
+  ) {
+    json(response, 503, errorBody(503, 'storage-unavailable', STORAGE_UNAVAILABLE_MESSAGE));
+    return;
+  }
   if (error instanceof Error && error.name === 'AutomaticBackupError') {
     json(response, 503, errorBody(503, 'storage-unavailable', STORAGE_UNAVAILABLE_MESSAGE));
     return;
@@ -942,12 +963,21 @@ function pathnameFrom(request: IncomingMessage): string {
   }
 }
 
+function usesCanonicalStorage(pathname: string): boolean {
+  return pathname === '/api/v1/trips'
+    || pathname.startsWith('/api/v1/trips/')
+    || pathname.startsWith('/api/v1/media/')
+    || pathname === '/api/v1/backups'
+    || pathname.startsWith('/api/v1/backups/');
+}
+
 export function createPlotterHttpHandler(dependencies: PlotterHttpDependencies) {
   void dependencies.media;
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     try {
       const pathname = pathnameFrom(request);
       const method = request.method ?? '';
+      const handle = async (): Promise<void> => {
 
       if (pathname === '/healthz' && method === 'GET') {
         if (dependencies.readiness().ready) json(response, 200, { ready: true });
@@ -1201,6 +1231,12 @@ export function createPlotterHttpHandler(dependencies: PlotterHttpDependencies) 
         throw new HttpError(404, NOT_FOUND_MESSAGE);
       }
       await frontend(request, response, dependencies.publicRoot, pathname);
+      };
+      if (dependencies.operations && usesCanonicalStorage(pathname)) {
+        await dependencies.operations.run(handle);
+      } else {
+        await handle();
+      }
     } catch (error) {
       sendCaughtError(response, error);
     }

@@ -2,6 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { calculateOpenRouteServiceRoute } from '../adapters/openRouteService';
 import { createPlotterApiClient, PlotterApiError, type PlotterApiClient } from '../api/client';
+import type {
+  CreateBackupResponse,
+  InspectBackupResponse,
+  ListBackupsResponse,
+  RestoreBackupResponse,
+} from '../api/contracts';
 import { createHttpLinkPreviewClient } from '../services/linkPreviewClient';
 import { createServiceRepositories } from '../storage/serviceRepositories';
 import { createLinkEnricher } from '../tripCommands/linkEnrichment';
@@ -17,6 +23,7 @@ type ParsedArgs = {
 type RunTripCliInput = {
   argv: string[];
   service: TripDataService;
+  backups?: BackupCliOperations;
   readFile: (path: string) => Promise<string>;
   write: (value: string) => void;
   writeError: (value: string) => void;
@@ -32,6 +39,13 @@ type CliResult = {
 
 type JsonRecord = Record<string, unknown>;
 
+export type BackupCliOperations = {
+  create(): Promise<CreateBackupResponse>;
+  list(): Promise<ListBackupsResponse>;
+  inspect(backupId: string): Promise<InspectBackupResponse>;
+  restore(backupId: string, confirmation: string): Promise<RestoreBackupResponse>;
+};
+
 const defaultPlotterBaseUrl = 'http://127.0.0.1/plotter/';
 const serviceUnavailableMessage = 'Plotter service is unavailable.';
 const configurationErrorMessage = 'Plotter CLI configuration is invalid.';
@@ -43,6 +57,7 @@ const tripCliHelp = {
     'create', 'delete', 'rename', 'replace-stops', 'insert-stop', 'update-stop', 'delete-stop', 'reorder-stops',
     'add-stop-link', 'delete-stop-link', 'list-activities', 'create-activity', 'update-activity', 'delete-activity',
     'reorder-activities', 'add-activity-link', 'delete-activity-link',
+    'backup-create', 'backup-list', 'backup-inspect', 'backup-restore',
   ],
 };
 
@@ -99,6 +114,17 @@ export function parseTripCliArgs(argv: string[]): ParsedArgs {
 function stringFlag(flags: Record<string, string | boolean>, name: string) {
   const value = flags[name];
   return typeof value === 'string' ? value : undefined;
+}
+
+function requiredStringFlag(flags: Record<string, string | boolean>, name: string): string {
+  const value = stringFlag(flags, name);
+  if (!value) throw new Error(`Missing --${name}.`);
+  return value;
+}
+
+function backupOperations(input: RunTripCliInput): BackupCliOperations {
+  if (!input.backups) throw new Error(serviceUnavailableMessage);
+  return input.backups;
 }
 
 async function readJson(path: string | undefined, readFileImpl: RunTripCliInput['readFile']) {
@@ -242,6 +268,21 @@ export async function runTripCli(input: RunTripCliInput) {
       case 'help':
         result = tripCliHelp;
         break;
+      case 'backup-create':
+        result = await backupOperations(input).create();
+        break;
+      case 'backup-list':
+        result = await backupOperations(input).list();
+        break;
+      case 'backup-inspect':
+        result = await backupOperations(input).inspect(requiredStringFlag(flags, 'backup-id'));
+        break;
+      case 'backup-restore': {
+        const backupId = requiredStringFlag(flags, 'backup-id');
+        const confirmation = requiredStringFlag(flags, 'confirmation');
+        result = await backupOperations(input).restore(backupId, confirmation);
+        break;
+      }
       case 'list':
         result = await input.service.listTrips();
         break;
@@ -476,6 +517,30 @@ function createCliApiClient(baseUrl: URL): PlotterApiClient {
   };
 }
 
+function createCliBackupOperations(environment: NodeJS.ProcessEnv = process.env): BackupCliOperations {
+  const client = createCliApiClient(resolvePlotterBaseUrl(environment));
+  return {
+    create() {
+      return client.request<CreateBackupResponse>('api/v1/backups', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+    list() {
+      return client.request<ListBackupsResponse>('api/v1/backups');
+    },
+    inspect(backupId) {
+      return client.request<InspectBackupResponse>(`api/v1/backups/${encodeURIComponent(backupId)}`);
+    },
+    restore(backupId, confirmation) {
+      return client.request<RestoreBackupResponse>(
+        `api/v1/backups/${encodeURIComponent(backupId)}/restore`,
+        { method: 'POST', body: JSON.stringify({ confirmation }) },
+      );
+    },
+  };
+}
+
 function createCliService(environment: NodeJS.ProcessEnv = process.env) {
   const client = createCliApiClient(resolvePlotterBaseUrl(environment));
   const repositories = createServiceRepositories(client);
@@ -496,6 +561,7 @@ function createCliService(environment: NodeJS.ProcessEnv = process.env) {
 type RunTripProgramInput = {
   argv?: string[];
   createService?: typeof createCliService;
+  createBackups?: typeof createCliBackupOperations;
   readFile?: (path: string) => Promise<string>;
   write?: (value: string) => void;
   writeError?: (value: string) => void;
@@ -532,10 +598,13 @@ export async function runTripProgram(input: RunTripProgramInput = {}) {
     }
 
     const service = createService();
+    const createBackups = input.createBackups ?? createCliBackupOperations;
+    const backups = createBackups();
 
     const exitCode = await runTripCli({
       argv,
       service,
+      backups,
       readFile: readFileImpl,
       write,
       writeError,

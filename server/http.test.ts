@@ -10,6 +10,12 @@ import type { RevisionedDirectoryStore } from './directoryRepository';
 import type { RevisionEventSource } from './http';
 import { createPlotterHttpHandler, type PlotterHttpDependencies } from './http';
 import type { MediaStore } from './mediaStore';
+import {
+  PortableBackupCreateError,
+  PortableBackupInvalidError,
+  PortableRestoreConfirmationError,
+  PortableRestoreRecoveredError,
+} from './portableBackup';
 import type { RevisionedTripStore } from './tripRepository';
 
 const temporaryDirectories: string[] = [];
@@ -420,11 +426,65 @@ describe('Plotter HTTP media and provider routes', () => {
 describe('Plotter HTTP transport and safety', () => {
   it('routes typed backup operations and leaves production mechanics injectable', async () => {
     const harness = dependencies();
+    const restore = vi.spyOn(harness.values.backups, 'restore');
     const base = await start(harness.values);
     expect((await jsonRequest(`${base}/api/v1/backups`, 'POST', undefined, true)).status).toBe(201);
     expect((await fetch(`${base}/api/v1/backups`)).status).toBe(200);
     expect((await fetch(`${base}/api/v1/backups/backup-1`)).status).toBe(200);
     expect((await jsonRequest(`${base}/api/v1/backups/backup-1/restore`, 'POST', { confirmation: 'RESTORE backup-1' }, true)).status).toBe(200);
+    expect(restore).toHaveBeenCalledWith('backup-1', { confirmation: 'RESTORE backup-1' });
+  });
+
+  it('quiesces state, media, and backup handlers behind the injected storage operation gate', async () => {
+    const harness = dependencies();
+    const order: string[] = [];
+    let release: (() => void) | undefined;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    harness.values.operations = {
+      async run(operation) {
+        order.push('gate');
+        await blocked;
+        return operation();
+      },
+    };
+    harness.values.directory.load = async () => {
+      order.push('load');
+      return { revision: 2, trips: [] };
+    };
+    const base = await start(harness.values);
+    const response = fetch(`${base}/api/v1/trips`);
+    await expect.poll(() => order).toEqual(['gate']);
+
+    release?.();
+    await expect(response.then((value) => value.status)).resolves.toBe(200);
+    expect(order).toEqual(['gate', 'load']);
+  });
+
+  it('maps bounded portable-backup failures without exposing archive or recovery details', async () => {
+    for (const error of [new PortableBackupInvalidError(), new PortableRestoreConfirmationError()]) {
+      const harness = dependencies();
+      harness.values.backups.restore = async () => { throw error; };
+      const base = await start(harness.values);
+      const response = await jsonRequest(`${base}/api/v1/backups/backup-1/restore`, 'POST', {
+        confirmation: 'RESTORE backup-1',
+      }, true);
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        status: 400,
+        error: { code: 'invalid-request', message: 'The request is invalid.' },
+      });
+    }
+
+    for (const error of [new PortableBackupCreateError(), new PortableRestoreRecoveredError()]) {
+      const harness = dependencies();
+      harness.values.backups.create = async () => { throw error; };
+      const base = await start(harness.values);
+      const response = await jsonRequest(`${base}/api/v1/backups`, 'POST', undefined, true);
+      expect(response.status).toBe(503);
+      const text = await response.text();
+      expect(text).toBe('{"status":503,"error":{"code":"storage-unavailable","message":"Plotter storage is unavailable."}}');
+      expect(text).not.toContain(error.message);
+    }
   });
 
   it('streams invalidation-only SSE events and unsubscribes on disconnect', async () => {

@@ -136,7 +136,7 @@ it('stays reachable with redacted readiness when the canonical database is inval
   });
 });
 
-it('keeps portable backup routes unavailable until the backup task supplies mechanics', async () => {
+it('creates, lists, and explicitly restores portable backups while recovering service readiness', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
   mkdirSync(testDataParent, { recursive: true });
   const dataDirectory = mkdtempSync(resolve(testDataParent, 'service-backup-'));
@@ -154,22 +154,43 @@ it('keeps portable backup routes unavailable until the backup task supplies mech
   processes.push(child);
 
   await expect.poll(async () => {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/v1/backups`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-plotter-write': '1' },
-      });
-      return { status: response.status, body: await response.json() };
-    } catch {
-      return null;
-    }
-  }, { interval: 50, timeout: 3_000 }).toEqual({
-    status: 503,
-    body: {
-      status: 503,
-      error: { code: 'storage-unavailable', message: 'Portable backup operations are unavailable.' },
-    },
+    try { return (await fetch(`http://127.0.0.1:${port}/healthz`)).status; } catch { return 0; }
+  }, { interval: 50, timeout: 3_000 }).toBe(200);
+  const headers = { 'content-type': 'application/json', 'x-plotter-write': '1' };
+  const created = await fetch(`http://127.0.0.1:${port}/api/v1/trips`, {
+    method: 'POST', headers, body: JSON.stringify({ expectedRevision: 0, name: 'Before backup' }),
   });
+  const createdBody = await created.json() as { trip: { id: string } };
+  const backupResponse = await fetch(`http://127.0.0.1:${port}/api/v1/backups`, {
+    method: 'POST', headers,
+  });
+  expect(backupResponse.status).toBe(201);
+  const backupBody = await backupResponse.json() as { backup: { id: string } };
+  const changed = await fetch(`http://127.0.0.1:${port}/api/v1/trips/${createdBody.trip.id}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ expectedRevision: 1, patch: { name: 'After backup' } }),
+  });
+  expect(changed.status).toBe(200);
+
+  const wrongConfirmation = await fetch(
+    `http://127.0.0.1:${port}/api/v1/backups/${backupBody.backup.id}/restore`,
+    { method: 'POST', headers, body: JSON.stringify({ confirmation: 'RESTORE wrong' }) },
+  );
+  expect(wrongConfirmation.status).toBe(400);
+  const restored = await fetch(
+    `http://127.0.0.1:${port}/api/v1/backups/${backupBody.backup.id}/restore`,
+    { method: 'POST', headers, body: JSON.stringify({ confirmation: `RESTORE ${backupBody.backup.id}` }) },
+  );
+  expect(restored.status).toBe(200);
+  await expect((await fetch(`http://127.0.0.1:${port}/healthz`)).json()).resolves.toEqual({ ready: true });
+  await expect((await fetch(`http://127.0.0.1:${port}/api/v1/trips`)).json()).resolves.toMatchObject({
+    revision: 1,
+    trips: [{ id: createdBody.trip.id, name: 'Before backup' }],
+  });
+  const listed = await (await fetch(`http://127.0.0.1:${port}/api/v1/backups`)).json() as {
+    backups: Array<{ id: string }>;
+  };
+  expect(listed.backups.some((backup) => backup.id.startsWith('recovery-before-restore-'))).toBe(true);
 });
 
 it('composes revisioned SQLite writes, atomic media, and ID-only content reads over HTTP', async () => {

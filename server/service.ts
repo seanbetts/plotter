@@ -8,7 +8,6 @@ import { openPlotterDatabase, type PlotterDatabase } from './database';
 import { createSqliteDirectoryRepository, type RevisionedDirectoryStore } from './directoryRepository';
 import { createRevisionEventBus } from './events';
 import {
-  BackupOperationsUnavailableError,
   createPlotterHttpHandler,
   type MediaContentReader,
   type PlotterBackupOperations,
@@ -17,6 +16,11 @@ import { createMediaStore, type MediaStore } from './mediaStore';
 import { searchWebImages } from './providers/imageSearch';
 import { fetchLinkPreview } from './providers/linkPreview';
 import { fetchRemoteImage } from './providers/remoteImage';
+import {
+  createPortableBackupOperations,
+  createStorageOperationGate,
+  recoverInterruptedPortableRestore,
+} from './portableBackup';
 import { createSqliteTripRepository, type RevisionedTripStore } from './tripRepository';
 import { createWriteCoordinator } from './writeCoordinator';
 
@@ -82,13 +86,6 @@ function createMediaContentReader(database: PlotterDatabase, media: MediaStore):
   };
 }
 
-const unavailableBackups: PlotterBackupOperations = {
-  async create() { throw new BackupOperationsUnavailableError(); },
-  async list() { throw new BackupOperationsUnavailableError(); },
-  async inspect() { throw new BackupOperationsUnavailableError(); },
-  async restore() { throw new BackupOperationsUnavailableError(); },
-};
-
 function unavailableDependency<T>(): T {
   return new Proxy<Record<string, never>>({}, {
     get() {
@@ -97,32 +94,88 @@ function unavailableDependency<T>(): T {
   }) as T;
 }
 
-let database: PlotterDatabase | undefined;
+type StorageRuntime = {
+  database: PlotterDatabase;
+  directory: RevisionedDirectoryStore;
+  tripRepository(tripId: string): RevisionedTripStore;
+  media: MediaStore;
+  mediaContent: MediaContentReader;
+};
+
+let runtime: StorageRuntime | undefined;
 let ready = false;
 const events = createRevisionEventBus();
-let directory: RevisionedDirectoryStore;
-let tripRepository: (tripId: string) => RevisionedTripStore;
-let media: MediaStore;
-let mediaContent: MediaContentReader;
+const operations = createStorageOperationGate();
+let backups: PlotterBackupOperations = unavailableDependency<PlotterBackupOperations>();
+
+function requireRuntime(): StorageRuntime {
+  if (!runtime) throw new Error('Plotter storage is unavailable.');
+  return runtime;
+}
+
+function openStorageRuntime(): void {
+  let database: PlotterDatabase | undefined;
+  try {
+    database = openPlotterDatabase(join(serviceArguments.dataDir, 'plotter.sqlite3'));
+    const media = createMediaStore(serviceArguments.dataDir);
+    const writes = createWriteCoordinator(
+      database,
+      createBackupStore(join(serviceArguments.dataDir, 'backups')),
+      events,
+    );
+    runtime = {
+      database,
+      directory: createSqliteDirectoryRepository(database, writes, media),
+      tripRepository: (tripId) => createSqliteTripRepository(database!, writes, tripId, media),
+      media,
+      mediaContent: createMediaContentReader(database, media),
+    };
+    ready = true;
+  } catch (error) {
+    try { database?.close(); } catch { /* Preserve the stable readiness failure. */ }
+    runtime = undefined;
+    ready = false;
+    throw error;
+  }
+}
+
+function closeStorageRuntime(): void {
+  ready = false;
+  const closing = runtime;
+  runtime = undefined;
+  closing?.database.close();
+}
 
 try {
-  database = openPlotterDatabase(join(serviceArguments.dataDir, 'plotter.sqlite3'));
-  media = createMediaStore(serviceArguments.dataDir);
-  const writes = createWriteCoordinator(
-    database,
-    createBackupStore(join(serviceArguments.dataDir, 'backups')),
-    events,
-  );
-  directory = createSqliteDirectoryRepository(database, writes, media);
-  tripRepository = (tripId) => createSqliteTripRepository(database!, writes, tripId, media);
-  mediaContent = createMediaContentReader(database, media);
-  ready = true;
+  await recoverInterruptedPortableRestore(serviceArguments.dataDir);
+  openStorageRuntime();
+  backups = createPortableBackupOperations({
+    dataDirectory: serviceArguments.dataDir,
+    currentDatabase: () => requireRuntime().database,
+    closeStorage: closeStorageRuntime,
+    openStorage: openStorageRuntime,
+    publish: (event) => events.publish(event),
+  });
 } catch {
-  directory = unavailableDependency<RevisionedDirectoryStore>();
-  tripRepository = () => unavailableDependency<RevisionedTripStore>();
-  media = unavailableDependency<MediaStore>();
-  mediaContent = unavailableDependency<MediaContentReader>();
+  try { closeStorageRuntime(); } catch { /* Readiness remains false. */ }
 }
+
+const directory: RevisionedDirectoryStore = {
+  load: (...arguments_) => requireRuntime().directory.load(...arguments_),
+  create: (...arguments_) => requireRuntime().directory.create(...arguments_),
+  update: (...arguments_) => requireRuntime().directory.update(...arguments_),
+  delete: (...arguments_) => requireRuntime().directory.delete(...arguments_),
+};
+const tripRepository = (tripId: string) => requireRuntime().tripRepository(tripId);
+const media: MediaStore = {
+  stage: (...arguments_) => requireRuntime().media.stage(...arguments_),
+  commit: (...arguments_) => requireRuntime().media.commit(...arguments_),
+  moveToTrash: (...arguments_) => requireRuntime().media.moveToTrash(...arguments_),
+  open: (...arguments_) => requireRuntime().media.open(...arguments_),
+};
+const mediaContent: MediaContentReader = {
+  open: (...arguments_) => requireRuntime().mediaContent.open(...arguments_),
+};
 
 const handler = createPlotterHttpHandler({
   directory,
@@ -137,7 +190,8 @@ const handler = createPlotterHttpHandler({
     remoteImage: fetchRemoteImage,
     imageSearchApiKey: process.env.SERPAPI_API_KEY,
   },
-  backups: unavailableBackups,
+  backups,
+  operations,
   publicRoot: resolve(repositoryRoot, 'dist'),
 });
 
@@ -147,7 +201,7 @@ const server = createServer((request, response) => {
 
 function closeService(): void {
   server.close(() => {
-    database?.close();
+    closeStorageRuntime();
   });
 }
 
