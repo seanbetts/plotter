@@ -10,7 +10,17 @@ import type { WriteCoordinator } from '../../server/writeCoordinator';
 import { isCanonicalId } from '../../src/api/identifiers';
 import { validateRoutingAnchor } from '../../src/domain/routingAnchors';
 import type { Coordinates, RoutingAnchor, RoutingAnchorProfile } from '../../src/domain/types';
-import { sourceFingerprintDigest, type SourceFingerprint, type SourceSnapshot } from './source';
+import {
+  destinationFromPersistedRow,
+  destinationToPersistedRow,
+  type PersistedDestinationRow,
+} from '../../src/storage/persistedRows';
+import {
+  canonicalJson,
+  sourceFingerprintDigest,
+  type SourceFingerprint,
+  type SourceSnapshot,
+} from './source';
 
 export type MigrationFailure = { gate: string; message: string };
 export type OrphanClassification = { kind: string; sourceId: string; disposition: string };
@@ -151,18 +161,20 @@ function validDestinationLocation(value: unknown): boolean {
     && validOptionalString(value.sourceFeatureId);
 }
 
-function validResearchLink(value: unknown): boolean {
+function validResearchLink(value: unknown, normalizedLegacy = false): boolean {
   if (!exactRecord(
     value,
     ['id', 'title', 'url', 'domain', 'imageUrl', 'sortOrder', 'previewFetchedAt'],
     ['id', 'title', 'url', 'domain', 'sortOrder'],
   )) return false;
-  return isCanonicalId(value.id)
+  return (normalizedLegacy
+    ? stringValue(value.id) && value.id.length > 0
+    : isCanonicalId(value.id))
     && stringValue(value.title)
     && stringValue(value.url)
     && stringValue(value.domain)
     && validOptionalString(value.imageUrl)
-    && nonNegativeInteger(value.sortOrder)
+    && (normalizedLegacy ? finiteNumber(value.sortOrder) : nonNegativeInteger(value.sortOrder))
     && validOptionalTimestamp(value.previewFetchedAt);
 }
 
@@ -245,7 +257,7 @@ function validRouteWaypoint(value: unknown): boolean {
     && validDestinationLocation(value.location)
     && stringValue(value.notes)
     && Array.isArray(value.links)
-    && value.links.every(validResearchLink);
+    && value.links.every((link) => validResearchLink(link));
 }
 
 function validRouteIntent(value: unknown): boolean {
@@ -354,7 +366,7 @@ function validTripMember(row: Record<string, unknown>): boolean {
     && validTimestamp(row.updated_at);
 }
 
-function validDestination(row: Record<string, unknown>): boolean {
+function validCanonicalDestinationRow(row: Record<string, unknown>): boolean {
   const canonicalCoordinates = { lat: row.lat, lng: row.lng };
   if (!(
     isCanonicalId(row.id) && isCanonicalId(row.trip_id) && stringValue(row.name)
@@ -389,12 +401,47 @@ function validDestination(row: Record<string, unknown>): boolean {
     && stringValue(timing.provisionalEndDate)
     && stringValue(why.summary) && stringValue(why.highlights) && stringValue(why.personalRationale)
     && stringValue(research.notes) && Array.isArray(research.links)
-    && research.links.every(validResearchLink)
+    && research.links.every((link) => validResearchLink(link, true))
     && Array.isArray(research.bookReferences) && research.bookReferences.every(validBookReference)
     && row.media.every(validMediaItem)
     && Array.isArray(activities.items) && activities.items.every(validActivityItem)
     && stringValue(routeContext.previousNextNotes) && stringValue(routeContext.drivingNotes)
     && stringValue(routeContext.borderShippingNotes) && stringValue(routeContext.notes);
+}
+
+function normalizedDestinationRow(
+  row: Record<string, unknown>,
+): PersistedDestinationRow | undefined {
+  try {
+    return destinationToPersistedRow(
+      destinationFromPersistedRow(row as unknown as PersistedDestinationRow),
+      String(row.trip_id),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function validDestination(row: Record<string, unknown>): boolean {
+  const normalized = normalizedDestinationRow(row);
+  return normalized !== undefined
+    && validCanonicalDestinationRow(normalized as unknown as Record<string, unknown>);
+}
+
+function normalizedDestinationFields(row: Record<string, unknown>): string[] {
+  const normalized = normalizedDestinationRow(row);
+  if (!normalized) return [];
+  const fields: string[] = [];
+  for (const [sourceField, normalizedValue] of [
+    ['research', normalized.research],
+    ['routing_anchors', normalized.routing_anchors],
+  ] as const) {
+    const sourceValue = row[sourceField];
+    const sourceJson = sourceValue === undefined ? 'undefined' : canonicalJson(sourceValue);
+    const normalizedJson = normalizedValue === undefined ? 'undefined' : canonicalJson(normalizedValue);
+    if (sourceJson !== normalizedJson) fields.push(sourceField);
+  }
+  return fields;
 }
 
 function validRoute(row: Record<string, unknown>): boolean {
@@ -423,7 +470,7 @@ function validActivity(row: Record<string, unknown>): boolean {
     && nonNegativeInteger(row.activity_order) && stringValue(row.title) && stringValue(row.description)
     && activityCategories.has(String(row.category)) && activityStatuses.has(String(row.status))
     && priorities.has(String(row.priority)) && (row.location === null || validActivityLocation(row.location))
-    && Array.isArray(row.links) && row.links.every(validResearchLink)
+    && Array.isArray(row.links) && row.links.every((link) => validResearchLink(link))
     && stringValue(row.notes) && validStringArray(row.tags)
     && validTimestamp(row.created_at) && validTimestamp(row.updated_at);
 }
@@ -637,6 +684,9 @@ export async function materializeSource(options: MaterializeOptions): Promise<Ma
             sourceFingerprint: options.fingerprint,
             archivedOnlyTables: ['trip_members'],
             archivedOnlyColumns: { trips: ['metadata'] },
+            normalizedDestinationFields: options.source.tables.destinations
+              .map((row) => ({ id: row.id, fields: normalizedDestinationFields(row) }))
+              .filter((item) => item.fields.length > 0),
             derivedMediaFields: options.source.tables.media_assets
               .filter((row) => row.content_type === null || row.size_bytes === null)
               .map((row) => ({
@@ -669,7 +719,8 @@ export async function materializeSource(options: MaterializeOptions): Promise<Ma
             routing_anchors, tags, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
-        for (const row of options.source.tables.destinations) {
+        for (const sourceRow of options.source.tables.destinations) {
+          const row = normalizedDestinationRow(sourceRow)!;
           insertDestination.run(
             sql(row.id), sql(row.trip_id), sql(row.name), sql(row.country_region),
             sql(row.lat), sql(row.lng), json(row.location), sql(row.stop_order),

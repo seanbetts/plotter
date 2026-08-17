@@ -7,6 +7,10 @@ const allowedProtocols = new Set(['http:', 'https:']);
 const nowIso = () => new Date().toISOString();
 const createId = () => crypto.randomUUID();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function normalizeResearchLinkUrl(rawUrl: string) {
   const trimmed = rawUrl.trim();
   if (!trimmed) {
@@ -51,6 +55,17 @@ export function createFallbackResearchLink(
 }
 
 export function normalizeResearchLink(link: LegacyResearchLink, index: number): ResearchLink {
+  if (!isRecord(link)
+    || typeof link.id !== 'string' || link.id.length === 0
+    || typeof link.title !== 'string'
+    || typeof link.url !== 'string'
+    || (link.domain !== undefined && typeof link.domain !== 'string')
+    || (link.sortOrder !== undefined
+      && (typeof link.sortOrder !== 'number' || !Number.isFinite(link.sortOrder)))
+    || (link.imageUrl !== undefined && typeof link.imageUrl !== 'string')
+    || (link.previewFetchedAt !== undefined && typeof link.previewFetchedAt !== 'string')) {
+    throw new Error('Saved research link is invalid.');
+  }
   const url = normalizeResearchLinkUrl(link.url);
   const domain = link.domain || deriveLinkDomain(url);
 

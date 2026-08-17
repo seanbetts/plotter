@@ -132,7 +132,11 @@ restore transaction used by normal recovery. The Supabase source remains
 read-only and remains an independent rollback source. Repeating the same
 fixture does not merge or duplicate IDs or media. Structured destination,
 route, activity, and media domain fields are validated recursively before a
-candidate can pass reconciliation.
+candidate can pass reconciliation. Production-supported legacy destination
+research is first normalized through the same persisted-row codec used by the
+application; the raw source row remains unchanged in the archive, while the
+normalized fields are recorded in import provenance and validated recursively
+before materialization.
 
 These commands are implementation and fixture gates only. They do not claim
 that a live Supabase project has been read, that personal `user-data/` has been

@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPlotterDatabase } from '../../server/database';
+import { createRawArchive } from './archive';
 import { loadFixtureSource } from './cli';
 import { materializeSource } from './materialize';
 import { fingerprintSourceSnapshot, type SourceSnapshot } from './source';
@@ -191,6 +192,92 @@ describe('Supabase source materialization', () => {
     expect(() => materialized.validate()).not.toThrow();
   });
 
+  it('normalizes production-supported legacy destination research without mutating the source row', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-legacy-research-'));
+    temporaryDirectories.push(root);
+    const loaded = await fixture();
+    const destination = loaded.source.tables.destinations[0]!;
+    const legacyResearch = {
+      notes: null,
+      links: [
+        {
+          id: 'wiki-link',
+          title: '',
+          url: 'www.wikipedia.org/wiki/Kyoto',
+        },
+        {
+          id: 'official-link',
+          title: 'Official',
+          url: 'https://kyoto.example/official',
+          sortOrder: 0,
+        },
+      ],
+    };
+    destination.research = structuredClone(legacyResearch);
+    const rawSourceRow = structuredClone(destination);
+    const fingerprint = fingerprintSourceSnapshot(loaded.source, loaded.schema);
+    const archive = await createRawArchive({
+      stagingParent: root,
+      source: loaded.source,
+      schema: loaded.schema,
+      fingerprint,
+      rawSchemaSql: loaded.rawSchemaSql,
+      rawDataSql: loaded.rawDataSql,
+    });
+    const materializedRoot = join(archive.root, 'materialized');
+    mkdirSync(materializedRoot, { mode: 0o700 });
+
+    const materialized = await materializeSource({
+      destinationRoot: materializedRoot,
+      archiveRelativePath: 'imports/synthetic',
+      source: loaded.source,
+      fingerprint,
+      importedAt: '2026-08-17T12:00:00.000Z',
+    });
+
+    expect(materialized.failures).toEqual([]);
+    expect(materialized.promotable).toBe(true);
+    expect(destination).toEqual(rawSourceRow);
+    const archivedRows = JSON.parse(readFileSync(
+      join(archive.root, 'tables', 'destinations.json'),
+      'utf8',
+    )) as Array<Record<string, unknown>>;
+    expect(archivedRows[0]!.research).toEqual(legacyResearch);
+    const database = new DatabaseSync(materialized.databasePath, { readOnly: true });
+    const persisted = database.prepare('SELECT research FROM destinations WHERE id = ?')
+      .get(String(destination.id)) as { research: string };
+    const provenance = database.prepare('SELECT details FROM migration_provenance').get() as {
+      details: string;
+    };
+    expect(JSON.parse(persisted.research)).toEqual({
+      notes: '',
+      bookReferences: [],
+      links: [
+        {
+          id: 'official-link',
+          title: 'Official',
+          url: 'https://kyoto.example/official',
+          domain: 'kyoto.example',
+          sortOrder: 0,
+        },
+        {
+          id: 'wiki-link',
+          title: 'wikipedia.org',
+          url: 'https://www.wikipedia.org/wiki/Kyoto',
+          domain: 'wikipedia.org',
+          sortOrder: 0,
+        },
+      ],
+    });
+    expect(JSON.parse(provenance.details)).toMatchObject({
+      normalizedDestinationFields: [{
+        id: destination.id,
+        fields: ['research'],
+      }],
+    });
+    database.close();
+  });
+
   it.each([
     ['vehicle restrictions', (source: SourceSnapshot) => {
       source.tables.trips[0]!.vehicle_restrictions = { height: 'too-tall' };
@@ -220,6 +307,20 @@ describe('Supabase source materialization', () => {
         notes: '', links: [{ id: 'link', title: 'Link', url: 3, domain: 'example.invalid', sortOrder: 0 }],
         bookReferences: [],
       };
+    }],
+    ['legacy research notes', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.research = { notes: 42, links: [] };
+    }],
+    ['legacy research link derived fields', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.research = {
+        notes: null,
+        links: [{
+          id: 'legacy-link', title: '', url: 'example.invalid', imageUrl: 42,
+        }],
+      };
+    }],
+    ['legacy research container', (source: SourceSnapshot) => {
+      source.tables.destinations[0]!.research = 42;
     }],
     ['book reference', (source: SourceSnapshot) => {
       source.tables.destinations[0]!.research = {

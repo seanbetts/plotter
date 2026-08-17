@@ -58,6 +58,14 @@ describe('researchLinks', () => {
     });
   });
 
+  it.each([
+    { id: 42, title: 'Bad ID', url: 'https://example.com' },
+    { id: 'bad-order', title: 'Bad order', url: 'https://example.com', sortOrder: 'first' },
+    { id: 'bad-image', title: 'Bad image', url: 'https://example.com', imageUrl: 0 },
+  ])('rejects malformed saved link fields instead of dropping or deriving them', (link) => {
+    expect(() => normalizeResearchLink(link as never, 0)).toThrow('Saved research link is invalid.');
+  });
+
   it('sorts links by sortOrder and reassigns order after drag reorder', () => {
     const first: ResearchLink = {
       id: 'first',

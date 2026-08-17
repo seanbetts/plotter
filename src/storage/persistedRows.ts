@@ -16,6 +16,10 @@ import { sortResearchLinks } from '../domain/researchLinks';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { TripSummary } from './tripDirectoryRepository';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export type PersistedTripRow = {
   id: string;
   owner_user_id: string;
@@ -184,7 +188,13 @@ export function destinationToPersistedRow(destination: Destination, tripId: stri
 }
 
 export function destinationFromPersistedRow(row: PersistedDestinationRow): Destination {
-  const research = row.research ?? {};
+  const savedResearch = row.research as unknown;
+  if (savedResearch !== null && savedResearch !== undefined && !isRecord(savedResearch)) {
+    throw new Error('Saved destination research is invalid.');
+  }
+  const research = (savedResearch ?? {}) as Partial<Destination['research']> & {
+    notes?: string | null;
+  };
 
   return {
     id: row.id,

@@ -211,6 +211,13 @@ describe('persisted rows', () => {
     });
   });
 
+  it('rejects a malformed persisted research container before applying legacy defaults', () => {
+    const row = destinationToPersistedRow(destination, tripId);
+
+    expect(() => destinationFromPersistedRow({ ...row, research: 42 } as never))
+      .toThrow('Saved destination research is invalid.');
+  });
+
   it('adds revisioned snapshot loading without removing existing repository operations', () => {
     expectTypeOf<TripRepository['loadSnapshot']>().toEqualTypeOf<(() => Promise<import('./revision').TripSnapshot>) | undefined>();
     expectTypeOf<TripRepository['saveDestination']>().toEqualTypeOf<(destination: Destination) => Promise<void>>();
