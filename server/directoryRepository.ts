@@ -15,6 +15,7 @@ import type { DirectorySnapshot } from '../src/storage/revision';
 import type { TripSummary } from '../src/storage/tripDirectoryRepository';
 import { resolveVehiclePreset } from '../src/domain/vehiclePresets';
 import type { PlotterDatabase } from './database';
+import type { MediaStore } from './mediaStore';
 import type { WriteCoordinator } from './writeCoordinator';
 
 const LOCAL_OWNER_ID = 'local';
@@ -64,6 +65,7 @@ function nextTimestamp(previous?: string): string {
 export function createSqliteDirectoryRepository(
   database: PlotterDatabase,
   writes: WriteCoordinator,
+  mediaStore?: MediaStore,
 ): RevisionedDirectoryStore {
   const { connection } = database;
   const listTrips = connection.prepare(`
@@ -100,6 +102,9 @@ export function createSqliteDirectoryRepository(
     VALUES (?, 0)
   `);
   const deleteTrip = connection.prepare('DELETE FROM trips WHERE id = ?');
+  const mediaForTrip = connection.prepare(`
+    SELECT id, relative_path FROM media_assets WHERE trip_id = ? ORDER BY id
+  `);
 
   function decodeTrip(row: Record<string, unknown>): TripSummary {
     return tripSummaryFromPersistedRow(tripRowFromSqlite(row));
@@ -193,13 +198,31 @@ export function createSqliteDirectoryRepository(
     },
 
     async delete(expectedRevision, tripId) {
-      const result = await writes.run({ kind: 'directory', expectedRevision }, (transaction) => {
-        const write = deleteTrip.run(tripId);
-        if (write.changes !== 1) throw new Error('Trip not found.');
-        void transaction;
-      });
+      const restores: Array<() => Promise<void>> = [];
+      if (mediaStore) {
+        try {
+          const rows = mediaForTrip.all(tripId) as Array<{ id: string; relative_path: string }>;
+          for (const row of rows) {
+            restores.push(await mediaStore.moveToTrash(row.relative_path, row.id));
+          }
+        } catch (error) {
+          for (const restore of restores.reverse()) await restore();
+          throw error;
+        }
+      }
 
-      return { revision: result.revision };
+      try {
+        const result = await writes.run({ kind: 'directory', expectedRevision }, (transaction) => {
+          const write = deleteTrip.run(tripId);
+          if (write.changes !== 1) throw new Error('Trip not found.');
+          void transaction;
+        });
+
+        return { revision: result.revision };
+      } catch (error) {
+        for (const restore of restores.reverse()) await restore();
+        throw error;
+      }
     },
   };
 }
