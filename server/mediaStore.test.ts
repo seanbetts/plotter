@@ -230,6 +230,33 @@ describe('atomic media store', () => {
     expect(lstatSync(join(harness.directory, committed.relativePath)).isFile()).toBe(true);
   });
 
+  it.each(['_media', '-media', `a${'b'.repeat(128)}`])(
+    'rejects non-canonical media identity %s before publishing bytes',
+    async (mediaId) => {
+      const harness = createHarness();
+      const staged = await harness.media.stage(imageStream('invalid identity'), 'image/png');
+
+      await expect(harness.media.commit(staged, mediaId)).rejects.toThrow(
+        'Media identity is invalid.',
+      );
+
+      expect(readdirSync(join(harness.directory, 'media')).filter((name) => name !== '.staging'))
+        .toEqual([]);
+    },
+  );
+
+  it.each(['a', `a${'b'.repeat(127)}`])(
+    'accepts canonical media identity boundary %s',
+    async (mediaId) => {
+      const harness = createHarness();
+      const staged = await harness.media.stage(imageStream('boundary identity'), 'image/png');
+
+      await expect(harness.media.commit(staged, mediaId)).resolves.toMatchObject({
+        relativePath: `media/${mediaId}.png`,
+      });
+    },
+  );
+
   it('atomically rejects one of two concurrent commits for the same media identity', async () => {
     const harness = createHarness();
     const first = await harness.media.stage(imageStream('first contender'), 'image/png');

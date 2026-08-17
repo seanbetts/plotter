@@ -1,4 +1,5 @@
 import type { DirectoryReadResponse, TripReadResponse } from '../api/contracts';
+import { isCanonicalId } from '../api/identifiers';
 import type { PlotterApiClient } from '../api/client';
 import type { RevisionEvent, ServiceInvalidation } from './revision';
 
@@ -58,7 +59,7 @@ export function createServiceRealtime(
   }
 
   function validTripId(value: unknown): value is string {
-    return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+    return isCanonicalId(value);
   }
 
   function parseRevisionEvent(data: string): RevisionEvent | null {
@@ -194,21 +195,31 @@ export function createServiceRealtime(
 
   async function reconcile(): Promise<void> {
     const tripIds = [...tripSubscribers.keys()];
-    const [directory, ...trips] = await Promise.all([
-      options.client.request<DirectoryReadResponse>('/api/v1/trips'),
-      ...tripIds.map((tripId) =>
-        options.client.request<TripReadResponse>(`/api/v1/trips/${encodeURIComponent(tripId)}`)),
-    ]);
-    if (!validRevision(directory.revision)) throw new Error('Plotter service returned an invalid revision.');
+    const directoryRequest = options.client.request<DirectoryReadResponse>('/api/v1/trips');
+    const tripRequests = tripIds.map((tripId) =>
+      options.client.request<TripReadResponse>(`/api/v1/trips/${encodeURIComponent(tripId)}`));
+    const settledTripRequests = Promise.allSettled(tripRequests);
     const resetId = `reconcile-${++reconciliationSequence}`;
     const directoryReset: RevisionEvent = {
       kind: 'restore-reset',
       epoch: '00000000-0000-4000-8000-000000000000',
       scope: 'directory',
     };
+    let directory: DirectoryReadResponse;
+    try {
+      directory = await directoryRequest;
+    } catch (error) {
+      await settledTripRequests;
+      throw error;
+    }
+    if (!validRevision(directory.revision)) {
+      await settledTripRequests;
+      throw new Error('Plotter service returned an invalid revision.');
+    }
     publish(directoryReset, { kind: 'restore-reset', resetId });
-    trips.forEach((trip, index) => {
-      if (!validRevision(trip.revision)) throw new Error('Plotter service returned an invalid revision.');
+    const tripResults = await settledTripRequests;
+    tripResults.forEach((tripResult, index) => {
+      if (tripResult?.status !== 'fulfilled' || !validRevision(tripResult.value.revision)) return;
       publish({
         kind: 'restore-reset',
         epoch: '00000000-0000-4000-8000-000000000000',

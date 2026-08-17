@@ -203,6 +203,91 @@ describe('service realtime', () => {
     expect(tripRevisions).toEqual([{ kind: 'restore-reset', resetId: 'reconcile-1' }]);
   });
 
+  it('still resets the directory and other trips when a removed subscribed trip returns 404', async () => {
+    const client: PlotterApiClient = {
+      request: vi.fn(async (path: string) => {
+        if (path === '/api/v1/trips') return { revision: 3, trips: [] };
+        if (path === '/api/v1/trips/trip-present') {
+          return { revision: 5, destinations: [], routeLegs: [], activities: [] };
+        }
+        if (path === '/api/v1/trips/trip-removed') throw new Error('HTTP 404');
+        throw new Error(`Unexpected request: ${path}`);
+      }) as PlotterApiClient['request'],
+      upload: vi.fn(),
+    };
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client, createEventSource: createEventSourceHarness().createEventSource,
+    });
+    const directory = vi.fn();
+    const present = vi.fn();
+    const removed = vi.fn();
+    realtime.subscribeToDirectory(directory);
+    realtime.subscribeToTrip('trip-present', present);
+    realtime.subscribeToTrip('trip-removed', removed);
+
+    await expect(realtime.reconcile()).resolves.toBeUndefined();
+
+    expect(directory).toHaveBeenCalledWith({ kind: 'restore-reset', resetId: 'reconcile-1' });
+    expect(present).toHaveBeenCalledWith({ kind: 'restore-reset', resetId: 'reconcile-1' });
+    expect(removed).not.toHaveBeenCalled();
+  });
+
+  it('does not let one subscribed trip network failure suppress successful reconciliation', async () => {
+    const client: PlotterApiClient = {
+      request: vi.fn(async (path: string) => {
+        if (path === '/api/v1/trips') return { revision: 7, trips: [] };
+        if (path === '/api/v1/trips/trip-present') {
+          return { revision: 9, destinations: [], routeLegs: [], activities: [] };
+        }
+        if (path === '/api/v1/trips/trip-offline') throw new TypeError('network unavailable');
+        throw new Error(`Unexpected request: ${path}`);
+      }) as PlotterApiClient['request'],
+      upload: vi.fn(),
+    };
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client, createEventSource: createEventSourceHarness().createEventSource,
+    });
+    const directory = vi.fn();
+    const present = vi.fn();
+    const offline = vi.fn();
+    realtime.subscribeToDirectory(directory);
+    realtime.subscribeToTrip('trip-present', present);
+    realtime.subscribeToTrip('trip-offline', offline);
+
+    await expect(realtime.reconcile()).resolves.toBeUndefined();
+
+    expect(directory).toHaveBeenCalledWith({ kind: 'restore-reset', resetId: 'reconcile-1' });
+    expect(present).toHaveBeenCalledWith({ kind: 'restore-reset', resetId: 'reconcile-1' });
+    expect(offline).not.toHaveBeenCalled();
+  });
+
+  it('publishes the authoritative directory reset before a slow trip request settles', async () => {
+    let rejectSlowTrip: ((error: Error) => void) | undefined;
+    const slowTrip = new Promise<never>((_resolve, reject) => { rejectSlowTrip = reject; });
+    const client: PlotterApiClient = {
+      request: vi.fn(async (path: string) => {
+        if (path === '/api/v1/trips') return { revision: 11, trips: [] };
+        if (path === '/api/v1/trips/trip-slow') return slowTrip;
+        throw new Error(`Unexpected request: ${path}`);
+      }) as PlotterApiClient['request'],
+      upload: vi.fn(),
+    };
+    const realtime = createServiceRealtime({
+      baseUrl: '/', client, createEventSource: createEventSourceHarness().createEventSource,
+    });
+    const directory = vi.fn();
+    realtime.subscribeToDirectory(directory);
+    realtime.subscribeToTrip('trip-slow', vi.fn());
+
+    const reconciliation = realtime.reconcile();
+    await vi.waitFor(() => expect(client.request).toHaveBeenCalledTimes(2));
+    const publishedBeforeTripSettled = directory.mock.calls.length > 0;
+    rejectSlowTrip?.(new Error('eventual timeout'));
+    await reconciliation;
+
+    expect(publishedBeforeTripSettled).toBe(true);
+  });
+
   it('reconciles after EventSource opens so reconnects recover missed events', async () => {
     const harness = createEventSourceHarness();
     const client = createClient();

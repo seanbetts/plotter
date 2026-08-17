@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { open, realpath, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isCanonicalId } from '../src/api/identifiers';
 
 export const MAX_MEDIA_BYTES = 52_428_800;
 
@@ -96,7 +97,7 @@ function extensionFor(contentType: string): string {
 }
 
 function assertMediaId(mediaId: string): void {
-  if (!/^[A-Za-z0-9_-]+$/.test(mediaId)) throw new Error('Media identity is invalid.');
+  if (!isCanonicalId(mediaId)) throw new Error('Media identity is invalid.');
 }
 
 async function resolveExistingContainedPath(

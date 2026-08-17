@@ -15,6 +15,7 @@ import type {
   RestoreBackupRequest,
   TripMutationRequest,
 } from '../src/api/contracts';
+import { isCanonicalId } from '../src/api/identifiers';
 import type { Activity, Destination, MediaItem, RouteLeg, TripRoutingVehicle } from '../src/domain/types';
 import { buildWebImageProviderQuery, type WebImageSearchResult } from '../src/services/webImageSearchClient';
 import { TripStorageConflictError, type RevisionEvent } from '../src/storage/revision';
@@ -147,7 +148,7 @@ function nonNegativeInteger(value: unknown): number {
 
 function idValue(value: unknown): string {
   const id = stringValue(value, false);
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) invalid();
+  if (!isCanonicalId(id)) invalid();
   return id;
 }
 

@@ -40,6 +40,7 @@ import type {
   BackupSummary,
   RestoreBackupRequest,
 } from '../src/api/contracts';
+import { isCanonicalId } from '../src/api/identifiers';
 import { openPlotterDatabase, type PlotterDatabase } from './database';
 
 const ARCHIVE_BLOCK_BYTES = 512;
@@ -61,10 +62,12 @@ const RESTORE_RECOVERED_MESSAGE = 'Portable restore failed; canonical state was 
 const RESTORE_INCOMPLETE_MESSAGE = 'Portable restore failed and canonical recovery is incomplete.';
 const BACKUP_ID_PATTERN = /^(?:portable|recovery-before-restore)-\d{8}T\d{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const RESTORE_PREPARING_DIRECTORY_PATTERN = /^\.portable-restore-preparing-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
 const RESTORE_DIRECTORY_PATTERN = /^\.portable-restore-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
+const RESTORE_CLEANUP_DIRECTORY_PATTERN = /^\.portable-restore-cleanup-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
 const RESTORE_COMMITTED_FILENAME = 'restore-committed';
+const RESTORE_PLAN_FILENAME = 'restore-plan';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const MEDIA_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 export type PortableBackupManifest = {
   formatVersion: 1;
@@ -95,7 +98,10 @@ export type PortableBackupPhase =
   | 'originals-durable'
   | 'promotion-durable'
   | 'commit-marker-durable'
+  | 'commit-marker-invalidated'
   | 'rollback-durable'
+  | 'cleanup-published'
+  | 'restore-transaction-validated'
   | 'transaction-cleaned';
 
 export type PortableBackupSyncPhase =
@@ -106,7 +112,9 @@ export type PortableBackupSyncPhase =
   | 'restore-originals-moved'
   | 'restore-promoted'
   | 'restore-marker-published'
+  | 'restore-marker-invalidated'
   | 'restore-rolled-back'
+  | 'restore-cleanup-published'
   | 'restore-transaction-cleaned';
 
 export type PortableBackupDurability = {
@@ -214,6 +222,77 @@ function assertCanonicalDirectory(path: string, root: string): void {
   }
 }
 
+type RestoreTransactionKind = 'preparing' | 'active' | 'cleanup';
+
+function restoreTransactionPattern(kind: RestoreTransactionKind): RegExp {
+  if (kind === 'preparing') return RESTORE_PREPARING_DIRECTORY_PATTERN;
+  return kind === 'active' ? RESTORE_DIRECTORY_PATTERN : RESTORE_CLEANUP_DIRECTORY_PATTERN;
+}
+
+function assertPrivateRestoreTransaction(
+  dataRoot: string,
+  path: string,
+  kind: RestoreTransactionKind,
+): string {
+  try {
+    const match = restoreTransactionPattern(kind).exec(basename(path));
+    const metadata = lstatSync(path);
+    if (
+      !match
+      || dirname(path) !== dataRoot
+      || metadata.isSymbolicLink()
+      || !metadata.isDirectory()
+      || (metadata.mode & 0o777) !== 0o700
+      || realpathSync(path) !== path
+      || !isContained(path, dataRoot)
+    ) throw new PortableBackupInvalidError();
+    return match[1]!;
+  } catch (error) {
+    if (error instanceof PortableBackupInvalidError) throw error;
+    throw new PortableBackupInvalidError();
+  }
+}
+
+function assertPrivateInternalDirectory(path: string, transactionRoot: string): void {
+  try {
+    const metadata = lstatSync(path);
+    if (
+      metadata.isSymbolicLink()
+      || !metadata.isDirectory()
+      || (metadata.mode & 0o077) !== 0
+      || realpathSync(path) !== path
+      || !isContained(path, transactionRoot)
+    ) throw new PortableBackupInvalidError();
+  } catch (error) {
+    if (error instanceof PortableBackupInvalidError) throw error;
+    throw new PortableBackupInvalidError();
+  }
+}
+
+function pathMetadata(path: string): ReturnType<typeof lstatSync> | undefined {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+async function validateRestoreTransaction(
+  dataRoot: string,
+  transaction: string,
+  kind: RestoreTransactionKind,
+  durability: DurabilityController,
+  announce = false,
+): Promise<string> {
+  const transactionId = assertPrivateRestoreTransaction(dataRoot, transaction, kind);
+  if (announce) {
+    await durability.phase('restore-transaction-validated');
+    assertPrivateRestoreTransaction(dataRoot, transaction, kind);
+  }
+  return transactionId;
+}
+
 function createDurabilityController(
   durability: PortableBackupDurability | undefined,
 ): DurabilityController {
@@ -242,6 +321,10 @@ function createDurabilityController(
 
 function validNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function validPositiveInteger(value: unknown): value is number {
+  return validNonNegativeInteger(value) && value > 0;
 }
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
@@ -308,7 +391,7 @@ function parseManifest(value: unknown): PortableBackupManifest {
   const tripRevisions: Record<string, number> = {};
   for (const tripId of Object.keys(value.tripRevisions).sort()) {
     const revision = value.tripRevisions[tripId];
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(tripId) || !validNonNegativeInteger(revision)) {
+    if (!isCanonicalId(tripId) || !validNonNegativeInteger(revision)) {
       throw new PortableBackupInvalidError();
     }
     tripRevisions[tripId] = revision;
@@ -325,10 +408,12 @@ function parseManifest(value: unknown): PortableBackupManifest {
       || !SHA256_PATTERN.test(item.sha256)
     ) throw new PortableBackupInvalidError();
     assertArchivePath(item.path);
-    if (
-      item.path !== DATABASE_ARCHIVE_PATH
-      && !/^media\/[A-Za-z0-9_-]{1,128}\.(?:jpg|png|webp|gif)$/.test(item.path)
-    ) throw new PortableBackupInvalidError();
+    if (item.path !== DATABASE_ARCHIVE_PATH) {
+      const mediaPath = /^media\/(.+)\.(?:jpg|png|webp|gif)$/.exec(item.path);
+      if (!mediaPath || !isCanonicalId(mediaPath[1]) || !validPositiveInteger(item.byteCount)) {
+        throw new PortableBackupInvalidError();
+      }
+    }
     return { path: item.path, byteCount: item.byteCount, sha256: item.sha256 };
   });
   for (let index = 0; index < files.length; index += 1) {
@@ -417,7 +502,7 @@ function readDatabaseState(databasePath: string): {
       if (
         typeof row.id !== 'string'
         || typeof row.relative_path !== 'string'
-        || !validNonNegativeInteger(row.size_bytes)
+        || !validPositiveInteger(row.size_bytes)
         || typeof row.sha256 !== 'string'
         || !SHA256_PATTERN.test(row.sha256)
         || typeof row.content_type !== 'string'
@@ -461,9 +546,10 @@ function activeMediaArchivePath(media: {
   id: string;
   relativePath: string;
   contentType: string;
+  byteCount: number;
 }): string {
   const extension = expectedMediaExtension(media.contentType);
-  if (!MEDIA_ID_PATTERN.test(media.id) || extension === undefined) {
+  if (!isCanonicalId(media.id) || extension === undefined || !validPositiveInteger(media.byteCount)) {
     throw new PortableBackupInvalidError();
   }
   const expectedRelativePath = `media/${media.id}.${extension}`;
@@ -522,7 +608,7 @@ function writeTarNumber(buffer: Buffer, offset: number, width: number, value: nu
   buffer.write(encoded, offset, width, 'ascii');
 }
 
-function tarHeader(path: string, byteCount: number): Buffer {
+function tarHeader(path: string, byteCount: number, type: '0' | 'x' = '0'): Buffer {
   const { name, prefix } = tarPathParts(path);
   const header = Buffer.alloc(ARCHIVE_BLOCK_BYTES);
   header.write(name, 0, 100, 'utf8');
@@ -532,7 +618,7 @@ function tarHeader(path: string, byteCount: number): Buffer {
   writeTarNumber(header, 124, 12, byteCount);
   writeTarNumber(header, 136, 12, 0);
   header.fill(0x20, 148, 156);
-  header.write('0', 156, 1, 'ascii');
+  header.write(type, 156, 1, 'ascii');
   header.write('ustar\0', 257, 6, 'ascii');
   header.write('00', 263, 2, 'ascii');
   header.write(prefix, 345, 155, 'utf8');
@@ -554,18 +640,50 @@ async function writeTarEntry(
   handle: Awaited<ReturnType<typeof open>>,
   path: string,
   bytes: Uint8Array,
+  type: '0' | 'x' = '0',
 ): Promise<void> {
-  await writeAll(handle, tarHeader(path, bytes.byteLength));
+  await writeAll(handle, tarHeader(path, bytes.byteLength, type));
   await writeAll(handle, bytes);
   const padding = (ARCHIVE_BLOCK_BYTES - (bytes.byteLength % ARCHIVE_BLOCK_BYTES)) % ARCHIVE_BLOCK_BYTES;
   if (padding > 0) await writeAll(handle, Buffer.alloc(padding));
+}
+
+function paxIdentifier(path: string): string {
+  return createHash('sha256').update(path).digest('hex').slice(0, 16);
+}
+
+function paxPathRecord(path: string): Buffer {
+  const payload = ` path=${path}\n`;
+  let length = Buffer.byteLength(payload) + 1;
+  while (true) {
+    const record = `${length}${payload}`;
+    const nextLength = Buffer.byteLength(record);
+    if (nextLength === length) return Buffer.from(record);
+    length = nextLength;
+  }
+}
+
+async function writeTarPathHeader(
+  handle: Awaited<ReturnType<typeof open>>,
+  path: string,
+  byteCount: number,
+): Promise<void> {
+  try {
+    await writeAll(handle, tarHeader(path, byteCount));
+    return;
+  } catch (error) {
+    if (!(error instanceof PortableBackupInvalidError)) throw error;
+  }
+  const identifier = paxIdentifier(path);
+  await writeTarEntry(handle, `PaxHeaders/${identifier}`, paxPathRecord(path), 'x');
+  await writeAll(handle, tarHeader(`PaxFiles/${identifier}`, byteCount));
 }
 
 async function writeTarFile(
   handle: Awaited<ReturnType<typeof open>>,
   source: SourceFile,
 ): Promise<void> {
-  await writeAll(handle, tarHeader(source.archivePath, source.byteCount));
+  await writeTarPathHeader(handle, source.archivePath, source.byteCount);
   const hash = createHash('sha256');
   let byteCount = 0;
   const descriptor = openSync(source.sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -625,19 +743,14 @@ async function publishArchive(
   backupsRoot: string,
   durability: DurabilityController,
 ): Promise<void> {
-  let ownsFinal = false;
-  let finalDurable = false;
-  await durability.phase('archive-ready');
   try {
     await link(temporaryPath, archivePath);
-    ownsFinal = true;
     await durability.syncDirectories([backupsRoot], 'archive-published');
-    finalDurable = true;
     await durability.phase('archive-published');
   } catch (error) {
-    if (ownsFinal && !finalDurable) {
-      await unlink(archivePath).catch(() => undefined);
-    }
+    // Once link() succeeds the final name is published. Its directory sync may
+    // be ambiguous, and the pathname may already belong to a later publisher,
+    // so only the unique temporary pathname is ever eligible for cleanup.
     await unlink(temporaryPath).catch(() => undefined);
     await durability.syncDirectories([backupsRoot], 'archive-temp-cleaned').catch(() => undefined);
     throw error instanceof PortableBackupCreateError ? error : new PortableBackupCreateError();
@@ -689,6 +802,25 @@ function maximumEntryBytes(path: string): number {
   return MAX_MANIFEST_BYTES;
 }
 
+function parsePaxPathRecord(bytes: Buffer): string {
+  const record = bytes.toString('utf8');
+  const separator = record.indexOf(' ');
+  if (separator <= 0 || !/^\d+$/.test(record.slice(0, separator))) {
+    throw new PortableBackupInvalidError();
+  }
+  const declaredLength = Number.parseInt(record.slice(0, separator), 10);
+  const body = record.slice(separator + 1);
+  if (
+    declaredLength !== bytes.byteLength
+    || !body.startsWith('path=')
+    || !body.endsWith('\n')
+    || body.slice(0, -1).includes('\n')
+  ) throw new PortableBackupInvalidError();
+  const path = body.slice('path='.length, -1);
+  assertArchivePath(path);
+  return path;
+}
+
 async function extractArchive(archivePath: string, stageDirectory: string): Promise<Map<string, { byteCount: number; sha256: string }>> {
   const archiveMetadata = lstatSync(archivePath);
   if (!archiveMetadata.isFile() || archiveMetadata.isSymbolicLink() || archiveMetadata.size > MAX_ARCHIVE_BYTES) {
@@ -699,6 +831,7 @@ async function extractArchive(archivePath: string, stageDirectory: string): Prom
   let position = 0;
   let totalBytes = 0;
   let foundEnd = false;
+  let pendingPax: { path: string; identifier: string } | undefined;
   try {
     while (position + ARCHIVE_BLOCK_BYTES <= archiveMetadata.size) {
       const header = Buffer.alloc(ARCHIVE_BLOCK_BYTES);
@@ -725,19 +858,48 @@ async function extractArchive(archivePath: string, stageDirectory: string): Prom
       if ([...checksumHeader].reduce((total, byte) => total + byte, 0) !== checksum) {
         throw new PortableBackupInvalidError();
       }
+      const type = header.subarray(156, 157).toString('ascii');
       if (
         header.subarray(257, 263).toString('ascii') !== 'ustar\0'
         || header.subarray(263, 265).toString('ascii') !== '00'
-        || !['0', '\0'].includes(header.subarray(156, 157).toString('ascii'))
+        || !['0', '\0', 'x'].includes(type)
       ) throw new PortableBackupInvalidError();
-      const archiveEntryPath = tarEntryPath(header);
-      if (seen.has(archiveEntryPath)) throw new PortableBackupInvalidError();
+      const headerPath = tarEntryPath(header);
       const byteCount = parseTarNumber(header.subarray(124, 136));
-      if (byteCount > maximumEntryBytes(archiveEntryPath)) throw new PortableBackupInvalidError();
       totalBytes += byteCount;
       if (totalBytes > MAX_ARCHIVE_BYTES) throw new PortableBackupInvalidError();
       const paddedBytes = byteCount + ((ARCHIVE_BLOCK_BYTES - (byteCount % ARCHIVE_BLOCK_BYTES)) % ARCHIVE_BLOCK_BYTES);
       if (position + paddedBytes > archiveMetadata.size) throw new PortableBackupInvalidError();
+
+      if (type === 'x') {
+        const headerMatch = /^PaxHeaders\/([0-9a-f]{16})$/.exec(headerPath);
+        if (!headerMatch || pendingPax || byteCount === 0 || byteCount > 1_024) {
+          throw new PortableBackupInvalidError();
+        }
+        const bytes = Buffer.alloc(byteCount);
+        await readExactly(handle, bytes, position);
+        position += byteCount;
+        const paddingBytes = paddedBytes - byteCount;
+        if (paddingBytes > 0) {
+          const padding = Buffer.alloc(paddingBytes);
+          await readExactly(handle, padding, position);
+          if (!padding.every((byte) => byte === 0)) throw new PortableBackupInvalidError();
+          position += paddingBytes;
+        }
+        const path = parsePaxPathRecord(bytes);
+        if (headerMatch[1] !== paxIdentifier(path)) throw new PortableBackupInvalidError();
+        pendingPax = { path, identifier: headerMatch[1] };
+        continue;
+      }
+
+      const archiveEntryPath = pendingPax?.path ?? headerPath;
+      if (pendingPax && headerPath !== `PaxFiles/${pendingPax.identifier}`) {
+        throw new PortableBackupInvalidError();
+      }
+      pendingPax = undefined;
+      if (seen.has(archiveEntryPath) || byteCount > maximumEntryBytes(archiveEntryPath)) {
+        throw new PortableBackupInvalidError();
+      }
 
       const destination = resolve(stageDirectory, archiveEntryPath);
       if (!isContained(destination, stageDirectory)) throw new PortableBackupInvalidError();
@@ -776,7 +938,7 @@ async function extractArchive(archivePath: string, stageDirectory: string): Prom
   } finally {
     await handle.close();
   }
-  if (!foundEnd) throw new PortableBackupInvalidError();
+  if (!foundEnd || pendingPax) throw new PortableBackupInvalidError();
   return seen;
 }
 
@@ -835,6 +997,20 @@ async function validateExtractedArchive(
   return manifest;
 }
 
+async function validateArchiveFile(dataRoot: string, archivePath: string): Promise<void> {
+  const stageDirectory = await mkdtemp(join(dataRoot, '.portable-inspect-'));
+  try {
+    const canonicalStage = await realpath(stageDirectory);
+    if (canonicalStage !== stageDirectory || !isContained(canonicalStage, dataRoot)) {
+      throw new PortableBackupInvalidError();
+    }
+    const entries = await extractArchive(archivePath, canonicalStage);
+    await validateExtractedArchive(canonicalStage, entries);
+  } finally {
+    await rm(stageDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 async function inspectArchive(
   dataRoot: string,
   backupsRoot: string,
@@ -851,7 +1027,7 @@ async function inspectArchive(
   }
   const stageDirectory = restoreStageId === undefined
     ? await mkdtemp(join(dataRoot, '.portable-inspect-'))
-    : join(dataRoot, `.portable-restore-${restoreStageId}`);
+    : join(dataRoot, `.portable-restore-preparing-${restoreStageId}`);
   const payloadDirectory = restoreStageId === undefined
     ? stageDirectory
     : join(stageDirectory, 'payload');
@@ -872,7 +1048,16 @@ async function inspectArchive(
     const manifest = await validateExtractedArchive(canonicalPayload, entries);
     return { stageDirectory: canonicalStage, payloadDirectory: canonicalPayload, manifest };
   } catch (error) {
-    await rm(stageDirectory, { recursive: true, force: true }).catch(() => undefined);
+    if (restoreStageId === undefined) {
+      await rm(stageDirectory, { recursive: true, force: true }).catch(() => undefined);
+    } else {
+      try {
+        assertPrivateRestoreTransaction(dataRoot, stageDirectory, 'preparing');
+        await rm(stageDirectory, { recursive: true, force: true });
+      } catch {
+        // Never follow a replaced preparation path during validation cleanup.
+      }
+    }
     if (error instanceof PortableBackupNotFoundError) throw error;
     throw new PortableBackupInvalidError();
   }
@@ -888,23 +1073,95 @@ async function renameIfExists(source: string, destination: string): Promise<bool
   }
 }
 
-async function moveAsideAndRestore(current: string, original: string, failed: string): Promise<void> {
-  if (!existsSync(original)) return;
-  const currentMoved = await renameIfExists(current, failed);
-  try {
-    await rename(original, current);
-  } catch (error) {
-    if (currentMoved) await rename(failed, current).catch(() => undefined);
-    throw error;
-  }
-}
-
 type RestoreCommitMarker = {
   formatVersion: 1;
   transactionId: string;
   backupId: string;
   restoreEpoch: string;
 };
+
+type RestorePlan = {
+  formatVersion: 1;
+  transactionId: string;
+  backupId: string;
+  originalWal: boolean;
+  originalShm: boolean;
+};
+
+function restorePlan(
+  transactionId: string,
+  backupId: string,
+  originalWal: boolean,
+  originalShm: boolean,
+): RestorePlan {
+  return { formatVersion: 1, transactionId, backupId, originalWal, originalShm };
+}
+
+async function writeSyncedControlFile(path: string, value: object): Promise<void> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(
+      path,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+      0o600,
+    );
+    await writeAll(handle, Buffer.from(JSON.stringify(value)));
+    await handle.sync();
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function readRestorePlan(
+  dataRoot: string,
+  stageDirectory: string,
+  kind: 'preparing' | 'active',
+): Promise<RestorePlan> {
+  const transactionId = assertPrivateRestoreTransaction(dataRoot, stageDirectory, kind);
+  const planPath = join(stageDirectory, RESTORE_PLAN_FILENAME);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    const metadata = lstatSync(planPath);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size === 0 || metadata.size > 1_024) {
+      throw new PortableBackupInvalidError();
+    }
+    handle = await open(planPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const openedMetadata = await handle.stat();
+    if (
+      !openedMetadata.isFile()
+      || openedMetadata.size !== metadata.size
+      || openedMetadata.dev !== metadata.dev
+      || openedMetadata.ino !== metadata.ino
+    ) throw new PortableBackupInvalidError();
+    const bytes = Buffer.alloc(openedMetadata.size);
+    await readExactly(handle, bytes, 0);
+    const value: unknown = JSON.parse(bytes.toString('utf8'));
+    if (!isRecord(value) || !exactKeys(value, [
+      'formatVersion', 'transactionId', 'backupId', 'originalWal', 'originalShm',
+    ])) throw new PortableBackupInvalidError();
+    if (
+      value.formatVersion !== 1
+      || value.transactionId !== transactionId
+      || typeof value.backupId !== 'string'
+      || !BACKUP_ID_PATTERN.test(value.backupId)
+      || typeof value.originalWal !== 'boolean'
+      || typeof value.originalShm !== 'boolean'
+    ) throw new PortableBackupInvalidError();
+    assertPrivateRestoreTransaction(dataRoot, stageDirectory, kind);
+    return {
+      formatVersion: 1,
+      transactionId,
+      backupId: value.backupId,
+      originalWal: value.originalWal,
+      originalShm: value.originalShm,
+    };
+  } catch (error) {
+    if (error instanceof PortableBackupInvalidError) throw error;
+    throw new PortableBackupInvalidError();
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
 
 function restoreCommitMarker(
   transactionId: string,
@@ -913,7 +1170,12 @@ function restoreCommitMarker(
   return { formatVersion: 1, transactionId, backupId, restoreEpoch: transactionId };
 }
 
-async function hasValidRestoreCommitMarker(stageDirectory: string): Promise<boolean> {
+async function hasValidRestoreCommitMarker(
+  dataRoot: string,
+  stageDirectory: string,
+  expectedBackupId: string,
+): Promise<boolean> {
+  assertPrivateRestoreTransaction(dataRoot, stageDirectory, 'active');
   const transactionMatch = RESTORE_DIRECTORY_PATTERN.exec(basename(stageDirectory));
   if (!transactionMatch) return false;
   const markerPath = join(stageDirectory, RESTORE_COMMITTED_FILENAME);
@@ -925,22 +1187,30 @@ async function hasValidRestoreCommitMarker(stageDirectory: string): Promise<bool
     }
     handle = await open(markerPath, constants.O_RDONLY | constants.O_NOFOLLOW);
     const openedMetadata = await handle.stat();
-    if (!openedMetadata.isFile() || openedMetadata.size !== metadata.size) return false;
+    if (
+      !openedMetadata.isFile()
+      || openedMetadata.size !== metadata.size
+      || openedMetadata.dev !== metadata.dev
+      || openedMetadata.ino !== metadata.ino
+    ) return false;
     const bytes = Buffer.alloc(openedMetadata.size);
     await readExactly(handle, bytes, 0);
     const value: unknown = JSON.parse(bytes.toString('utf8'));
     if (!isRecord(value) || !exactKeys(value, [
       'formatVersion', 'transactionId', 'backupId', 'restoreEpoch',
     ])) return false;
-    return value.formatVersion === 1
+    const valid = value.formatVersion === 1
       && value.transactionId === transactionMatch[1]
       && value.restoreEpoch === transactionMatch[1]
       && typeof value.backupId === 'string'
       && BACKUP_ID_PATTERN.test(value.backupId)
+      && value.backupId === expectedBackupId
       && typeof value.transactionId === 'string'
       && UUID_PATTERN.test(value.transactionId)
       && typeof value.restoreEpoch === 'string'
       && UUID_PATTERN.test(value.restoreEpoch);
+    assertPrivateRestoreTransaction(dataRoot, stageDirectory, 'active');
+    return valid;
   } catch {
     return false;
   } finally {
@@ -948,35 +1218,189 @@ async function hasValidRestoreCommitMarker(stageDirectory: string): Promise<bool
   }
 }
 
-async function rollbackRestoreTransaction(
+type StoredObjectKind = 'file' | 'directory';
+
+function assertOptionalStoredObject(path: string, kind: StoredObjectKind, root: string): boolean {
+  const metadata = pathMetadata(path);
+  if (!metadata) return false;
+  if (
+    metadata.isSymbolicLink()
+    || (kind === 'file' ? !metadata.isFile() : !metadata.isDirectory())
+    || realpathSync(path) !== path
+    || !isContained(path, root)
+  ) throw new PortableBackupInvalidError();
+  return true;
+}
+
+async function moveAsideAndRestore(
+  current: string,
+  original: string,
+  failed: string,
+  kind: StoredObjectKind,
+  currentRoot: string,
+  transactionRoot: string,
+  expectedOriginal: boolean,
+): Promise<void> {
+  const originalExists = assertOptionalStoredObject(original, kind, transactionRoot);
+  const failedExists = assertOptionalStoredObject(failed, kind, transactionRoot);
+  const currentExists = assertOptionalStoredObject(current, kind, currentRoot);
+
+  if (originalExists) {
+    if (failedExists && currentExists) throw new PortableBackupInvalidError();
+    if (!failedExists && currentExists) await rename(current, failed);
+    await rename(original, current);
+    return;
+  }
+  if (failedExists || expectedOriginal) return;
+  if (currentExists) await rename(current, failed);
+}
+
+async function invalidateRestoreCommitMarker(
   dataRoot: string,
   stageDirectory: string,
   durability: DurabilityController,
 ): Promise<void> {
+  await validateRestoreTransaction(dataRoot, stageDirectory, 'active', durability);
+  const markerPath = join(stageDirectory, RESTORE_COMMITTED_FILENAME);
+  try {
+    await unlink(markerPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  await validateRestoreTransaction(dataRoot, stageDirectory, 'active', durability);
+  await durability.syncDirectories([stageDirectory], 'restore-marker-invalidated');
+  await validateRestoreTransaction(dataRoot, stageDirectory, 'active', durability);
+  await durability.phase('commit-marker-invalidated');
+}
+
+async function rollbackRestoreTransaction(
+  dataRoot: string,
+  stageDirectory: string,
+  plan: RestorePlan,
+  durability: DurabilityController,
+): Promise<void> {
+  await validateRestoreTransaction(dataRoot, stageDirectory, 'active', durability);
   const rollbackRoot = join(stageDirectory, 'rollback');
+  assertPrivateInternalDirectory(rollbackRoot, stageDirectory);
   const failedRoot = join(stageDirectory, 'failed');
-  await rm(failedRoot, { recursive: true, force: true });
-  await mkdir(failedRoot, { recursive: true, mode: 0o700 });
+  if (!pathMetadata(failedRoot)) await mkdir(failedRoot, { mode: 0o700 });
+  assertPrivateInternalDirectory(failedRoot, stageDirectory);
   const databasePath = join(dataRoot, DATABASE_FILENAME);
-  await moveAsideAndRestore(databasePath, join(rollbackRoot, DATABASE_FILENAME), join(failedRoot, DATABASE_FILENAME));
-  await moveAsideAndRestore(`${databasePath}-wal`, join(rollbackRoot, `${DATABASE_FILENAME}-wal`), join(failedRoot, `${DATABASE_FILENAME}-wal`));
-  await moveAsideAndRestore(`${databasePath}-shm`, join(rollbackRoot, `${DATABASE_FILENAME}-shm`), join(failedRoot, `${DATABASE_FILENAME}-shm`));
-  await moveAsideAndRestore(join(dataRoot, 'media'), join(rollbackRoot, 'media'), join(failedRoot, 'media'));
-  await durability.syncDirectories(
-    [dataRoot, rollbackRoot, failedRoot].filter((path) => existsSync(path)),
-    'restore-rolled-back',
+  const rollbackStarted = assertOptionalStoredObject(
+    join(rollbackRoot, DATABASE_FILENAME),
+    'file',
+    stageDirectory,
+  ) || assertOptionalStoredObject(
+    join(failedRoot, DATABASE_FILENAME),
+    'file',
+    stageDirectory,
   );
+
+  if (rollbackStarted) {
+    const operations: Array<{
+      current: string;
+      original: string;
+      failed: string;
+      kind: StoredObjectKind;
+      expectedOriginal: boolean;
+    }> = [
+      {
+        current: databasePath,
+        original: join(rollbackRoot, DATABASE_FILENAME),
+        failed: join(failedRoot, DATABASE_FILENAME),
+        kind: 'file',
+        expectedOriginal: true,
+      },
+      {
+        current: `${databasePath}-wal`,
+        original: join(rollbackRoot, `${DATABASE_FILENAME}-wal`),
+        failed: join(failedRoot, `${DATABASE_FILENAME}-wal`),
+        kind: 'file',
+        expectedOriginal: plan.originalWal,
+      },
+      {
+        current: `${databasePath}-shm`,
+        original: join(rollbackRoot, `${DATABASE_FILENAME}-shm`),
+        failed: join(failedRoot, `${DATABASE_FILENAME}-shm`),
+        kind: 'file',
+        expectedOriginal: plan.originalShm,
+      },
+      {
+        current: join(dataRoot, 'media'),
+        original: join(rollbackRoot, 'media'),
+        failed: join(failedRoot, 'media'),
+        kind: 'directory',
+        expectedOriginal: true,
+      },
+    ];
+    for (const operation of operations) {
+      await validateRestoreTransaction(dataRoot, stageDirectory, 'active', durability, true);
+      assertPrivateInternalDirectory(rollbackRoot, stageDirectory);
+      assertPrivateInternalDirectory(failedRoot, stageDirectory);
+      await moveAsideAndRestore(
+        operation.current,
+        operation.original,
+        operation.failed,
+        operation.kind,
+        dataRoot,
+        stageDirectory,
+        operation.expectedOriginal,
+      );
+    }
+  }
+  await validateRestoreTransaction(dataRoot, stageDirectory, 'active', durability);
+  await durability.syncDirectories([dataRoot, rollbackRoot, failedRoot], 'restore-rolled-back');
+  await validateRestoreTransaction(dataRoot, stageDirectory, 'active', durability);
   await durability.phase('rollback-durable');
 }
 
-async function removeRestoreTransaction(
+function cleanupTransactionPath(dataRoot: string, transactionId: string): string {
+  return join(dataRoot, `.portable-restore-cleanup-${transactionId}`);
+}
+
+async function publishRestoreCleanup(
+  dataRoot: string,
+  transaction: string,
+  durability: DurabilityController,
+): Promise<string> {
+  const transactionId = await validateRestoreTransaction(
+    dataRoot,
+    transaction,
+    'active',
+    durability,
+  );
+  const cleanup = cleanupTransactionPath(dataRoot, transactionId);
+  if (pathMetadata(cleanup)) throw new PortableBackupInvalidError();
+  await rename(transaction, cleanup);
+  await durability.syncDirectories([dataRoot], 'restore-cleanup-published');
+  await validateRestoreTransaction(dataRoot, cleanup, 'cleanup', durability);
+  await durability.phase('cleanup-published');
+  return cleanup;
+}
+
+async function removeRestoreGarbage(
+  dataRoot: string,
+  transaction: string,
+  kind: 'preparing' | 'cleanup',
+  durability: DurabilityController,
+): Promise<void> {
+  await validateRestoreTransaction(dataRoot, transaction, kind, durability, true);
+  // Node exposes no openat/renameat family. Revalidation immediately before
+  // mutation closes every operation-time swap seam available to tests; the
+  // remaining kernel-level path race is confined to this private 0700 root.
+  assertPrivateRestoreTransaction(dataRoot, transaction, kind);
+  await rm(transaction, { recursive: true, force: true });
+  await durability.syncDirectories([dataRoot], 'restore-transaction-cleaned');
+  await durability.phase('transaction-cleaned');
+}
+
+async function retireRestoreTransaction(
   dataRoot: string,
   transaction: string,
   durability: DurabilityController,
 ): Promise<void> {
-  await rm(transaction, { recursive: true, force: true });
-  await durability.syncDirectories([dataRoot], 'restore-transaction-cleaned');
-  await durability.phase('transaction-cleaned');
+  const cleanup = await publishRestoreCleanup(dataRoot, transaction, durability);
+  await removeRestoreGarbage(dataRoot, cleanup, 'cleanup', durability);
 }
 
 export async function recoverInterruptedPortableRestore(
@@ -985,19 +1409,32 @@ export async function recoverInterruptedPortableRestore(
 ): Promise<void> {
   const dataRoot = realpathSync(dataDirectory);
   const durability = createDurabilityController(durabilityOptions);
-  const transactions = readdirSync(dataRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && RESTORE_DIRECTORY_PATTERN.test(entry.name))
-    .map((entry) => join(dataRoot, entry.name))
-    .sort();
-  for (const transaction of transactions) {
-    try {
-      if (!await hasValidRestoreCommitMarker(transaction)) {
-        await rollbackRestoreTransaction(dataRoot, transaction, durability);
-      }
-      await removeRestoreTransaction(dataRoot, transaction, durability);
-    } catch {
-      throw new PortableRestoreIncompleteError();
+  const names = readdirSync(dataRoot).sort();
+  const preparing = names.filter((name) => RESTORE_PREPARING_DIRECTORY_PATTERN.test(name));
+  const cleanup = names.filter((name) => RESTORE_CLEANUP_DIRECTORY_PATTERN.test(name));
+  const active = names.filter((name) => RESTORE_DIRECTORY_PATTERN.test(name));
+  try {
+    for (const name of preparing) {
+      await removeRestoreGarbage(dataRoot, join(dataRoot, name), 'preparing', durability);
     }
+    for (const name of cleanup) {
+      await removeRestoreGarbage(dataRoot, join(dataRoot, name), 'cleanup', durability);
+    }
+    for (const name of active) {
+      const transaction = join(dataRoot, name);
+      await validateRestoreTransaction(dataRoot, transaction, 'active', durability, true);
+      const plan = await readRestorePlan(dataRoot, transaction, 'active');
+      const markerExists = pathMetadata(join(transaction, RESTORE_COMMITTED_FILENAME)) !== undefined;
+      if (markerExists && await hasValidRestoreCommitMarker(dataRoot, transaction, plan.backupId)) {
+        await retireRestoreTransaction(dataRoot, transaction, durability);
+        continue;
+      }
+      if (markerExists) await invalidateRestoreCommitMarker(dataRoot, transaction, durability);
+      await rollbackRestoreTransaction(dataRoot, transaction, plan, durability);
+      await retireRestoreTransaction(dataRoot, transaction, durability);
+    }
+  } catch {
+    throw new PortableRestoreIncompleteError();
   }
 }
 
@@ -1057,6 +1494,8 @@ export function createPortableBackupOperations(options: PortableBackupOptions): 
       };
       parseManifest(manifest);
       await createArchive(temporaryArchivePath, manifest, sources);
+      await durability.phase('archive-ready');
+      await validateArchiveFile(dataRoot, temporaryArchivePath);
       await publishArchive(temporaryArchivePath, archivePath, backupsRoot, durability);
       return backupSummary(backupId, manifest);
     } catch (error) {
@@ -1118,62 +1557,202 @@ export function createPortableBackupOperations(options: PortableBackupOptions): 
         if (request.confirmation !== `RESTORE ${backupId}`) throw new PortableRestoreConfirmationError();
         const stageId = makeRandomId();
         let extracted: ExtractedArchive | undefined;
+        let recovery: BackupSummary | undefined;
+        let plan: RestorePlan | undefined;
+        let transactionKind: 'preparing' | 'active' = 'preparing';
         let storageClosed = false;
         let restoredRuntimeOpen = false;
         let promotionStarted = false;
+        let markerMayExist = false;
+        let commitDurable = false;
         try {
           extracted = await inspectArchive(dataRoot, backupsRoot, backupId, stageId);
-          await durability.syncDirectories([dataRoot], 'restore-transaction-created');
-          const recovery = await createInternal('recovery-before-restore');
+          await validateRestoreTransaction(
+            dataRoot,
+            extracted.stageDirectory,
+            'preparing',
+            durability,
+          );
+          recovery = await createInternal('recovery-before-restore');
           await durability.phase('recovery-archive-durable');
           const rollbackRoot = join(extracted.stageDirectory, 'rollback');
           await mkdir(rollbackRoot, { mode: 0o700 });
-          await durability.syncDirectories([extracted.stageDirectory], 'restore-rollback-created');
+          assertPrivateInternalDirectory(rollbackRoot, extracted.stageDirectory);
           await options.closeStorage();
           storageClosed = true;
           await durability.phase('storage-quiesced');
+          const originalWal = assertOptionalStoredObject(`${databasePath}-wal`, 'file', dataRoot);
+          const originalShm = assertOptionalStoredObject(`${databasePath}-shm`, 'file', dataRoot);
+          plan = restorePlan(stageId, backupId, originalWal, originalShm);
+          await validateRestoreTransaction(
+            dataRoot,
+            extracted.stageDirectory,
+            'preparing',
+            durability,
+          );
+          await writeSyncedControlFile(join(extracted.stageDirectory, RESTORE_PLAN_FILENAME), plan);
+          await durability.syncDirectories(
+            [extracted.stageDirectory],
+            'restore-rollback-created',
+          );
+          await validateRestoreTransaction(
+            dataRoot,
+            extracted.stageDirectory,
+            'preparing',
+            durability,
+          );
+          const activeStage = join(dataRoot, `.portable-restore-${stageId}`);
+          if (pathMetadata(activeStage)) throw new PortableBackupInvalidError();
+          await rename(extracted.stageDirectory, activeStage);
+          extracted.stageDirectory = activeStage;
+          extracted.payloadDirectory = join(activeStage, 'payload');
+          transactionKind = 'active';
+          await durability.syncDirectories([dataRoot], 'restore-transaction-created');
+          await validateRestoreTransaction(
+            dataRoot,
+            extracted.stageDirectory,
+            'active',
+            durability,
+            true,
+          );
+          const activeRollbackRoot = join(extracted.stageDirectory, 'rollback');
+          assertPrivateInternalDirectory(activeRollbackRoot, extracted.stageDirectory);
+          assertPrivateInternalDirectory(extracted.payloadDirectory, extracted.stageDirectory);
           promotionStarted = true;
-          await rename(databasePath, join(rollbackRoot, DATABASE_FILENAME));
-          await renameIfExists(`${databasePath}-wal`, join(rollbackRoot, `${DATABASE_FILENAME}-wal`));
-          await renameIfExists(`${databasePath}-shm`, join(rollbackRoot, `${DATABASE_FILENAME}-shm`));
-          await rename(mediaRoot, join(rollbackRoot, 'media'));
-          await durability.syncDirectories([dataRoot, rollbackRoot], 'restore-originals-moved');
+          await rename(databasePath, join(activeRollbackRoot, DATABASE_FILENAME));
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
+          if (await renameIfExists(
+            `${databasePath}-wal`,
+            join(activeRollbackRoot, `${DATABASE_FILENAME}-wal`),
+          ) !== plan.originalWal) throw new PortableBackupInvalidError();
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
+          if (await renameIfExists(
+            `${databasePath}-shm`,
+            join(activeRollbackRoot, `${DATABASE_FILENAME}-shm`),
+          ) !== plan.originalShm) throw new PortableBackupInvalidError();
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
+          await rename(mediaRoot, join(activeRollbackRoot, 'media'));
+          await durability.syncDirectories([dataRoot, activeRollbackRoot], 'restore-originals-moved');
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
           await durability.phase('originals-durable');
           if (!existsSync(join(extracted.payloadDirectory, 'media'))) {
             await mkdir(join(extracted.payloadDirectory, 'media'), { mode: 0o700 });
           }
+          assertPrivateInternalDirectory(
+            dirname(join(extracted.payloadDirectory, DATABASE_ARCHIVE_PATH)),
+            extracted.stageDirectory,
+          );
+          assertPrivateInternalDirectory(join(extracted.payloadDirectory, 'media'), extracted.stageDirectory);
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
           await rename(join(extracted.payloadDirectory, DATABASE_ARCHIVE_PATH), databasePath);
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
           await rename(join(extracted.payloadDirectory, 'media'), mediaRoot);
           await durability.syncDirectories([
             dataRoot,
             dirname(join(extracted.payloadDirectory, DATABASE_ARCHIVE_PATH)),
             extracted.payloadDirectory,
           ], 'restore-promoted');
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
           await durability.phase('promotion-durable');
           await options.openStorage();
           storageClosed = false;
           restoredRuntimeOpen = true;
-          let committedMarker: Awaited<ReturnType<typeof open>> | undefined;
-          try {
-            committedMarker = await open(
-              join(extracted.stageDirectory, RESTORE_COMMITTED_FILENAME),
-              constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-              0o600,
-            );
-            await writeAll(
-              committedMarker,
-              Buffer.from(JSON.stringify(restoreCommitMarker(stageId, backupId))),
-            );
-            await committedMarker.sync();
-          } finally {
-            await committedMarker?.close().catch(() => undefined);
-          }
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
+          markerMayExist = true;
+          await writeSyncedControlFile(
+            join(extracted.stageDirectory, RESTORE_COMMITTED_FILENAME),
+            restoreCommitMarker(stageId, backupId),
+          );
           await durability.syncDirectories(
             [extracted.stageDirectory],
             'restore-marker-published',
           );
-          await durability.phase('commit-marker-durable');
-          const restored = backupSummary(backupId, extracted.manifest);
+          commitDurable = true;
+          await validateRestoreTransaction(dataRoot, extracted.stageDirectory, 'active', durability);
+        } catch (error) {
+          if (extracted === undefined) throw error;
+          if (commitDurable) {
+            if (storageClosed) {
+              try {
+                await options.openStorage();
+                storageClosed = false;
+              } catch {
+                // The stable incomplete error below also gates failed readiness.
+              }
+            }
+            throw new PortableRestoreIncompleteError();
+          }
+          if (transactionKind === 'preparing') {
+            if (storageClosed) {
+              try {
+                await options.openStorage();
+                storageClosed = false;
+              } catch {
+                throw new PortableRestoreIncompleteError();
+              }
+            }
+            await removeRestoreGarbage(
+              dataRoot,
+              extracted.stageDirectory,
+              'preparing',
+              durability,
+            ).catch(() => undefined);
+            throw error;
+          }
+          if (!promotionStarted) {
+            if (storageClosed) {
+              try {
+                await options.openStorage();
+                storageClosed = false;
+              } catch {
+                throw new PortableRestoreIncompleteError();
+              }
+            }
+            await retireRestoreTransaction(dataRoot, extracted.stageDirectory, durability)
+              .catch(() => undefined);
+            throw error;
+          }
+          if (
+            markerMayExist
+            || pathMetadata(join(extracted.stageDirectory, RESTORE_COMMITTED_FILENAME)) !== undefined
+          ) {
+            try {
+              await invalidateRestoreCommitMarker(dataRoot, extracted.stageDirectory, durability);
+              markerMayExist = false;
+            } catch {
+              if (storageClosed) {
+                try {
+                  await options.openStorage();
+                  storageClosed = false;
+                } catch {
+                  // The stable incomplete error below also gates failed readiness.
+                }
+              }
+              throw new PortableRestoreIncompleteError();
+            }
+          }
+          try {
+            if (restoredRuntimeOpen) {
+              await options.closeStorage();
+              storageClosed = true;
+            }
+            plan ??= await readRestorePlan(dataRoot, extracted.stageDirectory, 'active');
+            await rollbackRestoreTransaction(dataRoot, extracted.stageDirectory, plan, durability);
+            if (storageClosed) {
+              await options.openStorage();
+              storageClosed = false;
+            }
+            await retireRestoreTransaction(dataRoot, extracted.stageDirectory, durability)
+              .catch(() => undefined);
+          } catch {
+            throw new PortableRestoreIncompleteError();
+          }
+          throw new PortableRestoreRecoveredError();
+        }
+        if (!commitDurable || !extracted || !recovery) throw new PortableRestoreIncompleteError();
+        const restored = backupSummary(backupId, extracted.manifest);
+        await durability.phase('commit-marker-durable').catch(() => undefined);
+        try {
           options.publishRestoreReset({
             epoch: stageId,
             tripIds: [...new Set([
@@ -1181,33 +1760,13 @@ export function createPortableBackupOperations(options: PortableBackupOptions): 
               ...Object.keys(recovery.tripRevisions),
             ])],
           });
-          await removeRestoreTransaction(dataRoot, extracted.stageDirectory, durability)
-            .catch(() => undefined);
-          return restored;
-        } catch (error) {
-          if (!storageClosed && extracted === undefined) throw error;
-          if (extracted === undefined) throw error;
-          if (!promotionStarted) {
-            await removeRestoreTransaction(dataRoot, extracted.stageDirectory, durability)
-              .catch(() => undefined);
-            throw error;
-          }
-          try {
-            if (restoredRuntimeOpen) {
-              await options.closeStorage();
-              storageClosed = true;
-            }
-            await rollbackRestoreTransaction(dataRoot, extracted.stageDirectory, durability);
-            if (storageClosed) {
-              await options.openStorage();
-              storageClosed = false;
-            }
-            await removeRestoreTransaction(dataRoot, extracted.stageDirectory, durability);
-          } catch {
-            throw new PortableRestoreIncompleteError();
-          }
-          throw new PortableRestoreRecoveredError();
+        } catch {
+          // Durable canonical state is authoritative; reconnect reconciliation
+          // supplies the same reset if an in-process subscriber throws.
         }
+        await retireRestoreTransaction(dataRoot, extracted.stageDirectory, durability)
+          .catch(() => undefined);
+        return restored;
       });
     },
   };

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -22,6 +23,7 @@ import { createRevisionEventBus } from './events';
 import { createMediaStore } from './mediaStore';
 import {
   PortableBackupCreateError,
+  PortableRestoreIncompleteError,
   createPortableBackupOperations,
   recoverInterruptedPortableRestore,
   type PortableBackupDurability,
@@ -104,22 +106,36 @@ function writeSelfConsistentMediaVariant(
   harness: ReturnType<typeof createHarness>,
   sourceBackupId: string,
   targetBackupId: string,
-  input: { contentType: string; relativePath(mediaId: string): string },
+  input: {
+    contentType: string;
+    relativePath(mediaId: string): string;
+    mediaId?: string;
+    bytes?: Buffer;
+  },
 ): void {
   const entries = readTar(join(harness.dataDirectory, 'backups', `${sourceBackupId}.tar`));
   const manifest = JSON.parse(entries[0]!.bytes.toString('utf8')) as PortableBackupManifest;
   const databaseEntry = entries.find((entry) => entry.path === 'database/plotter.sqlite3')!;
   const mediaEntry = entries.find((entry) => entry.path.startsWith('media/'))!;
-  const mediaId = mediaEntry.path.slice('media/'.length).replace(/\.[^.]+$/, '');
+  const sourceMediaId = mediaEntry.path.slice('media/'.length).replace(/\.[^.]+$/, '');
+  const mediaId = input.mediaId ?? sourceMediaId;
   const relativePath = input.relativePath(mediaId);
+  const mediaBytes = input.bytes ?? mediaEntry.bytes;
   const databasePath = join(harness.dataDirectory, `${targetBackupId}.sqlite3`);
   writeFileSync(databasePath, databaseEntry.bytes);
   const database = new DatabaseSync(databasePath);
   database.prepare(`
     UPDATE media_assets
-    SET content_type = ?, relative_path = ?
+    SET id = ?, content_type = ?, relative_path = ?, size_bytes = ?, sha256 = ?
     WHERE id = ?
-  `).run(input.contentType, relativePath, mediaId);
+  `).run(
+    mediaId,
+    input.contentType,
+    relativePath,
+    mediaBytes.byteLength,
+    sha256(mediaBytes),
+    sourceMediaId,
+  );
   database.close();
   const databaseBytes = readFileSync(databasePath);
   const files = manifest.files.map((file) => {
@@ -130,12 +146,16 @@ function writeSelfConsistentMediaVariant(
         sha256: sha256(databaseBytes),
       };
     }
-    return { ...file, path: relativePath };
+    return {
+      path: relativePath,
+      byteCount: mediaBytes.byteLength,
+      sha256: sha256(mediaBytes),
+    };
   }).sort((left, right) => left.path.localeCompare(right.path));
   writeTar(join(harness.dataDirectory, 'backups', `${targetBackupId}.tar`), [
     { path: 'manifest.json', bytes: Buffer.from(JSON.stringify({ ...manifest, files })) },
     { path: 'database/plotter.sqlite3', bytes: databaseBytes },
-    { ...mediaEntry, path: relativePath },
+    { path: relativePath, bytes: mediaBytes },
   ]);
 }
 
@@ -385,6 +405,56 @@ describe('portable backup creation and inspection', () => {
     harness.close();
   });
 
+  it.each([
+    ['leading underscore', '_media', '000000000091'],
+    ['leading hyphen', '-media', '000000000092'],
+  ])('rejects self-consistent active media with a %s identity', async (_label, mediaId, suffix) => {
+    const harness = createHarness();
+    await seedTrip(harness);
+    const valid = await harness.operations.create();
+    const invalidId = `portable-20260817T120000000Z-00000000-0000-4000-8000-${suffix}`;
+    writeSelfConsistentMediaVariant(harness, valid.id, invalidId, {
+      contentType: 'image/png',
+      mediaId,
+      relativePath: (id) => `media/${id}.png`,
+    });
+
+    await expect(harness.operations.inspect(invalidId)).rejects.toThrow('Portable backup is invalid.');
+    harness.close();
+  });
+
+  it('rejects a self-consistent zero-byte active media object', async () => {
+    const harness = createHarness();
+    await seedTrip(harness);
+    const valid = await harness.operations.create();
+    const invalidId = 'portable-20260817T120000000Z-00000000-0000-4000-8000-000000000090';
+    writeSelfConsistentMediaVariant(harness, valid.id, invalidId, {
+      contentType: 'image/png',
+      bytes: Buffer.alloc(0),
+      relativePath: (id) => `media/${id}.png`,
+    });
+
+    await expect(harness.operations.inspect(invalidId)).rejects.toThrow('Portable backup is invalid.');
+    harness.close();
+  });
+
+  it('accepts the canonical one-character and 128-character media identity boundaries', async () => {
+    for (const mediaId of ['a', `a${'b'.repeat(127)}`]) {
+      const harness = createHarness();
+      const seeded = await seedTrip(harness);
+      const sourcePath = join(harness.dataDirectory, `media/${seeded.media.id}.png`);
+      const boundaryPath = join(harness.dataDirectory, `media/${mediaId}.png`);
+      renameSync(sourcePath, boundaryPath);
+      harness.database()!.connection.prepare(`
+        UPDATE media_assets SET id = ?, relative_path = ? WHERE id = ?
+      `).run(mediaId, `media/${mediaId}.png`, seeded.media.id);
+
+      const boundary = await harness.operations.create();
+      await expect(harness.operations.inspect(boundary.id)).resolves.toMatchObject({ id: boundary.id });
+      harness.close();
+    }
+  });
+
   it('refuses to create a backup if its validated directory is replaced by a symlink', async () => {
     const harness = createHarness();
     await seedTrip(harness);
@@ -441,6 +511,55 @@ describe('portable backup creation and inspection', () => {
     expect(readFileSync(finalPath)).toEqual(raceBytes);
     expect(readdirSync(join(harness.dataDirectory, 'backups')).filter((name) => name.endsWith('.tmp')))
       .toEqual([]);
+    harness.close();
+  });
+
+  it('validates the completed temporary archive before publishing its final name', async () => {
+    let backupsDirectory = '';
+    const harness = createHarness({
+      durability: {
+        async onPhase(phase) {
+          if (phase !== 'archive-ready') return;
+          const temporary = readdirSync(backupsDirectory).find((name) => name.endsWith('.tar.tmp'))!;
+          writeFileSync(join(backupsDirectory, temporary), 'corrupted after write');
+        },
+        async syncDirectory() {},
+      },
+    });
+    backupsDirectory = join(harness.dataDirectory, 'backups');
+    await seedTrip(harness);
+
+    await expect(harness.operations.create()).rejects.toBeInstanceOf(PortableBackupCreateError);
+
+    expect(readdirSync(backupsDirectory).filter((name) => !name.startsWith('.'))).toEqual([]);
+    harness.close();
+  });
+
+  it('never unlinks a racer replacement after the archive hard link succeeds', async () => {
+    const identifier = '00000000-0000-4000-8000-000000000001';
+    const raceBytes = Buffer.from('replacement owned by another publisher');
+    let finalPath = '';
+    const harness = createHarness({
+      ids: [identifier],
+      durability: {
+        async syncDirectory(_path, phase) {
+          if (phase !== 'archive-published') return;
+          renameSync(finalPath, `${finalPath}.linked-by-original-operation`);
+          writeFileSync(finalPath, raceBytes);
+          throw new Error('ambiguous directory sync');
+        },
+      },
+    });
+    await seedTrip(harness);
+    finalPath = join(
+      harness.dataDirectory,
+      'backups',
+      `portable-20260817T120000000Z-${identifier}.tar`,
+    );
+
+    await expect(harness.operations.create()).rejects.toBeInstanceOf(PortableBackupCreateError);
+
+    expect(readFileSync(finalPath)).toEqual(raceBytes);
     harness.close();
   });
 });
@@ -532,6 +651,37 @@ describe('portable restore', () => {
     expect(harness.closeCount()).toBe(0);
     expect((harness.database()!.connection.prepare('SELECT name FROM trips').get() as { name: string }).name)
       .toBe('Original');
+    harness.close();
+  });
+
+  it('fails closed if a validated restore transaction is replaced by a symlink before mutation', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'plotter-portable-transaction-outside-'));
+    temporaryDirectories.push(outside);
+    let swapped = false;
+    const harness = createHarness({
+      durability: {
+        async onPhase(phase) {
+          if ((phase as string) !== 'restore-transaction-validated' || swapped) return;
+          const transactionName = readdirSync(harness.dataDirectory)
+            .find((name) => /^\.portable-restore-[0-9a-f-]+$/.test(name))!;
+          const transaction = join(harness.dataDirectory, transactionName);
+          renameSync(transaction, `${transaction}.held`);
+          symlinkSync(outside, transaction, 'dir');
+          swapped = true;
+        },
+        async syncDirectory() {},
+      },
+    });
+    await seedTrip(harness);
+    const backup = await harness.operations.create();
+
+    await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
+      .rejects.toThrow('Portable backup is invalid.');
+
+    expect(swapped).toBe(true);
+    expect(readdirSync(outside)).toEqual([]);
+    expect(harness.closeCount()).toBe(1);
+    expect(harness.openCount()).toBe(1);
     harness.close();
   });
 
@@ -628,6 +778,46 @@ describe('portable restore', () => {
     harness.close();
   });
 
+  it.each([
+    ['wal', false, false],
+    ['wal', false, true],
+    ['wal', true, false],
+    ['wal', true, true],
+    ['shm', false, false],
+    ['shm', false, true],
+    ['shm', true, false],
+    ['shm', true, true],
+  ] as const)(
+    'restores exact %s sidecar absence/presence when original=%s promoted=%s',
+    async (sidecar, originalPresent, promotedPresent) => {
+      let observedAtRollback: boolean | undefined;
+      let failAfterPromotion = true;
+      const harness = createHarness({
+        durability: {
+          async onPhase(phase) {
+            const path = `${harness.databasePath}-${sidecar}`;
+            if (phase === 'storage-quiesced' && originalPresent) writeFileSync(path, Buffer.alloc(0));
+            if (phase === 'promotion-durable' && failAfterPromotion) {
+              failAfterPromotion = false;
+              if (promotedPresent) writeFileSync(path, Buffer.alloc(0));
+              throw new Error('controlled failure after promoted sidecar state');
+            }
+            if (phase === 'rollback-durable') observedAtRollback = existsSync(path);
+          },
+          async syncDirectory() {},
+        },
+      });
+      await seedTrip(harness);
+      const backup = await harness.operations.create();
+
+      await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
+        .rejects.toThrow('Portable restore failed; canonical state was recovered.');
+
+      expect(observedAtRollback).toBe(originalPresent);
+      harness.close();
+    },
+  );
+
   it('does not quiesce storage when the recovery archive directory cannot be synced', async () => {
     let archivePublishCount = 0;
     const harness = createHarness({
@@ -654,7 +844,7 @@ describe('portable restore', () => {
     harness.close();
   });
 
-  it('rolls back when the exact commit marker name cannot be made durable', async () => {
+  it('durably invalidates a pre-commit marker before rolling back', async () => {
     let failMarkerSync = true;
     const phases: string[] = [];
     const harness = createHarness({
@@ -679,14 +869,183 @@ describe('portable restore', () => {
 
     expect((harness.database()!.connection.prepare('SELECT name FROM trips').get() as { name: string }).name)
       .toBe('Keep current');
+    expect(phases).toContain('commit-marker-invalidated');
     expect(phases).toContain('rollback-durable');
     expect(phases).not.toContain('commit-marker-durable');
     harness.close();
   });
+
+  it.each([1, 2, 3, 4])(
+    'recovers an interrupted pre-commit rollback at mutation boundary %s',
+    async (failureBoundary) => {
+      let failMarkerPublication = true;
+      let rollbackStarted = false;
+      let rollbackValidation = 0;
+      const harness = createHarness({
+        durability: {
+          async onPhase(phase) {
+            if (phase === 'commit-marker-invalidated') {
+              rollbackStarted = true;
+              return;
+            }
+            if (phase !== 'restore-transaction-validated' || !rollbackStarted) return;
+            rollbackValidation += 1;
+            if (rollbackValidation === failureBoundary) {
+              throw new Error(`controlled rollback interruption ${failureBoundary}`);
+            }
+          },
+          async syncDirectory(_path, phase) {
+            if (phase === 'restore-marker-published' && failMarkerPublication) {
+              failMarkerPublication = false;
+              throw new Error('controlled marker publication sync failure');
+            }
+          },
+        },
+      });
+      const seeded = await seedTrip(harness);
+      const backup = await harness.operations.create();
+      await seeded.directory.update(1, seeded.trip.id, {
+        expectedRevision: 1, patch: { name: 'Keep current' },
+      });
+      const currentMedia = await seeded.tripRepository.createDestinationMedia(2, seeded.destination.id, {
+        bytes: stream('current-only image'), contentType: 'image/jpeg', caption: 'Current only',
+      });
+
+      await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
+        .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
+      expect(rollbackValidation).toBe(failureBoundary);
+      expect(readdirSync(harness.dataDirectory).filter((name) => /^\.portable-restore-[0-9a-f-]+$/.test(name)))
+        .toHaveLength(1);
+      harness.close();
+
+      await recoverInterruptedPortableRestore(harness.dataDirectory);
+
+      const reopened = new DatabaseSync(harness.databasePath, { readOnly: true });
+      expect((reopened.prepare('SELECT name FROM trips').get() as { name: string }).name)
+        .toBe('Keep current');
+      reopened.close();
+      expect(existsSync(join(
+        harness.dataDirectory,
+        'media',
+        `${currentMedia.mediaItem!.id}.jpg`,
+      ))).toBe(true);
+      expect(readdirSync(harness.dataDirectory).some((name) => name.startsWith('.portable-restore-')))
+        .toBe(false);
+    },
+  );
+
+  it('does not roll back when marker invalidation directory sync is ambiguous', async () => {
+    let failMarkerPublication = true;
+    const harness = createHarness({
+      durability: {
+        async syncDirectory(_path, phase) {
+          if (phase === 'restore-marker-published' && failMarkerPublication) {
+            failMarkerPublication = false;
+            throw new Error('controlled marker publication sync failure');
+          }
+          if ((phase as string) === 'restore-marker-invalidated') {
+            throw new Error('controlled marker invalidation sync failure');
+          }
+        },
+      },
+    });
+    const seeded = await seedTrip(harness);
+    const backup = await harness.operations.create();
+    await seeded.directory.update(1, seeded.trip.id, {
+      expectedRevision: 1, patch: { name: 'Keep current' },
+    });
+
+    await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
+      .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
+
+    expect((harness.database()!.connection.prepare('SELECT name FROM trips').get() as { name: string }).name)
+      .toBe('Original');
+    expect(readdirSync(harness.dataDirectory).filter((name) => /^\.portable-restore-[0-9a-f-]+$/.test(name)))
+      .toHaveLength(1);
+
+    harness.close();
+    await recoverInterruptedPortableRestore(harness.dataDirectory);
+    const reopened = new DatabaseSync(harness.databasePath, { readOnly: true });
+    expect((reopened.prepare('SELECT name FROM trips').get() as { name: string }).name).toBe('Keep current');
+    reopened.close();
+    expect(readdirSync(harness.dataDirectory).some((name) => name.startsWith('.portable-restore-')))
+      .toBe(false);
+  });
+
+  it('does not roll back when the pre-commit marker cannot be unlinked', async () => {
+    let replacedMarker = false;
+    const harness = createHarness({
+      durability: {
+        async syncDirectory(path, phase) {
+          if (phase !== 'restore-marker-published' || replacedMarker) return;
+          replacedMarker = true;
+          rmSync(join(path, 'restore-committed'));
+          mkdirSync(join(path, 'restore-committed'), { mode: 0o700 });
+          throw new Error('controlled marker publication sync failure');
+        },
+      },
+    });
+    const seeded = await seedTrip(harness);
+    const backup = await harness.operations.create();
+    await seeded.directory.update(1, seeded.trip.id, {
+      expectedRevision: 1, patch: { name: 'Keep current' },
+    });
+
+    await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
+      .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
+
+    expect((harness.database()!.connection.prepare('SELECT name FROM trips').get() as { name: string }).name)
+      .toBe('Original');
+    expect(replacedMarker).toBe(true);
+    harness.close();
+
+    await expect(recoverInterruptedPortableRestore(harness.dataDirectory))
+      .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
+    const reopened = new DatabaseSync(harness.databasePath, { readOnly: true });
+    expect((reopened.prepare('SELECT name FROM trips').get() as { name: string }).name).toBe('Original');
+    reopened.close();
+  });
+
+  it('leaves a committed cleanup namespace restart-safe when its publication sync is ambiguous', async () => {
+    let failedCleanupPublication = false;
+    const harness = createHarness({
+      durability: {
+        async syncDirectory(_path, phase) {
+          if ((phase as string) !== 'restore-cleanup-published' || failedCleanupPublication) return;
+          failedCleanupPublication = true;
+          throw new Error('controlled cleanup publication sync failure');
+        },
+      },
+    });
+    const seeded = await seedTrip(harness);
+    const backup = await harness.operations.create();
+    await seeded.directory.update(1, seeded.trip.id, {
+      expectedRevision: 1, patch: { name: 'Current' },
+    });
+
+    await expect(harness.operations.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
+      .resolves.toEqual(backup);
+
+    expect((harness.database()!.connection.prepare('SELECT name FROM trips').get() as { name: string }).name)
+      .toBe('Original');
+    expect(readdirSync(harness.dataDirectory).filter((name) => name.startsWith('.portable-restore-cleanup-')))
+      .toHaveLength(1);
+    harness.close();
+
+    await recoverInterruptedPortableRestore(harness.dataDirectory);
+    const reopened = new DatabaseSync(harness.databasePath, { readOnly: true });
+    expect((reopened.prepare('SELECT name FROM trips').get() as { name: string }).name).toBe('Original');
+    reopened.close();
+    expect(readdirSync(harness.dataDirectory).some((name) => name.startsWith('.portable-restore-')))
+      .toBe(false);
+  });
 });
 
 describe('interrupted portable restore recovery', () => {
-  function interruptedTransaction(committed: boolean) {
+  function interruptedTransaction(
+    committed: boolean,
+    sidecars: { originalWal?: boolean; originalShm?: boolean } = {},
+  ) {
     const dataDirectory = mkdtempSync(join(tmpdir(), 'plotter-portable-recovery-'));
     temporaryDirectories.push(dataDirectory);
     writeFileSync(join(dataDirectory, 'plotter.sqlite3'), 'promoted database');
@@ -694,14 +1053,25 @@ describe('interrupted portable restore recovery', () => {
     writeFileSync(join(dataDirectory, 'media', 'promoted.png'), 'promoted media');
     const transactionId = '00000000-0000-4000-8000-000000000001';
     const transaction = join(dataDirectory, `.portable-restore-${transactionId}`);
+    mkdirSync(transaction, { mode: 0o700 });
     mkdirSync(join(transaction, 'rollback', 'media'), { recursive: true });
+    chmodSync(join(transaction, 'rollback'), 0o700);
+    chmodSync(join(transaction, 'rollback', 'media'), 0o700);
     writeFileSync(join(transaction, 'rollback', 'plotter.sqlite3'), 'canonical database');
     writeFileSync(join(transaction, 'rollback', 'media', 'canonical.png'), 'canonical media');
+    const backupId = 'portable-20260817T120000000Z-00000000-0000-4000-8000-000000000009';
+    writeFileSync(join(transaction, 'restore-plan'), JSON.stringify({
+      formatVersion: 1,
+      transactionId,
+      backupId,
+      originalWal: sidecars.originalWal ?? false,
+      originalShm: sidecars.originalShm ?? false,
+    }));
     if (committed) {
       writeFileSync(join(transaction, 'restore-committed'), JSON.stringify({
         formatVersion: 1,
         transactionId,
-        backupId: 'portable-20260817T120000000Z-00000000-0000-4000-8000-000000000009',
+        backupId,
         restoreEpoch: transactionId,
       }));
     }
@@ -742,5 +1112,126 @@ describe('interrupted portable restore recovery', () => {
     expect(readFileSync(join(dataDirectory, 'plotter.sqlite3'), 'utf8')).toBe('canonical database');
     expect(readdirSync(join(dataDirectory, 'media'))).toEqual(['canonical.png']);
     expect(existsSync(transaction)).toBe(false);
+  });
+
+  it.each([
+    ['wal', false, false],
+    ['wal', false, true],
+    ['wal', true, false],
+    ['wal', true, true],
+    ['shm', false, false],
+    ['shm', false, true],
+    ['shm', true, false],
+    ['shm', true, true],
+  ] as const)(
+    'recovers exact interrupted %s sidecar absence/presence when original=%s promoted=%s',
+    async (sidecar, originalPresent, promotedPresent) => {
+      const { dataDirectory, transaction } = interruptedTransaction(false, {
+        originalWal: sidecar === 'wal' && originalPresent,
+        originalShm: sidecar === 'shm' && originalPresent,
+      });
+      const current = join(dataDirectory, `plotter.sqlite3-${sidecar}`);
+      const original = join(transaction, 'rollback', `plotter.sqlite3-${sidecar}`);
+      if (promotedPresent) writeFileSync(current, Buffer.alloc(0));
+      if (originalPresent) writeFileSync(original, Buffer.alloc(0));
+
+      await recoverInterruptedPortableRestore(dataDirectory);
+
+      expect(existsSync(current)).toBe(originalPresent);
+      expect(existsSync(transaction)).toBe(false);
+    },
+  );
+
+  it.each([
+    ['complete', ['payload', 'rollback', 'failed', 'marker']],
+    ['marker already removed', ['payload', 'rollback', 'failed']],
+    ['rollback already removed', ['payload', 'failed', 'marker']],
+    ['payload already removed', ['rollback', 'failed', 'marker']],
+    ['only failed remainder', ['failed']],
+    ['empty namespace', []],
+  ] as const)('deletes %s committed cleanup garbage without interpreting rollback remnants', async (_label, remnants) => {
+    const remaining = new Set<string>(remnants);
+    const dataDirectory = mkdtempSync(join(tmpdir(), 'plotter-portable-cleanup-'));
+    temporaryDirectories.push(dataDirectory);
+    writeFileSync(join(dataDirectory, 'plotter.sqlite3'), 'promoted database');
+    mkdirSync(join(dataDirectory, 'media'));
+    writeFileSync(join(dataDirectory, 'media', 'promoted.png'), 'promoted media');
+    const cleanup = join(
+      dataDirectory,
+      '.portable-restore-cleanup-00000000-0000-4000-8000-000000000001',
+    );
+    mkdirSync(cleanup, { mode: 0o700 });
+    if (remaining.has('payload')) {
+      mkdirSync(join(cleanup, 'payload', 'database'), { recursive: true, mode: 0o700 });
+      writeFileSync(join(cleanup, 'payload', 'database', 'plotter.sqlite3'), 'payload remainder');
+    }
+    if (remaining.has('rollback')) {
+      mkdirSync(join(cleanup, 'rollback', 'media'), { recursive: true, mode: 0o700 });
+      writeFileSync(join(cleanup, 'rollback', 'plotter.sqlite3'), 'old database');
+      writeFileSync(join(cleanup, 'rollback', 'media', 'old.png'), 'old media');
+    }
+    if (remaining.has('failed')) {
+      mkdirSync(join(cleanup, 'failed'), { mode: 0o700 });
+      writeFileSync(join(cleanup, 'failed', 'plotter.sqlite3'), 'failed promoted database');
+    }
+    if (remaining.has('marker')) writeFileSync(join(cleanup, 'restore-committed'), 'partial marker');
+
+    await recoverInterruptedPortableRestore(dataDirectory);
+
+    expect(readFileSync(join(dataDirectory, 'plotter.sqlite3'), 'utf8')).toBe('promoted database');
+    expect(readdirSync(join(dataDirectory, 'media'))).toEqual(['promoted.png']);
+    expect(existsSync(cleanup)).toBe(false);
+  });
+
+  it('fails closed if a startup transaction is replaced by a symlink after validation', async () => {
+    const { dataDirectory, transaction } = interruptedTransaction(false);
+    const outside = mkdtempSync(join(tmpdir(), 'plotter-portable-startup-outside-'));
+    temporaryDirectories.push(outside);
+    let swapped = false;
+
+    await expect(recoverInterruptedPortableRestore(dataDirectory, {
+      async onPhase(phase) {
+        if ((phase as string) !== 'restore-transaction-validated' || swapped) return;
+        renameSync(transaction, `${transaction}.held`);
+        symlinkSync(outside, transaction, 'dir');
+        swapped = true;
+      },
+      async syncDirectory() {},
+    })).rejects.toBeInstanceOf(PortableRestoreIncompleteError);
+
+    expect(swapped).toBe(true);
+    expect(readdirSync(outside)).toEqual([]);
+    expect(readFileSync(join(dataDirectory, 'plotter.sqlite3'), 'utf8')).toBe('promoted database');
+  });
+
+  it('rejects a non-private startup transaction directory without mutating canonical state', async () => {
+    const { dataDirectory, transaction } = interruptedTransaction(false);
+    chmodSync(transaction, 0o755);
+
+    await expect(recoverInterruptedPortableRestore(dataDirectory))
+      .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
+
+    expect(readFileSync(join(dataDirectory, 'plotter.sqlite3'), 'utf8')).toBe('promoted database');
+    expect(existsSync(transaction)).toBe(true);
+  });
+
+  it('rejects an exact-name startup transaction symlink instead of trusting its directory entry', async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), 'plotter-portable-startup-link-'));
+    const outside = mkdtempSync(join(tmpdir(), 'plotter-portable-startup-link-outside-'));
+    temporaryDirectories.push(dataDirectory, outside);
+    writeFileSync(join(dataDirectory, 'plotter.sqlite3'), 'canonical database');
+    mkdirSync(join(dataDirectory, 'media'));
+    writeFileSync(join(outside, 'do-not-touch'), 'outside');
+    const transaction = join(
+      dataDirectory,
+      '.portable-restore-00000000-0000-4000-8000-000000000001',
+    );
+    symlinkSync(outside, transaction, 'dir');
+
+    await expect(recoverInterruptedPortableRestore(dataDirectory))
+      .rejects.toBeInstanceOf(PortableRestoreIncompleteError);
+
+    expect(readFileSync(join(outside, 'do-not-touch'), 'utf8')).toBe('outside');
+    expect(readdirSync(outside)).toEqual(['do-not-touch']);
   });
 });

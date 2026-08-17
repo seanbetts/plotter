@@ -68,7 +68,7 @@ function createMediaContentReader(database: PlotterDatabase, media: MediaStore):
         typeof row.content_type !== 'string'
         || typeof row.size_bytes !== 'number'
         || !Number.isSafeInteger(row.size_bytes)
-        || row.size_bytes < 0
+        || row.size_bytes <= 0
         || typeof row.relative_path !== 'string'
         || extensions[row.content_type] === undefined
       ) {
