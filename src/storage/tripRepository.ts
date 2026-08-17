@@ -134,7 +134,7 @@ function storeActivityMedia(record: ActivityMediaRecord, tripId: string): Stored
   return { ...record, id: localTripKey(tripId, record.id), entityId: record.id, tripId };
 }
 
-function normalizeDestination(destination: Destination, index = 0): Destination {
+export function normalizeDestination(destination: Destination, index = 0): Destination {
   return {
     ...destination,
     countryRegion: destination.countryRegion ?? destination.location?.countryName ?? '',
@@ -155,14 +155,14 @@ function normalizeDestination(destination: Destination, index = 0): Destination 
   };
 }
 
-function normalizeActivity(activity: Activity): Activity {
+export function normalizeActivity(activity: Activity): Activity {
   return {
     ...activity,
     links: sortResearchLinks(activity.links ?? []),
   };
 }
 
-function normalizeRouteLeg(routeLeg: RouteLeg): RouteLeg {
+export function normalizeRouteLeg(routeLeg: RouteLeg): RouteLeg {
   return {
     ...routeLeg,
     ferryPolicy: routeLeg.ferryPolicy ?? 'allow',
