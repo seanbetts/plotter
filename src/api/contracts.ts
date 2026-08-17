@@ -1,4 +1,4 @@
-import type { Activity, Destination, MediaItem, RouteLeg } from '../domain/types';
+import type { Activity, Destination, MediaItem, MediaRollupItem, RouteLeg } from '../domain/types';
 import type { LinkPreviewResult } from '../services/linkPreviewClient';
 import type { WebImageSearchResult, WebImageSearchStopContext } from '../services/webImageSearchClient';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
@@ -14,13 +14,21 @@ export type ApiErrorCode =
   | 'storage-unavailable'
   | 'internal-error';
 
-export type ApiErrorResponse = {
-  error: {
-    code: ApiErrorCode;
-    message: string;
-    currentRevision?: number;
-  };
+export type ApiErrorResponse =
+  | { status: 400; error: { code: 'invalid-request'; message: string } }
+  | { status: 404; error: { code: 'not-found'; message: string } }
+  | { status: 409; error: { code: 'conflict'; message: string; currentRevision: number } }
+  | { status: 503; error: { code: 'storage-unavailable'; message: string } }
+  | { status: 500; error: { code: 'internal-error'; message: string } };
+
+export type ApiSuccessResponse<T, Status extends 200 | 201 | 204 = 200> = {
+  status: Status;
+  body: T;
 };
+
+export type ApiRouteResponse<T, Status extends 200 | 201 | 204 = 200> =
+  | ApiSuccessResponse<T, Status>
+  | ApiErrorResponse;
 
 export type DirectoryReadResponse = DirectorySnapshot;
 export type TripReadResponse = TripSnapshot;
@@ -91,23 +99,19 @@ export type TripWriteResponse = {
 
 /** Multipart bodies carry bytes separately; this is their JSON field contract. */
 export type DestinationMediaUploadFields = {
-  destinationId: string;
+  expectedRevision: number;
   caption?: string;
   credit?: string;
 };
 
-export type ActivityMediaUploadFields = DestinationMediaUploadFields & {
-  activityId: string;
-};
+export type ActivityMediaUploadFields = DestinationMediaUploadFields;
 
 export type DestinationMediaImportRequest = {
   expectedRevision: number;
   result: WebImageSearchResult;
 };
 
-export type ActivityMediaImportRequest = DestinationMediaImportRequest & {
-  destinationId: string;
-};
+export type ActivityMediaImportRequest = DestinationMediaImportRequest;
 
 export type UpdateMediaRequest = {
   expectedRevision: number;
@@ -128,6 +132,10 @@ export type MediaWriteResponse = {
   mediaItem?: MediaItem;
   mediaItems?: MediaItem[];
 };
+
+export type DestinationMediaReadResponse = { mediaItems: MediaItem[] };
+export type ActivityMediaReadResponse = { mediaItems: MediaItem[] };
+export type DestinationMediaRollupReadResponse = { media: MediaRollupItem[] };
 
 export type LinkPreviewRequest = { url: string };
 export type LinkPreviewResponse = { preview: LinkPreviewResult };
@@ -157,31 +165,35 @@ export type ListBackupsResponse = { backups: BackupSummary[] };
 export type InspectBackupResponse = { backup: BackupManifest };
 export type RestoreBackupRequest = { confirmation: string };
 export type RestoreBackupResponse = { restored: BackupSummary };
+export type HealthResponse = { ready: boolean; reason?: string };
 
 /** The exact public routes; dynamic segments are represented by named templates. */
 export type PlotterApiRoute =
-  | { method: 'GET'; path: '/healthz' }
-  | { method: 'GET'; path: '/api/v1/trips'; response: DirectoryReadResponse }
-  | { method: 'POST'; path: '/api/v1/trips'; request: CreateTripRequest; response: DirectoryWriteResponse }
-  | { method: 'GET'; path: '/api/v1/trips/:tripId'; response: TripReadResponse }
-  | { method: 'PATCH'; path: '/api/v1/trips/:tripId'; request: UpdateTripRequest; response: DirectoryWriteResponse }
-  | { method: 'DELETE'; path: '/api/v1/trips/:tripId'; request: DeleteTripRequest; response: DirectoryWriteResponse }
-  | { method: 'POST'; path: '/api/v1/trips/:tripId/mutations'; request: RevisionedTripMutationRequest; response: TripWriteResponse }
-  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media'; request: DestinationMediaUploadFields; response: MediaWriteResponse }
-  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media/import'; request: DestinationMediaImportRequest; response: MediaWriteResponse }
-  | { method: 'PATCH'; path: '/api/v1/trips/:tripId/destination-media/:mediaId'; request: UpdateMediaRequest; response: MediaWriteResponse }
-  | { method: 'DELETE'; path: '/api/v1/trips/:tripId/destination-media/:mediaId'; request: DeleteMediaRequest; response: MediaWriteResponse }
-  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media/reorder'; request: ReorderMediaRequest; response: MediaWriteResponse }
-  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/activities/:activityId/media'; request: ActivityMediaUploadFields; response: MediaWriteResponse }
-  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/activities/:activityId/media/import'; request: ActivityMediaImportRequest; response: MediaWriteResponse }
-  | { method: 'PATCH'; path: '/api/v1/trips/:tripId/activity-media/:mediaId'; request: UpdateMediaRequest; response: MediaWriteResponse }
-  | { method: 'DELETE'; path: '/api/v1/trips/:tripId/activity-media/:mediaId'; request: DeleteMediaRequest; response: MediaWriteResponse }
-  | { method: 'POST'; path: '/api/v1/trips/:tripId/activities/:activityId/media/reorder'; request: ReorderMediaRequest; response: MediaWriteResponse }
-  | { method: 'GET'; path: '/api/v1/media/:mediaId/content' }
-  | { method: 'POST'; path: '/api/v1/link-preview'; request: LinkPreviewRequest; response: LinkPreviewResponse }
-  | { method: 'POST'; path: '/api/v1/image-search'; request: ImageSearchRequest; response: ImageSearchResponse }
-  | { method: 'GET'; path: '/api/v1/events'; response: RevisionEvent }
-  | { method: 'POST'; path: '/api/v1/backups'; response: CreateBackupResponse }
-  | { method: 'GET'; path: '/api/v1/backups'; response: ListBackupsResponse }
-  | { method: 'GET'; path: '/api/v1/backups/:backupId'; response: InspectBackupResponse }
-  | { method: 'POST'; path: '/api/v1/backups/:backupId/restore'; request: RestoreBackupRequest; response: RestoreBackupResponse };
+  | { method: 'GET'; path: '/healthz'; response: ApiRouteResponse<HealthResponse> }
+  | { method: 'GET'; path: '/api/v1/trips'; response: ApiRouteResponse<DirectoryReadResponse> }
+  | { method: 'POST'; path: '/api/v1/trips'; request: CreateTripRequest; response: ApiRouteResponse<DirectoryWriteResponse, 201> }
+  | { method: 'GET'; path: '/api/v1/trips/:tripId'; response: ApiRouteResponse<TripReadResponse> }
+  | { method: 'PATCH'; path: '/api/v1/trips/:tripId'; request: UpdateTripRequest; response: ApiRouteResponse<DirectoryWriteResponse> }
+  | { method: 'DELETE'; path: '/api/v1/trips/:tripId'; request: DeleteTripRequest; response: ApiRouteResponse<DirectoryWriteResponse> }
+  | { method: 'POST'; path: '/api/v1/trips/:tripId/mutations'; request: RevisionedTripMutationRequest; response: ApiRouteResponse<TripWriteResponse> }
+  | { method: 'GET'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media'; response: ApiRouteResponse<DestinationMediaReadResponse> }
+  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media'; request: DestinationMediaUploadFields; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media/import'; request: DestinationMediaImportRequest; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'PATCH'; path: '/api/v1/trips/:tripId/destination-media/:mediaId'; request: UpdateMediaRequest; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'DELETE'; path: '/api/v1/trips/:tripId/destination-media/:mediaId'; request: DeleteMediaRequest; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media/reorder'; request: ReorderMediaRequest; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'GET'; path: '/api/v1/trips/:tripId/activities/:activityId/media'; response: ApiRouteResponse<ActivityMediaReadResponse> }
+  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/activities/:activityId/media'; request: ActivityMediaUploadFields; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'POST'; path: '/api/v1/trips/:tripId/destinations/:destinationId/activities/:activityId/media/import'; request: ActivityMediaImportRequest; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'PATCH'; path: '/api/v1/trips/:tripId/activity-media/:mediaId'; request: UpdateMediaRequest; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'DELETE'; path: '/api/v1/trips/:tripId/activity-media/:mediaId'; request: DeleteMediaRequest; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'POST'; path: '/api/v1/trips/:tripId/activities/:activityId/media/reorder'; request: ReorderMediaRequest; response: ApiRouteResponse<MediaWriteResponse> }
+  | { method: 'GET'; path: '/api/v1/trips/:tripId/destinations/:destinationId/media-rollup'; response: ApiRouteResponse<DestinationMediaRollupReadResponse> }
+  | { method: 'GET'; path: '/api/v1/media/:mediaId/content'; response: ApiRouteResponse<undefined, 204> }
+  | { method: 'POST'; path: '/api/v1/link-preview'; request: LinkPreviewRequest; response: ApiRouteResponse<LinkPreviewResponse> }
+  | { method: 'POST'; path: '/api/v1/image-search'; request: ImageSearchRequest; response: ApiRouteResponse<ImageSearchResponse> }
+  | { method: 'GET'; path: '/api/v1/events'; response: ApiRouteResponse<RevisionEvent> }
+  | { method: 'POST'; path: '/api/v1/backups'; response: ApiRouteResponse<CreateBackupResponse, 201> }
+  | { method: 'GET'; path: '/api/v1/backups'; response: ApiRouteResponse<ListBackupsResponse> }
+  | { method: 'GET'; path: '/api/v1/backups/:backupId'; response: ApiRouteResponse<InspectBackupResponse> }
+  | { method: 'POST'; path: '/api/v1/backups/:backupId/restore'; request: RestoreBackupRequest; response: ApiRouteResponse<RestoreBackupResponse> };
