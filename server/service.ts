@@ -7,6 +7,7 @@ import { createPlotterHttpHandler } from './http';
 import { searchWebImages } from './providers/imageSearch';
 import { fetchLinkPreview } from './providers/linkPreview';
 import { fetchRemoteImage } from './providers/remoteImage';
+import { acquireDataDirectoryOwnership } from './maintenanceLock';
 import { createPlotterStorageRuntime } from './storageRuntime';
 
 const moduleDirectory = realpathSync(dirname(fileURLToPath(import.meta.url)));
@@ -33,7 +34,14 @@ if (serviceArguments.envFile !== undefined) {
   }
 }
 
-const storage = await createPlotterStorageRuntime({ dataDirectory: serviceArguments.dataDir });
+const dataDirectoryOwnership = acquireDataDirectoryOwnership(serviceArguments.dataDir, 'service');
+let storage: Awaited<ReturnType<typeof createPlotterStorageRuntime>>;
+try {
+  storage = await createPlotterStorageRuntime({ dataDirectory: serviceArguments.dataDir });
+} catch (error) {
+  dataDirectoryOwnership.release();
+  throw error;
+}
 const handler = createPlotterHttpHandler({
   directory: storage.directory,
   tripRepository: storage.tripRepository,
@@ -59,8 +67,13 @@ const server = createServer((request, response) => {
 function closeService(): void {
   server.close(() => {
     try { storage.close(); } catch { /* Readiness was revoked before physical close. */ }
+    try { dataDirectoryOwnership.release(); } catch { /* A retained lock fails closed. */ }
   });
 }
+
+process.once('exit', () => {
+  try { dataDirectoryOwnership.release(); } catch { /* A retained lock fails closed. */ }
+});
 
 process.once('SIGINT', closeService);
 process.once('SIGTERM', closeService);

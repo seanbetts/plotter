@@ -81,16 +81,56 @@ current data; investigate recovery backups and retry only after review.
 
 ## Supabase migration and activation gates
 
-The migration executable is a separate maintenance operation. Its required
-sequence is a dry-run first, for example
-`npm run migrate:supabase -- --dry-run --data-dir user-data`, followed by
-review of the retained report and source fingerprint. An `--apply` promotion
-requires a separately approved maintenance window and the reviewed value in
-`--confirm-source-fingerprint`; do not infer approval from a dry run. The source
-stays read-only and remains the rollback source; migration credentials are
-runtime-only `PLOTTER_*` values, never Vite variables or release contents. No
-migration or import is performed by `npm run build`, the service, or local-web
-checks.
+The migration executable is a separate, explicit maintenance operation. Start
+with the credential-free synthetic gate:
+
+```bash
+npm run migrate:supabase -- --dry-run \
+  --fixture scripts/supabase-migration/fixtures/complete-project.json
+```
+
+A real source dry-run requires runtime-only `PLOTTER_SUPABASE_URL`,
+`PLOTTER_SUPABASE_SECRET_KEY`, and the separate
+`PLOTTER_SUPABASE_DB_PASSWORD`. Never give these variables a `VITE_` prefix or
+put them in a release. The local Supabase CLI must already be authenticated and
+linked to the same project reference as the URL. Migration validates those
+conditions before issuing read-only public-schema and data-only COPY dumps.
+The JavaScript source pass uses exact, paged `select`, Storage `list`, and
+Storage `download` calls only; it disables session persistence, token refresh,
+and URL-session detection.
+
+```bash
+npm run migrate:supabase -- --dry-run --data-dir user-data
+```
+
+Dry-run retains its private raw archive, SQL/COPY dumps, downloaded object
+bytes, materialized candidate, inventory, and reconciliation report under
+`imports/`. It does not change `plotter.sqlite3`, `media/`, `backups/`, service
+state, or local-web state. Review the report and its complete 64-character
+source fingerprint. A second complete source pass must still match before the
+run can pass.
+
+Apply requires a separately approved maintenance window, the stopped Plotter
+service, the reviewed fingerprint, and the exact explicit confirmation:
+
+```bash
+npm run migrate:supabase -- --apply --data-dir user-data \
+  --confirm-source-fingerprint <reviewed-64-character-sha256>
+```
+
+The service and apply command contend for the same exclusive data-root
+ownership lock. A running service, a newly starting service, or a crash-stale
+lock causes the other operation to fail closed; investigate a stale lock before
+removing it. Apply creates a named `pre-supabase-import-*` backup and promotes
+the validated database/media pair through the same crash-recoverable portable
+restore transaction used by normal recovery. The Supabase source remains
+read-only and remains an independent rollback source. Repeating the same
+fixture does not merge or duplicate IDs or media.
+
+These commands are implementation and fixture gates only. They do not claim
+that a live Supabase project has been read, that personal `user-data/` has been
+changed, or that migration has been approved or completed. No migration or
+import is performed by `npm run build`, the service, or local-web checks.
 
 Local-web activation is also separate from implementation verification. First
 run the app-local checks and `local-web app doctor`/`local-web app check` on the

@@ -1,0 +1,150 @@
+{
+  "schema": {
+    "trips": ["id", "owner_user_id", "name", "description", "metadata", "created_at", "updated_at", "vehicle_preset", "vehicle_profile", "vehicle_type", "vehicle_restrictions"],
+    "trip_members": ["trip_id", "user_id", "role", "created_at", "updated_at"],
+    "destinations": ["id", "trip_id", "name", "country_region", "lat", "lng", "location", "stop_order", "status", "priority", "timing", "why", "media", "research", "activities", "route_context", "tags", "created_at", "updated_at", "routing_anchors"],
+    "route_legs": ["id", "trip_id", "origin_destination_id", "target_destination_id", "status", "distance_km", "travel_time_hours", "geometry", "provider", "profile", "route_key", "calculated_at", "error", "notes", "created_at", "updated_at", "movement", "calculation_mode", "ferry_policy", "waypoints", "sections", "warnings", "provider_diagnostic"],
+    "activities": ["id", "trip_id", "destination_id", "activity_order", "title", "description", "category", "status", "priority", "location", "links", "notes", "tags", "created_at", "updated_at"],
+    "media_assets": ["id", "trip_id", "destination_id", "bucket_id", "object_path", "caption", "credit", "content_type", "size_bytes", "uploaded_by", "created_at", "updated_at", "sort_order", "activity_id"]
+  },
+  "tables": {
+    "trips": [{
+      "id": "00000000-0000-4000-8000-000000000001",
+      "owner_user_id": "00000000-0000-4000-8000-000000000010",
+      "name": "Synthetic migration trip",
+      "description": "Fixture only",
+      "metadata": {"legacy": "preserved in raw archive"},
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-02T00:00:00.000Z",
+      "vehicle_preset": "standard",
+      "vehicle_profile": "driving-car",
+      "vehicle_type": null,
+      "vehicle_restrictions": {}
+    }],
+    "trip_members": [{
+      "trip_id": "00000000-0000-4000-8000-000000000001",
+      "user_id": "00000000-0000-4000-8000-000000000010",
+      "role": "owner",
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    }],
+    "destinations": [
+      {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "trip_id": "00000000-0000-4000-8000-000000000001",
+        "name": "First stop",
+        "country_region": "England",
+        "lat": 51.0,
+        "lng": -0.1,
+        "location": {"placeName": "First stop", "regionName": "England", "countryName": "United Kingdom", "countryCode": "GB", "sourceLabel": "First stop, England", "sourceProvider": "legacy"},
+        "stop_order": 0,
+        "status": "planned",
+        "priority": "high",
+        "timing": {"idealMonths": ["June"], "expectedStayDays": 2, "provisionalStartDate": "", "provisionalEndDate": ""},
+        "why": {"summary": "Visit", "highlights": "Views", "personalRationale": "Fixture"},
+        "media": [],
+        "research": {"notes": "", "links": [], "bookReferences": []},
+        "activities": {"items": []},
+        "route_context": {"previousNextNotes": "", "drivingNotes": "", "borderShippingNotes": "", "notes": ""},
+        "tags": ["fixture"],
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-02T00:00:00.000Z",
+        "routing_anchors": {}
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000003",
+        "trip_id": "00000000-0000-4000-8000-000000000001",
+        "name": "Second stop",
+        "country_region": "Scotland",
+        "lat": 56.0,
+        "lng": -3.0,
+        "location": {"placeName": "Second stop", "regionName": "Scotland", "countryName": "United Kingdom", "countryCode": "GB", "sourceLabel": "Second stop, Scotland", "sourceProvider": "legacy"},
+        "stop_order": 1,
+        "status": "idea",
+        "priority": "medium",
+        "timing": {"idealMonths": [], "expectedStayDays": 1, "provisionalStartDate": "", "provisionalEndDate": ""},
+        "why": {"summary": "", "highlights": "", "personalRationale": ""},
+        "media": [],
+        "research": {"notes": "", "links": [], "bookReferences": []},
+        "activities": {"items": []},
+        "route_context": {"previousNextNotes": "", "drivingNotes": "", "borderShippingNotes": "", "notes": ""},
+        "tags": [],
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-02T00:00:00.000Z",
+        "routing_anchors": {}
+      }
+    ],
+    "route_legs": [{
+      "id": "00000000-0000-4000-8000-000000000004",
+      "trip_id": "00000000-0000-4000-8000-000000000001",
+      "origin_destination_id": "00000000-0000-4000-8000-000000000002",
+      "target_destination_id": "00000000-0000-4000-8000-000000000003",
+      "status": "pending",
+      "distance_km": null,
+      "travel_time_hours": null,
+      "geometry": null,
+      "provider": null,
+      "profile": null,
+      "route_key": null,
+      "calculated_at": null,
+      "error": null,
+      "notes": "",
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-02T00:00:00.000Z",
+      "movement": "drive",
+      "calculation_mode": "automatic",
+      "ferry_policy": "allow",
+      "waypoints": [],
+      "sections": [],
+      "warnings": [],
+      "provider_diagnostic": null
+    }],
+    "activities": [{
+      "id": "00000000-0000-4000-8000-000000000005",
+      "trip_id": "00000000-0000-4000-8000-000000000001",
+      "destination_id": "00000000-0000-4000-8000-000000000002",
+      "activity_order": 0,
+      "title": "Synthetic activity",
+      "description": "Fixture only",
+      "category": "outdoors",
+      "status": "planned",
+      "priority": "medium",
+      "location": null,
+      "links": [],
+      "notes": "",
+      "tags": [],
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-02T00:00:00.000Z"
+    }],
+    "media_assets": [{
+      "id": "00000000-0000-4000-8000-000000000006",
+      "trip_id": "00000000-0000-4000-8000-000000000001",
+      "destination_id": "00000000-0000-4000-8000-000000000002",
+      "bucket_id": "trip-media",
+      "object_path": "00000000-0000-4000-8000-000000000001/hero.png",
+      "caption": "Fixture image",
+      "credit": "Synthetic",
+      "content_type": "image/png",
+      "size_bytes": 13,
+      "uploaded_by": "00000000-0000-4000-8000-000000000010",
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-02T00:00:00.000Z",
+      "sort_order": 0,
+      "activity_id": null
+    }]
+  },
+  "storage": [
+    {
+      "path": "00000000-0000-4000-8000-000000000001/hero.png",
+      "listing": {"name": "hero.png", "id": "00000000-0000-4000-8000-000000000020", "metadata": {"size": 13, "mimetype": "image/png"}},
+      "base64": "Zml4dHVyZS1pbWFnZQ=="
+    },
+    {
+      "path": "unreferenced/readme.bin",
+      "listing": {"name": "readme.bin", "id": "00000000-0000-4000-8000-000000000021", "metadata": {"size": 4, "mimetype": "application/octet-stream"}},
+      "base64": "cmF3IQ=="
+    }
+  ],
+  "rawSchemaSql": "-- synthetic public schema dump for fixture mode\n",
+  "rawDataSql": "-- synthetic public data-only COPY dump for fixture mode\n"
+}
