@@ -175,7 +175,7 @@ export function createServiceRepositories(client: PlotterApiClient): {
   createTripRepository(tripId: string): TripRepository;
 } {
   let directoryRevision: number | undefined;
-  let directoryReadSequence = 0;
+  let directoryOperationSequence = 0;
 
   function requireDirectoryRevision(): number {
     if (directoryRevision === undefined) throw new Error(READ_REQUIRED_MESSAGE);
@@ -183,17 +183,24 @@ export function createServiceRepositories(client: PlotterApiClient): {
   }
 
   async function loadDirectory() {
-    const readSequence = directoryReadSequence + 1;
-    directoryReadSequence = readSequence;
+    const operationSequence = directoryOperationSequence + 1;
+    directoryOperationSequence = operationSequence;
     const snapshot = await client.request<DirectoryReadResponse>('/api/v1/trips');
     const revision = directorySnapshotRevision(snapshot);
-    if (directoryReadSequence === readSequence) directoryRevision = revision;
+    if (directoryOperationSequence === operationSequence) directoryRevision = revision;
     return snapshot;
   }
 
-  function commitDirectoryRevision(response: { revision: unknown }): void {
-    directoryReadSequence += 1;
-    directoryRevision = revisionFrom(response);
+  function beginDirectoryWrite(): { expectedRevision: number; operationSequence: number } {
+    const expectedRevision = requireDirectoryRevision();
+    const operationSequence = directoryOperationSequence + 1;
+    directoryOperationSequence = operationSequence;
+    return { expectedRevision, operationSequence };
+  }
+
+  function commitDirectoryRevision(response: { revision: unknown }, operationSequence: number): void {
+    const revision = revisionFrom(response);
+    if (directoryOperationSequence === operationSequence) directoryRevision = revision;
   }
 
   const directory: TripDirectoryRepository = {
@@ -202,34 +209,38 @@ export function createServiceRepositories(client: PlotterApiClient): {
       return (await loadDirectory()).trips;
     },
     async createTrip(input) {
-      const request: CreateTripRequest = { expectedRevision: requireDirectoryRevision(), ...input };
+      const operation = beginDirectoryWrite();
+      const request: CreateTripRequest = { expectedRevision: operation.expectedRevision, ...input };
       const response = await client.request<DirectoryWriteResponse>('/api/v1/trips', jsonRequest('POST', request));
       const created = requiredObject<NonNullable<DirectoryWriteResponse['trip']>>(response.trip, isTripSummary, 'Plotter service did not return the created trip.');
-      commitDirectoryRevision(response);
+      commitDirectoryRevision(response, operation.operationSequence);
       return created;
     },
     async updateTrip(tripId, patch) {
-      const request: UpdateTripRequest = { expectedRevision: requireDirectoryRevision(), patch };
+      const operation = beginDirectoryWrite();
+      const request: UpdateTripRequest = { expectedRevision: operation.expectedRevision, patch };
       const response = await client.request<DirectoryWriteResponse>(
         `/api/v1/trips/${routePart(tripId)}`,
         jsonRequest('PATCH', request),
       );
       const updated = requiredObject<NonNullable<DirectoryWriteResponse['trip']>>(response.trip, isTripSummary, 'Plotter service did not return the updated trip.');
-      commitDirectoryRevision(response);
+      commitDirectoryRevision(response, operation.operationSequence);
       return updated;
     },
     async deleteTrip(tripId) {
+      const operation = beginDirectoryWrite();
       const response = await client.request<DirectoryWriteResponse>(
         `/api/v1/trips/${routePart(tripId)}`,
-        jsonRequest('DELETE', { expectedRevision: requireDirectoryRevision() }),
+        jsonRequest('DELETE', { expectedRevision: operation.expectedRevision }),
       );
-      commitDirectoryRevision(response);
+      commitDirectoryRevision(response, operation.operationSequence);
     },
   };
 
   function createTripRepository(tripId: string): TripRepository {
     let tripRevision: number | undefined;
-    let tripReadSequence = 0;
+    let tripOperationSequence = 0;
+    const writeOperationByResponse = new WeakMap<object, number>();
     const tripPath = `/api/v1/trips/${routePart(tripId)}`;
 
     function requireTripRevision(): number {
@@ -238,31 +249,48 @@ export function createServiceRepositories(client: PlotterApiClient): {
     }
 
     async function loadSnapshot() {
-      const readSequence = tripReadSequence + 1;
-      tripReadSequence = readSequence;
+      const operationSequence = tripOperationSequence + 1;
+      tripOperationSequence = operationSequence;
       const snapshot = await client.request<TripReadResponse>(tripPath);
       const revision = tripSnapshotRevision(snapshot);
-      if (tripReadSequence === readSequence) tripRevision = revision;
+      if (tripOperationSequence === operationSequence) tripRevision = revision;
       return snapshot;
     }
 
     function commitTripRevision(response: { revision: unknown }): void {
-      tripReadSequence += 1;
-      tripRevision = revisionFrom(response);
+      const revision = revisionFrom(response);
+      if (writeOperationByResponse.get(response) === tripOperationSequence) {
+        tripRevision = revision;
+      }
+    }
+
+    async function requestTripWrite<T extends { revision: number }>(
+      send: (expectedRevision: number) => Promise<T>,
+    ): Promise<T> {
+      const expectedRevision = requireTripRevision();
+      const operationSequence = tripOperationSequence + 1;
+      tripOperationSequence = operationSequence;
+      const response = await send(expectedRevision);
+      writeOperationByResponse.set(response, operationSequence);
+      return response;
     }
 
     async function requestMutation(mutation: TripMutationRequest): Promise<TripWriteResponse> {
-      return client.request<TripWriteResponse>(
-        `${tripPath}/mutations`,
-        jsonRequest('POST', { expectedRevision: requireTripRevision(), mutation }),
+      return requestTripWrite((expectedRevision) =>
+        client.request<TripWriteResponse>(
+          `${tripPath}/mutations`,
+          jsonRequest('POST', { expectedRevision, mutation }),
+        ),
       );
     }
 
     async function requestMediaMutation(path: string, method: 'PATCH' | 'DELETE' | 'POST', body: unknown): Promise<MediaWriteResponse> {
-      return client.request<MediaWriteResponse>(path, jsonRequest(method, {
-        expectedRevision: requireTripRevision(),
-        ...body as object,
-      }));
+      return requestTripWrite((expectedRevision) =>
+        client.request<MediaWriteResponse>(path, jsonRequest(method, {
+          expectedRevision,
+          ...body as object,
+        })),
+      );
     }
 
     return {
@@ -302,18 +330,20 @@ export function createServiceRepositories(client: PlotterApiClient): {
         form.set('file', input.file);
         appendOptionalText(form, 'caption', input.caption);
         appendOptionalText(form, 'credit', input.credit);
-        const response = await client.upload<MediaWriteResponse>(
-          `${tripPath}/destinations/${routePart(input.destinationId)}/media`, form, requireTripRevision(),
-        );
+        const response = await requestTripWrite((expectedRevision) => client.upload<MediaWriteResponse>(
+          `${tripPath}/destinations/${routePart(input.destinationId)}/media`, form, expectedRevision,
+        ));
         const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the uploaded media.');
         commitTripRevision(response);
         return serviceRelativeMediaItem(mediaItem);
       },
       async importDestinationMediaFromSearch(input) {
-        const body: DestinationMediaImportRequest = { expectedRevision: requireTripRevision(), result: input.result };
-        const response = await client.request<MediaWriteResponse>(
-          `${tripPath}/destinations/${routePart(input.destinationId)}/media/import`, jsonRequest('POST', body),
-        );
+        const response = await requestTripWrite((expectedRevision) => {
+          const body: DestinationMediaImportRequest = { expectedRevision, result: input.result };
+          return client.request<MediaWriteResponse>(
+            `${tripPath}/destinations/${routePart(input.destinationId)}/media/import`, jsonRequest('POST', body),
+          );
+        });
         const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the imported media.');
         commitTripRevision(response);
         return serviceRelativeMediaItem(mediaItem);
@@ -343,18 +373,20 @@ export function createServiceRepositories(client: PlotterApiClient): {
         form.set('file', input.file);
         appendOptionalText(form, 'caption', input.caption);
         appendOptionalText(form, 'credit', input.credit);
-        const response = await client.upload<MediaWriteResponse>(
-          `${tripPath}/destinations/${routePart(input.destinationId)}/activities/${routePart(input.activityId)}/media`, form, requireTripRevision(),
-        );
+        const response = await requestTripWrite((expectedRevision) => client.upload<MediaWriteResponse>(
+          `${tripPath}/destinations/${routePart(input.destinationId)}/activities/${routePart(input.activityId)}/media`, form, expectedRevision,
+        ));
         const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the uploaded media.');
         commitTripRevision(response);
         return serviceRelativeMediaItem(mediaItem);
       },
       async importActivityMediaFromSearch(input) {
-        const body: DestinationMediaImportRequest = { expectedRevision: requireTripRevision(), result: input.result };
-        const response = await client.request<MediaWriteResponse>(
-          `${tripPath}/destinations/${routePart(input.destinationId)}/activities/${routePart(input.activityId)}/media/import`, jsonRequest('POST', body),
-        );
+        const response = await requestTripWrite((expectedRevision) => {
+          const body: DestinationMediaImportRequest = { expectedRevision, result: input.result };
+          return client.request<MediaWriteResponse>(
+            `${tripPath}/destinations/${routePart(input.destinationId)}/activities/${routePart(input.activityId)}/media/import`, jsonRequest('POST', body),
+          );
+        });
         const mediaItem = requiredObject<NonNullable<MediaWriteResponse['mediaItem']>>(response.mediaItem, isMediaItem, 'Plotter service did not return the imported media.');
         commitTripRevision(response);
         return serviceRelativeMediaItem(mediaItem);

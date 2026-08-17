@@ -87,6 +87,45 @@ describe('service repositories', () => {
     expect(responseBody(tripHarness.calls[2]!)).toMatchObject({ expectedRevision: 12 });
   });
 
+  it('does not let a delayed directory write response supersede a later authoritative read', async () => {
+    const harness = recordingClient();
+    const directory = createServiceRepositories(harness.client).directory;
+    harness.responses.push({ revision: 5, trips: [trip()] });
+    await directory.loadDirectory?.();
+
+    const delayedWrite = createDeferred<{ revision: number }>();
+    harness.responses.push(delayedWrite.promise);
+    const writePromise = directory.deleteTrip('trip-1');
+    harness.responses.push({ revision: 7, trips: [trip()] });
+    await directory.loadDirectory?.();
+    delayedWrite.resolve({ revision: 6 });
+    await writePromise;
+
+    harness.responses.push({ revision: 8 });
+    await directory.deleteTrip('trip-1');
+    expect(responseBody(harness.calls[3]!)).toEqual({ expectedRevision: 7 });
+  });
+
+  it('does not let a delayed trip write response supersede a later authoritative snapshot', async () => {
+    const harness = recordingClient();
+    const repository = createServiceRepositories(harness.client).createTripRepository('trip-1');
+    const destination = createDestination({ name: 'Aosta', coordinates: { lat: 45.737, lng: 7.32 } });
+    harness.responses.push({ revision: 5, destinations: [destination], routeLegs: [], activities: [] });
+    await repository.loadSnapshot?.();
+
+    const delayedWrite = createDeferred<{ revision: number }>();
+    harness.responses.push(delayedWrite.promise);
+    const writePromise = repository.saveDestination(destination);
+    harness.responses.push({ revision: 7, destinations: [destination], routeLegs: [], activities: [] });
+    await repository.loadSnapshot?.();
+    delayedWrite.resolve({ revision: 6 });
+    await writePromise;
+
+    harness.responses.push({ revision: 8 });
+    await repository.deleteDestination(destination.id);
+    expect(responseBody(harness.calls[3]!)).toMatchObject({ expectedRevision: 7 });
+  });
+
   it('does not let malformed directory or trip reads prime a mutation revision', async () => {
     const directoryHarness = recordingClient();
     const directory = createServiceRepositories(directoryHarness.client).directory;
