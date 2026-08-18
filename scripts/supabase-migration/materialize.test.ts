@@ -5,8 +5,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPlotterDatabase } from '../../server/database';
 import { createRawArchive } from './archive';
-import { loadFixtureSource } from './cli';
+import { loadFixtureSource, packagePortableCandidate } from './cli';
 import { materializeSource } from './materialize';
+import { reconcileMaterialization } from './reconcile';
 import { fingerprintSourceSnapshot, type SourceSnapshot } from './source';
 
 const temporaryDirectories: string[] = [];
@@ -481,6 +482,51 @@ describe('Supabase source materialization', () => {
     });
     writeFileSync(join(materialized.mediaRoot, '00000000-0000-4000-8000-000000000006.png'), 'changed');
     expect(() => materialized.validate()).toThrow('Materialized media bytes changed.');
+  });
+
+  it('rejects candidate packaging after a reconciled active database value changes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-changed-value-'));
+    temporaryDirectories.push(root);
+    const loaded = await fixture();
+    const fingerprint = fingerprintSourceSnapshot(loaded.source, loaded.schema);
+    const materialized = await materializeSource({
+      destinationRoot: root,
+      archiveRelativePath: 'imports/synthetic',
+      source: loaded.source,
+      fingerprint,
+      importedAt: '2026-08-17T12:00:00.000Z',
+    });
+    expect(reconcileMaterialization({
+      source: loaded.source,
+      fingerprint,
+      materialized,
+    }).passed).toBe(true);
+    const database = new DatabaseSync(materialized.databasePath);
+    database.prepare('UPDATE trips SET name = ?').run('CORRUPTED AFTER RECONCILIATION');
+    database.close();
+
+    await expect(packagePortableCandidate(materialized))
+      .rejects.toThrow('Materialized database values changed.');
+  });
+
+  it('does not collapse a non-finite SQLite REAL to the digest for SQL NULL', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-nonfinite-value-'));
+    temporaryDirectories.push(root);
+    const loaded = await fixture();
+    const materialized = await materializeSource({
+      destinationRoot: root,
+      archiveRelativePath: 'imports/synthetic',
+      source: loaded.source,
+      fingerprint: fingerprintSourceSnapshot(loaded.source, loaded.schema),
+      importedAt: '2026-08-17T12:00:00.000Z',
+    });
+    const database = new DatabaseSync(materialized.databasePath);
+    database.prepare('UPDATE route_legs SET distance_km = ?').run(Infinity);
+    database.close();
+
+    expect(() => materialized.validate()).toThrow('Materialized database value is unsupported.');
+    await expect(packagePortableCandidate(materialized))
+      .rejects.toThrow('Materialized database value is unsupported.');
   });
 
   it('rejects a zero-byte referenced object even when legacy size metadata is nullable', async () => {

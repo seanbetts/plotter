@@ -272,18 +272,74 @@ function parseTextArray(value: string): string[] {
   return values;
 }
 
+function canonicalDecimalLiteral(value: string): string {
+  const match = /^(-?)(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(value);
+  if (!match) throw new Error('Source COPY JSON number is invalid.');
+  let digits = `${match[2]}${match[3] ?? ''}`.replace(/^0+/, '');
+  if (digits.length === 0) return '0';
+  let exponent = BigInt(match[4] ?? '0') - BigInt((match[3] ?? '').length);
+  while (digits.endsWith('0')) {
+    digits = digits.slice(0, -1);
+    exponent += 1n;
+  }
+  return `${match[1]}${digits}e${exponent}`;
+}
+
+function assertLosslessJsonNumbers(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '"') {
+      for (index += 1; index < value.length; index += 1) {
+        if (value[index] === '\\') index += 1;
+        else if (value[index] === '"') break;
+      }
+      continue;
+    }
+    if (value[index] !== '-' && !/\d/.test(value[index]!)) continue;
+    const match = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(value.slice(index));
+    if (!match) throw new Error('Source COPY JSON number is invalid.');
+    const numericValue = Number(match[0]);
+    const serialized = Number.isFinite(numericValue) ? JSON.stringify(numericValue) : undefined;
+    if (
+      serialized === undefined
+      || canonicalDecimalLiteral(match[0]) !== canonicalDecimalLiteral(serialized)
+    ) throw new Error('Source COPY JSON number cannot be represented losslessly.');
+    index += match[0].length - 1;
+  }
+}
+
+function canonicalStructuredJson(value: unknown): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('Source SDK JSON value is invalid.');
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(canonicalStructuredJson);
+  if (!isRecord(value)) throw new Error('Source SDK JSON value is invalid.');
+  return Object.fromEntries(
+    Object.keys(value).sort().map((key) => [key, canonicalStructuredJson(value[key])]),
+  );
+}
+
 function canonicalColumnValue(
   table: SourceTableName,
   column: string,
   value: unknown,
+  origin: 'copy' | 'structured',
 ): unknown {
-  if (value === null) return null;
   if (JSON_COLUMNS[table]?.has(column)) {
-    if (typeof value === 'string') return canonicalValue(JSON.parse(value) as unknown);
-    return canonicalValue(value);
+    if (origin === 'copy') {
+      if (typeof value !== 'string') throw new Error('Source COPY JSON value is invalid.');
+      assertLosslessJsonNumbers(value);
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed === null) throw new Error('Source COPY JSON null is ambiguous.');
+      return canonicalValue(parsed);
+    }
+    if (value === null) return null;
+    return canonicalStructuredJson(value);
   }
+  if (value === null) return null;
   if (TEXT_ARRAY_COLUMNS[table]?.has(column)) {
-    if (typeof value === 'string') return parseTextArray(value);
+    if (origin === 'copy' && typeof value === 'string') return parseTextArray(value);
     if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
       throw new Error('Source text array is invalid.');
     }
@@ -319,7 +375,9 @@ function canonicalCopyRow(
     const raw = cells[index]!;
     return [
       column,
-      raw === '\\N' ? null : canonicalColumnValue(table, column, decodeCopyText(raw)),
+      raw === '\\N'
+        ? null
+        : canonicalColumnValue(table, column, decodeCopyText(raw), 'copy'),
     ];
   }));
 }
@@ -337,7 +395,7 @@ function canonicalStructuredRow(
   ) throw new Error('Source SDK row columns are incomplete.');
   return Object.fromEntries(columns.map((column) => [
     column,
-    canonicalColumnValue(table, column, row[column]),
+    canonicalColumnValue(table, column, row[column], 'structured'),
   ]));
 }
 

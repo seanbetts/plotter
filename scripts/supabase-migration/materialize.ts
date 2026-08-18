@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import { constants, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join, sep } from 'node:path';
-import { assertDatabaseIntegrity, openPlotterDatabase } from '../../server/database';
+import {
+  assertDatabaseIntegrity,
+  openPlotterDatabase,
+  type PlotterDatabase,
+} from '../../server/database';
 import { createSqliteDirectoryRepository } from '../../server/directoryRepository';
 import { createMediaStore } from '../../server/mediaStore';
 import { createSqliteTripRepository } from '../../server/tripRepository';
@@ -34,6 +38,7 @@ export type MaterializedSource = {
   failures: MigrationFailure[];
   orphanClassifications: OrphanClassification[];
   validate(): void;
+  validateSnapshot(databasePath: string, dataRoot: string): void;
 };
 
 type MaterializeOptions = {
@@ -44,6 +49,46 @@ type MaterializeOptions = {
   importedAt: string;
   provenance?: SourceCaptureProvenance;
 };
+
+const MATERIALIZED_TABLE_ORDER = {
+  activities: 'id',
+  destinations: 'id',
+  media_assets: 'id',
+  migration_provenance: 'id',
+  route_legs: 'id',
+  schema_metadata: 'version',
+  store_metadata: 'singleton',
+  trip_revisions: 'trip_id',
+  trips: 'id',
+} as const;
+
+function strictLogicalValue(value: unknown): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('Materialized database value is unsupported.');
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(strictLogicalValue);
+  if (
+    typeof value !== 'object'
+    || value === null
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value) as object | null)
+  ) throw new Error('Materialized database value is unsupported.');
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [
+    key,
+    strictLogicalValue((value as Record<string, unknown>)[key]),
+  ]));
+}
+
+function logicalDatabaseDigest(connection: PlotterDatabase['connection']): string {
+  const state = Object.fromEntries(Object.entries(MATERIALIZED_TABLE_ORDER).map(
+    ([table, order]) => [
+      table,
+      connection.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all(),
+    ],
+  ));
+  return createHash('sha256').update(JSON.stringify(strictLogicalValue(state))).digest('hex');
+}
 
 const CONTENT_TYPE_EXTENSIONS: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -685,7 +730,11 @@ export async function materializeSource(options: MaterializeOptions): Promise<Ma
   const failures: MigrationFailure[] = [];
   const orphanClassifications: OrphanClassification[] = [];
   const objects = validateSource(options.source, failures, orphanClassifications);
-  const expectedMedia = new Map<string, { path: string; sha256: string; byteCount: number }>();
+  const expectedMedia = new Map<string, {
+    relativePath: string;
+    sha256: string;
+    byteCount: number;
+  }>();
 
   const database = openPlotterDatabase(databasePath);
   try {
@@ -810,7 +859,7 @@ export async function materializeSource(options: MaterializeOptions): Promise<Ma
           const hash = createHash('sha256').update(object.bytes).digest('hex');
           await writeExclusive(join(root, relativePath), object.bytes);
           expectedMedia.set(String(row.id), {
-            path: join(root, relativePath), sha256: hash, byteCount: object.bytes.byteLength,
+            relativePath, sha256: hash, byteCount: object.bytes.byteLength,
           });
           insertMedia.run(
             sql(row.id), sql(row.trip_id), sql(row.destination_id), sql(row.activity_id),
@@ -847,13 +896,29 @@ export async function materializeSource(options: MaterializeOptions): Promise<Ma
     }
   }
 
-  function validate(): void {
-    if (failures.length > 0) throw new Error(failures[0]!.message);
-    const reopened = openPlotterDatabase(databasePath);
+  let expectedDatabaseDigest: string | undefined;
+  if (failures.length === 0) {
+    let reopened: PlotterDatabase | undefined;
+    try {
+      reopened = openPlotterDatabase(databasePath);
+      expectedDatabaseDigest = logicalDatabaseDigest(reopened.connection);
+    } catch {
+      fail(failures, 'integrity', 'Materialized database values could not be fingerprinted.');
+    } finally {
+      reopened?.close();
+    }
+  }
+
+  function validateSnapshot(candidateDatabasePath: string, candidateRoot: string): void {
+    const reopened = openPlotterDatabase(candidateDatabasePath);
     try {
       assertDatabaseIntegrity(reopened.connection);
+      if (
+        expectedDatabaseDigest === undefined
+        || logicalDatabaseDigest(reopened.connection) !== expectedDatabaseDigest
+      ) throw new Error('Materialized database values changed.');
       for (const expected of expectedMedia.values()) {
-        const bytes = readFileSyncSafe(expected.path);
+        const bytes = readFileSyncSafe(join(candidateRoot, expected.relativePath));
         if (
           bytes.byteLength !== expected.byteCount
           || createHash('sha256').update(bytes).digest('hex') !== expected.sha256
@@ -864,9 +929,14 @@ export async function materializeSource(options: MaterializeOptions): Promise<Ma
     }
   }
 
+  function validate(): void {
+    if (failures.length > 0) throw new Error(failures[0]!.message);
+    validateSnapshot(databasePath, root);
+  }
+
   return {
     root, databasePath, mediaRoot, promotable: failures.length === 0,
-    failures, orphanClassifications, validate,
+    failures, orphanClassifications, validate, validateSnapshot,
   };
 }
 

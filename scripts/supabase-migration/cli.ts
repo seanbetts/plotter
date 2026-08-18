@@ -2,7 +2,7 @@ import { createClient as createSupabaseClient, type SupabaseClient } from '@supa
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants, existsSync, lstatSync, mkdirSync, realpathSync, renameSync } from 'node:fs';
-import { link, mkdtemp, open, readFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { openPlotterDatabase, type PlotterDatabase } from '../../server/database';
@@ -618,6 +618,69 @@ async function hashExactFile(path: string): Promise<{
   }
 }
 
+async function validatePreparedCandidateArtifact(
+  materialized: Awaited<ReturnType<typeof materializeSource>>,
+  backupId: string,
+  archivePath: string,
+  expected: { dev: number; ino: number; byteCount: number; sha256: string },
+): Promise<void> {
+  const validationRoot = join(materialized.root, `.candidate-validation-${randomUUID()}`);
+  await mkdir(validationRoot, { mode: 0o700 });
+  await syncDirectory(materialized.root);
+  let validationDatabase: PlotterDatabase | undefined;
+  try {
+    const validationMediaRoot = join(validationRoot, 'media');
+    const validationBackupsRoot = join(validationRoot, 'backups');
+    await mkdir(validationMediaRoot, { mode: 0o700 });
+    await mkdir(validationBackupsRoot, { mode: 0o700 });
+    await syncDirectory(validationRoot);
+    const linkedArchive = join(validationBackupsRoot, `${backupId}.tar`);
+    await link(archivePath, linkedArchive);
+    const linkedMetadata = lstatSync(linkedArchive);
+    if (
+      !linkedMetadata.isFile()
+      || linkedMetadata.isSymbolicLink()
+      || linkedMetadata.dev !== expected.dev
+      || linkedMetadata.ino !== expected.ino
+    ) throw new Error('Portable migration candidate is invalid.');
+    await syncDirectory(validationBackupsRoot);
+
+    const validationDatabasePath = join(validationRoot, 'plotter.sqlite3');
+    validationDatabase = openPlotterDatabase(validationDatabasePath);
+    const operations = createPortableBackupOperations({
+      dataDirectory: validationRoot,
+      currentDatabase() {
+        if (!validationDatabase) throw new Error('Candidate validation database is closed.');
+        return validationDatabase;
+      },
+      closeStorage() {
+        const closing = validationDatabase;
+        validationDatabase = undefined;
+        closing?.close();
+      },
+      openStorage() {
+        validationDatabase = openPlotterDatabase(validationDatabasePath);
+      },
+      publishRestoreReset() { /* Candidate validation has no clients. */ },
+    });
+    await operations.restore(backupId, { confirmation: `RESTORE ${backupId}` });
+    validationDatabase?.close();
+    validationDatabase = undefined;
+    materialized.validateSnapshot(validationDatabasePath, validationRoot);
+    const after = await hashExactFile(archivePath);
+    if (
+      after.dev !== expected.dev
+      || after.ino !== expected.ino
+      || after.byteCount !== expected.byteCount
+      || after.sha256 !== expected.sha256
+    ) throw new Error('Portable migration candidate changed during validation.');
+  } finally {
+    validationDatabase?.close();
+    await rm(validationRoot, { recursive: true, force: true });
+    await syncDirectory(materialized.root);
+  }
+}
+
 export async function packagePortableCandidate(
   materialized: Awaited<ReturnType<typeof materializeSource>>,
 ): Promise<PreparedMigrationCandidate> {
@@ -642,12 +705,18 @@ export async function packagePortableCandidate(
   try {
     const backupId = (await operations.create()).id;
     const manifest = await operations.inspect(backupId);
+    materialized.validate();
     const archivePath = join(materialized.root, 'backups', `${backupId}.tar`);
     const canonicalArchive = realpathSync(archivePath);
     if (!isContained(canonicalArchive, materialized.root) || canonicalArchive !== archivePath) {
       throw new Error('Portable migration candidate is invalid.');
     }
     const { dev, ino, ...digest } = await hashExactFile(archivePath);
+    await validatePreparedCandidateArtifact(materialized, backupId, archivePath, {
+      dev,
+      ino,
+      ...digest,
+    });
     return {
       backupId,
       archivePath,

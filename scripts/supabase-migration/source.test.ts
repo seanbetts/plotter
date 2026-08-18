@@ -405,6 +405,37 @@ describe('read-only Supabase source inventory', () => {
     })).not.toThrow();
   });
 
+  it('rejects JSONB numeric precision that cannot round-trip through SDK values', () => {
+    const fixture = completeFixture();
+    fixture.tables.trips[0]!.vehicle_restrictions = { length: 1 };
+    fixture.rawDataSql = replaceCopyRows(fixture.rawDataSql, 'trips', (rows, columns) => {
+      const cells = rows[0]!.split('\t');
+      cells[columns.indexOf('vehicle_restrictions')] = '{"length":1.0000000000000001}';
+      return [cells.join('\t')];
+    });
+
+    expect(() => parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    )).toThrow('Source COPY JSON number cannot be represented losslessly.');
+  });
+
+  it('rejects ambiguous top-level JSON null instead of treating it as SQL NULL', () => {
+    const fixture = completeFixture();
+    fixture.rawDataSql = replaceCopyRows(fixture.rawDataSql, 'trips', (rows, columns) => {
+      const cells = rows[0]!.split('\t');
+      cells[columns.indexOf('metadata')] = 'null';
+      return [cells.join('\t')];
+    });
+
+    expect(() => parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    )).toThrow('Source COPY JSON null is ambiguous.');
+  });
+
   it('binds canonical DDL evidence into the otherwise stable source fingerprint', () => {
     const fixture = completeFixture();
     const firstEvidence = parseSourceDumpEvidence(
