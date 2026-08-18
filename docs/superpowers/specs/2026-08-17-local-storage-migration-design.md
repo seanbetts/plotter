@@ -461,3 +461,27 @@ The migration is complete only when:
 - the live static-to-service cutover has separate explicit approval and live
   evidence;
 - Supabase remains untouched and recoverable until separately retired.
+
+## Verified implementation evidence
+
+Tasks 1–16 were implemented and independently reviewed on
+`codex/plotter-local-storage` from merge base
+`45e7f3574ee76589877282762dff1042eddba109` through `4738423`. The verified
+implementation includes the SQLite/media service, typed HTTP and SSE clients,
+automatic and portable backup/restore, service-backed browser and CLI paths,
+local-web release packaging, disposable service-owned E2E harness, and the
+lossless Supabase migration tool.
+
+The final pre-integration matrix passed 1,118 app tests, 426 server tests, the
+92-test migration suite, all 27 Playwright scenarios, lint, TypeScript, frontend
+and service builds, release assembly, local-web Doctor, and full local-web app
+check. Review fixes specifically covered global media-write serialization,
+durable media-operation recovery, backup publication and retention, exact
+COPY-to-SDK source equality, dump-bound fingerprints, complete archive
+readback, child-process credential isolation, retained schema-failure evidence,
+and production restore/reconciliation of the exact candidate archive.
+
+This evidence is synthetic and disposable only. It does not authorize or claim
+live Supabase access, a canonical import, local-web activation, host-registry
+mutation, or Supabase retirement. Those remain the separately approved steps
+described above.
