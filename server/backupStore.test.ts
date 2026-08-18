@@ -137,6 +137,56 @@ describe('createBackupStore', () => {
     fixture.database.close();
   });
 
+  it('restores every prior backup when a later rotation removal fails', async () => {
+    const fixture = createFixture();
+    mkdirSync(fixture.backupDirectory);
+    const automaticNames = Array.from({ length: 6 }, (_, index) => `automatic-retained-${index}.sqlite3`);
+    for (const [index, name] of automaticNames.entries()) {
+      const path = join(fixture.backupDirectory, name);
+      writeFileSync(path, `retained-${index}`);
+      const timestamp = new Date(`2026-08-17T10:0${index}:00.000Z`);
+      utimesSync(path, timestamp, timestamp);
+    }
+    const before = readdirSync(fixture.backupDirectory).sort();
+    let removals = 0;
+
+    await expect(createBackupStore(fixture.backupDirectory, {
+      removeAutomaticBackup(path) {
+        removals += 1;
+        if (removals === 2) throw new Error('forced second rotation failure');
+        rmSync(path);
+      },
+    }).createAutomaticBackup(fixture.database.connection, 6))
+      .rejects.toThrow('Automatic database backup failed.');
+
+    expect(removals).toBe(2);
+    expect(readdirSync(fixture.backupDirectory).sort()).toEqual(before);
+    fixture.database.close();
+  });
+
+  it('restores the prior backup set when rotation directory sync fails', async () => {
+    const fixture = createFixture();
+    mkdirSync(fixture.backupDirectory);
+    const automaticNames = Array.from({ length: 5 }, (_, index) => `automatic-retained-${index}.sqlite3`);
+    for (const [index, name] of automaticNames.entries()) {
+      const path = join(fixture.backupDirectory, name);
+      writeFileSync(path, `retained-${index}`);
+      const timestamp = new Date(`2026-08-17T10:0${index}:00.000Z`);
+      utimesSync(path, timestamp, timestamp);
+    }
+    const before = readdirSync(fixture.backupDirectory).sort();
+
+    await expect(createBackupStore(fixture.backupDirectory, {
+      async syncDirectory(_path, phase) {
+        if (phase === 'backup-rotated') throw new Error('forced rotation sync failure');
+      },
+    }).createAutomaticBackup(fixture.database.connection, 5))
+      .rejects.toThrow('Automatic database backup failed.');
+
+    expect(readdirSync(fixture.backupDirectory).sort()).toEqual(before);
+    fixture.database.close();
+  });
+
   it('reports filesystem failures without exposing a path', async () => {
     const fixture = createFixture();
     writeFileSync(fixture.backupDirectory, 'not a directory');
@@ -148,6 +198,43 @@ describe('createBackupStore', () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe('Automatic database backup failed.');
     expect((error as Error).message).not.toContain(fixture.backupDirectory);
+    fixture.database.close();
+  });
+
+  it('syncs the backup directory after canonical publication before reporting success', async () => {
+    const fixture = createFixture();
+    const phases: string[] = [];
+
+    const backupPath = await createBackupStore(fixture.backupDirectory, {
+      async syncDirectory(path, phase) {
+        if (phase === 'backup-published') {
+          expect(path).toBe(fixture.backupDirectory);
+          expect(readdirSync(path).some((name) => /^automatic-.*\.sqlite3$/.test(name)))
+            .toBe(true);
+        }
+        phases.push(phase);
+      },
+    }).createAutomaticBackup(fixture.database.connection, 0);
+
+    expect(existsSync(backupPath)).toBe(true);
+    expect(phases).toContain('backup-published');
+    fixture.database.close();
+  });
+
+  it('rolls back a canonical backup whose parent-directory sync fails', async () => {
+    const fixture = createFixture();
+    mkdirSync(fixture.backupDirectory);
+    writeFileSync(join(fixture.backupDirectory, 'pre-operation.sqlite3'), 'named');
+
+    await expect(createBackupStore(fixture.backupDirectory, {
+      async syncDirectory(_path, phase) {
+        if (phase === 'backup-published') throw new Error('forced directory sync failure');
+      },
+    }).createAutomaticBackup(fixture.database.connection, 0)).rejects.toThrow(
+      'Automatic database backup failed.',
+    );
+
+    expect(readdirSync(fixture.backupDirectory)).toEqual(['pre-operation.sqlite3']);
     fixture.database.close();
   });
 });

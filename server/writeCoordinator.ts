@@ -13,6 +13,17 @@ export type WriteCoordinator = {
     scope: WriteScope,
     mutate: (connection: DatabaseSync) => T,
   ): Promise<{ value: T; revision: number }>;
+  runPrepared<P, T>(
+    scope: WriteScope,
+    prepare: (connection: DatabaseSync) => Promise<WritePreparation<P>>,
+    mutate: (connection: DatabaseSync, prepared: P) => T,
+  ): Promise<{ value: T; revision: number }>;
+};
+
+export type WritePreparation<T> = {
+  value: T;
+  rollback?(): Promise<void> | void;
+  finalize?(): Promise<void> | void;
 };
 
 function readRevision(connection: DatabaseSync, scope: WriteScope): number {
@@ -73,27 +84,44 @@ export function createWriteCoordinator(
   const connection = database.connection;
   let writeTail = Promise.resolve();
 
-  async function execute<T>(
+  function assertExpectedRevision(scope: WriteScope): number {
+    const revision = readRevision(connection, scope);
+    if (revision !== scope.expectedRevision) {
+      throw new TripStorageConflictError(revision);
+    }
+    return revision;
+  }
+
+  async function execute<P, T>(
     scope: WriteScope,
-    mutate: (transactionConnection: DatabaseSync) => T,
+    prepare: ((connection: DatabaseSync) => Promise<WritePreparation<P>>) | undefined,
+    mutate: (transactionConnection: DatabaseSync, prepared: P | undefined) => T,
   ): Promise<{ value: T; revision: number }> {
-    const backupRevision = readRevision(connection, scope);
-    await backups.createAutomaticBackup(connection, backupRevision);
+    const acceptedRevision = assertExpectedRevision(scope);
+    await backups.createAutomaticBackup(connection, acceptedRevision);
+    assertExpectedRevision(scope);
 
     let transactionOpen = false;
+    let committed = false;
+    let preparation: WritePreparation<P> | undefined;
     try {
+      preparation = await prepare?.(connection);
       connection.exec('BEGIN IMMEDIATE');
       transactionOpen = true;
-      const currentRevision = readRevision(connection, scope);
-      if (currentRevision !== scope.expectedRevision) {
-        throw new TripStorageConflictError(currentRevision);
-      }
+      const currentRevision = assertExpectedRevision(scope);
 
-      const value = mutate(connection);
+      const value = mutate(connection, preparation?.value);
       const revision = currentRevision + 1;
       incrementRevision(connection, scope, revision);
       connection.exec('COMMIT');
       transactionOpen = false;
+      committed = true;
+      try {
+        await preparation?.finalize?.();
+      } catch {
+        // The database and filesystem mutation already committed. A retained
+        // durable preparation record is reconciled on the next startup.
+      }
       events.publish(revisionEvent(scope, revision));
       return { value, revision };
     } catch (error) {
@@ -104,15 +132,41 @@ export function createWriteCoordinator(
           // Preserve the mutation, conflict, or commit failure.
         }
       }
+      if (!committed && preparation?.rollback) {
+        try {
+          await preparation.rollback();
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            'The write failed and its prepared filesystem changes could not be rolled back.',
+            { cause: rollbackError },
+          );
+        }
+      }
       throw error;
     }
   }
 
+  function enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = writeTail.then(operation);
+    writeTail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
   return {
     run<T>(scope: WriteScope, mutate: (connection: DatabaseSync) => T) {
-      const result = writeTail.then(() => execute(scope, mutate));
-      writeTail = result.then(() => undefined, () => undefined);
-      return result;
+      return enqueue(() => execute<never, T>(scope, undefined, (transactionConnection) => (
+        mutate(transactionConnection)
+      )));
+    },
+    runPrepared<P, T>(
+      scope: WriteScope,
+      prepare: (connection: DatabaseSync) => Promise<WritePreparation<P>>,
+      mutate: (connection: DatabaseSync, prepared: P) => T,
+    ) {
+      return enqueue(() => execute(scope, prepare, (transactionConnection, prepared) => (
+        mutate(transactionConnection, prepared as P)
+      )));
     },
   };
 }

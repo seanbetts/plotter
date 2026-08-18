@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
+import { createDestination } from '../src/domain/destinations';
 import { createPlotterHttpHandler, type PlotterHttpDependencies } from './http';
 import { createPlotterStorageRuntime, type PlotterStorageRuntime } from './storageRuntime';
 
@@ -54,6 +55,15 @@ async function expectUnavailable(response: Response): Promise<void> {
   await expect(response.json()).resolves.toEqual({
     status: 503,
     error: { code: 'storage-unavailable', message: 'Plotter storage is unavailable.' },
+  });
+}
+
+function imageStream(value: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(value));
+      controller.close();
+    },
   });
 }
 
@@ -155,4 +165,75 @@ it('keeps the real gated service unavailable after ambiguous marker invalidation
   });
   expect(readdirSync(dataDirectory).some((name) => name.startsWith('.portable-restore-')))
     .toBe(false);
+});
+
+it('fails readiness without deleting an invalid durable media operation', async () => {
+  const dataDirectory = mkdtempSync(join(tmpdir(), 'plotter-storage-runtime-media-intent-'));
+  directories.push(dataDirectory);
+  const operationDirectory = join(dataDirectory, '.media-operations');
+  mkdirSync(operationDirectory, { mode: 0o700 });
+  const operationPath = join(
+    operationDirectory,
+    'media-operation-00000000-0000-4000-8000-000000000001.json',
+  );
+  writeFileSync(operationPath, '{"version":1,"kind":"unknown"}\n', { mode: 0o600 });
+
+  const runtime = await createPlotterStorageRuntime({ dataDirectory });
+  runtimes.push(runtime);
+
+  expect(runtime.readiness()).toEqual({ ready: false });
+  expect(() => runtime.directory.load()).toThrow('Plotter storage is unavailable.');
+  expect(readdirSync(operationDirectory)).toEqual([
+    'media-operation-00000000-0000-4000-8000-000000000001.json',
+  ]);
+});
+
+it('reconciles a committed media journal before restoring an older paired database and media tree', async () => {
+  const dataDirectory = mkdtempSync(join(tmpdir(), 'plotter-storage-runtime-journal-restore-'));
+  directories.push(dataDirectory);
+  let failNextIntentClear = false;
+  const runtime = await createPlotterStorageRuntime({
+    dataDirectory,
+    mediaDurability: {
+      async onPhase(phase) {
+        if (failNextIntentClear && phase === 'intent-clear-start') {
+          failNextIntentClear = false;
+          throw new Error('interrupt:intent-clear-start');
+        }
+      },
+    },
+  });
+  runtimes.push(runtime);
+  const createdTrip = await runtime.directory.create(0, {
+    expectedRevision: 0,
+    name: 'Journal restore',
+  });
+  const trip = createdTrip.trip!;
+  const destination = createDestination({
+    name: 'Reykjavik', coordinates: { lat: 64.1466, lng: -21.9426 },
+  });
+  const repository = runtime.tripRepository(trip.id);
+  await repository.mutate(0, { type: 'save-destination', destination });
+  const createdMedia = await repository.createDestinationMedia(1, destination.id, {
+    bytes: imageStream('restored media bytes'), contentType: 'image/png',
+  });
+  const backup = await runtime.backups.create();
+
+  failNextIntentClear = true;
+  await expect(repository.deleteDestinationMedia(2, createdMedia.mediaItem!.id))
+    .resolves.toEqual({ revision: 3 });
+  expect(readdirSync(join(dataDirectory, '.media-operations'))).toHaveLength(1);
+  expect(readdirSync(join(dataDirectory, 'trash'))).toHaveLength(1);
+
+  await expect(runtime.backups.restore(backup.id, { confirmation: `RESTORE ${backup.id}` }))
+    .resolves.toMatchObject({ id: backup.id });
+
+  expect(runtime.readiness()).toEqual({ ready: true });
+  expect(readdirSync(join(dataDirectory, '.media-operations'))).toEqual([]);
+  await expect(runtime.tripRepository(trip.id).listDestinationMedia(destination.id))
+    .resolves.toEqual([expect.objectContaining({ id: createdMedia.mediaItem!.id })]);
+  const opened = await runtime.mediaContent.open(createdMedia.mediaItem!.id);
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of opened.bytes) chunks.push(chunk);
+  expect(Buffer.concat(chunks).toString('utf8')).toBe('restored media bytes');
 });

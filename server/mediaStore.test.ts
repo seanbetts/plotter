@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -14,13 +17,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDestination } from '../src/domain/destinations';
-import type { RevisionEvent } from '../src/storage/revision';
+import { TripStorageConflictError, type RevisionEvent } from '../src/storage/revision';
 import { openPlotterDatabase, type PlotterDatabase } from './database';
 import { createSqliteDirectoryRepository } from './directoryRepository';
 import { createRevisionEventBus } from './events';
 import {
   MAX_MEDIA_BYTES,
   createMediaStore,
+  type MediaStoreOptions,
   type StoredMediaObject,
 } from './mediaStore';
 import { createSqliteTripRepository } from './tripRepository';
@@ -29,16 +33,19 @@ import { createWriteCoordinator } from './writeCoordinator';
 const temporaryDirectories: string[] = [];
 const openDatabases: PlotterDatabase[] = [];
 
-function createHarness() {
+function createHarness(options: MediaStoreOptions = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'plotter-media-store-'));
   temporaryDirectories.push(directory);
   return {
     directory,
-    media: createMediaStore(directory),
+    media: createMediaStore(directory, options),
   };
 }
 
-function createRepositoryHarness() {
+function createRepositoryHarness(options: {
+  media?: MediaStoreOptions;
+  onBackup?(revision: number): void;
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'plotter-media-repository-'));
   temporaryDirectories.push(directory);
   const database = openPlotterDatabase(join(directory, 'plotter.sqlite3'));
@@ -50,10 +57,15 @@ function createRepositoryHarness() {
   eventBus.subscribe((event) => events.push(event));
   const writes = createWriteCoordinator(
     database,
-    { async createAutomaticBackup() { return join(directory, 'backup.sqlite3'); } },
+    {
+      async createAutomaticBackup(_connection, revision) {
+        options.onBackup?.(revision);
+        return join(directory, 'backup.sqlite3');
+      },
+    },
     eventBus,
   );
-  const media = createMediaStore(directory);
+  const media = createMediaStore(directory, options.media);
   const tripDirectory = createSqliteDirectoryRepository(database, writes, media);
 
   return {
@@ -206,13 +218,20 @@ describe('atomic media store', () => {
     expect(readdirSync(join(harness.directory, 'media', '.staging'))).toEqual([]);
   });
 
-  it('removes a partial temporary file when its input stream fails', async () => {
-    const harness = createHarness();
+  it('removes and directory-syncs a partial temporary file when its input stream fails', async () => {
+    const syncs: Array<{ path: string; phase: string }> = [];
+    const harness = createHarness({
+      async syncDirectory(path, phase) { syncs.push({ path, phase }); },
+    });
 
     await expect(harness.media.stage(failingStream(), 'image/png')).rejects.toThrow(
       'upload interrupted',
     );
     expect(readdirSync(join(harness.directory, 'media', '.staging'))).toEqual([]);
+    expect(syncs).toContainEqual({
+      path: realpathSync(join(harness.directory, 'media', '.staging')),
+      phase: 'media-discarded',
+    });
   });
 
   it('commits by media identity and content type without accepting a request filename', async () => {
@@ -358,6 +377,84 @@ describe('atomic media store', () => {
     expect(readdirSync(join(harness.directory, 'trash'))).toEqual([]);
   });
 
+  it('rejects an occupied generated trash path without replacing either file', async () => {
+    const trashId = '00000000-0000-4000-8000-000000000041';
+    const harness = createHarness({ randomId: () => trashId });
+    const committed = await harness.media.commit(
+      await harness.media.stage(imageStream('active bytes'), 'image/jpeg'),
+      'media-collision',
+    );
+    const collisionPath = join(
+      harness.directory,
+      'trash',
+      `media-collision-${trashId}.jpg`,
+    );
+    writeFileSync(collisionPath, 'existing recovery bytes');
+
+    await expect(harness.media.moveToTrash(committed.relativePath, 'media-collision'))
+      .rejects.toThrow('Media trash target already exists.');
+
+    expect(readFileSync(join(harness.directory, committed.relativePath), 'utf8'))
+      .toBe('active bytes');
+    expect(readFileSync(collisionPath, 'utf8')).toBe('existing recovery bytes');
+  });
+
+  it.each([1, 2])(
+    'restores active bytes when trash directory sync step %i fails',
+    async (failedSync) => {
+      let armed = false;
+      let trashSyncs = 0;
+      const harness = createHarness({
+        async syncDirectory(_path, phase) {
+          if (armed && phase === 'media-trashed') {
+            trashSyncs += 1;
+            if (trashSyncs === failedSync) throw new Error('forced trash sync failure');
+          }
+        },
+      });
+      const committed = await harness.media.commit(
+        await harness.media.stage(imageStream('restore after sync failure'), 'image/png'),
+        `trash-sync-${failedSync}`,
+      );
+      armed = true;
+
+      await expect(harness.media.moveToTrash(committed.relativePath, `trash-sync-${failedSync}`))
+        .rejects.toThrow('forced trash sync failure');
+
+      expect(readFileSync(join(harness.directory, committed.relativePath), 'utf8'))
+        .toBe('restore after sync failure');
+      expect(readdirSync(join(harness.directory, 'trash'))).toEqual([]);
+    },
+  );
+
+  it('does not unlink active bytes when a trash target is swapped at the durability boundary', async () => {
+    let armed = false;
+    let swapped = false;
+    const harness = createHarness({
+      async syncDirectory(path, phase) {
+        if (!armed || swapped || phase !== 'media-trashed') return;
+        const target = join(path, readdirSync(path)[0]);
+        rmSync(target);
+        writeFileSync(target, 'replacement bytes');
+        swapped = true;
+      },
+    });
+    const committed = await harness.media.commit(
+      await harness.media.stage(imageStream('owned active bytes'), 'image/png'),
+      'trash-swap',
+    );
+    armed = true;
+
+    await expect(harness.media.moveToTrash(committed.relativePath, 'trash-swap'))
+      .rejects.toThrow('Media filesystem identity changed.');
+
+    expect(readFileSync(join(harness.directory, committed.relativePath), 'utf8'))
+      .toBe('owned active bytes');
+    const trashEntry = readdirSync(join(harness.directory, 'trash'))[0];
+    expect(readFileSync(join(harness.directory, 'trash', trashEntry), 'utf8'))
+      .toBe('replacement bytes');
+  });
+
   it('atomically rejects one of two concurrent restores targeting the same active identity', async () => {
     const harness = createHarness();
     const original = await harness.media.commit(
@@ -437,9 +534,335 @@ describe('atomic media store', () => {
     );
     expect(readFileSync(join(outside, 'outside.png'), 'utf8')).toBe('outside');
   });
+
+  it('syncs both rename parents before a canonical media publication succeeds', async () => {
+    const syncs: Array<{ path: string; phase: string }> = [];
+    const harness = createHarness({
+      async syncDirectory(path, phase) {
+        syncs.push({ path, phase });
+      },
+    });
+    const staged = await harness.media.stage(imageStream('durable media'), 'image/png');
+
+    const committed = await harness.media.commit(staged, 'durable-media');
+
+    const published = syncs.filter(({ phase }) => phase === 'media-published');
+    const canonicalDirectory = realpathSync(harness.directory);
+    expect(published.map(({ path }) => path).sort()).toEqual([
+      join(canonicalDirectory, 'media'),
+      join(canonicalDirectory, 'media', '.staging'),
+    ].sort());
+    expect(readFileSync(join(harness.directory, committed.relativePath), 'utf8'))
+      .toBe('durable media');
+  });
+
+  it('restores staged bytes when canonical media publication cannot be synced', async () => {
+    let failed = false;
+    const harness = createHarness({
+      async syncDirectory(_path, phase) {
+        if (phase === 'media-published' && !failed) {
+          failed = true;
+          throw new Error('forced media directory sync failure');
+        }
+      },
+    });
+    const staged = await harness.media.stage(imageStream('not durable'), 'image/png');
+
+    await expect(harness.media.commit(staged, 'not-durable')).rejects.toThrow(
+      'forced media directory sync failure',
+    );
+
+    expect(readdirSync(join(harness.directory, 'media')).filter((name) => name !== '.staging'))
+      .toEqual([]);
+    expect(readdirSync(join(harness.directory, 'media', '.staging'))).toEqual([]);
+  });
+});
+
+describe('durable media operation recovery', () => {
+  it('requires the private operation directory to remain exactly owner-only executable', async () => {
+    const harness = createRepositoryHarness();
+    const operationDirectory = join(harness.dataDirectory, '.media-operations');
+    chmodSync(operationDirectory, 0o500);
+
+    await expect(harness.media.recoverPendingOperations(harness.database.connection))
+      .rejects.toThrow('Pending media recovery is incomplete.');
+  });
+
+  it('rejects non-canonical generated operation paths before publishing a journal', async () => {
+    const harness = createRepositoryHarness({
+      media: { randomId: () => 'not-a-uuid' },
+    });
+    const { destination, repository } = await createTripWithDestination(harness);
+
+    await expect(repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('invalid operation identity'),
+      contentType: 'image/png',
+    })).rejects.toThrow('Pending media recovery is incomplete.');
+
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toEqual([]);
+    expect(readdirSync(join(harness.dataDirectory, 'media', '.staging'))).toEqual([]);
+  });
+
+  it('removes an unpublished intent and staged bytes when intent-directory sync fails', async () => {
+    let failed = false;
+    const harness = createRepositoryHarness({
+      media: {
+        async syncDirectory(_path, phase) {
+          if (phase === 'intent-published' && !failed) {
+            failed = true;
+            throw new Error('forced intent sync failure');
+          }
+        },
+      },
+    });
+    const { destination, repository } = await createTripWithDestination(harness);
+
+    await expect(repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('intent sync failure'),
+      contentType: 'image/png',
+    })).rejects.toThrow('forced intent sync failure');
+
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toEqual([]);
+    expect(readdirSync(join(harness.dataDirectory, 'media')).filter((name) => name !== '.staging'))
+      .toEqual([]);
+    expect(readdirSync(join(harness.dataDirectory, 'media', '.staging'))).toEqual([]);
+    await expect(repository.load()).resolves.toMatchObject({ revision: 1 });
+  });
+
+  it.each(['intent-durable', 'filesystem-durable'] as const)(
+    'recovers an interrupted uncommitted create after %s',
+    async (interruptedPhase) => {
+      const harness = createRepositoryHarness({
+        media: {
+          async onPhase(phase) {
+            if (phase === interruptedPhase) throw new Error(`interrupt:${phase}`);
+          },
+        },
+      });
+      const { destination, repository } = await createTripWithDestination(harness);
+
+      await expect(repository.createDestinationMedia(1, destination.id, {
+        bytes: imageStream('interrupted create'),
+        contentType: 'image/png',
+      })).rejects.toThrow(`interrupt:${interruptedPhase}`);
+
+      const restarted = createMediaStore(harness.dataDirectory);
+      await restarted.recoverPendingOperations(harness.database.connection);
+      expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM media_assets').get())
+        .toEqual({ count: 0 });
+      expect(readdirSync(join(harness.dataDirectory, 'media')).filter((name) => name !== '.staging'))
+        .toEqual([]);
+      expect(readdirSync(join(harness.dataDirectory, 'media', '.staging'))).toEqual([]);
+      expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toEqual([]);
+    },
+  );
+
+  it('retains a committed create and clears its leftover intent on restart', async () => {
+    const harness = createRepositoryHarness({
+      media: {
+        async onPhase(phase) {
+          if (phase === 'intent-clear-start') throw new Error('interrupt:intent-clear-start');
+        },
+      },
+    });
+    const { destination, repository } = await createTripWithDestination(harness);
+
+    const created = await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('committed create'),
+      contentType: 'image/png',
+    });
+
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toHaveLength(1);
+    const row = harness.database.connection.prepare(
+      'SELECT relative_path FROM media_assets WHERE id = ?',
+    ).get(created.mediaItem!.id) as { relative_path: string };
+    const restarted = createMediaStore(harness.dataDirectory);
+    await restarted.recoverPendingOperations(harness.database.connection);
+    expect(readFileSync(join(harness.dataDirectory, row.relative_path), 'utf8'))
+      .toBe('committed create');
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toEqual([]);
+  });
+
+  it('rejects a journal whose private file mode changed and retains it', async () => {
+    const harness = createRepositoryHarness({
+      media: {
+        async onPhase(phase) {
+          if (phase === 'intent-clear-start') throw new Error('interrupt:intent-clear-start');
+        },
+      },
+    });
+    const { destination, repository } = await createTripWithDestination(harness);
+    await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('private journal'), contentType: 'image/png',
+    });
+    const operationDirectory = join(harness.dataDirectory, '.media-operations');
+    const journalPath = join(operationDirectory, readdirSync(operationDirectory)[0]);
+    chmodSync(journalPath, 0o644);
+
+    await expect(createMediaStore(harness.dataDirectory)
+      .recoverPendingOperations(harness.database.connection))
+      .rejects.toThrow('Pending media recovery is incomplete.');
+    expect(readdirSync(operationDirectory)).toHaveLength(1);
+  });
+
+  it('rejects an in-root active-path symlink without blessing or deleting its target', async () => {
+    let retainIntent = false;
+    const harness = createRepositoryHarness({
+      media: {
+        async onPhase(phase) {
+          if (retainIntent && phase === 'intent-clear-start') {
+            throw new Error('interrupt:intent-clear-start');
+          }
+        },
+      },
+    });
+    const { destination, repository } = await createTripWithDestination(harness);
+    retainIntent = true;
+    const created = await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('symlink target bytes'), contentType: 'image/png',
+    });
+    const row = harness.database.connection.prepare(
+      'SELECT relative_path FROM media_assets WHERE id = ?',
+    ).get(created.mediaItem!.id) as { relative_path: string };
+    const activePath = join(harness.dataDirectory, row.relative_path);
+    const otherPath = join(harness.dataDirectory, 'media', 'other.png');
+    renameSync(activePath, otherPath);
+    symlinkSync('other.png', activePath);
+
+    await expect(createMediaStore(harness.dataDirectory)
+      .recoverPendingOperations(harness.database.connection))
+      .rejects.toThrow('Pending media recovery is incomplete.');
+
+    expect(lstatSync(activePath).isSymbolicLink()).toBe(true);
+    expect(readFileSync(otherPath, 'utf8')).toBe('symlink target bytes');
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toHaveLength(1);
+  });
+
+  it('fails recovery without clearing evidence when committed create bytes no longer match metadata', async () => {
+    const harness = createRepositoryHarness({
+      media: {
+        async onPhase(phase) {
+          if (phase === 'intent-clear-start') throw new Error('interrupt:intent-clear-start');
+        },
+      },
+    });
+    const { destination, repository } = await createTripWithDestination(harness);
+    const created = await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('committed create'),
+      contentType: 'image/png',
+    });
+    const row = harness.database.connection.prepare(
+      'SELECT relative_path FROM media_assets WHERE id = ?',
+    ).get(created.mediaItem!.id) as { relative_path: string };
+    writeFileSync(join(harness.dataDirectory, row.relative_path), 'changed bytes');
+
+    const restarted = createMediaStore(harness.dataDirectory);
+    await expect(restarted.recoverPendingOperations(harness.database.connection)).rejects.toThrow(
+      'Pending media recovery is incomplete.',
+    );
+
+    expect(readFileSync(join(harness.dataDirectory, row.relative_path), 'utf8'))
+      .toBe('changed bytes');
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toHaveLength(1);
+  });
+
+  it('restores an interrupted delete while metadata exists and completes it after metadata commit', async () => {
+    const harness = createRepositoryHarness();
+    const { destination, repository } = await createTripWithDestination(harness);
+    const created = await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('delete recovery'), contentType: 'image/jpeg',
+    });
+    const row = harness.database.connection.prepare(
+      'SELECT relative_path FROM media_assets WHERE id = ?',
+    ).get(created.mediaItem!.id) as { relative_path: string };
+
+    await harness.media.prepareMoveToTrash([
+      { mediaId: created.mediaItem!.id, relativePath: row.relative_path },
+    ]);
+    await createMediaStore(harness.dataDirectory)
+      .recoverPendingOperations(harness.database.connection);
+    expect(readFileSync(join(harness.dataDirectory, row.relative_path), 'utf8'))
+      .toBe('delete recovery');
+    expect(readdirSync(join(harness.dataDirectory, 'trash'))).toEqual([]);
+
+    const prepared = await harness.media.prepareMoveToTrash([
+      { mediaId: created.mediaItem!.id, relativePath: row.relative_path },
+    ]);
+    harness.database.connection.prepare('DELETE FROM media_assets WHERE id = ?')
+      .run(created.mediaItem!.id);
+    void prepared;
+    await createMediaStore(harness.dataDirectory)
+      .recoverPendingOperations(harness.database.connection);
+    expect(existsSync(join(harness.dataDirectory, row.relative_path))).toBe(false);
+    expect(readdirSync(join(harness.dataDirectory, 'trash'))).toHaveLength(1);
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toEqual([]);
+  });
+
+  it('fails recovery without moving changed trash bytes back into an existing metadata row', async () => {
+    const harness = createRepositoryHarness();
+    const { destination, repository } = await createTripWithDestination(harness);
+    const created = await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('original delete bytes'), contentType: 'image/jpeg',
+    });
+    const row = harness.database.connection.prepare(
+      'SELECT relative_path FROM media_assets WHERE id = ?',
+    ).get(created.mediaItem!.id) as { relative_path: string };
+    await harness.media.prepareMoveToTrash([
+      { mediaId: created.mediaItem!.id, relativePath: row.relative_path },
+    ]);
+    const trashPath = join(
+      harness.dataDirectory,
+      'trash',
+      readdirSync(join(harness.dataDirectory, 'trash'))[0],
+    );
+    writeFileSync(trashPath, 'changed trash bytes');
+
+    const restarted = createMediaStore(harness.dataDirectory);
+    await expect(restarted.recoverPendingOperations(harness.database.connection)).rejects.toThrow(
+      'Pending media recovery is incomplete.',
+    );
+
+    expect(existsSync(join(harness.dataDirectory, row.relative_path))).toBe(false);
+    expect(readFileSync(trashPath, 'utf8')).toBe('changed trash bytes');
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toHaveLength(1);
+  });
 });
 
 describe('revisioned media metadata and filesystem coordination', () => {
+  it('rejects a journaled trash collision before publishing intent and remains restartable', async () => {
+    const ids = [
+      '00000000-0000-4000-8000-000000000051',
+      '00000000-0000-4000-8000-000000000052',
+    ];
+    const harness = createRepositoryHarness({
+      media: { randomId: () => ids.shift()! },
+    });
+    const { destination, repository } = await createTripWithDestination(harness);
+    const created = await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('journal collision active'), contentType: 'image/jpeg',
+    });
+    const row = harness.database.connection.prepare(
+      'SELECT relative_path FROM media_assets WHERE id = ?',
+    ).get(created.mediaItem!.id) as { relative_path: string };
+    const collisionPath = join(
+      harness.dataDirectory,
+      'trash',
+      `${created.mediaItem!.id}-00000000-0000-4000-8000-000000000052.jpg`,
+    );
+    writeFileSync(collisionPath, 'pre-existing trash evidence');
+
+    await expect(repository.deleteDestinationMedia(2, created.mediaItem!.id))
+      .rejects.toThrow('Media trash target already exists.');
+
+    expect(readFileSync(join(harness.dataDirectory, row.relative_path), 'utf8'))
+      .toBe('journal collision active');
+    expect(readFileSync(collisionPath, 'utf8')).toBe('pre-existing trash evidence');
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toEqual([]);
+    await expect(createMediaStore(harness.dataDirectory)
+      .recoverPendingOperations(harness.database.connection)).resolves.toBeUndefined();
+    await expect(repository.load()).resolves.toMatchObject({ revision: 2 });
+  });
+
   it('creates destination and activity media with complete immutable metadata and one revision each', async () => {
     const harness = createRepositoryHarness();
     const { destination, repository, trip } = await createTripWithDestination(harness);
@@ -591,6 +1014,17 @@ describe('revisioned media metadata and filesystem coordination', () => {
     });
   });
 
+  it('rejects an empty media reorder for a nonexistent owner without advancing revision', async () => {
+    const harness = createRepositoryHarness();
+    const { repository } = await createTripWithDestination(harness);
+
+    await expect(repository.reorderDestinationMedia(1, 'missing-destination', []))
+      .rejects.toThrow('Destination not found.');
+    await expect(repository.reorderActivityMedia(1, 'missing-activity', []))
+      .rejects.toThrow('Activity not found.');
+    await expect(repository.load()).resolves.toMatchObject({ revision: 1 });
+  });
+
   it('restores bytes and metadata when a media delete transaction fails', async () => {
     const harness = createRepositoryHarness();
     const { destination, repository } = await createTripWithDestination(harness);
@@ -657,5 +1091,110 @@ describe('revisioned media metadata and filesystem coordination', () => {
     expect(readdirSync(join(harness.dataDirectory, 'media')).filter((name) => name !== '.staging'))
       .toEqual([]);
     expect(readdirSync(join(harness.dataDirectory, 'trash'))).toHaveLength(1);
+  });
+
+  it('serializes media creation before a concurrent cross-scope whole-trip delete', async () => {
+    let releasePublication: (() => void) | undefined;
+    const publicationGate = new Promise<void>((resolve) => { releasePublication = resolve; });
+    let publicationReached: (() => void) | undefined;
+    const reached = new Promise<void>((resolve) => { publicationReached = resolve; });
+    let blockPublication = false;
+    const harness = createRepositoryHarness({
+      media: {
+        async onPhase(phase) {
+          if (blockPublication && phase === 'filesystem-durable') {
+            publicationReached?.();
+            await publicationGate;
+          }
+        },
+      },
+    });
+    const { destination, repository, trip } = await createTripWithDestination(harness);
+    blockPublication = true;
+
+    const create = repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('create before trip delete'), contentType: 'image/png',
+    });
+    await reached;
+    let deleteSettled = false;
+    const tripDelete = harness.directory.delete(1, trip.id)
+      .finally(() => { deleteSettled = true; });
+    await Promise.resolve();
+    expect(deleteSettled).toBe(false);
+
+    releasePublication?.();
+    await expect(create).resolves.toMatchObject({ revision: 2 });
+    await expect(tripDelete).resolves.toEqual({ revision: 2 });
+    expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM trips').get())
+      .toEqual({ count: 0 });
+    expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM media_assets').get())
+      .toEqual({ count: 0 });
+    expect(readdirSync(join(harness.dataDirectory, 'media')).filter((name) => name !== '.staging'))
+      .toEqual([]);
+    expect(readdirSync(join(harness.dataDirectory, 'trash'))).toHaveLength(1);
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toEqual([]);
+  });
+
+  it('keeps a media-bearing cascade in the global queue before another directory write', async () => {
+    let releaseTrash: (() => void) | undefined;
+    const trashGate = new Promise<void>((resolve) => { releaseTrash = resolve; });
+    let trashReached: (() => void) | undefined;
+    const reached = new Promise<void>((resolve) => { trashReached = resolve; });
+    let blockTrash = false;
+    const harness = createRepositoryHarness({
+      media: {
+        async onPhase(phase) {
+          if (blockTrash && phase === 'filesystem-durable') {
+            trashReached?.();
+            await trashGate;
+          }
+        },
+      },
+    });
+    const { destination, repository } = await createTripWithDestination(harness);
+    await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('cascade media'), contentType: 'image/webp',
+    });
+    blockTrash = true;
+
+    const cascade = repository.mutate(2, {
+      type: 'delete-destination', destinationId: destination.id,
+    });
+    await reached;
+    let createSettled = false;
+    const secondTrip = harness.directory.create(1, { expectedRevision: 1, name: 'Second' })
+      .finally(() => { createSettled = true; });
+    await Promise.resolve();
+    expect(createSettled).toBe(false);
+
+    releaseTrash?.();
+    await expect(cascade).resolves.toEqual({ revision: 3 });
+    await expect(secondTrip).resolves.toMatchObject({ revision: 2 });
+    expect(harness.database.connection.prepare('SELECT COUNT(*) AS count FROM media_assets').get())
+      .toEqual({ count: 0 });
+    expect(readdirSync(join(harness.dataDirectory, 'trash'))).toHaveLength(1);
+  });
+
+  it('returns a stale conflict before backup or missing-content access after another delete wins', async () => {
+    const backedUpRevisions: number[] = [];
+    const harness = createRepositoryHarness({
+      onBackup(revision) { backedUpRevisions.push(revision); },
+    });
+    const { destination, repository, trip } = await createTripWithDestination(harness);
+    const created = await repository.createDestinationMedia(1, destination.id, {
+      bytes: imageStream('one delete wins'), contentType: 'image/jpeg',
+    });
+    const staleRepository = harness.trip(trip.id);
+    await repository.deleteDestinationMedia(2, created.mediaItem!.id);
+    backedUpRevisions.splice(0);
+
+    const error = await staleRepository.deleteDestinationMedia(2, created.mediaItem!.id)
+      .catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(TripStorageConflictError);
+    expect((error as TripStorageConflictError).currentRevision).toBe(3);
+    expect(backedUpRevisions).toEqual([]);
+    expect(readdirSync(join(harness.dataDirectory, 'trash'))).toHaveLength(1);
+    expect(readdirSync(join(harness.dataDirectory, '.media-operations'))).toEqual([]);
   });
 });

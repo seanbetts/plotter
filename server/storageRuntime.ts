@@ -8,7 +8,12 @@ import type {
   PlotterBackupOperations,
   PlotterHttpDependencies,
 } from './http';
-import { createMediaStore, type MediaStore } from './mediaStore';
+import {
+  createMediaStore,
+  type AtomicMediaStore,
+  type MediaStore,
+  type MediaStoreOptions,
+} from './mediaStore';
 import {
   createPortableBackupOperations,
   createStorageOperationGate,
@@ -23,7 +28,7 @@ type StorageRuntime = {
   database: PlotterDatabase;
   directory: RevisionedDirectoryStore;
   tripRepository(tripId: string): RevisionedTripStore;
-  media: MediaStore;
+  media: AtomicMediaStore;
   mediaContent: MediaContentReader;
 };
 
@@ -38,6 +43,7 @@ export type PlotterStorageRuntime = Pick<
 export type CreatePlotterStorageRuntimeOptions = {
   dataDirectory: string;
   backupDurability?: PortableBackupDurability;
+  mediaDurability?: MediaStoreOptions;
 };
 
 function createMediaContentReader(database: PlotterDatabase, media: MediaStore): MediaContentReader {
@@ -105,11 +111,12 @@ export async function createPlotterStorageRuntime(
     return runtime;
   }
 
-  function openStorageRuntime(): void {
+  async function openStorageRuntime(): Promise<void> {
     let database: PlotterDatabase | undefined;
     try {
       database = openPlotterDatabase(join(options.dataDirectory, 'plotter.sqlite3'));
-      const media = createMediaStore(options.dataDirectory);
+      const media = createMediaStore(options.dataDirectory, options.mediaDurability);
+      await media.recoverPendingOperations(database.connection);
       const writes = createWriteCoordinator(
         database,
         createBackupStore(join(options.dataDirectory, 'backups')),
@@ -140,10 +147,19 @@ export async function createPlotterStorageRuntime(
 
   try {
     await recoverInterruptedPortableRestore(options.dataDirectory, options.backupDurability);
-    openStorageRuntime();
+    await openStorageRuntime();
     backupOperations = createPortableBackupOperations({
       dataDirectory: options.dataDirectory,
       currentDatabase: () => requireRuntime().database,
+      async prepareCanonicalState() {
+        const current = requireRuntime();
+        try {
+          await current.media.recoverPendingOperations(current.database.connection);
+        } catch (error) {
+          closeStorageRuntime();
+          throw error;
+        }
+      },
       closeStorage: closeStorageRuntime,
       openStorage: openStorageRuntime,
       publishRestoreReset: (input) => events.restoreReset(input),

@@ -31,11 +31,14 @@ that release.
 ## Environment and service data
 
 `.env` is optional: `npm run dev:service` and the hosted service tolerate its
-absence. Copy `.env.example` only when development needs the map keys or the
-service-side `SERPAPI_API_KEY`; these provider keys are runtime-only and may be
-left unset. Keep the file readable only by the account that runs Plotter (for
-example, `chmod 600 .env`); never use a `VITE_` prefix for service or migration
-secrets.
+absence, while a present but unreadable file stops service startup. The
+`VITE_MAPTILER_API_KEY` and `VITE_OPENROUTESERVICE_API_KEY` values are read by
+Vite when development or a browser release starts building and are exposed to
+browser code; restart Vite after changing them. `SERPAPI_API_KEY` is different:
+it is read only by the running service and is never included in a browser
+bundle. All three provider values may be left unset when their feature is not
+needed. Keep `.env` readable only by the account that runs Plotter (for example,
+`chmod 600 .env`); never use a `VITE_` prefix for service or migration secrets.
 
 The service receives `user-data/` from the local-web manifest. It is Git-ignored
 and must stay owned by the service account; use restrictive owner-only

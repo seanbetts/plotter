@@ -125,7 +125,7 @@ describe('createWriteCoordinator', () => {
     expect(events).toEqual([]);
   });
 
-  it('throws the current revision for a stale write without mutation, increment, or event', async () => {
+  it('throws the current revision for a stale write without backup, mutation, increment, or event', async () => {
     const database = createDatabase();
     database.connection.prepare(
       'UPDATE store_metadata SET directory_revision = 2 WHERE singleton = 1',
@@ -136,6 +136,7 @@ describe('createWriteCoordinator', () => {
     bus.subscribe((event) => events.push(event));
     const writes = createWriteCoordinator(database, successfulBackup((revision) => {
       backedUpRevisions.push(revision);
+      throw new Error('a stale write must not reach backup creation');
     }), bus);
     let mutated = false;
 
@@ -145,12 +146,98 @@ describe('createWriteCoordinator', () => {
 
     expect(error).toBeInstanceOf(TripStorageConflictError);
     expect((error as TripStorageConflictError).currentRevision).toBe(2);
-    expect(backedUpRevisions).toEqual([2]);
+    expect(backedUpRevisions).toEqual([]);
     expect(mutated).toBe(false);
     expect(database.connection.prepare(
       'SELECT directory_revision FROM store_metadata WHERE singleton = 1',
     ).get()).toEqual({ directory_revision: 2 });
     expect(events).toEqual([]);
+  });
+
+  it('rechecks the revision after backup before asynchronous preparation mutates external state', async () => {
+    const database = createDatabase();
+    const events: RevisionEvent[] = [];
+    const bus = createRevisionEventBus();
+    bus.subscribe((event) => events.push(event));
+    const writes = createWriteCoordinator(database, {
+      async createAutomaticBackup() {
+        database.connection.prepare(
+          'UPDATE store_metadata SET directory_revision = 1 WHERE singleton = 1',
+        ).run();
+        return '/disposable/automatic.sqlite3';
+      },
+    }, bus);
+    let prepared = false;
+    let mutated = false;
+
+    const error = await writes.runPrepared(
+      { kind: 'directory', expectedRevision: 0 },
+      async () => {
+        prepared = true;
+        return { value: undefined };
+      },
+      () => {
+        mutated = true;
+      },
+    ).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(TripStorageConflictError);
+    expect((error as TripStorageConflictError).currentRevision).toBe(1);
+    expect(prepared).toBe(false);
+    expect(mutated).toBe(false);
+    expect(events).toEqual([]);
+  });
+
+  it('keeps asynchronous preparation and rollback inside the one cross-scope write queue', async () => {
+    const database = createDatabase();
+    seedTrip(database.connection, 'trip-aurora', 0);
+    const order: string[] = [];
+    let releaseRollback: (() => void) | undefined;
+    const rollbackGate = new Promise<void>((resolve) => { releaseRollback = resolve; });
+    const writes = createWriteCoordinator(database, successfulBackup((revision) => {
+      order.push(`backup:${revision}`);
+    }), createRevisionEventBus());
+
+    const first = writes.runPrepared(
+      { kind: 'trip', tripId: 'trip-aurora', expectedRevision: 0 },
+      async () => {
+        order.push('prepare:trip');
+        return {
+          value: 'prepared',
+          async rollback() {
+            order.push('rollback:start');
+            await rollbackGate;
+            order.push('rollback:end');
+          },
+        };
+      },
+      () => {
+        order.push('mutate:trip');
+        throw new Error('forced trip mutation failure');
+      },
+    );
+    const second = writes.run({ kind: 'directory', expectedRevision: 0 }, () => {
+      order.push('mutate:directory');
+    });
+
+    await expect.poll(() => order).toEqual([
+      'backup:0',
+      'prepare:trip',
+      'mutate:trip',
+      'rollback:start',
+    ]);
+    releaseRollback?.();
+    await expect(first).rejects.toThrow('forced trip mutation failure');
+    await expect(second).resolves.toEqual({ value: undefined, revision: 1 });
+    expect(order).toEqual([
+      'backup:0',
+      'prepare:trip',
+      'mutate:trip',
+      'rollback:start',
+      'rollback:end',
+      'backup:0',
+      'mutate:directory',
+    ]);
   });
 
   it('increments the scoped revision exactly once and emits only after commit', async () => {

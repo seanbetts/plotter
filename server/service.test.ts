@@ -42,6 +42,17 @@ async function expectReady(port: number, child?: ChildProcess, errors: string[] 
   });
 }
 
+async function expectPortClosed(port: number): Promise<void> {
+  await expect.poll(async () => {
+    try {
+      await fetch(`http://127.0.0.1:${port}/healthz`);
+      return false;
+    } catch {
+      return true;
+    }
+  }, { interval: 50, timeout: 3_000 }).toBe(true);
+}
+
 async function stopProcess(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null) {
     return;
@@ -195,6 +206,7 @@ it('runs dev:service without a repository .env using disposable user data', asyn
   } finally {
     await stopProcess(child);
   }
+  await expectPortClosed(port);
 }, 10_000);
 
 it('stays reachable with redacted readiness when the canonical database is invalid', async () => {

@@ -25,7 +25,7 @@ import {
   normalizeRouteLeg,
 } from '../src/storage/tripRepository';
 import type { PlotterDatabase } from './database';
-import type { MediaStore, StoredMediaObject } from './mediaStore';
+import type { AtomicMediaStore, StoredMediaObject } from './mediaStore';
 import type { WriteCoordinator } from './writeCoordinator';
 
 export type MediaSourceMetadata = {
@@ -137,10 +137,6 @@ function mediaItemFromRow(row: MediaRow): MediaItem {
     ...(row.size_bytes === null ? {} : { sizeBytes: row.size_bytes }),
     uploadedAt: row.created_at,
   };
-}
-
-async function restoreMovedMedia(restores: Array<() => Promise<void>>): Promise<void> {
-  for (const restore of restores.reverse()) await restore();
 }
 
 function destinationRowFromSqlite(row: Record<string, unknown>): PersistedDestinationRow {
@@ -286,7 +282,7 @@ export function createSqliteTripRepository(
   database: PlotterDatabase,
   writes: WriteCoordinator,
   tripId: string,
-  mediaStore?: MediaStore,
+  mediaStore?: AtomicMediaStore,
 ): RevisionedTripStore {
   const { connection } = database;
   const destinationUpsert = connection.prepare(`
@@ -503,7 +499,7 @@ export function createSqliteTripRepository(
     }
   }
 
-  function requireMediaStore(): MediaStore {
+  function requireMediaStore(): AtomicMediaStore {
     if (!mediaStore) throw new Error('Media storage is unavailable.');
     return mediaStore;
   }
@@ -516,30 +512,6 @@ export function createSqliteTripRepository(
     const row = mediaById.get(tripId, mediaId) as Record<string, unknown> | undefined;
     if (!row) throw new Error('Media item not found.');
     return decodeMediaRow(row);
-  }
-
-  async function moveMediaRowsToTrash(rows: MediaRow[]): Promise<Array<() => Promise<void>>> {
-    if (rows.length === 0) return [];
-    if (!mediaStore) throw new Error('Media storage is unavailable.');
-    const restores: Array<() => Promise<void>> = [];
-    try {
-      for (const row of rows) {
-        restores.push(await mediaStore.moveToTrash(row.relative_path, row.id));
-      }
-      return restores;
-    } catch (error) {
-      await restoreMovedMedia(restores);
-      throw error;
-    }
-  }
-
-  async function discardCommittedMedia(committed: StoredMediaObject, mediaId: string): Promise<void> {
-    const store = requireMediaStore();
-    if ('discard' in store && typeof store.discard === 'function') {
-      await store.discard(committed.relativePath);
-      return;
-    }
-    await store.moveToTrash(committed.relativePath, mediaId);
   }
 
   function mediaRowsForMutation(mutation: TripMutationRequest): MediaRow[] {
@@ -573,12 +545,28 @@ export function createSqliteTripRepository(
     const store = requireMediaStore();
     const staged = await store.stage(input.bytes, input.contentType);
     const mediaId = crypto.randomUUID();
-    const committed: StoredMediaObject = await store.commit(staged, mediaId);
+    let preparationStarted = false;
 
     try {
-      const result = await writes.run(
+      const result = await writes.runPrepared(
         { kind: 'trip', tripId, expectedRevision },
-        () => {
+        async () => {
+          requireDestination(owner.destinationId);
+          if (owner.activityId !== null) {
+            const activity = activityById.get(tripId, owner.activityId) as Record<string, unknown> | undefined;
+            if (!activity || activity.destination_id !== owner.destinationId) {
+              throw new Error('Activity not found.');
+            }
+          }
+          preparationStarted = true;
+          const prepared = await store.prepareCommit(staged, mediaId);
+          return {
+            value: prepared.value,
+            rollback: prepared.rollback,
+            finalize: prepared.finalize,
+          };
+        },
+        (_transaction, committed: StoredMediaObject) => {
           requireDestination(owner.destinationId);
           if (owner.activityId !== null) {
             const activity = activityById.get(tripId, owner.activityId) as Record<string, unknown> | undefined;
@@ -620,14 +608,16 @@ export function createSqliteTripRepository(
       );
       return { revision: result.revision, mediaItem: mediaItemFromRow(result.value) };
     } catch (error) {
-      try {
-        await discardCommittedMedia(committed, mediaId);
-      } catch (cleanupError) {
-        throw new AggregateError(
-          [error, cleanupError],
-          'Media metadata creation failed and active bytes could not be removed.',
-          { cause: cleanupError },
-        );
+      if (!preparationStarted) {
+        try {
+          await store.discard(staged.relativePath);
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            'Media metadata creation failed and staged bytes could not be removed.',
+            { cause: cleanupError },
+          );
+        }
       }
       throw error;
     }
@@ -666,28 +656,33 @@ export function createSqliteTripRepository(
     mediaId: string,
     owner: 'destination' | 'activity',
   ): Promise<MediaWriteResponse> {
-    const existing = readMedia(mediaId);
-    if ((owner === 'destination') !== (existing.activity_id === null)) {
-      throw new Error('Media item not found.');
-    }
-    const restores = await moveMediaRowsToTrash([existing]);
-    try {
-      const result = await writes.run(
-        { kind: 'trip', tripId, expectedRevision },
-        () => {
+    const result = await writes.runPrepared(
+      { kind: 'trip', tripId, expectedRevision },
+      async () => {
+        const existing = readMedia(mediaId);
+        if ((owner === 'destination') !== (existing.activity_id === null)) {
+          throw new Error('Media item not found.');
+        }
+        const prepared = await requireMediaStore().prepareMoveToTrash([{
+          mediaId: existing.id,
+          relativePath: existing.relative_path,
+        }]);
+        return {
+          value: undefined,
+          rollback: prepared.rollback,
+          finalize: prepared.finalize,
+        };
+      },
+      () => {
           const current = readMedia(mediaId);
           if ((owner === 'destination') !== (current.activity_id === null)) {
             throw new Error('Media item not found.');
           }
           const write = deleteMedia.run(tripId, mediaId);
           if (write.changes !== 1) throw new Error('Media item not found.');
-        },
-      );
-      return { revision: result.revision };
-    } catch (error) {
-      await restoreMovedMedia(restores);
-      throw error;
-    }
+      },
+    );
+    return { revision: result.revision };
   }
 
   async function reorderOwnedMedia(
@@ -698,6 +693,11 @@ export function createSqliteTripRepository(
     const result = await writes.run(
       { kind: 'trip', tripId, expectedRevision },
       () => {
+        if (owner.type === 'destination') {
+          requireDestination(owner.id);
+        } else if (!activityById.get(tripId, owner.id)) {
+          throw new Error('Activity not found.');
+        }
         const current = (owner.type === 'destination'
           ? destinationMedia.all(tripId, owner.id)
           : activityMedia.all(tripId, owner.id))
@@ -846,17 +846,24 @@ export function createSqliteTripRepository(
     },
 
     async mutate(expectedRevision, mutation) {
-      const restores = await moveMediaRowsToTrash(mediaRowsForMutation(mutation));
-      try {
-        const result = await writes.run(
-          { kind: 'trip', tripId, expectedRevision },
-          () => mutateTrip(mutation),
-        );
-        return { revision: result.revision, ...result.value };
-      } catch (error) {
-        await restoreMovedMedia(restores);
-        throw error;
-      }
+      const result = await writes.runPrepared(
+        { kind: 'trip', tripId, expectedRevision },
+        async () => {
+          const rows = mediaRowsForMutation(mutation);
+          if (rows.length === 0) return { value: undefined };
+          const prepared = await requireMediaStore().prepareMoveToTrash(rows.map((row) => ({
+            mediaId: row.id,
+            relativePath: row.relative_path,
+          })));
+          return {
+            value: undefined,
+            rollback: prepared.rollback,
+            finalize: prepared.finalize,
+          };
+        },
+        () => mutateTrip(mutation),
+      );
+      return { revision: result.revision, ...result.value };
     },
 
     async listDestinationMedia(destinationId) {

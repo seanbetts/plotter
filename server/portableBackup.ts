@@ -126,6 +126,7 @@ export type PortableBackupOptions = {
   dataDirectory: string;
   backupsDirectory?: string;
   currentDatabase(): PlotterDatabase;
+  prepareCanonicalState?(): Promise<void> | void;
   closeStorage(): Promise<void> | void;
   openStorage(): Promise<void> | void;
   publishRestoreReset(input: { epoch: string; tripIds: string[] }): void;
@@ -1479,6 +1480,7 @@ export function createPortableBackupOperations(options: PortableBackupOptions): 
     const temporaryArchivePath = join(backupsRoot, `.${backupId}.${operationId}.tar.tmp`);
     const archivePath = join(backupsRoot, `${backupId}.tar`);
     try {
+      await options.prepareCanonicalState?.();
       assertCanonicalDirectory(backupsRoot, dataRoot);
       if (existsSync(archivePath)) throw new PortableBackupCreateError();
       options.currentDatabase().connection.prepare('VACUUM main INTO ?').run(snapshotPath);
