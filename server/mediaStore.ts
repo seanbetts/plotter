@@ -728,7 +728,7 @@ export function createMediaStore(
       try {
         if (sourceRemoved) {
           await assertFileIdentity(targetPath, trashRoot, sourceIdentity);
-          if (pathExists(sourcePath)) throw new Error(MEDIA_IDENTITY_ERROR);
+          if (pathExists(sourcePath)) throw new Error(MEDIA_IDENTITY_ERROR, { cause: error });
           await link(targetPath, sourcePath);
           await syncDirectories([dirname(sourcePath)], 'media-restored');
           await assertFileIdentity(sourcePath, mediaRoot, sourceIdentity);
