@@ -950,7 +950,14 @@ test('imports a web image result into a stop carousel', async ({ page }) => {
   await expect(stopPanel).toBeVisible();
 
   await stopPanel.getByLabel('Search web images').fill('mural');
+  const importResponsePromise = page.waitForResponse((response) =>
+    response.request().method() === 'POST'
+    && response.url().includes('/destinations/')
+    && response.url().endsWith('/media/import'),
+  );
   await stopPanel.getByRole('option', { name: 'Import mural in Paris from Local image search' }).click();
+  const importResponse = await importResponsePromise;
+  expect(importResponse.ok(), await importResponse.text()).toBe(true);
 
   await expect(stopPanel.getByRole('button', { name: 'Open full image: mural in Paris' })).toBeVisible();
 });

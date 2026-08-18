@@ -387,7 +387,7 @@ select {
 .map-add-stop-menu {
   position: absolute;
   box-sizing: border-box;
-  z-index: 12;
+  z-index: 20;
   display: grid;
   min-width: 148px;
   max-width: calc(100% - var(--lwp-space-8));
