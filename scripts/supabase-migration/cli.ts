@@ -23,6 +23,7 @@ import {
   sourceFingerprintDigest,
   validateSourceSchema,
   validateStorageObjectBytes,
+  type SourceCaptureProvenance,
   type SourceSchema,
   type SourceSnapshot,
   type SourceStorageEntry,
@@ -79,6 +80,7 @@ export type LoadedFixtureSource = {
   source: SourceSnapshot;
   rawSchemaSql: string;
   rawDataSql: string;
+  provenance?: SourceCaptureProvenance;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -112,6 +114,15 @@ export async function loadFixtureSource(path: string): Promise<LoadedFixtureSour
     source: { tables, storage },
     rawSchemaSql: parsed.rawSchemaSql,
     rawDataSql: parsed.rawDataSql,
+    provenance: {
+      sourceKind: 'fixture',
+      projectReference: null,
+      linkedProjectReferenceConfirmed: false,
+      captureStartedAt: null,
+      captureCompletedAt: null,
+      captureTool: 'synthetic-fixture',
+      dumpFormat: 'postgres-schema-and-copy-v1',
+    } satisfies SourceCaptureProvenance,
   };
   validateFixtureRawDumps(loaded);
   return loaded;
@@ -328,6 +339,7 @@ async function captureLiveSource(
   dependencies: RunDependencies,
   captureDirectory: string,
 ): Promise<LoadedFixtureSource> {
+  const captureStartedAt = new Date().toISOString();
   const environment = dependencies.environment ?? process.env;
   const url = environment.PLOTTER_SUPABASE_URL;
   const secretKey = environment.PLOTTER_SUPABASE_SECRET_KEY;
@@ -447,7 +459,21 @@ async function captureLiveSource(
       ? dependencies.createClient(url, secretKey, authOptions)
       : createSupabaseClient(url, secretKey, authOptions);
     const source = await readSourceSnapshot(createSupabaseSourceBackend(client));
-    return { schema, source, rawSchemaSql, rawDataSql };
+    return {
+      schema,
+      source,
+      rawSchemaSql,
+      rawDataSql,
+      provenance: {
+        sourceKind: 'live',
+        projectReference: expectedProjectReference,
+        linkedProjectReferenceConfirmed: true,
+        captureStartedAt,
+        captureCompletedAt: new Date().toISOString(),
+        captureTool: 'supabase-cli-linked',
+        dumpFormat: 'postgres-schema-and-copy-v1',
+      },
+    };
   } catch (error) {
     await syncDirectory(dumpRoot).catch(() => undefined);
     throw error;
@@ -751,6 +777,7 @@ export async function runMigration(
     first.source,
     first.schema,
     firstDumpEvidence,
+    first.provenance?.projectReference ?? null,
   );
   const digest = sourceFingerprintDigest(firstFingerprint);
 
@@ -762,6 +789,7 @@ export async function runMigration(
     fingerprint: firstFingerprint,
     rawSchemaSql: first.rawSchemaSql,
     rawDataSql: first.rawDataSql,
+    provenance: first.provenance,
     log: dependencies.log,
   });
   const materializedRoot = join(archive.root, 'materialized');
@@ -775,13 +803,17 @@ export async function runMigration(
     source: first.source,
     fingerprint: firstFingerprint,
     importedAt: new Date().toISOString(),
+    provenance: first.provenance,
   });
   const reconciliationReport = reconcileMaterialization({
     source: first.source,
     fingerprint: firstFingerprint,
     materialized,
   });
-  let report = reconciliationReport;
+  let report: ReconciliationReport = {
+    ...reconciliationReport,
+    ...(first.provenance === undefined ? {} : { provenance: first.provenance }),
+  };
   try {
     const second = await load('second');
     const secondDumpEvidence = parseSourceDumpEvidence(
@@ -793,6 +825,7 @@ export async function runMigration(
       second.source,
       second.schema,
       secondDumpEvidence,
+      second.provenance?.projectReference ?? null,
     ));
     if (secondDigest !== digest) throw new Error('Supabase source changed after staging.');
   } catch (error) {
@@ -803,10 +836,10 @@ export async function runMigration(
       ? []
       : [{ gate: captureFailurePhase(error), message: formatMigrationError(error) }];
     report = {
-      ...reconciliationReport,
+      ...report,
       passed: false,
       failures: [
-        ...reconciliationReport.failures,
+        ...report.failures,
         { gate: 'source-stability', message },
         ...evidenceFailure,
       ],

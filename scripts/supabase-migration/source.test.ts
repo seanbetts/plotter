@@ -421,8 +421,15 @@ describe('read-only Supabase source inventory', () => {
 
     const first = fingerprintSourceSnapshot(source, fixture.schema, firstEvidence);
     const second = fingerprintSourceSnapshot(source, fixture.schema, secondEvidence);
+    const otherProject = fingerprintSourceSnapshot(
+      source,
+      fixture.schema,
+      firstEvidence,
+      'different-project-ref',
+    );
 
     expect(second.ddlSha256).not.toBe(first.ddlSha256);
     expect(sourceFingerprintDigest(second)).not.toBe(sourceFingerprintDigest(first));
+    expect(sourceFingerprintDigest(otherProject)).not.toBe(sourceFingerprintDigest(first));
   });
 });

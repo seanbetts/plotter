@@ -3,7 +3,13 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import type { BackupManifest } from '../../src/api/contracts';
 import type { MaterializedSource, MigrationFailure, OrphanClassification } from './materialize';
-import { SOURCE_TABLES, type SourceFingerprint, type SourceSnapshot, type SourceTableName } from './source';
+import {
+  SOURCE_TABLES,
+  type SourceCaptureProvenance,
+  type SourceFingerprint,
+  type SourceSnapshot,
+  type SourceTableName,
+} from './source';
 
 export type ReconciliationReport = {
   passed: boolean;
@@ -19,6 +25,7 @@ export type ReconciliationReport = {
     sha256: string;
     manifest: BackupManifest;
   };
+  provenance?: SourceCaptureProvenance;
 };
 
 type ReconcileOptions = {

@@ -25,12 +25,22 @@ describe('Supabase source materialization', () => {
     temporaryDirectories.push(root);
     const loaded = await fixture();
     const fingerprint = fingerprintSourceSnapshot(loaded.source, loaded.schema);
+    const provenance = {
+      sourceKind: 'live',
+      projectReference: 'abcdefghijklmnopqrst',
+      linkedProjectReferenceConfirmed: true,
+      captureStartedAt: '2026-08-17T11:59:00.000Z',
+      captureCompletedAt: '2026-08-17T12:00:00.000Z',
+      captureTool: 'supabase-cli-linked',
+      dumpFormat: 'postgres-schema-and-copy-v1',
+    } as const;
     const materialized = await materializeSource({
       destinationRoot: root,
       archiveRelativePath: 'imports/synthetic',
       source: loaded.source,
       fingerprint,
       importedAt: '2026-08-17T12:00:00.000Z',
+      provenance,
     });
 
     expect(materialized.failures).toEqual([]);
@@ -44,6 +54,13 @@ describe('Supabase source materialization', () => {
     expect(database.connection.prepare('SELECT * FROM migration_provenance').get()).toMatchObject({
       source: 'supabase',
       archive_relative_path: 'imports/synthetic',
+      source_created_at: provenance.captureCompletedAt,
+    });
+    const persistedProvenance = database.connection.prepare(
+      'SELECT details FROM migration_provenance',
+    ).get() as { details: string };
+    expect(JSON.parse(persistedProvenance.details)).toMatchObject({
+      sourceCaptureProvenance: provenance,
     });
     expect(database.connection.prepare('SELECT * FROM media_assets').get()).toMatchObject({
       id: '00000000-0000-4000-8000-000000000006',

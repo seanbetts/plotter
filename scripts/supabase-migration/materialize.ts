@@ -18,6 +18,7 @@ import {
 import {
   canonicalJson,
   sourceFingerprintDigest,
+  type SourceCaptureProvenance,
   type SourceFingerprint,
   type SourceSnapshot,
 } from './source';
@@ -41,6 +42,7 @@ type MaterializeOptions = {
   source: SourceSnapshot;
   fingerprint: SourceFingerprint;
   importedAt: string;
+  provenance?: SourceCaptureProvenance;
 };
 
 const CONTENT_TYPE_EXTENSIONS: Record<string, string> = {
@@ -701,11 +703,14 @@ export async function materializeSource(options: MaterializeOptions): Promise<Ma
         `).run(
           provenanceId,
           digest,
-          null,
+          options.provenance?.captureCompletedAt ?? null,
           options.importedAt,
           options.archiveRelativePath,
           json({
             sourceFingerprint: options.fingerprint,
+            ...(options.provenance === undefined
+              ? {}
+              : { sourceCaptureProvenance: options.provenance }),
             archivedOnlyTables: ['trip_members'],
             archivedOnlyColumns: { trips: ['metadata'] },
             normalizedDestinationFields: options.source.tables.destinations

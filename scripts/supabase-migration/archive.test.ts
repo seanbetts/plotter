@@ -44,6 +44,15 @@ describe('lossless raw source archive', () => {
     temporaryDirectories.push(root);
     const source = snapshot();
     const fingerprint = fingerprintSourceSnapshot(source, KNOWN_SOURCE_SCHEMA);
+    const provenance = {
+      sourceKind: 'live',
+      projectReference: 'abcdefghijklmnopqrst',
+      linkedProjectReferenceConfirmed: true,
+      captureStartedAt: '2026-08-17T12:30:00.000Z',
+      captureCompletedAt: '2026-08-17T12:31:00.000Z',
+      captureTool: 'supabase-cli-linked',
+      dumpFormat: 'postgres-schema-and-copy-v1',
+    } as const;
 
     const first = await createRawArchive({
       stagingParent: root,
@@ -52,6 +61,7 @@ describe('lossless raw source archive', () => {
       fingerprint,
       rawSchemaSql: '-- synthetic schema\n',
       rawDataSql: '-- synthetic COPY data\n',
+      provenance,
       now: () => new Date('2026-08-17T12:34:56.789Z'),
       randomId: () => '00000000-0000-4000-8000-000000000001',
     });
@@ -99,6 +109,8 @@ describe('lossless raw source archive', () => {
     expect(inventory.files).toContainEqual(expect.objectContaining({
       archivePath: 'source.json', sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     }));
+    expect(JSON.parse(readFileSync(join(first.payloadRoot, 'source.json'), 'utf8')))
+      .toMatchObject({ provenance });
     await expect(first.verify()).resolves.toBeUndefined();
   });
 

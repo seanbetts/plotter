@@ -86,6 +86,15 @@ describe('Supabase migration CLI', () => {
     });
     const stagingRoot = join(stagingParent, result.stagingId);
     expect(result.report.passed).toBe(true);
+    expect(result.report.provenance).toMatchObject({
+      sourceKind: 'fixture',
+      projectReference: null,
+      linkedProjectReferenceConfirmed: false,
+      captureStartedAt: null,
+      captureCompletedAt: null,
+      captureTool: 'synthetic-fixture',
+      dumpFormat: 'postgres-schema-and-copy-v1',
+    });
     expect(result.applied).toBe(false);
     expect(result.stagingLabel).toBe(`temporary/${result.stagingId}`);
     expect(existsSync(join(stagingRoot, 'report.json'))).toBe(true);
@@ -335,6 +344,15 @@ describe('Supabase migration CLI', () => {
     });
 
     expect(result.report.passed).toBe(true);
+    expect(result.report.provenance).toMatchObject({
+      sourceKind: 'live',
+      projectReference: projectRef,
+      linkedProjectReferenceConfirmed: true,
+      captureStartedAt: expect.stringMatching(/^\d{4}-/),
+      captureCompletedAt: expect.stringMatching(/^\d{4}-/),
+      captureTool: 'supabase-cli-linked',
+      dumpFormat: 'postgres-schema-and-copy-v1',
+    });
     expect(clientOptions).toEqual([
       { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },
       { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },

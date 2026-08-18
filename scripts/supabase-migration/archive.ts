@@ -15,6 +15,7 @@ import {
   canonicalJson,
   sourceFingerprintDigest,
   validateSourceSchema,
+  type SourceCaptureProvenance,
   type SourceFingerprint,
   type SourceSchema,
   type SourceSnapshot,
@@ -43,6 +44,7 @@ type CreateRawArchiveOptions = {
   fingerprint: SourceFingerprint;
   rawSchemaSql: string;
   rawDataSql: string;
+  provenance?: SourceCaptureProvenance;
   now?: () => Date;
   randomId?: () => string;
   log?: (message: string) => void;
@@ -354,6 +356,7 @@ export async function createRawArchive(options: CreateRawArchiveOptions): Promis
       schema: options.schema,
       sourceFingerprint: options.fingerprint,
       sourceFingerprintDigest: digest,
+      ...(options.provenance === undefined ? {} : { provenance: options.provenance }),
     };
     await writePayload('source.json', `${canonicalJson(sourceMetadata)}\n`);
     const inventory: ArchiveInventory = {

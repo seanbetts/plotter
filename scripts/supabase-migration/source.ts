@@ -42,6 +42,7 @@ export const KNOWN_SOURCE_SCHEMA: SourceSchema = {
 };
 
 export type SourceFingerprint = {
+  projectReference: string | null;
   schemaSha256: string;
   ddlSha256: string;
   tableInventories: Record<string, { rowCount: number; idsSha256: string; rowsSha256: string }>;
@@ -86,6 +87,16 @@ export type SourceStorageObject = {
 export type SourceSnapshot = {
   tables: Record<SourceTableName, Record<string, unknown>[]>;
   storage: SourceStorageObject[];
+};
+
+export type SourceCaptureProvenance = {
+  sourceKind: 'fixture' | 'live';
+  projectReference: string | null;
+  linkedProjectReferenceConfirmed: boolean;
+  captureStartedAt: string | null;
+  captureCompletedAt: string | null;
+  captureTool: 'synthetic-fixture' | 'supabase-cli-linked';
+  dumpFormat: 'postgres-schema-and-copy-v1';
 };
 
 export type SourceBackend = {
@@ -620,6 +631,7 @@ export function fingerprintSourceSnapshot(
   source: SourceSnapshot,
   schema: Record<string, readonly string[]>,
   dumpEvidence?: SourceDumpEvidence,
+  projectReference: string | null = null,
 ): SourceFingerprint {
   validateSourceSchema(schema);
   if (dumpEvidence) assertCopyMatchesSource(dumpEvidence, source);
@@ -665,6 +677,7 @@ export function fingerprintSourceSnapshot(
   }));
   const schemaSha256 = sha256(canonicalJson(schema));
   return {
+    projectReference,
     schemaSha256,
     ddlSha256: dumpEvidence?.ddlSha256 ?? schemaSha256,
     tableInventories,
