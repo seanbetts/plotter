@@ -1201,6 +1201,10 @@ export function createMediaStore(
                 } else if (activeExists && trashExists) {
                   const activeIdentity = await assertRecoveryBytes(activePath, mediaRoot, row);
                   const trashIdentity = await assertRecoveryBytes(trashPath, trashRoot, row);
+                  if (
+                    activeIdentity.device !== trashIdentity.device
+                    || activeIdentity.inode !== trashIdentity.inode
+                  ) throw new Error(MEDIA_RECOVERY_ERROR);
                   await announce('recovery-delete-validated');
                   const currentActiveIdentity = await assertRecoveryBytes(
                     activePath,
@@ -1217,6 +1221,8 @@ export function createMediaStore(
                     || currentActiveIdentity.inode !== activeIdentity.inode
                     || currentTrashIdentity.device !== trashIdentity.device
                     || currentTrashIdentity.inode !== trashIdentity.inode
+                    || currentActiveIdentity.device !== currentTrashIdentity.device
+                    || currentActiveIdentity.inode !== currentTrashIdentity.inode
                   ) throw new Error(MEDIA_RECOVERY_ERROR);
                   await unlink(trashPath);
                   await syncDirectories([trashRoot], 'recovery-applied');

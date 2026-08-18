@@ -665,7 +665,7 @@ describe('durable media operation recovery', () => {
     expect(intentClearSync).toBeGreaterThan(trashCleanupSync);
   });
 
-  it('removes a separate redundant trash file only when both files match metadata', async () => {
+  it('rejects separate active and trash inodes even when both files match metadata', async () => {
     const state = await createInterruptedDeleteLinkState('separate canonical copies');
     rmSync(state.trashPath);
     writeFileSync(state.trashPath, state.value, { mode: 0o600 });
@@ -676,12 +676,13 @@ describe('durable media operation recovery', () => {
       inode: activeIdentity.ino,
     });
 
-    await createMediaStore(state.harness.dataDirectory)
-      .recoverPendingOperations(state.harness.database.connection);
+    await expect(createMediaStore(state.harness.dataDirectory)
+      .recoverPendingOperations(state.harness.database.connection))
+      .rejects.toThrow('Pending media recovery is incomplete.');
 
     expect(readFileSync(state.activePath, 'utf8')).toBe(state.value);
-    expect(existsSync(state.trashPath)).toBe(false);
-    expect(readdirSync(state.operationDirectory)).toEqual([]);
+    expect(readFileSync(state.trashPath, 'utf8')).toBe(state.value);
+    expect(readdirSync(state.operationDirectory)).toHaveLength(1);
   });
 
   it.each([
@@ -765,14 +766,15 @@ describe('durable media operation recovery', () => {
   });
 
   it.each(['active', 'trash'] as const)(
-    'retains both canonical copies when %s bytes change in place after validation',
+    'retains both hard links when %s bytes change in place after validation',
     async (changedPath) => {
       const state = await createInterruptedDeleteLinkState('AAAAAAAAAAAAAAAA');
-      rmSync(state.trashPath);
-      writeFileSync(state.trashPath, state.value, { mode: 0o600 });
       const initialActiveIdentity = lstatSync(state.activePath);
       const initialTrashIdentity = lstatSync(state.trashPath);
-      expect(initialTrashIdentity.ino).not.toBe(initialActiveIdentity.ino);
+      expect({ device: initialTrashIdentity.dev, inode: initialTrashIdentity.ino }).toEqual({
+        device: initialActiveIdentity.dev,
+        inode: initialActiveIdentity.ino,
+      });
       let changed = false;
       const restarted = createMediaStore(state.harness.dataDirectory, {
         async onPhase(phase) {
