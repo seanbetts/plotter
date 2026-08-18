@@ -72,9 +72,11 @@ export type PreparedMediaOperation<T> = {
 
 export type MediaStorePhase =
   | 'intent-durable'
+  | 'trash-link-durable'
   | 'filesystem-durable'
   | 'intent-clear-start'
   | 'intent-cleared'
+  | 'recovery-delete-validated'
   | 'recovery-complete';
 
 export type MediaStoreSyncPhase =
@@ -127,6 +129,18 @@ type PublishedIntent = {
 };
 
 type FileIdentity = { device: number; inode: number };
+
+class MediaDurabilityInterruption extends Error {
+  readonly interruption: unknown;
+
+  constructor(interruption: unknown) {
+    super(
+      interruption instanceof Error ? interruption.message : 'Media operation interrupted.',
+      { cause: interruption },
+    );
+    this.interruption = interruption;
+  }
+}
 
 function isContained(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}${sep}`);
@@ -552,17 +566,55 @@ export function createMediaStore(
     path: string,
     root: string,
     metadata: RecoveryMediaMetadata,
-  ): Promise<void> {
+  ): Promise<FileIdentity> {
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
       const canonicalPath = await resolveExistingContainedPath(path, root);
       if (dirname(canonicalPath) !== root) throw new Error(MEDIA_RECOVERY_ERROR);
-      const digest = await digestFile(canonicalPath);
-      if (digest.byteCount !== metadata.sizeBytes || digest.sha256 !== metadata.sha256) {
+      handle = await open(canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const before = await handle.stat();
+      const identity = { device: before.dev, inode: before.ino };
+      if (
+        !before.isFile()
+        || before.size !== metadata.sizeBytes
+        || (before.mode & 0o777) !== 0o600
+        || before.uid !== dataRootMetadata.uid
+        || before.gid !== dataRootMetadata.gid
+      ) {
         throw new Error(MEDIA_RECOVERY_ERROR);
       }
+      await assertFileIdentity(canonicalPath, root, identity);
+      const hash = createHash('sha256');
+      const buffer = Buffer.allocUnsafe(64 * 1024);
+      let offset = 0;
+      while (offset < before.size) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          Math.min(buffer.byteLength, before.size - offset),
+          offset,
+        );
+        if (bytesRead <= 0) throw new Error(MEDIA_RECOVERY_ERROR);
+        hash.update(buffer.subarray(0, bytesRead));
+        offset += bytesRead;
+      }
+      const after = await handle.stat();
+      if (
+        after.dev !== before.dev
+        || after.ino !== before.ino
+        || after.size !== before.size
+        || after.mode !== before.mode
+        || after.uid !== before.uid
+        || after.gid !== before.gid
+        || hash.digest('hex') !== metadata.sha256
+      ) throw new Error(MEDIA_RECOVERY_ERROR);
+      await assertFileIdentity(canonicalPath, root, identity);
+      return identity;
     } catch (error) {
       if (error instanceof Error && error.message === MEDIA_RECOVERY_ERROR) throw error;
       throw new Error(MEDIA_RECOVERY_ERROR, { cause: error });
+    } finally {
+      await handle?.close().catch(() => undefined);
     }
   }
 
@@ -706,6 +758,7 @@ export function createMediaStore(
   async function moveToUnoccupiedTrash(
     sourcePath: string,
     targetPath: string,
+    afterTrashLinkDurable?: () => Promise<void>,
   ): Promise<void> {
     if (pathExists(targetPath)) throw new Error('Media trash target already exists.');
     const sourceIdentity = await readFileIdentity(sourcePath, mediaRoot);
@@ -717,11 +770,19 @@ export function createMediaStore(
       await syncDirectories([dirname(targetPath)], 'media-trashed');
       await assertFileIdentity(sourcePath, mediaRoot, sourceIdentity);
       await assertFileIdentity(targetPath, trashRoot, sourceIdentity);
+      if (afterTrashLinkDurable) {
+        try {
+          await afterTrashLinkDurable();
+        } catch (error) {
+          throw new MediaDurabilityInterruption(error);
+        }
+      }
       await unlink(sourcePath);
       sourceRemoved = true;
       await syncDirectories([dirname(sourcePath)], 'media-trashed');
       await assertFileIdentity(targetPath, trashRoot, sourceIdentity);
     } catch (error) {
+      if (error instanceof MediaDurabilityInterruption) throw error;
       if ((error as NodeJS.ErrnoException).code === 'EEXIST' && !targetLinked) {
         throw new Error('Media trash target already exists.', { cause: error });
       }
@@ -755,12 +816,13 @@ export function createMediaStore(
 
   async function moveTrashItem(
     item: MediaDeleteIntentItem,
+    afterTrashLinkDurable?: () => Promise<void>,
   ): Promise<void> {
     const canonicalActivePath = await resolveActivePath(item.activePath);
     const trashedPath = absoluteMetadataPath(item.trashPath);
     await assertCanonicalDirectory(trashRoot, dataRoot);
     await withMediaIdentityLock(join(mediaRoot, item.mediaId), async () => {
-      await moveToUnoccupiedTrash(canonicalActivePath, trashedPath);
+      await moveToUnoccupiedTrash(canonicalActivePath, trashedPath, afterTrashLinkDurable);
     });
   }
 
@@ -1043,8 +1105,11 @@ export function createMediaStore(
         items,
       });
       try {
-        for (const item of items) await moveTrashItem(item);
+        for (const item of items) {
+          await moveTrashItem(item, () => announce('trash-link-durable'));
+        }
       } catch (error) {
+        if (error instanceof MediaDurabilityInterruption) throw error.interruption;
         try {
           await rollbackDeleteIntent(intent);
         } catch (rollbackError) {
@@ -1133,6 +1198,37 @@ export function createMediaStore(
                   await assertRecoveryBytes(trashPath, trashRoot, row);
                   await restoreDeleteItems([item]);
                   await assertRecoveryBytes(activePath, mediaRoot, row);
+                } else if (activeExists && trashExists) {
+                  const activeIdentity = await assertRecoveryBytes(activePath, mediaRoot, row);
+                  const trashIdentity = await assertRecoveryBytes(trashPath, trashRoot, row);
+                  await announce('recovery-delete-validated');
+                  const currentActiveIdentity = await assertRecoveryBytes(
+                    activePath,
+                    mediaRoot,
+                    row,
+                  );
+                  const currentTrashIdentity = await assertRecoveryBytes(
+                    trashPath,
+                    trashRoot,
+                    row,
+                  );
+                  if (
+                    currentActiveIdentity.device !== activeIdentity.device
+                    || currentActiveIdentity.inode !== activeIdentity.inode
+                    || currentTrashIdentity.device !== trashIdentity.device
+                    || currentTrashIdentity.inode !== trashIdentity.inode
+                  ) throw new Error(MEDIA_RECOVERY_ERROR);
+                  await unlink(trashPath);
+                  await syncDirectories([trashRoot], 'recovery-applied');
+                  const recoveredActiveIdentity = await assertRecoveryBytes(
+                    activePath,
+                    mediaRoot,
+                    row,
+                  );
+                  if (
+                    recoveredActiveIdentity.device !== activeIdentity.device
+                    || recoveredActiveIdentity.inode !== activeIdentity.inode
+                  ) throw new Error(MEDIA_RECOVERY_ERROR);
                 } else if (activeExists && !trashExists) {
                   await assertRecoveryBytes(activePath, mediaRoot, row);
                 } else {

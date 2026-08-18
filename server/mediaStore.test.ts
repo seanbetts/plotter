@@ -92,6 +92,45 @@ async function createTripWithDestination(harness: ReturnType<typeof createReposi
   return { destination, repository, trip };
 }
 
+async function createInterruptedDeleteLinkState(value = 'durable trash link') {
+  let interruptDelete = false;
+  const harness = createRepositoryHarness({
+    media: {
+      async onPhase(phase) {
+        if (interruptDelete && phase === 'trash-link-durable') {
+          throw new Error('interrupt:trash-link-durable');
+        }
+      },
+    },
+  });
+  const { destination, repository } = await createTripWithDestination(harness);
+  const created = await repository.createDestinationMedia(1, destination.id, {
+    bytes: imageStream(value), contentType: 'image/png',
+  });
+  const row = harness.database.connection.prepare(
+    'SELECT relative_path FROM media_assets WHERE id = ?',
+  ).get(created.mediaItem!.id) as { relative_path: string };
+  const activePath = join(harness.dataDirectory, row.relative_path);
+  interruptDelete = true;
+  const interruption = await repository.deleteDestinationMedia(2, created.mediaItem!.id)
+    .catch((error: unknown) => error);
+  if (!(interruption instanceof Error) || interruption.message !== 'interrupt:trash-link-durable') {
+    throw new Error('Delete did not stop at the durable trash-link phase.');
+  }
+  const operationDirectory = join(harness.dataDirectory, '.media-operations');
+  const trashDirectory = join(harness.dataDirectory, 'trash');
+  const trashPath = join(trashDirectory, readdirSync(trashDirectory)[0]);
+  return {
+    activePath,
+    created,
+    harness,
+    operationDirectory,
+    trashDirectory,
+    trashPath,
+    value,
+  };
+}
+
 function imageStream(value: string) {
   return bytesStream(new TextEncoder().encode(value));
 }
@@ -579,6 +618,209 @@ describe('atomic media store', () => {
 });
 
 describe('durable media operation recovery', () => {
+  it('recovers a delete interrupted after the trash link is durable but before active unlink', async () => {
+    const {
+      activePath,
+      created,
+      harness,
+      operationDirectory,
+      trashDirectory,
+      trashPath,
+    } = await createInterruptedDeleteLinkState();
+    const activeIdentity = lstatSync(activePath);
+    const trashIdentity = lstatSync(trashPath);
+    expect({ device: trashIdentity.dev, inode: trashIdentity.ino }).toEqual({
+      device: activeIdentity.dev,
+      inode: activeIdentity.ino,
+    });
+    expect(readFileSync(activePath, 'utf8')).toBe('durable trash link');
+    expect(readFileSync(trashPath, 'utf8')).toBe('durable trash link');
+    expect(readdirSync(operationDirectory)).toHaveLength(1);
+    expect(harness.database.connection.prepare(
+      'SELECT COUNT(*) AS count FROM media_assets WHERE id = ?',
+    ).get(created.mediaItem!.id)).toEqual({ count: 1 });
+
+    const recoverySyncs: Array<{ path: string; phase: string }> = [];
+    const restarted = createMediaStore(harness.dataDirectory, {
+      async syncDirectory(path, phase) {
+        recoverySyncs.push({ path, phase });
+      },
+    });
+    await restarted.recoverPendingOperations(harness.database.connection);
+
+    expect(readFileSync(activePath, 'utf8')).toBe('durable trash link');
+    expect(readdirSync(trashDirectory)).toEqual([]);
+    expect(readdirSync(operationDirectory)).toEqual([]);
+    expect(recoverySyncs).toContainEqual({
+      path: realpathSync(trashDirectory),
+      phase: 'recovery-applied',
+    });
+    const trashCleanupSync = recoverySyncs.findIndex(({ path, phase }) => (
+      path === realpathSync(trashDirectory) && phase === 'recovery-applied'
+    ));
+    const intentClearSync = recoverySyncs.findIndex(({ path, phase }) => (
+      path === realpathSync(operationDirectory) && phase === 'intent-cleared'
+    ));
+    expect(trashCleanupSync).toBeGreaterThanOrEqual(0);
+    expect(intentClearSync).toBeGreaterThan(trashCleanupSync);
+  });
+
+  it('removes a separate redundant trash file only when both files match metadata', async () => {
+    const state = await createInterruptedDeleteLinkState('separate canonical copies');
+    rmSync(state.trashPath);
+    writeFileSync(state.trashPath, state.value, { mode: 0o600 });
+    const activeIdentity = lstatSync(state.activePath);
+    const trashIdentity = lstatSync(state.trashPath);
+    expect({ device: trashIdentity.dev, inode: trashIdentity.ino }).not.toEqual({
+      device: activeIdentity.dev,
+      inode: activeIdentity.ino,
+    });
+
+    await createMediaStore(state.harness.dataDirectory)
+      .recoverPendingOperations(state.harness.database.connection);
+
+    expect(readFileSync(state.activePath, 'utf8')).toBe(state.value);
+    expect(existsSync(state.trashPath)).toBe(false);
+    expect(readdirSync(state.operationDirectory)).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'different bytes',
+      mutate({ trashPath }: Awaited<ReturnType<typeof createInterruptedDeleteLinkState>>) {
+        rmSync(trashPath);
+        writeFileSync(trashPath, 'different bytes', { mode: 0o600 });
+      },
+    },
+    {
+      name: 'non-private mode',
+      mutate({ trashPath, value }: Awaited<ReturnType<typeof createInterruptedDeleteLinkState>>) {
+        rmSync(trashPath);
+        writeFileSync(trashPath, value, { mode: 0o600 });
+        chmodSync(trashPath, 0o640);
+      },
+    },
+    {
+      name: 'symlink',
+      mutate({ activePath, trashPath }: Awaited<ReturnType<typeof createInterruptedDeleteLinkState>>) {
+        rmSync(trashPath);
+        symlinkSync(activePath, trashPath);
+      },
+    },
+    {
+      name: 'different active bytes',
+      mutate({ activePath }: Awaited<ReturnType<typeof createInterruptedDeleteLinkState>>) {
+        rmSync(activePath);
+        writeFileSync(activePath, 'different active bytes', { mode: 0o600 });
+      },
+    },
+    {
+      name: 'non-private active mode',
+      mutate({ activePath, value }: Awaited<ReturnType<typeof createInterruptedDeleteLinkState>>) {
+        rmSync(activePath);
+        writeFileSync(activePath, value, { mode: 0o600 });
+        chmodSync(activePath, 0o640);
+      },
+    },
+    {
+      name: 'active symlink',
+      mutate({ activePath, trashPath }: Awaited<ReturnType<typeof createInterruptedDeleteLinkState>>) {
+        rmSync(activePath);
+        symlinkSync(trashPath, activePath);
+      },
+    },
+  ])('retains both paths and the journal when redundant trash has $name', async ({ mutate }) => {
+    const state = await createInterruptedDeleteLinkState();
+    mutate(state);
+
+    await expect(createMediaStore(state.harness.dataDirectory)
+      .recoverPendingOperations(state.harness.database.connection))
+      .rejects.toThrow('Pending media recovery is incomplete.');
+
+    expect(existsSync(state.trashPath)).toBe(true);
+    expect(existsSync(state.activePath)).toBe(true);
+    expect(readdirSync(state.operationDirectory)).toHaveLength(1);
+  });
+
+  it('rejects a redundant trash path whose identity changes after validation', async () => {
+    const state = await createInterruptedDeleteLinkState('stable recovery identity');
+    let swapped = false;
+    const restarted = createMediaStore(state.harness.dataDirectory, {
+      async onPhase(phase) {
+        if (!swapped && phase === 'recovery-delete-validated') {
+          rmSync(state.trashPath);
+          writeFileSync(state.trashPath, state.value, { mode: 0o600 });
+          swapped = true;
+        }
+      },
+    });
+
+    await expect(restarted.recoverPendingOperations(state.harness.database.connection))
+      .rejects.toThrow('Pending media recovery is incomplete.');
+
+    expect(swapped).toBe(true);
+    expect(readFileSync(state.activePath, 'utf8')).toBe(state.value);
+    expect(readFileSync(state.trashPath, 'utf8')).toBe(state.value);
+    expect(readdirSync(state.operationDirectory)).toHaveLength(1);
+  });
+
+  it.each(['active', 'trash'] as const)(
+    'retains both canonical copies when %s bytes change in place after validation',
+    async (changedPath) => {
+      const state = await createInterruptedDeleteLinkState('AAAAAAAAAAAAAAAA');
+      rmSync(state.trashPath);
+      writeFileSync(state.trashPath, state.value, { mode: 0o600 });
+      const initialActiveIdentity = lstatSync(state.activePath);
+      const initialTrashIdentity = lstatSync(state.trashPath);
+      expect(initialTrashIdentity.ino).not.toBe(initialActiveIdentity.ino);
+      let changed = false;
+      const restarted = createMediaStore(state.harness.dataDirectory, {
+        async onPhase(phase) {
+          if (!changed && phase === 'recovery-delete-validated') {
+            writeFileSync(
+              changedPath === 'active' ? state.activePath : state.trashPath,
+              'BBBBBBBBBBBBBBBB',
+            );
+            changed = true;
+          }
+        },
+      });
+
+      await expect(restarted.recoverPendingOperations(state.harness.database.connection))
+        .rejects.toThrow('Pending media recovery is incomplete.');
+
+      expect(changed).toBe(true);
+      expect(existsSync(state.activePath)).toBe(true);
+      expect(existsSync(state.trashPath)).toBe(true);
+      expect(readdirSync(state.operationDirectory)).toHaveLength(1);
+    },
+  );
+
+  it('revalidates active bytes after redundant trash cleanup is synced', async () => {
+    const state = await createInterruptedDeleteLinkState('validate after trash cleanup');
+    let changed = false;
+    const restarted = createMediaStore(state.harness.dataDirectory, {
+      async syncDirectory(path, phase) {
+        if (
+          !changed
+          && path === realpathSync(state.trashDirectory)
+          && phase === 'recovery-applied'
+        ) {
+          writeFileSync(state.activePath, 'changed after trash cleanup');
+          changed = true;
+        }
+      },
+    });
+
+    await expect(restarted.recoverPendingOperations(state.harness.database.connection))
+      .rejects.toThrow('Pending media recovery is incomplete.');
+
+    expect(changed).toBe(true);
+    expect(readFileSync(state.activePath, 'utf8')).toBe('changed after trash cleanup');
+    expect(existsSync(state.trashPath)).toBe(false);
+    expect(readdirSync(state.operationDirectory)).toHaveLength(1);
+  });
+
   it('requires the private operation directory to remain exactly owner-only executable', async () => {
     const harness = createRepositoryHarness();
     const operationDirectory = join(harness.dataDirectory, '.media-operations');
