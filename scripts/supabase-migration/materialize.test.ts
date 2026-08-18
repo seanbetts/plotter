@@ -239,7 +239,7 @@ describe('Supabase source materialization', () => {
     expect(materialized.promotable).toBe(true);
     expect(destination).toEqual(rawSourceRow);
     const archivedRows = JSON.parse(readFileSync(
-      join(archive.root, 'tables', 'destinations.json'),
+      join(archive.payloadRoot, 'tables', 'destinations.json'),
       'utf8',
     )) as Array<Record<string, unknown>>;
     expect(archivedRows[0]!.research).toEqual(legacyResearch);
@@ -321,7 +321,7 @@ describe('Supabase source materialization', () => {
     expect(materialized.promotable).toBe(false);
     expect(destination).toEqual(rawSourceRow);
     const archivedRows = JSON.parse(readFileSync(
-      join(archive.root, 'tables', 'destinations.json'),
+      join(archive.payloadRoot, 'tables', 'destinations.json'),
       'utf8',
     )) as Array<Record<string, unknown>>;
     expect(archivedRows[0]!.research).toEqual(legacyResearch);

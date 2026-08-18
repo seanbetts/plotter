@@ -1,4 +1,12 @@
-import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -61,14 +69,14 @@ describe('lossless raw source archive', () => {
     expect(first.root).not.toBe(second.root);
     expect(first.root.startsWith(`${realpathSync(root)}/`)).toBe(true);
     expect(lstatSync(first.root).mode & 0o777).toBe(0o700);
-    expect(lstatSync(join(first.root, 'tables', 'trips.json')).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(join(first.root, 'tables', 'trips.json'), 'utf8')))
+    expect(lstatSync(join(first.payloadRoot, 'tables', 'trips.json')).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(join(first.payloadRoot, 'tables', 'trips.json'), 'utf8')))
       .toEqual(source.tables.trips);
-    expect(readFileSync(join(first.root, 'raw', 'schema.sql'), 'utf8')).toBe('-- synthetic schema\n');
-    expect(readFileSync(join(first.root, 'raw', 'data.sql'), 'utf8')).toBe('-- synthetic COPY data\n');
-    expect(readFileSync(join(first.root, 'objects', 'trip-sensitive', 'private-object.png'), 'utf8'))
+    expect(readFileSync(join(first.payloadRoot, 'raw', 'schema.sql'), 'utf8')).toBe('-- synthetic schema\n');
+    expect(readFileSync(join(first.payloadRoot, 'raw', 'data.sql'), 'utf8')).toBe('-- synthetic COPY data\n');
+    expect(readFileSync(join(first.payloadRoot, 'objects', 'trip-sensitive', 'private-object.png'), 'utf8'))
       .toBe('data');
-    const inventory = JSON.parse(readFileSync(join(first.root, 'inventory.json'), 'utf8')) as {
+    const inventory = JSON.parse(readFileSync(join(first.payloadRoot, 'inventory.json'), 'utf8')) as {
       tables: Record<string, { rowCount: number }>;
       storage: Array<{ byteCount: number; sha256: string }>;
       files: Array<{ archivePath: string; byteCount: number; sha256: string }>;
@@ -87,7 +95,11 @@ describe('lossless raw source archive', () => {
       { archivePath: 'objects/trip-sensitive/private-object.png', byteCount: 4, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
       expect.objectContaining({ archivePath: 'tables/trips.json', sha256: expect.stringMatching(/^[0-9a-f]{64}$/) }),
     ]));
-    expect(inventory.files).toHaveLength(2 + 6 + 1);
+    expect(inventory.files).toHaveLength(2 + 6 + 1 + 1);
+    expect(inventory.files).toContainEqual(expect.objectContaining({
+      archivePath: 'source.json', sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    }));
+    await expect(first.verify()).resolves.toBeUndefined();
   });
 
   it('does not put sensitive row values, URLs, keys, or object names in progress logs', async () => {
@@ -127,5 +139,81 @@ describe('lossless raw source archive', () => {
       rawSchemaSql: '-- schema',
       rawDataSql: '-- data',
     })).rejects.toThrow('Source storage path is invalid.');
+  });
+
+  it.each([
+    {
+      label: 'missing schema SQL',
+      tamper(root: string) { rmSync(join(root, 'raw', 'schema.sql')); },
+    },
+    {
+      label: 'extra payload',
+      tamper(root: string) { writeFileSync(join(root, 'extra.txt'), 'extra', { mode: 0o600 }); },
+    },
+    {
+      label: 'changed raw-only trip members',
+      tamper(root: string) {
+        writeFileSync(join(root, 'tables', 'trip_members.json'), '[{"trip_id":"changed"}]\n');
+      },
+    },
+    {
+      label: 'changed listing metadata',
+      tamper(root: string) {
+        const path = join(root, 'inventory.json');
+        const value = JSON.parse(readFileSync(path, 'utf8')) as {
+          storage: Array<{ listing: { metadata: Record<string, unknown> } }>;
+        };
+        value.storage[0]!.listing.metadata.size = 999;
+        writeFileSync(path, `${JSON.stringify(value)}\n`);
+      },
+    },
+    {
+      label: 'changed unreferenced object bytes',
+      tamper(root: string) {
+        writeFileSync(join(root, 'objects', 'trip-sensitive', 'private-object.png'), 'evil');
+      },
+    },
+  ])('fails exact readback for $label', async ({ tamper }) => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-supabase-archive-readback-'));
+    temporaryDirectories.push(root);
+    const source = snapshot();
+    const archive = await createRawArchive({
+      stagingParent: root,
+      source,
+      schema: KNOWN_SOURCE_SCHEMA,
+      fingerprint: fingerprintSourceSnapshot(source, KNOWN_SOURCE_SCHEMA),
+      rawSchemaSql: '-- synthetic schema\n',
+      rawDataSql: '-- synthetic COPY data\n',
+    });
+
+    tamper(archive.payloadRoot);
+
+    await expect(archive.verify()).rejects.toThrow(
+      'Raw Supabase archive verification failed.',
+    );
+  });
+
+  it('syncs archive publication and removes an unpublished root when parent sync fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-supabase-archive-sync-'));
+    temporaryDirectories.push(root);
+    const source = snapshot();
+    const phases: string[] = [];
+
+    await expect(createRawArchive({
+      stagingParent: root,
+      source,
+      schema: KNOWN_SOURCE_SCHEMA,
+      fingerprint: fingerprintSourceSnapshot(source, KNOWN_SOURCE_SCHEMA),
+      rawSchemaSql: '-- synthetic schema\n',
+      rawDataSql: '-- synthetic COPY data\n',
+      async syncDirectory(_path, phase) {
+        phases.push(phase);
+        if (phase === 'archive-published') throw new Error('forced archive parent sync failure');
+      },
+    })).rejects.toThrow('Raw Supabase archive could not be published.');
+
+    expect(phases).toContain('archive-ready');
+    expect(phases).toContain('archive-published');
+    expect(readdirSync(root)).toEqual([]);
   });
 });

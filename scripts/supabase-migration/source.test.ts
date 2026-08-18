@@ -1,17 +1,51 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import {
   KNOWN_SOURCE_SCHEMA,
   SOURCE_TABLES,
+  assertCopyMatchesSource,
   createSupabaseSourceBackend,
   fingerprintSourceSnapshot,
+  parseSourceDumpEvidence,
   readSourceSnapshot,
   sourceFingerprintDigest,
   validateSourceSchema,
   type SourceBackend,
+  type SourceSnapshot,
   type SourceStorageEntry,
 } from './source';
+
+type CompleteFixture = {
+  schema: typeof KNOWN_SOURCE_SCHEMA;
+  tables: SourceSnapshot['tables'];
+  rawSchemaSql: string;
+  rawDataSql: string;
+};
+
+function completeFixture(): CompleteFixture {
+  return structuredClone(JSON.parse(readFileSync(
+    join(import.meta.dirname, 'fixtures', 'complete-project.json'),
+    'utf8',
+  )) as CompleteFixture);
+}
+
+function replaceCopyRows(
+  sql: string,
+  table: string,
+  transform: (rows: string[], columns: string[]) => string[],
+): string {
+  const pattern = new RegExp(
+    `(COPY "public"\\."${table}" \\(([^)]*)\\) FROM stdin;\\n)([\\s\\S]*?)(\\n\\\\\\.)(?=\\n|$)`,
+  );
+  const match = pattern.exec(sql);
+  if (!match) throw new Error(`missing fixture COPY ${table}`);
+  const columns = match[2]!.split(',').map((value) => value.trim().replaceAll('"', ''));
+  const rows = match[3]!.length === 0 ? [] : match[3]!.split('\n');
+  return sql.replace(pattern, `${match[1]}${transform(rows, columns).join('\n')}${match[4]}`);
+}
 
 function row(id: string) {
   return { id, created_at: '2026-01-01T00:00:00.000Z' };
@@ -308,5 +342,87 @@ describe('read-only Supabase source inventory', () => {
     expect(sourceFingerprintDigest(first)).toBe(
       createHash('sha256').update(JSON.stringify(first)).digest('hex'),
     );
+  });
+
+  it('parses every known COPY table and reconciles rows by identity rather than dump order', () => {
+    const fixture = completeFixture();
+    fixture.rawDataSql = replaceCopyRows(
+      fixture.rawDataSql,
+      'destinations',
+      (rows) => [...rows].reverse(),
+    );
+
+    const evidence = parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    );
+
+    expect(() => assertCopyMatchesSource(evidence, {
+      tables: fixture.tables,
+      storage: [],
+    })).not.toThrow();
+    expect(evidence.copyInventories.destinations.rowCount).toBe(2);
+  });
+
+  it('distinguishes one-microsecond timestamp drift that millisecond Date parsing loses', () => {
+    const fixture = completeFixture();
+    fixture.rawDataSql = fixture.rawDataSql.replace(
+      '2026-01-01 00:00:00+00',
+      '2026-01-01 00:00:00.000001+00',
+    );
+    const evidence = parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    );
+
+    expect(() => assertCopyMatchesSource(evidence, {
+      tables: fixture.tables,
+      storage: [],
+    })).toThrow('Supabase COPY rows do not exactly match the SDK inventory.');
+  });
+
+  it('decodes escaped COPY text while preserving an exact null cell', () => {
+    const fixture = completeFixture();
+    fixture.tables.trips[0]!.description = 'line\tbreak\nslash\\done';
+    fixture.tables.trips[0]!.vehicle_type = null;
+    fixture.rawDataSql = replaceCopyRows(fixture.rawDataSql, 'trips', (rows, columns) => {
+      const cells = rows[0]!.split('\t');
+      cells[columns.indexOf('description')] = 'line\\tbreak\\nslash\\\\done';
+      cells[columns.indexOf('vehicle_type')] = '\\N';
+      return [cells.join('\t')];
+    });
+    const evidence = parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    );
+
+    expect(() => assertCopyMatchesSource(evidence, {
+      tables: fixture.tables,
+      storage: [],
+    })).not.toThrow();
+  });
+
+  it('binds canonical DDL evidence into the otherwise stable source fingerprint', () => {
+    const fixture = completeFixture();
+    const firstEvidence = parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    );
+    const secondEvidence = parseSourceDumpEvidence(
+      `${fixture.rawSchemaSql}\nCOMMENT ON TABLE public.trips IS 'changed';\n`,
+      fixture.rawDataSql,
+      fixture.schema,
+    );
+    const source = { tables: fixture.tables, storage: [] };
+
+    const first = fingerprintSourceSnapshot(source, fixture.schema, firstEvidence);
+    const second = fingerprintSourceSnapshot(source, fixture.schema, secondEvidence);
+
+    expect(second.ddlSha256).not.toBe(first.ddlSha256);
+    expect(sourceFingerprintDigest(second)).not.toBe(sourceFingerprintDigest(first));
   });
 });

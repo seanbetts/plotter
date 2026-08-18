@@ -43,8 +43,29 @@ export const KNOWN_SOURCE_SCHEMA: SourceSchema = {
 
 export type SourceFingerprint = {
   schemaSha256: string;
+  ddlSha256: string;
   tableInventories: Record<string, { rowCount: number; idsSha256: string; rowsSha256: string }>;
+  copyInventories: Record<string, {
+    columnsSha256: string;
+    rowCount: number;
+    idsSha256: string;
+    rowsSha256: string;
+  }>;
   storageInventorySha256: string;
+};
+
+export type SourceCopyInventory = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  columnsSha256: string;
+  rowCount: number;
+  idsSha256: string;
+  rowsSha256: string;
+};
+
+export type SourceDumpEvidence = {
+  ddlSha256: string;
+  copyInventories: Record<SourceTableName, SourceCopyInventory>;
 };
 
 export type SourceStorageEntry = {
@@ -90,7 +111,7 @@ type ReadOptions = {
   maxRows?: number;
 };
 
-const TABLE_ORDER: Record<SourceTableName, readonly string[]> = {
+export const SOURCE_TABLE_ORDER: Record<SourceTableName, readonly string[]> = {
   trips: ['id'],
   trip_members: ['trip_id', 'user_id'],
   destinations: ['id'],
@@ -121,11 +142,292 @@ function sha256(value: string | Uint8Array): string {
 }
 
 function stableRowKey(table: SourceTableName, row: Record<string, unknown>): string {
-  const values = TABLE_ORDER[table].map((column) => row[column]);
+  const values = SOURCE_TABLE_ORDER[table].map((column) => row[column]);
   if (values.some((value) => typeof value !== 'string' || value.length === 0)) {
     throw new Error('Source row identity is invalid.');
   }
   return values.join('\0');
+}
+
+const JSON_COLUMNS: Partial<Record<SourceTableName, Set<string>>> = {
+  trips: new Set(['metadata', 'vehicle_restrictions']),
+  destinations: new Set([
+    'location', 'timing', 'why', 'media', 'research', 'activities', 'route_context',
+    'routing_anchors',
+  ]),
+  route_legs: new Set(['geometry', 'waypoints', 'sections', 'warnings', 'provider_diagnostic']),
+  activities: new Set(['location', 'links']),
+};
+
+const TEXT_ARRAY_COLUMNS: Partial<Record<SourceTableName, Set<string>>> = {
+  destinations: new Set(['tags']),
+  activities: new Set(['tags']),
+};
+
+const NUMBER_COLUMNS: Partial<Record<SourceTableName, Set<string>>> = {
+  destinations: new Set(['lat', 'lng', 'stop_order']),
+  route_legs: new Set(['distance_km', 'travel_time_hours']),
+  activities: new Set(['activity_order']),
+  media_assets: new Set(['size_bytes', 'sort_order']),
+};
+
+const INTEGER_COLUMNS: Partial<Record<SourceTableName, Set<string>>> = {
+  destinations: new Set(['stop_order']),
+  activities: new Set(['activity_order']),
+  media_assets: new Set(['size_bytes', 'sort_order']),
+};
+
+function canonicalTimestamp(value: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}(?::?\d{2})?)$/.exec(value);
+  if (!match) throw new Error('Source timestamp is invalid.');
+  const fraction = (match[3] ?? '').padEnd(6, '0');
+  let zone = match[4]!;
+  if (/^[+-]\d{2}$/.test(zone)) zone = `${zone}:00`;
+  if (/^[+-]\d{4}$/.test(zone)) zone = `${zone.slice(0, 3)}:${zone.slice(3)}`;
+  const epoch = Date.parse(`${match[1]}T${match[2]}.${fraction.slice(0, 3)}${zone}`);
+  if (!Number.isFinite(epoch)) throw new Error('Source timestamp is invalid.');
+  return `${new Date(epoch).toISOString().slice(0, 19)}.${fraction}Z`;
+}
+
+function decodeCopyText(value: string): string {
+  let decoded = '';
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (character !== '\\') {
+      decoded += character;
+      continue;
+    }
+    const escaped = value[index + 1];
+    if (escaped === undefined) throw new Error('Source COPY escape is invalid.');
+    const replacements: Record<string, string> = {
+      b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\',
+    };
+    const replacement = replacements[escaped];
+    if (replacement === undefined) throw new Error('Source COPY escape is unsupported.');
+    decoded += replacement;
+    index += 1;
+  }
+  return decoded;
+}
+
+function parseTextArray(value: string): string[] {
+  if (!value.startsWith('{') || !value.endsWith('}')) {
+    throw new Error('Source COPY text array is invalid.');
+  }
+  if (value === '{}') return [];
+  const values: string[] = [];
+  let index = 1;
+  while (index < value.length - 1) {
+    let item = '';
+    if (value[index] === '"') {
+      index += 1;
+      let closed = false;
+      while (index < value.length - 1) {
+        const character = value[index]!;
+        index += 1;
+        if (character === '"') {
+          closed = true;
+          break;
+        }
+        if (character === '\\') {
+          if (index >= value.length - 1) throw new Error('Source COPY text array is invalid.');
+          item += value[index]!;
+          index += 1;
+        } else {
+          item += character;
+        }
+      }
+      if (!closed) throw new Error('Source COPY text array is invalid.');
+    } else {
+      while (index < value.length - 1 && value[index] !== ',') {
+        const character = value[index]!;
+        index += 1;
+        if (character === '\\') {
+          if (index >= value.length - 1) throw new Error('Source COPY text array is invalid.');
+          item += value[index]!;
+          index += 1;
+        } else {
+          item += character;
+        }
+      }
+      if (item === 'NULL') throw new Error('Source COPY text array is unsupported.');
+    }
+    values.push(item);
+    if (index === value.length - 1) break;
+    if (value[index] !== ',') throw new Error('Source COPY text array is invalid.');
+    index += 1;
+  }
+  if (index !== value.length - 1) throw new Error('Source COPY text array is invalid.');
+  return values;
+}
+
+function canonicalColumnValue(
+  table: SourceTableName,
+  column: string,
+  value: unknown,
+): unknown {
+  if (value === null) return null;
+  if (JSON_COLUMNS[table]?.has(column)) {
+    if (typeof value === 'string') return canonicalValue(JSON.parse(value) as unknown);
+    return canonicalValue(value);
+  }
+  if (TEXT_ARRAY_COLUMNS[table]?.has(column)) {
+    if (typeof value === 'string') return parseTextArray(value);
+    if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+      throw new Error('Source text array is invalid.');
+    }
+    return [...value];
+  }
+  if (NUMBER_COLUMNS[table]?.has(column)) {
+    const number = typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value)
+        ? Number(value)
+        : Number.NaN;
+    if (!Number.isFinite(number)) throw new Error('Source number is invalid.');
+    if (INTEGER_COLUMNS[table]?.has(column) && !Number.isSafeInteger(number)) {
+      throw new Error('Source integer is invalid.');
+    }
+    return number;
+  }
+  if (column.endsWith('_at')) {
+    if (typeof value !== 'string') throw new Error('Source timestamp is invalid.');
+    return canonicalTimestamp(value);
+  }
+  if (typeof value !== 'string') throw new Error('Source text value is invalid.');
+  return value;
+}
+
+function canonicalCopyRow(
+  table: SourceTableName,
+  columns: string[],
+  cells: string[],
+): Record<string, unknown> {
+  if (cells.length !== columns.length) throw new Error('Source COPY row is invalid.');
+  return Object.fromEntries(columns.map((column, index) => {
+    const raw = cells[index]!;
+    return [
+      column,
+      raw === '\\N' ? null : canonicalColumnValue(table, column, decodeCopyText(raw)),
+    ];
+  }));
+}
+
+function canonicalStructuredRow(
+  table: SourceTableName,
+  columns: readonly string[],
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const actualColumns = Object.keys(row).sort();
+  const expectedColumns = [...columns].sort();
+  if (
+    actualColumns.length !== expectedColumns.length
+    || actualColumns.some((column, index) => column !== expectedColumns[index])
+  ) throw new Error('Source SDK row columns are incomplete.');
+  return Object.fromEntries(columns.map((column) => [
+    column,
+    canonicalColumnValue(table, column, row[column]),
+  ]));
+}
+
+function parseCopyIdentifier(value: string): string {
+  const trimmed = value.trim();
+  const quoted = /^"((?:[^"]|"")+)"$/.exec(trimmed);
+  if (quoted) return quoted[1]!.replaceAll('""', '"');
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(trimmed)) return trimmed;
+  throw new Error('Source COPY identifier is invalid.');
+}
+
+export function canonicalizeDumpSql(sql: string): string {
+  const lines = sql.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
+    .filter((line) => !(
+      /^-- Dumped (?:from database|by pg_dump) version /.test(line)
+      || /^-- (?:Started|Completed) on /.test(line)
+      || /^\\(?:un)?restrict\s+\S+\s*$/.test(line)
+    ))
+    .map((line) => line.replace(/[ \t]+$/g, ''));
+  while (lines[0] === '') lines.shift();
+  while (lines.at(-1) === '') lines.pop();
+  return `${lines.join('\n')}\n`;
+}
+
+export function parseSourceDumpEvidence(
+  rawSchemaSql: string,
+  rawDataSql: string,
+  schema: SourceSchema,
+): SourceDumpEvidence {
+  validateSourceSchema(schema);
+  const normalized = rawDataSql.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  const lines = normalized.split('\n');
+  const copyInventories = {} as Record<SourceTableName, SourceCopyInventory>;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!line.startsWith('COPY ')) continue;
+    const match = /^COPY (?:(?:"public")|public)\.(?:"((?:[^"]|"")+)"|([a-zA-Z_][a-zA-Z0-9_]*)) \((.*)\) FROM stdin;$/.exec(line);
+    if (!match) throw new Error('Source COPY statement is unsupported.');
+    const tableValue = (match[1] ?? match[2]!).replaceAll('""', '"');
+    if (!SOURCE_TABLES.includes(tableValue as SourceTableName)) {
+      throw new Error('Source COPY contains an unknown table.');
+    }
+    const table = tableValue as SourceTableName;
+    if (copyInventories[table]) throw new Error('Source COPY table is duplicate.');
+    const columns = match[3]!.split(',').map(parseCopyIdentifier);
+    if (canonicalJson(columns) !== canonicalJson(schema[table])) {
+      throw new Error('Source COPY columns do not match the schema.');
+    }
+    const rows: Record<string, unknown>[] = [];
+    let terminated = false;
+    for (index += 1; index < lines.length; index += 1) {
+      const rowLine = lines[index]!;
+      if (rowLine === '\\.') {
+        terminated = true;
+        break;
+      }
+      rows.push(canonicalCopyRow(table, columns, rowLine.split('\t')));
+    }
+    if (!terminated) throw new Error('Source COPY table is unterminated.');
+    rows.sort((left, right) => stableRowKey(table, left).localeCompare(stableRowKey(table, right)));
+    const ids = rows.map((row) => stableRowKey(table, row));
+    if (new Set(ids).size !== ids.length) throw new Error('Source COPY identity is duplicate.');
+    copyInventories[table] = {
+      columns,
+      rows,
+      columnsSha256: sha256(canonicalJson(columns)),
+      rowCount: rows.length,
+      idsSha256: sha256(canonicalJson(ids)),
+      rowsSha256: sha256(canonicalJson(rows)),
+    };
+  }
+  for (const table of SOURCE_TABLES) {
+    if (!copyInventories[table]) throw new Error('Source COPY is missing a known table.');
+  }
+  return {
+    ddlSha256: sha256(canonicalizeDumpSql(rawSchemaSql)),
+    copyInventories,
+  };
+}
+
+export function assertCopyMatchesSource(
+  evidence: SourceDumpEvidence,
+  source: SourceSnapshot,
+): void {
+  try {
+    for (const table of SOURCE_TABLES) {
+      const copy = evidence.copyInventories[table];
+      const structured = source.tables[table]
+        .map((row) => canonicalStructuredRow(table, copy.columns, row))
+        .sort((left, right) => stableRowKey(table, left).localeCompare(stableRowKey(table, right)));
+      const ids = structured.map((row) => stableRowKey(table, row));
+      if (
+        new Set(ids).size !== ids.length
+        || structured.length !== copy.rowCount
+        || sha256(canonicalJson(ids)) !== copy.idsSha256
+        || sha256(canonicalJson(structured)) !== copy.rowsSha256
+      ) throw new Error('mismatch');
+    }
+  } catch {
+    throw new Error('Supabase COPY rows do not exactly match the SDK inventory.');
+  }
 }
 
 export function validateSourceSchema(schema: Record<string, readonly string[]>): asserts schema is SourceSchema {
@@ -196,7 +498,7 @@ async function readTable(
     const response = await backend.select({
       table,
       columns: KNOWN_SOURCE_SCHEMA[table],
-      order: TABLE_ORDER[table],
+      order: SOURCE_TABLE_ORDER[table],
       offset: page * pageSize,
       limit: pageSize,
     });
@@ -317,11 +619,15 @@ export async function readSourceSnapshot(
 export function fingerprintSourceSnapshot(
   source: SourceSnapshot,
   schema: Record<string, readonly string[]>,
+  dumpEvidence?: SourceDumpEvidence,
 ): SourceFingerprint {
   validateSourceSchema(schema);
+  if (dumpEvidence) assertCopyMatchesSource(dumpEvidence, source);
   const tableInventories: SourceFingerprint['tableInventories'] = {};
   for (const table of SOURCE_TABLES) {
-    const rows = [...source.tables[table]].sort((left, right) =>
+    const rows = (dumpEvidence
+      ? source.tables[table].map((row) => canonicalStructuredRow(table, schema[table], row))
+      : [...source.tables[table]]).sort((left, right) =>
       stableRowKey(table, left).localeCompare(stableRowKey(table, right)));
     tableInventories[table] = {
       rowCount: rows.length,
@@ -337,9 +643,32 @@ export function fingerprintSourceSnapshot(
       byteCount: object.bytes.byteLength,
       sha256: sha256(object.bytes),
     }));
+  const copyInventories = Object.fromEntries(SOURCE_TABLES.map((table) => {
+    const evidence = dumpEvidence?.copyInventories[table];
+    if (evidence) {
+      return [table, {
+        columnsSha256: evidence.columnsSha256,
+        rowCount: evidence.rowCount,
+        idsSha256: evidence.idsSha256,
+        rowsSha256: evidence.rowsSha256,
+      }];
+    }
+    const rows = [...source.tables[table]].sort((left, right) =>
+      stableRowKey(table, left).localeCompare(stableRowKey(table, right)));
+    const ids = rows.map((row) => stableRowKey(table, row));
+    return [table, {
+      columnsSha256: sha256(canonicalJson(schema[table])),
+      rowCount: rows.length,
+      idsSha256: sha256(canonicalJson(ids)),
+      rowsSha256: sha256(canonicalJson(rows)),
+    }];
+  }));
+  const schemaSha256 = sha256(canonicalJson(schema));
   return {
-    schemaSha256: sha256(canonicalJson(schema)),
+    schemaSha256,
+    ddlSha256: dumpEvidence?.ddlSha256 ?? schemaSha256,
     tableInventories,
+    copyInventories,
     storageInventorySha256: sha256(canonicalJson(storageInventory)),
   };
 }
