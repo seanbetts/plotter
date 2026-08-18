@@ -466,6 +466,31 @@ describe('Supabase source materialization', () => {
     expect(() => materialized.validate()).toThrow('Materialized media bytes changed.');
   });
 
+  it('rejects a zero-byte referenced object even when legacy size metadata is nullable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-empty-media-'));
+    temporaryDirectories.push(root);
+    const loaded = await fixture();
+    const media = loaded.source.tables.media_assets[0]!;
+    const object = loaded.source.storage.find((item) => item.path === media.object_path)!;
+    media.size_bytes = null;
+    object.listing.metadata = { ...object.listing.metadata, size: 0 };
+    object.bytes = new Uint8Array();
+
+    const materialized = await materializeSource({
+      destinationRoot: root,
+      archiveRelativePath: 'imports/synthetic',
+      source: loaded.source,
+      fingerprint: fingerprintSourceSnapshot(loaded.source, loaded.schema),
+      importedAt: '2026-08-17T12:00:00.000Z',
+    });
+
+    expect(materialized.promotable).toBe(false);
+    expect(materialized.failures).toContainEqual({
+      gate: 'referenced-media',
+      message: 'Source media object is empty.',
+    });
+  });
+
   it('accepts PostgREST offset/microsecond timestamps and derives nullable legacy media facts from preserved bytes', async () => {
     const root = mkdtempSync(join(tmpdir(), 'plotter-materialize-legacy-media-'));
     temporaryDirectories.push(root);

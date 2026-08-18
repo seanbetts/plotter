@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import type { BackupManifest } from '../../src/api/contracts';
 import type { MaterializedSource, MigrationFailure, OrphanClassification } from './materialize';
 import { SOURCE_TABLES, type SourceFingerprint, type SourceSnapshot, type SourceTableName } from './source';
 
@@ -12,6 +13,12 @@ export type ReconciliationReport = {
   orphanClassifications: Array<{ kind: string; sourceId: string; disposition: string }>;
   media: { objectCount: number; byteCount: number; hashesMatch: boolean };
   failures: Array<{ gate: string; message: string }>;
+  candidatePackage?: {
+    backupId: string;
+    byteCount: number;
+    sha256: string;
+    manifest: BackupManifest;
+  };
 };
 
 type ReconcileOptions = {

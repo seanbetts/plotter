@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,6 +11,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { KNOWN_SOURCE_SCHEMA } from './source';
 import {
   defaultRunCommand,
+  formatMigrationError,
   loadFixtureSource,
   main,
   parseMigrationArguments,
@@ -40,6 +41,34 @@ function syntheticJwt(role: string): string {
   return `${header}.${payload}.${signature}`;
 }
 
+function emptyCopySql(overrides: Partial<Record<keyof typeof KNOWN_SOURCE_SCHEMA, string[]>> = {}): string {
+  return Object.entries(KNOWN_SOURCE_SCHEMA).map(([table, columns]) => {
+    const rows = overrides[table as keyof typeof KNOWN_SOURCE_SCHEMA] ?? [];
+    return [
+      `COPY "public"."${table}" (${columns.map((column) => `"${column}"`).join(', ')}) FROM stdin;`,
+      ...rows,
+      '\\.',
+    ].join('\n');
+  }).join('\n');
+}
+
+function knownSchemaSql(): string {
+  return Object.entries(KNOWN_SOURCE_SCHEMA).map(([table, columns]) =>
+    `CREATE TABLE IF NOT EXISTS "public"."${table}" (\n${columns.map((column) => `    "${column}" text`).join(',\n')}\n);`)
+    .join('\n');
+}
+
+function emptySyntheticClient(): SupabaseClient {
+  const emptyQuery = {
+    order() { return this; },
+    async range() { return { data: [], error: null, count: 0 }; },
+  };
+  return {
+    from() { return { select() { return emptyQuery; } }; },
+    storage: { from() { return { async list() { return { data: [], error: null }; } }; } },
+  } as unknown as SupabaseClient;
+}
+
 describe('Supabase migration CLI', () => {
   it('parses help without requiring mode, credentials, a data directory, or network state', () => {
     expect(parseMigrationArguments(['--help'])).toEqual({ help: true });
@@ -62,6 +91,43 @@ describe('Supabase migration CLI', () => {
     expect(existsSync(join(stagingRoot, 'report.json'))).toBe(true);
     expect(existsSync(join(stagingRoot, 'source-archive', 'raw', 'schema.sql'))).toBe(true);
     expect(result.sourceFingerprintDigest).toMatch(/^[0-9a-f]{64}$/);
+    const candidate = (result.report as typeof result.report & {
+      candidatePackage: { backupId: string; sha256: string; byteCount: number };
+    }).candidatePackage;
+    expect(candidate).toMatchObject({
+      backupId: expect.stringMatching(/^portable-/),
+      sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      byteCount: expect.any(Number),
+    });
+    expect(existsSync(join(
+      stagingRoot,
+      'materialized',
+      'backups',
+      `${candidate.backupId}.tar`,
+    ))).toBe(true);
+  });
+
+  it('records candidate-package failure before any passing report or canonical backup', async () => {
+    const dataDirectory = canonicalRoot();
+
+    await expect(runMigration({ mode: 'dry-run', fixturePath, dataDirectory }, {
+      async packageCandidate() {
+        throw new Error('synthetic package failure');
+      },
+    })).rejects.toThrow('Supabase migration candidate packaging failed.');
+
+    expect(existsSync(join(dataDirectory, 'backups'))).toBe(false);
+    const imports = readdirSync(join(dataDirectory, 'imports'));
+    expect(imports).toHaveLength(1);
+    const report = JSON.parse(readFileSync(
+      join(dataDirectory, 'imports', imports[0]!, 'report.json'),
+      'utf8',
+    )) as { passed: boolean; failures: Array<{ gate: string; message: string }> };
+    expect(report.passed).toBe(false);
+    expect(report.failures).toContainEqual({
+      gate: 'candidate-package',
+      message: 'Portable migration candidate could not be created and inspected.',
+    });
   });
 
   it('retains realistic fixture schema and COPY dumps that agree with the structured fixture', async () => {
@@ -258,7 +324,7 @@ describe('Supabase migration CLI', () => {
         calls.push({ arguments: arguments_, environment: options.environment });
         if (arguments_[0] === 'projects') return { stdout: JSON.stringify([{ id: projectRef }]) };
         const outputPath = arguments_[arguments_.indexOf('--file') + 1]!;
-        writeFileSync(outputPath, arguments_.includes('--data-only') ? '-- COPY data\n' : schemaSql);
+        writeFileSync(outputPath, arguments_.includes('--data-only') ? emptyCopySql() : schemaSql);
         return { stdout: '' };
       },
       createClient(_url, _key, options) {
@@ -295,6 +361,158 @@ describe('Supabase migration CLI', () => {
     expect(logs.join('\n')).not.toContain(projectRef);
   });
 
+  it('rejects RLS-limited SDK rows when authoritative COPY contains a fuller table', async () => {
+    const dataDirectory = canonicalRoot();
+    const projectRef = 'abcdefghijklmnopqrst';
+    const schemaSql = Object.entries(KNOWN_SOURCE_SCHEMA).map(([table, columns]) =>
+      `CREATE TABLE IF NOT EXISTS "public"."${table}" (\n${columns.map((column) => `    "${column}" text`).join(',\n')}\n);`)
+      .join('\n');
+    const emptyQuery = {
+      order() { return this; },
+      async range() { return { data: [], error: null, count: 0 }; },
+    };
+    const client = {
+      from() { return { select() { return emptyQuery; } }; },
+      storage: { from() { return { async list() { return { data: [], error: null }; } }; } },
+    } as unknown as SupabaseClient;
+
+    await expect(runMigration({ mode: 'dry-run', dataDirectory }, {
+      environment: {
+        PLOTTER_SUPABASE_URL: `https://${projectRef}.supabase.co`,
+        PLOTTER_SUPABASE_SECRET_KEY: 'sb_secret_synthetic-runtime-value',
+        PLOTTER_SUPABASE_DB_PASSWORD: 'synthetic-database-password',
+      },
+      async readLinkedProjectReference() { return projectRef; },
+      async runCommand(_file, arguments_) {
+        if (arguments_[0] === 'projects') return { stdout: JSON.stringify([{ id: projectRef }]) };
+        const outputPath = arguments_[arguments_.indexOf('--file') + 1]!;
+        writeFileSync(outputPath, arguments_.includes('--data-only')
+          ? emptyCopySql({
+            trip_members: [
+              '00000000-0000-4000-8000-000000000001\t00000000-0000-4000-8000-000000000002\towner\t2026-01-01 00:00:00+00\t2026-01-01 00:00:00+00',
+            ],
+          })
+          : schemaSql);
+        return { stdout: '' };
+      },
+      createClient() { return client; },
+    })).rejects.toThrow('Supabase COPY rows do not exactly match the SDK inventory.');
+    expect(existsSync(join(dataDirectory, 'backups'))).toBe(false);
+  });
+
+  it.each([
+    {
+      label: 'unknown table',
+      schema: `${knownSchemaSql()}\nCREATE TABLE public.surprise (\n    id text\n);`,
+      data: emptyCopySql(),
+      message: 'Source schema contains an unknown table.',
+    },
+    {
+      label: 'unknown column',
+      schema: knownSchemaSql().replace(
+        '    "vehicle_restrictions" text',
+        '    "vehicle_restrictions" text,\n    "surprise" text',
+      ),
+      data: emptyCopySql(),
+      message: 'Source schema contains an unknown column.',
+    },
+    {
+      label: 'unknown COPY table',
+      schema: knownSchemaSql(),
+      data: `${emptyCopySql()}\nCOPY public.surprise (id) FROM stdin;\nvalue\n\\.`,
+      message: 'Source COPY contains an unknown table.',
+    },
+  ])('retains private raw evidence and a failed report for $label', async ({ schema, data, message }) => {
+    const dataDirectory = canonicalRoot();
+    const projectRef = 'abcdefghijklmnopqrst';
+    let capturedError: unknown;
+    try {
+      await runMigration({ mode: 'dry-run', dataDirectory }, {
+        environment: {
+          PLOTTER_SUPABASE_URL: `https://${projectRef}.supabase.co`,
+          PLOTTER_SUPABASE_SECRET_KEY: 'sb_secret_synthetic-private-key',
+          PLOTTER_SUPABASE_DB_PASSWORD: 'synthetic-private-password',
+        },
+        async readLinkedProjectReference() { return projectRef; },
+        async runCommand(_file, arguments_) {
+          if (arguments_[0] === 'projects') return { stdout: JSON.stringify([{ id: projectRef }]) };
+          const outputPath = arguments_[arguments_.indexOf('--file') + 1]!;
+          writeFileSync(outputPath, arguments_.includes('--data-only') ? data : schema);
+          return { stdout: '' };
+        },
+        createClient() { return emptySyntheticClient(); },
+      });
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(formatMigrationError(capturedError)).toBe(message);
+    const importsRoot = join(dataDirectory, 'imports');
+    const entries = readdirSync(importsRoot);
+    expect(entries).toHaveLength(1);
+    const retainedRoot = join(importsRoot, entries[0]!);
+    expect(lstatSync(retainedRoot).mode & 0o777).toBe(0o700);
+    for (const filename of ['schema.sql', 'data.sql']) {
+      const path = join(retainedRoot, 'captures', 'first', filename);
+      expect(existsSync(path)).toBe(true);
+      expect(lstatSync(path).mode & 0o777).toBe(0o600);
+    }
+    const report = JSON.parse(readFileSync(join(retainedRoot, 'report.json'), 'utf8')) as {
+      passed: boolean; phase: string; failures: Array<{ gate: string; message: string }>;
+    };
+    expect(report).toMatchObject({ passed: false, phase: expect.stringMatching(/schema|copy/) });
+    expect(report.failures[0]?.message).toBe(message);
+    const rendered = `${formatMigrationError(capturedError)}\n${JSON.stringify(report)}`;
+    expect(rendered).not.toContain(dataDirectory);
+    expect(rendered).not.toContain(projectRef);
+    expect(rendered).not.toContain('sb_secret_synthetic-private-key');
+    expect(rendered).not.toContain('synthetic-private-password');
+  });
+
+  it('retains both capture slots when the second schema acquisition fails', async () => {
+    const dataDirectory = canonicalRoot();
+    const projectRef = 'abcdefghijklmnopqrst';
+    let schemaDumps = 0;
+
+    await expect(runMigration({ mode: 'dry-run', dataDirectory }, {
+      environment: {
+        PLOTTER_SUPABASE_URL: `https://${projectRef}.supabase.co`,
+        PLOTTER_SUPABASE_SECRET_KEY: 'sb_secret_synthetic-runtime-value',
+        PLOTTER_SUPABASE_DB_PASSWORD: 'synthetic-database-password',
+      },
+      async readLinkedProjectReference() { return projectRef; },
+      async runCommand(_file, arguments_) {
+        if (arguments_[0] === 'projects') return { stdout: JSON.stringify([{ id: projectRef }]) };
+        const outputPath = arguments_[arguments_.indexOf('--file') + 1]!;
+        if (arguments_.includes('--data-only')) writeFileSync(outputPath, emptyCopySql());
+        else {
+          schemaDumps += 1;
+          writeFileSync(outputPath, schemaDumps === 1 ? knownSchemaSql() : `${knownSchemaSql()}\nCREATE TABLE public.surprise (\n    id text\n);`);
+        }
+        return { stdout: '' };
+      },
+      createClient() { return emptySyntheticClient(); },
+    })).rejects.toThrow('Second Supabase source acquisition failed.');
+
+    const imports = readdirSync(join(dataDirectory, 'imports'));
+    expect(imports).toHaveLength(1);
+    const retainedRoot = join(dataDirectory, 'imports', imports[0]!);
+    for (const capture of ['first', 'second']) {
+      expect(readFileSync(join(retainedRoot, 'captures', capture, 'schema.sql'), 'utf8').length)
+        .toBeGreaterThan(0);
+      expect(readFileSync(join(retainedRoot, 'captures', capture, 'data.sql'), 'utf8').length)
+        .toBeGreaterThan(0);
+    }
+    const report = JSON.parse(readFileSync(join(retainedRoot, 'report.json'), 'utf8')) as {
+      passed: boolean; failures: Array<{ gate: string; message: string }>;
+    };
+    expect(report).toMatchObject({ passed: false });
+    expect(report.failures).toContainEqual({
+      gate: 'source-stability',
+      message: 'Second Supabase source acquisition failed.',
+    });
+  });
+
   it('rejects the wrong full fingerprint before backup or promotion', async () => {
     const dataDirectory = canonicalRoot();
     await expect(runMigration({
@@ -306,7 +524,7 @@ describe('Supabase migration CLI', () => {
     database.close();
   });
 
-  it('fails a changed second full source pass before backup or promotion', async () => {
+  it('fails changed second dump evidence with stable SDK rows before backup or promotion', async () => {
     const dataDirectory = canonicalRoot();
     let reads = 0;
     await expect(runMigration({
@@ -316,7 +534,7 @@ describe('Supabase migration CLI', () => {
       async loadFixture(path) {
         const loaded = await loadFixtureSource(path);
         reads += 1;
-        if (reads === 2) loaded.source.tables.trips[0]!.name = 'changed during staging';
+        if (reads === 2) loaded.rawSchemaSql += '\nCOMMENT ON TABLE public.trips IS \'changed\';\n';
         return loaded;
       },
     })).rejects.toThrow('Supabase source changed after staging.');

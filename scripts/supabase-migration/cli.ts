@@ -1,9 +1,10 @@
 import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants, existsSync, lstatSync, mkdirSync, realpathSync, renameSync } from 'node:fs';
-import { link, mkdtemp, open, readFile, rm } from 'node:fs/promises';
+import { link, mkdtemp, open, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { openPlotterDatabase, type PlotterDatabase } from '../../server/database';
 import { acquireDataDirectoryOwnership } from '../../server/maintenanceLock';
 import {
@@ -14,10 +15,10 @@ import { createRawArchive } from './archive';
 import { materializeSource } from './materialize';
 import { reconcileMaterialization, type ReconciliationReport } from './reconcile';
 import {
-  SOURCE_TABLES,
-  canonicalJson,
+  assertCopyMatchesSource,
   createSupabaseSourceBackend,
   fingerprintSourceSnapshot,
+  parseSourceDumpEvidence,
   readSourceSnapshot,
   sourceFingerprintDigest,
   validateSourceSchema,
@@ -55,6 +56,9 @@ type RunDependencies = {
   loadFixture?(path: string): Promise<LoadedFixtureSource>;
   readLinkedProjectReference?(repositoryRoot: string): Promise<string>;
   createTemporaryStagingParent?(): Promise<string>;
+  packageCandidate?(
+    materialized: Awaited<ReturnType<typeof materializeSource>>,
+  ): Promise<PreparedMigrationCandidate>;
   log?(message: string): void;
 };
 
@@ -300,66 +304,6 @@ export function parsePublicTableSchema(sql: string): SourceSchema {
   return schema;
 }
 
-const fixtureJsonColumns: Partial<Record<(typeof SOURCE_TABLES)[number], Set<string>>> = {
-  trips: new Set(['metadata', 'vehicle_restrictions']),
-  destinations: new Set([
-    'location', 'timing', 'why', 'media', 'research', 'activities', 'route_context',
-    'routing_anchors',
-  ]),
-  route_legs: new Set(['geometry', 'waypoints', 'sections', 'warnings', 'provider_diagnostic']),
-  activities: new Set(['location', 'links']),
-};
-
-const fixtureTextArrayColumns: Partial<Record<(typeof SOURCE_TABLES)[number], Set<string>>> = {
-  destinations: new Set(['tags']),
-  activities: new Set(['tags']),
-};
-
-function decodeCopyText(value: string): string {
-  const replacements: Record<string, string> = {
-    b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\',
-  };
-  return value.replace(/\\([bfnrtv\\])/g, (_match, escaped: string) => replacements[escaped]!);
-}
-
-function encodePostgresTextArray(value: unknown[]): string {
-  return `{${value.map((item) => {
-    if (typeof item !== 'string') throw new Error('invalid text array');
-    return /^[a-zA-Z0-9_-]+$/.test(item)
-      ? item
-      : `"${item.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
-  }).join(',')}}`;
-}
-
-function fixtureCopyCellMatches(
-  table: (typeof SOURCE_TABLES)[number],
-  column: string,
-  rawValue: string,
-  expectedValue: unknown,
-): boolean {
-  if (expectedValue === null) return rawValue === '\\N';
-  if (rawValue === '\\N') return false;
-  const value = decodeCopyText(rawValue);
-  if (fixtureJsonColumns[table]?.has(column)) {
-    try {
-      return canonicalJson(JSON.parse(value)) === canonicalJson(expectedValue);
-    } catch {
-      return false;
-    }
-  }
-  if (fixtureTextArrayColumns[table]?.has(column)) {
-    return Array.isArray(expectedValue) && value === encodePostgresTextArray(expectedValue);
-  }
-  if (typeof expectedValue === 'number') {
-    return Number.isFinite(expectedValue) && Number(value) === expectedValue;
-  }
-  if (typeof expectedValue !== 'string') return false;
-  if (column.endsWith('_at')) {
-    return !Number.isNaN(Date.parse(value)) && Date.parse(value) === Date.parse(expectedValue);
-  }
-  return value === expectedValue;
-}
-
 function validateFixtureRawDumps(fixture: LoadedFixtureSource): void {
   try {
     const rawSchema = parsePublicTableSchema(fixture.rawSchemaSql);
@@ -368,43 +312,12 @@ function validateFixtureRawDumps(fixture: LoadedFixtureSource): void {
         throw new Error('schema mismatch');
       }
     }
-    const inventories = new Map<string, { columns: string[]; rows: string[][] }>();
-    const copyPattern = /COPY\s+(?:"public"|public)\.(?:"([^"]+)"|([a-zA-Z_][a-zA-Z0-9_]*))\s*\(([^)]*)\)\s+FROM stdin;\r?\n([\s\S]*?)\r?\n\\\.\r?(?:\n|$)/g;
-    for (const match of fixture.rawDataSql.matchAll(copyPattern)) {
-      const table = match[1] ?? match[2]!;
-      if (inventories.has(table)) throw new Error('duplicate COPY');
-      const columns = match[3]!.split(',').map((column) => {
-        const trimmed = column.trim();
-        return trimmed.startsWith('"') && trimmed.endsWith('"')
-          ? trimmed.slice(1, -1).replaceAll('""', '"')
-          : trimmed;
-      });
-      inventories.set(table, {
-        columns,
-        rows: match[4]!.length === 0
-          ? []
-          : match[4]!.split(/\r?\n/).map((row) => row.split('\t')),
-      });
-    }
-    if (inventories.size !== SOURCE_TABLES.length) throw new Error('COPY count mismatch');
-    for (const table of SOURCE_TABLES) {
-      const inventory = inventories.get(table);
-      if (!inventory
-        || JSON.stringify(inventory.columns) !== JSON.stringify(fixture.schema[table])
-        || inventory.rows.length !== fixture.source.tables[table].length) {
-        throw new Error('COPY inventory mismatch');
-      }
-      for (const [rowIndex, rawRow] of inventory.rows.entries()) {
-        const structuredRow = fixture.source.tables[table][rowIndex]!;
-        if (rawRow.length !== inventory.columns.length
-          || inventory.columns.some((column, columnIndex) => !fixtureCopyCellMatches(
-            table,
-            column,
-            rawRow[columnIndex]!,
-            structuredRow[column],
-          ))) throw new Error('COPY row mismatch');
-      }
-    }
+    const evidence = parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    );
+    assertCopyMatchesSource(evidence, fixture.source);
   } catch {
     throw new Error('Supabase migration fixture raw dumps are inconsistent.');
   }
@@ -413,6 +326,7 @@ function validateFixtureRawDumps(fixture: LoadedFixtureSource): void {
 async function captureLiveSource(
   repositoryRoot: string,
   dependencies: RunDependencies,
+  captureDirectory: string,
 ): Promise<LoadedFixtureSource> {
   const environment = dependencies.environment ?? process.env;
   const url = environment.PLOTTER_SUPABASE_URL;
@@ -455,10 +369,57 @@ async function captureLiveSource(
     throw new Error('Supabase CLI linked project does not match the source URL.');
   }
 
-  const dumpRoot = await mkdtemp(join(tmpdir(), 'plotter-supabase-read-'));
+  const dumpRoot = realpathSync(captureDirectory);
+  if (!isContained(dumpRoot, realpathSync(dirname(dumpRoot)))) {
+    throw new Error('Migration capture directory is invalid.');
+  }
+  const dumpMetadata = lstatSync(dumpRoot);
+  if (
+    !dumpMetadata.isDirectory()
+    || dumpMetadata.isSymbolicLink()
+    || (dumpMetadata.mode & 0o777) !== 0o700
+    || (process.getuid?.() !== undefined && dumpMetadata.uid !== process.getuid?.())
+    || (process.getgid?.() !== undefined && dumpMetadata.gid !== process.getgid?.())
+  ) throw new Error('Migration capture directory is invalid.');
+  const schemaPath = join(dumpRoot, 'schema.sql');
+  const dataPath = join(dumpRoot, 'data.sql');
+  const readSecureDump = async (path: string): Promise<string> => {
+    const metadata = lstatSync(path);
+    if (
+      !metadata.isFile()
+      || metadata.isSymbolicLink()
+      || realpathSync(path) !== path
+      || !isContained(path, dumpRoot)
+    ) throw new Error('Supabase dump evidence is invalid.');
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      await handle.chmod(0o600);
+      const opened = await handle.stat();
+      if (opened.dev !== metadata.dev || opened.ino !== metadata.ino || opened.size !== metadata.size) {
+        throw new Error('Supabase dump evidence is invalid.');
+      }
+      const bytes = await handle.readFile();
+      await handle.sync();
+      const after = await handle.stat();
+      const current = lstatSync(path);
+      if (
+        after.dev !== opened.dev
+        || after.ino !== opened.ino
+        || after.size !== opened.size
+        || current.dev !== opened.dev
+        || current.ino !== opened.ino
+        || !current.isFile()
+        || current.isSymbolicLink()
+        || (current.mode & 0o777) !== 0o600
+        || (process.getuid?.() !== undefined && current.uid !== process.getuid?.())
+        || (process.getgid?.() !== undefined && current.gid !== process.getgid?.())
+      ) throw new Error('Supabase dump evidence is invalid.');
+      return bytes.toString('utf8');
+    } finally {
+      await handle.close();
+    }
+  };
   try {
-    const schemaPath = join(dumpRoot, 'schema.sql');
-    const dataPath = join(dumpRoot, 'data.sql');
     const dumpCommandOptions = {
       cwd: repositoryRoot,
       environment: { ...cliEnvironment, SUPABASE_DB_PASSWORD: databasePassword },
@@ -466,12 +427,14 @@ async function captureLiveSource(
     await runCommand(supabaseExecutable, [
       'db', 'dump', '--linked', '--schema', 'public', '--file', schemaPath,
     ], dumpCommandOptions);
+    const rawSchemaSql = await readSecureDump(schemaPath);
+    await syncDirectory(dumpRoot);
     await runCommand(supabaseExecutable, [
       'db', 'dump', '--linked', '--schema', 'public', '--data-only', '--use-copy',
       '--file', dataPath,
     ], dumpCommandOptions);
-    const rawSchemaSql = await readFile(schemaPath, 'utf8');
-    const rawDataSql = await readFile(dataPath, 'utf8');
+    const rawDataSql = await readSecureDump(dataPath);
+    await syncDirectory(dumpRoot);
     const schema = parsePublicTableSchema(rawSchemaSql);
     const authOptions = {
       auth: {
@@ -485,8 +448,9 @@ async function captureLiveSource(
       : createSupabaseClient(url, secretKey, authOptions);
     const source = await readSourceSnapshot(createSupabaseSourceBackend(client));
     return { schema, source, rawSchemaSql, rawDataSql };
-  } finally {
-    await rm(dumpRoot, { recursive: true, force: true });
+  } catch (error) {
+    await syncDirectory(dumpRoot).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -502,6 +466,7 @@ async function writePrivateJson(path: string, value: unknown): Promise<void> {
   } finally {
     await handle.close();
   }
+  await syncDirectory(dirname(path));
 }
 
 async function syncDirectory(path: string): Promise<void> {
@@ -513,9 +478,166 @@ async function syncDirectory(path: string): Promise<void> {
   }
 }
 
+function assertPrivateOwnedDirectory(path: string, root: string): void {
+  const metadata = lstatSync(path);
+  if (
+    metadata.isSymbolicLink()
+    || !metadata.isDirectory()
+    || realpathSync(path) !== path
+    || !isContained(path, root)
+    || (metadata.mode & 0o777) !== 0o700
+    || (process.getuid?.() !== undefined && metadata.uid !== process.getuid?.())
+    || (process.getgid?.() !== undefined && metadata.gid !== process.getgid?.())
+  ) throw new Error('Migration staging directory is invalid.');
+}
+
+function migrationRunName(now: Date, identifier: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(identifier)) {
+    throw new Error('Migration staging identity is invalid.');
+  }
+  return `supabase-${now.toISOString().replaceAll(/[-:.]/g, '')}-${identifier}`;
+}
+
+async function createMigrationRunRoot(stagingParent: string): Promise<string> {
+  const canonicalParent = realpathSync(stagingParent);
+  const root = join(canonicalParent, migrationRunName(new Date(), randomUUID()));
+  mkdirSync(root, { mode: 0o700 });
+  assertPrivateOwnedDirectory(root, canonicalParent);
+  await syncDirectory(canonicalParent);
+  return root;
+}
+
+async function createCaptureSlot(
+  runRoot: string,
+  slot: 'first' | 'second',
+): Promise<string> {
+  assertPrivateOwnedDirectory(runRoot, dirname(runRoot));
+  const capturesRoot = join(runRoot, 'captures');
+  if (!existsSync(capturesRoot)) {
+    mkdirSync(capturesRoot, { mode: 0o700 });
+    assertPrivateOwnedDirectory(capturesRoot, runRoot);
+    await syncDirectory(runRoot);
+  } else {
+    assertPrivateOwnedDirectory(capturesRoot, runRoot);
+  }
+  const captureRoot = join(capturesRoot, slot);
+  if (existsSync(captureRoot)) throw new Error('Migration capture slot already exists.');
+  mkdirSync(captureRoot, { mode: 0o700 });
+  assertPrivateOwnedDirectory(captureRoot, runRoot);
+  await syncDirectory(capturesRoot);
+  return captureRoot;
+}
+
+function captureFailurePhase(error: unknown): 'capture' | 'schema' | 'copy' {
+  const message = error instanceof Error ? error.message : '';
+  if (/schema|column|table/i.test(message) && !/COPY/i.test(message)) return 'schema';
+  if (/COPY/i.test(message)) return 'copy';
+  return 'capture';
+}
+
+async function retainCaptureFailure(runRoot: string, error: unknown): Promise<void> {
+  const phase = captureFailurePhase(error);
+  const message = formatMigrationError(error);
+  await writePrivateJson(join(runRoot, 'report.json'), {
+    formatVersion: 1,
+    passed: false,
+    phase,
+    failures: [{ gate: phase, message }],
+  });
+}
+
+export type PreparedMigrationCandidate = {
+  backupId: string;
+  archivePath: string;
+  identity: { dev: number; ino: number };
+  evidence: NonNullable<ReconciliationReport['candidatePackage']>;
+};
+
+async function hashExactFile(path: string): Promise<{
+  byteCount: number;
+  sha256: string;
+  dev: number;
+  ino: number;
+}> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.size <= 0) {
+      throw new Error('Portable migration candidate is invalid.');
+    }
+    const hash = createHash('sha256');
+    let offset = 0;
+    while (offset < before.size) {
+      const buffer = Buffer.alloc(Math.min(64 * 1024, before.size - offset));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, offset);
+      if (bytesRead <= 0) throw new Error('Portable migration candidate is invalid.');
+      hash.update(buffer.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+    const after = await handle.stat();
+    if (
+      after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== before.size
+      || offset !== before.size
+    ) throw new Error('Portable migration candidate is invalid.');
+    return {
+      byteCount: before.size,
+      sha256: hash.digest('hex'),
+      dev: before.dev,
+      ino: before.ino,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function packagePortableCandidate(
+  materialized: Awaited<ReturnType<typeof materializeSource>>,
+): Promise<PreparedMigrationCandidate> {
+  materialized.validate();
+  let database: PlotterDatabase | undefined = openPlotterDatabase(materialized.databasePath);
+  const operations = createPortableBackupOperations({
+    dataDirectory: materialized.root,
+    currentDatabase() {
+      if (!database) throw new Error('Migration candidate database is closed.');
+      return database;
+    },
+    closeStorage() {
+      const closing = database;
+      database = undefined;
+      closing?.close();
+    },
+    openStorage() {
+      database = openPlotterDatabase(materialized.databasePath);
+    },
+    publishRestoreReset() { /* Candidate packaging has no clients. */ },
+  });
+  try {
+    const backupId = (await operations.create()).id;
+    const manifest = await operations.inspect(backupId);
+    const archivePath = join(materialized.root, 'backups', `${backupId}.tar`);
+    const canonicalArchive = realpathSync(archivePath);
+    if (!isContained(canonicalArchive, materialized.root) || canonicalArchive !== archivePath) {
+      throw new Error('Portable migration candidate is invalid.');
+    }
+    const { dev, ino, ...digest } = await hashExactFile(archivePath);
+    return {
+      backupId,
+      archivePath,
+      identity: { dev, ino },
+      evidence: { backupId, ...digest, manifest },
+    };
+  } finally {
+    database?.close();
+    database = undefined;
+  }
+}
+
 async function promoteWithPortableRestore(
   dataDirectory: string,
   materialized: Awaited<ReturnType<typeof materializeSource>>,
+  candidate: PreparedMigrationCandidate,
 ): Promise<string> {
   materialized.validate();
   const dataRoot = realpathSync(dataDirectory);
@@ -549,36 +671,25 @@ async function promoteWithPortableRestore(
     );
     await syncDirectory(backupsRoot);
 
-    let candidateDatabase: PlotterDatabase | undefined = openPlotterDatabase(materialized.databasePath);
-    const candidateOperations = createPortableBackupOperations({
-      dataDirectory: materialized.root,
-      currentDatabase() {
-        if (!candidateDatabase) throw new Error('Migration candidate database is closed.');
-        return candidateDatabase;
-      },
-      closeStorage() {
-        const closing = candidateDatabase;
-        candidateDatabase = undefined;
-        closing?.close();
-      },
-      openStorage() {
-        candidateDatabase = openPlotterDatabase(materialized.databasePath);
-      },
-      publishRestoreReset() { /* Candidate packaging has no clients. */ },
-    });
-    let candidateBackupId: string;
-    try {
-      candidateBackupId = (await candidateOperations.create()).id;
-    } finally {
-      candidateDatabase?.close();
-      candidateDatabase = undefined;
-    }
-    const sourceArchive = join(materialized.root, 'backups', `${candidateBackupId}.tar`);
-    const destinationArchive = join(backupsRoot, `${candidateBackupId}.tar`);
-    await link(sourceArchive, destinationArchive);
+    const currentCandidate = await hashExactFile(candidate.archivePath);
+    if (
+      currentCandidate.dev !== candidate.identity.dev
+      || currentCandidate.ino !== candidate.identity.ino
+      || currentCandidate.byteCount !== candidate.evidence.byteCount
+      || currentCandidate.sha256 !== candidate.evidence.sha256
+    ) throw new Error('Migration candidate changed after inspection.');
+    const destinationArchive = join(backupsRoot, `${candidate.backupId}.tar`);
+    await link(candidate.archivePath, destinationArchive);
+    const linked = lstatSync(destinationArchive);
+    if (
+      !linked.isFile()
+      || linked.isSymbolicLink()
+      || linked.dev !== candidate.identity.dev
+      || linked.ino !== candidate.identity.ino
+    ) throw new Error('Migration candidate changed during publication.');
     await syncDirectory(backupsRoot);
-    await canonicalOperations.restore(candidateBackupId, {
-      confirmation: `RESTORE ${candidateBackupId}`,
+    await canonicalOperations.restore(candidate.backupId, {
+      confirmation: `RESTORE ${candidate.backupId}`,
     });
     canonicalDatabase?.close();
     canonicalDatabase = undefined;
@@ -601,13 +712,6 @@ export async function runMigration(
     throw new Error('--data-dir is required for live source migration.');
   }
   const repositoryRoot = resolve(import.meta.dirname, '..', '..');
-  const load = arguments_.fixturePath
-    ? async () => (dependencies.loadFixture ?? loadFixtureSource)(resolve(arguments_.fixturePath!))
-    : async () => captureLiveSource(repositoryRoot, dependencies);
-  const first = await load();
-  const firstFingerprint = fingerprintSourceSnapshot(first.source, first.schema);
-  const digest = sourceFingerprintDigest(firstFingerprint);
-
   let stagingParent: string;
   let dataRoot: string | undefined;
   if (arguments_.dataDirectory) {
@@ -618,8 +722,41 @@ export async function runMigration(
       ? await dependencies.createTemporaryStagingParent()
       : await mkdtemp(join(tmpdir(), 'plotter-supabase-fixture-'));
   }
+  let runRoot = arguments_.fixturePath
+    ? undefined
+    : await createMigrationRunRoot(stagingParent);
+  const load = async (slot: 'first' | 'second'): Promise<LoadedFixtureSource> => {
+    if (arguments_.fixturePath) {
+      return (dependencies.loadFixture ?? loadFixtureSource)(resolve(arguments_.fixturePath));
+    }
+    const captureRoot = await createCaptureSlot(runRoot!, slot);
+    return captureLiveSource(repositoryRoot, dependencies, captureRoot);
+  };
+  let first: LoadedFixtureSource;
+  let firstDumpEvidence: ReturnType<typeof parseSourceDumpEvidence>;
+  try {
+    first = await load('first');
+    firstDumpEvidence = parseSourceDumpEvidence(
+      first.rawSchemaSql,
+      first.rawDataSql,
+      first.schema,
+    );
+    assertCopyMatchesSource(firstDumpEvidence, first.source);
+  } catch (error) {
+    if (runRoot) await retainCaptureFailure(runRoot, error);
+    throw error;
+  }
+  runRoot ??= await createMigrationRunRoot(stagingParent);
+  const firstFingerprint = fingerprintSourceSnapshot(
+    first.source,
+    first.schema,
+    firstDumpEvidence,
+  );
+  const digest = sourceFingerprintDigest(firstFingerprint);
+
   const archive = await createRawArchive({
     stagingParent,
+    stagingRoot: runRoot,
     source: first.source,
     schema: first.schema,
     fingerprint: firstFingerprint,
@@ -646,28 +783,62 @@ export async function runMigration(
   });
   let report = reconciliationReport;
   try {
-    const second = await load();
-    const secondDigest = sourceFingerprintDigest(
-      fingerprintSourceSnapshot(second.source, second.schema),
+    const second = await load('second');
+    const secondDumpEvidence = parseSourceDumpEvidence(
+      second.rawSchemaSql,
+      second.rawDataSql,
+      second.schema,
     );
+    const secondDigest = sourceFingerprintDigest(fingerprintSourceSnapshot(
+      second.source,
+      second.schema,
+      secondDumpEvidence,
+    ));
     if (secondDigest !== digest) throw new Error('Supabase source changed after staging.');
   } catch (error) {
     const message = error instanceof Error && error.message === 'Supabase source changed after staging.'
       ? error.message
       : 'Second Supabase source acquisition failed.';
+    const evidenceFailure = message === 'Supabase source changed after staging.'
+      ? []
+      : [{ gate: captureFailurePhase(error), message: formatMigrationError(error) }];
     report = {
       ...reconciliationReport,
       passed: false,
       failures: [
         ...reconciliationReport.failures,
         { gate: 'source-stability', message },
+        ...evidenceFailure,
       ],
     };
     await writePrivateJson(join(archive.root, 'report.json'), report);
     throw new Error(message, { cause: error });
   }
+  if (!report.passed) {
+    await writePrivateJson(join(archive.root, 'report.json'), report);
+    throw new Error('Supabase migration reconciliation failed.');
+  }
+  await archive.verify();
+  let candidate: PreparedMigrationCandidate;
+  try {
+    candidate = await (dependencies.packageCandidate ?? packagePortableCandidate)(materialized);
+    report = { ...report, candidatePackage: candidate.evidence };
+  } catch (error) {
+    report = {
+      ...report,
+      passed: false,
+      failures: [
+        ...report.failures,
+        {
+          gate: 'candidate-package',
+          message: 'Portable migration candidate could not be created and inspected.',
+        },
+      ],
+    };
+    await writePrivateJson(join(archive.root, 'report.json'), report);
+    throw new Error('Supabase migration candidate packaging failed.', { cause: error });
+  }
   await writePrivateJson(join(archive.root, 'report.json'), report);
-  if (!report.passed) throw new Error('Supabase migration reconciliation failed.');
   const stagingId = basename(archive.root);
   const stagingLabel = dataRoot ? relative(dataRoot, archive.root) : `temporary/${stagingId}`;
   if (arguments_.mode === 'dry-run') {
@@ -683,7 +854,7 @@ export async function runMigration(
   const ownership = acquireDataDirectoryOwnership(dataRoot!, 'supabase-migration');
   try {
     await recoverInterruptedPortableRestore(dataRoot!);
-    const preImportBackupId = await promoteWithPortableRestore(dataRoot!, materialized);
+    const preImportBackupId = await promoteWithPortableRestore(dataRoot!, materialized, candidate);
     dependencies.log?.(`Supabase migration apply passed fingerprint=${digest}`);
     return {
       applied: true, stagingId, stagingLabel,

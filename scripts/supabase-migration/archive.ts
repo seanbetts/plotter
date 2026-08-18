@@ -37,6 +37,7 @@ export type RawArchiveSyncPhase = 'archive-ready' | 'archive-published' | 'archi
 
 type CreateRawArchiveOptions = {
   stagingParent: string;
+  stagingRoot?: string;
   source: SourceSnapshot;
   schema: SourceSchema;
   fingerprint: SourceFingerprint;
@@ -76,12 +77,16 @@ function isContained(path: string, root: string): boolean {
 
 function assertPrivateDirectory(path: string, root: string): void {
   const metadata = lstatSync(path);
+  const expectedUid = process.getuid?.();
+  const expectedGid = process.getgid?.();
   if (
     metadata.isSymbolicLink()
     || !metadata.isDirectory()
     || realpathSync(path) !== path
     || !isContained(path, root)
     || (metadata.mode & 0o777) !== 0o700
+    || (expectedUid !== undefined && metadata.uid !== expectedUid)
+    || (expectedGid !== undefined && metadata.gid !== expectedGid)
   ) throw new Error('Migration staging directory is invalid.');
 }
 
@@ -104,7 +109,12 @@ async function writePrivateFile(path: string, bytes: string | Uint8Array): Promi
   );
   try {
     const metadata = await handle.stat();
-    if (!metadata.isFile() || (metadata.mode & 0o777) !== 0o600) {
+    if (
+      !metadata.isFile()
+      || (metadata.mode & 0o777) !== 0o600
+      || (process.getuid?.() !== undefined && metadata.uid !== process.getuid?.())
+      || (process.getgid?.() !== undefined && metadata.gid !== process.getgid?.())
+    ) {
       throw new Error('Migration archive file is invalid.');
     }
     await handle.writeFile(bytes);
@@ -122,7 +132,12 @@ async function readPrivateFile(path: string, payloadRoot: string): Promise<Buffe
     }
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const before = await handle.stat();
-    if (!before.isFile() || (before.mode & 0o777) !== 0o600) {
+    if (
+      !before.isFile()
+      || (before.mode & 0o777) !== 0o600
+      || (process.getuid?.() !== undefined && before.uid !== process.getuid?.())
+      || (process.getgid?.() !== undefined && before.gid !== process.getgid?.())
+    ) {
       throw new Error(ARCHIVE_VERIFY_ERROR);
     }
     const bytes = await handle.readFile();
@@ -270,18 +285,27 @@ export async function createRawArchive(options: CreateRawArchiveOptions): Promis
   const now = options.now?.() ?? new Date();
   const identifier = options.randomId?.() ?? randomUUID();
   if (!UUID_PATTERN.test(identifier)) throw new Error('Migration staging identity is invalid.');
-  const finalRoot = join(stagingParent, `supabase-${timestampName(now)}-${identifier}`);
-  const preparingRoot = join(stagingParent, `.supabase-preparing-${identifier}`);
-  if (existsSync(finalRoot) || existsSync(preparingRoot)) {
-    throw new Error('Migration staging identity is invalid.');
-  }
+  const usesExistingRoot = options.stagingRoot !== undefined;
+  const finalRoot = usesExistingRoot
+    ? realpathSync(options.stagingRoot!)
+    : join(stagingParent, `supabase-${timestampName(now)}-${identifier}`);
+  if (usesExistingRoot) assertPrivateDirectory(finalRoot, stagingParent);
+  const preparingRoot = usesExistingRoot
+    ? join(finalRoot, `.source-archive-preparing-${identifier}`)
+    : join(stagingParent, `.supabase-preparing-${identifier}`);
+  const publishedPayloadRoot = join(finalRoot, PAYLOAD_DIRECTORY);
+  if (
+    (!usesExistingRoot && existsSync(finalRoot))
+    || existsSync(preparingRoot)
+    || existsSync(publishedPayloadRoot)
+  ) throw new Error('Migration staging identity is invalid.');
   mkdirSync(preparingRoot, { mode: 0o700 });
-  assertPrivateDirectory(preparingRoot, stagingParent);
-  const payloadRoot = join(preparingRoot, PAYLOAD_DIRECTORY);
+  assertPrivateDirectory(preparingRoot, usesExistingRoot ? finalRoot : stagingParent);
+  const payloadRoot = usesExistingRoot ? preparingRoot : join(preparingRoot, PAYLOAD_DIRECTORY);
   const rawRoot = join(payloadRoot, 'raw');
   const tablesRoot = join(payloadRoot, 'tables');
   const objectsRoot = join(payloadRoot, 'objects');
-  for (const path of [payloadRoot, rawRoot, tablesRoot, objectsRoot]) {
+  for (const path of [...(usesExistingRoot ? [] : [payloadRoot]), rawRoot, tablesRoot, objectsRoot]) {
     mkdirSync(path, { mode: 0o700 });
     assertPrivateDirectory(path, preparingRoot);
   }
@@ -360,15 +384,15 @@ export async function createRawArchive(options: CreateRawArchiveOptions): Promis
     for (const directory of directories) await syncDirectory(directory, 'archive-ready');
     await syncDirectory(preparingRoot, 'archive-ready');
     await verifyRawArchive(payloadRoot, verification);
-    await rename(preparingRoot, finalRoot);
+    await rename(preparingRoot, usesExistingRoot ? publishedPayloadRoot : finalRoot);
     try {
-      await syncDirectory(stagingParent, 'archive-published');
+      await syncDirectory(usesExistingRoot ? finalRoot : stagingParent, 'archive-published');
     } catch (error) {
       try {
-        await rename(finalRoot, preparingRoot);
-        await syncDirectory(stagingParent, 'archive-rolled-back');
+        await rename(usesExistingRoot ? publishedPayloadRoot : finalRoot, preparingRoot);
+        await syncDirectory(usesExistingRoot ? finalRoot : stagingParent, 'archive-rolled-back');
         await rm(preparingRoot, { recursive: true, force: true });
-        await syncDirectory(stagingParent, 'archive-rolled-back');
+        await syncDirectory(usesExistingRoot ? finalRoot : stagingParent, 'archive-rolled-back');
       } catch (rollbackError) {
         throw new AggregateError(
           [error, rollbackError],
@@ -378,7 +402,6 @@ export async function createRawArchive(options: CreateRawArchiveOptions): Promis
       }
       throw new Error(ARCHIVE_PUBLISH_ERROR, { cause: error });
     }
-    const publishedPayloadRoot = join(finalRoot, PAYLOAD_DIRECTORY);
     const verify = () => verifyRawArchive(publishedPayloadRoot, verification);
     await verify();
     options.log?.(
@@ -394,7 +417,10 @@ export async function createRawArchive(options: CreateRawArchiveOptions): Promis
   } catch (error) {
     if (existsSync(preparingRoot)) {
       await rm(preparingRoot, { recursive: true, force: true }).catch(() => undefined);
-      await Promise.resolve(syncDirectory(stagingParent, 'archive-rolled-back')).catch(() => undefined);
+      await Promise.resolve(syncDirectory(
+        usesExistingRoot ? finalRoot : stagingParent,
+        'archive-rolled-back',
+      )).catch(() => undefined);
     }
     throw error;
   }

@@ -622,6 +622,8 @@ function validateSource(
     const object = objects.get(objectPath);
     if (!object) {
       fail(failures, 'referenced-media', 'Source media object is missing.');
+    } else if (object.bytes.byteLength === 0) {
+      fail(failures, 'referenced-media', 'Source media object is empty.');
     } else if (media.size_bytes !== null && object.bytes.byteLength !== media.size_bytes) {
       fail(failures, 'referenced-media', 'Source media byte count does not match metadata.');
     } else if (!effectiveContentType(media, object)) {
