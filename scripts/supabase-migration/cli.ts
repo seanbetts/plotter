@@ -174,7 +174,7 @@ function ensureDirectory(path: string, root: string): string {
   return canonical;
 }
 
-async function defaultRunCommand(
+export async function defaultRunCommand(
   file: string,
   arguments_: string[],
   options: CommandOptions,
@@ -182,7 +182,7 @@ async function defaultRunCommand(
   return new Promise((resolvePromise, reject) => {
     execFile(file, arguments_, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.environment },
+      env: options.environment,
       maxBuffer: 32 * 1024 * 1024,
     }, (error, stdout) => {
       if (error) {
@@ -192,6 +192,62 @@ async function defaultRunCommand(
       resolvePromise({ stdout: String(stdout) });
     });
   });
+}
+
+const supabaseCliEnvironmentNames = [
+  'HOME',
+  'PATH',
+  'TMPDIR',
+  'XDG_CONFIG_HOME',
+  'SUPABASE_ACCESS_TOKEN',
+] as const;
+
+function createSupabaseCliEnvironment(
+  environment: Record<string, string | undefined>,
+): Record<string, string> {
+  const safeEnvironment: Record<string, string> = {};
+  for (const name of supabaseCliEnvironmentNames) {
+    const value = environment[name];
+    if (value !== undefined) safeEnvironment[name] = value;
+  }
+  return safeEnvironment;
+}
+
+function decodeJwtJsonSegment(segment: string): Record<string, unknown> | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(segment)) return undefined;
+  const bytes = Buffer.from(segment, 'base64url');
+  if (bytes.length === 0 || bytes.toString('base64url') !== segment) return undefined;
+  try {
+    const value: unknown = JSON.parse(bytes.toString('utf8'));
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isProjectWideSecretKey(value: string): boolean {
+  if (/^sb_secret_\S+$/.test(value)) return true;
+  const segments = value.split('.');
+  if (segments.length !== 3) return false;
+  const header = decodeJwtJsonSegment(segments[0]!);
+  const payload = decodeJwtJsonSegment(segments[1]!);
+  const signature = segments[2]!;
+  return header !== undefined
+    && typeof header.alg === 'string'
+    && header.alg.length > 0
+    && payload?.role === 'service_role'
+    && /^[A-Za-z0-9_-]+$/.test(signature)
+    && Buffer.from(signature, 'base64url').toString('base64url') === signature;
+}
+
+function assertProjectWideSecretKey(value: string): void {
+  // This rejects obviously partial-project credentials; Supabase remains the
+  // authority that authenticates the supplied key during the source reads.
+  if (!isProjectWideSecretKey(value)) {
+    throw new Error(
+      'PLOTTER_SUPABASE_SECRET_KEY must be a Supabase secret or service_role key.',
+    );
+  }
 }
 
 function projectReference(urlValue: string): string {
@@ -366,13 +422,15 @@ async function captureLiveSource(
     throw new Error('PLOTTER_SUPABASE_URL and PLOTTER_SUPABASE_SECRET_KEY are required.');
   }
   if (!databasePassword) throw new Error('PLOTTER_SUPABASE_DB_PASSWORD is required.');
+  assertProjectWideSecretKey(secretKey);
   const expectedProjectReference = projectReference(url);
   const runCommand = dependencies.runCommand ?? defaultRunCommand;
   const localSupabaseExecutable = resolve(repositoryRoot, 'node_modules', '.bin', 'supabase');
   const supabaseExecutable = existsSync(localSupabaseExecutable)
     ? localSupabaseExecutable
     : 'supabase';
-  const commandOptions = { cwd: repositoryRoot, environment };
+  const cliEnvironment = createSupabaseCliEnvironment(environment);
+  const commandOptions = { cwd: repositoryRoot, environment: cliEnvironment };
   const projects = parseProjectList((await runCommand(
     supabaseExecutable,
     ['projects', 'list', '--output-format', 'json'],
@@ -401,14 +459,17 @@ async function captureLiveSource(
   try {
     const schemaPath = join(dumpRoot, 'schema.sql');
     const dataPath = join(dumpRoot, 'data.sql');
+    const dumpCommandOptions = {
+      cwd: repositoryRoot,
+      environment: { ...cliEnvironment, SUPABASE_DB_PASSWORD: databasePassword },
+    };
     await runCommand(supabaseExecutable, [
-      'db', 'dump', '--linked', '--schema', 'public', '--password', databasePassword,
-      '--file', schemaPath,
-    ], commandOptions);
+      'db', 'dump', '--linked', '--schema', 'public', '--file', schemaPath,
+    ], dumpCommandOptions);
     await runCommand(supabaseExecutable, [
       'db', 'dump', '--linked', '--schema', 'public', '--data-only', '--use-copy',
-      '--password', databasePassword, '--file', dataPath,
-    ], commandOptions);
+      '--file', dataPath,
+    ], dumpCommandOptions);
     const rawSchemaSql = await readFile(schemaPath, 'utf8');
     const rawDataSql = await readFile(dataPath, 'utf8');
     const schema = parsePublicTableSchema(rawSchemaSql);

@@ -9,7 +9,14 @@ import { acquireDataDirectoryOwnership } from '../../server/maintenanceLock';
 import { createPlotterStorageRuntime } from '../../server/storageRuntime';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { KNOWN_SOURCE_SCHEMA } from './source';
-import { loadFixtureSource, main, parseMigrationArguments, parsePublicTableSchema, runMigration } from './cli';
+import {
+  defaultRunCommand,
+  loadFixtureSource,
+  main,
+  parseMigrationArguments,
+  parsePublicTableSchema,
+  runMigration,
+} from './cli';
 
 const fixturePath = join(import.meta.dirname, 'fixtures', 'complete-project.json');
 const temporaryDirectories: string[] = [];
@@ -24,6 +31,13 @@ function canonicalRoot(): string {
   const database = openPlotterDatabase(join(root, 'plotter.sqlite3'));
   database.close();
   return root;
+}
+
+function syntheticJwt(role: string): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ role })).toString('base64url');
+  const signature = Buffer.from('synthetic-signature').toString('base64url');
+  return `${header}.${payload}.${signature}`;
 }
 
 describe('Supabase migration CLI', () => {
@@ -46,7 +60,7 @@ describe('Supabase migration CLI', () => {
     expect(result.applied).toBe(false);
     expect(result.stagingLabel).toBe(`temporary/${result.stagingId}`);
     expect(existsSync(join(stagingRoot, 'report.json'))).toBe(true);
-    expect(existsSync(join(stagingRoot, 'raw', 'schema.sql'))).toBe(true);
+    expect(existsSync(join(stagingRoot, 'source-archive', 'raw', 'schema.sql'))).toBe(true);
     expect(result.sourceFingerprintDigest).toMatch(/^[0-9a-f]{64}$/);
   });
 
@@ -112,12 +126,100 @@ describe('Supabase migration CLI', () => {
     expect(result.stderr).toContain('Supabase migration failed.');
   });
 
+  it('does not merge the parent process environment into a command', async () => {
+    const parentSecretName = 'PLOTTER_TEST_PARENT_ONLY_SECRET';
+    const previousParentSecret = process.env[parentSecretName];
+    process.env[parentSecretName] = 'must-not-reach-child';
+    try {
+      const childEnvironment = {
+        PATH: process.env.PATH,
+        PLOTTER_TEST_ALLOWED_VALUE: 'explicit-child-value',
+      };
+      const result = await defaultRunCommand(process.execPath, [
+        '-e',
+        'process.stdout.write(JSON.stringify(process.env))',
+      ], {
+        cwd: import.meta.dirname,
+        environment: childEnvironment,
+      });
+
+      const receivedEnvironment = JSON.parse(result.stdout) as Record<string, string>;
+      expect(receivedEnvironment).toMatchObject(childEnvironment);
+      expect(receivedEnvironment[parentSecretName]).toBeUndefined();
+      expect(Object.keys(receivedEnvironment).filter((name) => (
+        !(name in childEnvironment) && name !== '__CF_USER_TEXT_ENCODING'
+      ))).toEqual([]);
+    } finally {
+      if (previousParentSecret === undefined) delete process.env[parentSecretName];
+      else process.env[parentSecretName] = previousParentSecret;
+    }
+  });
+
+  it.each([
+    ['an arbitrary value', 'runtime-secret-value'],
+    ['a publishable key', 'sb_publishable_synthetic-browser-key'],
+    ['a legacy anon JWT', syntheticJwt('anon')],
+    [
+      'a malformed JWT claiming service_role',
+      `not-json.${Buffer.from(JSON.stringify({ role: 'service_role' })).toString('base64url')}.signature`,
+    ],
+  ])('rejects %s before invoking Supabase CLI', async (_label, secretKey) => {
+    const dataDirectory = canonicalRoot();
+    let commandCalls = 0;
+
+    await expect(runMigration({ mode: 'dry-run', dataDirectory }, {
+      environment: {
+        PLOTTER_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
+        PLOTTER_SUPABASE_SECRET_KEY: secretKey,
+        PLOTTER_SUPABASE_DB_PASSWORD: 'synthetic-database-password',
+      },
+      async runCommand() {
+        commandCalls += 1;
+        throw new Error('credential gate was bypassed');
+      },
+    })).rejects.toThrow(
+      'PLOTTER_SUPABASE_SECRET_KEY must be a Supabase secret or service_role key.',
+    );
+    expect(commandCalls).toBe(0);
+  });
+
+  it.each([
+    ['a secret key', 'sb_secret_synthetic-server-key'],
+    ['a legacy service_role JWT', syntheticJwt('service_role')],
+  ])('accepts %s through the local credential-shape gate', async (_label, secretKey) => {
+    const dataDirectory = canonicalRoot();
+    let commandCalls = 0;
+
+    await expect(runMigration({ mode: 'dry-run', dataDirectory }, {
+      environment: {
+        PLOTTER_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
+        PLOTTER_SUPABASE_SECRET_KEY: secretKey,
+        PLOTTER_SUPABASE_DB_PASSWORD: 'synthetic-database-password',
+      },
+      async runCommand() {
+        commandCalls += 1;
+        throw new Error('synthetic accepted-credential stop');
+      },
+    })).rejects.toThrow('synthetic accepted-credential stop');
+    expect(commandCalls).toBe(1);
+  });
+
   it('uses disabled auth persistence and only authenticated linked public schema/COPY dump commands in live mode', async () => {
     const dataDirectory = canonicalRoot();
     const projectRef = 'abcdefghijklmnopqrst';
-    const secret = 'runtime-secret-value';
+    const secret = 'sb_secret_synthetic-runtime-value';
     const password = 'separate-db-password';
-    const calls: string[][] = [];
+    const safeEnvironment = {
+      HOME: '/synthetic/home',
+      PATH: '/synthetic/bin',
+      TMPDIR: '/synthetic/tmp',
+      XDG_CONFIG_HOME: '/synthetic/config',
+      SUPABASE_ACCESS_TOKEN: 'synthetic-cli-access-token',
+    };
+    const calls: Array<{
+      arguments: string[];
+      environment: Record<string, string | undefined>;
+    }> = [];
     const executables: string[] = [];
     const clientOptions: Record<string, unknown>[] = [];
     const logs: string[] = [];
@@ -144,14 +246,16 @@ describe('Supabase migration CLI', () => {
 
     const result = await runMigration({ mode: 'dry-run', dataDirectory }, {
       environment: {
+        ...safeEnvironment,
         PLOTTER_SUPABASE_URL: `https://${projectRef}.supabase.co`,
         PLOTTER_SUPABASE_SECRET_KEY: secret,
         PLOTTER_SUPABASE_DB_PASSWORD: password,
+        UNRELATED_SECRET: 'must-not-reach-child',
       },
       async readLinkedProjectReference() { return projectRef; },
-      async runCommand(file, arguments_) {
+      async runCommand(file, arguments_, options) {
         executables.push(file);
-        calls.push(arguments_);
+        calls.push({ arguments: arguments_, environment: options.environment });
         if (arguments_[0] === 'projects') return { stdout: JSON.stringify([{ id: projectRef }]) };
         const outputPath = arguments_[arguments_.indexOf('--file') + 1]!;
         writeFileSync(outputPath, arguments_.includes('--data-only') ? '-- COPY data\n' : schemaSql);
@@ -169,12 +273,23 @@ describe('Supabase migration CLI', () => {
       { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },
       { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },
     ]);
-    expect(calls.filter((call) => call[0] === 'projects')).toHaveLength(2);
+    const projectCalls = calls.filter((call) => call.arguments[0] === 'projects');
+    const dumpCalls = calls.filter((call) => call.arguments[0] === 'db');
+    expect(projectCalls).toHaveLength(2);
     expect(new Set(executables)).toEqual(new Set(['supabase']));
-    expect(calls.filter((call) => call[0] === 'db')).toEqual(expect.arrayContaining([
-      expect.arrayContaining(['db', 'dump', '--linked', '--schema', 'public', '--password', password, '--file']),
-      expect.arrayContaining(['db', 'dump', '--linked', '--schema', 'public', '--data-only', '--use-copy', '--password', password, '--file']),
+    expect(dumpCalls.map((call) => call.arguments)).toEqual(expect.arrayContaining([
+      expect.arrayContaining(['db', 'dump', '--linked', '--schema', 'public', '--file']),
+      expect.arrayContaining(['db', 'dump', '--linked', '--schema', 'public', '--data-only', '--use-copy', '--file']),
     ]));
+    expect(calls.every((call) => !call.arguments.includes('--password'))).toBe(true);
+    expect(calls.every((call) => !call.arguments.includes(password))).toBe(true);
+    for (const call of projectCalls) expect(call.environment).toEqual(safeEnvironment);
+    for (const call of dumpCalls) {
+      expect(call.environment).toEqual({
+        ...safeEnvironment,
+        SUPABASE_DB_PASSWORD: password,
+      });
+    }
     expect(logs.join('\n')).not.toContain(secret);
     expect(logs.join('\n')).not.toContain(password);
     expect(logs.join('\n')).not.toContain(projectRef);
