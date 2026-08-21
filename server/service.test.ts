@@ -1,7 +1,7 @@
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it } from 'vitest';
 
@@ -182,12 +182,19 @@ it.each([
   await expectReady(port, child, errors);
 }, 15_000);
 
-it('runs dev:service without a repository .env using disposable user data', async () => {
-  expect(existsSync(join(repositoryRoot, '.env'))).toBe(false);
+it('runs dev:service with an explicitly missing optional env file and disposable user data', async () => {
+  const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')) as {
+    scripts?: Record<string, string>;
+  };
+  expect(packageJson.scripts?.['dev:service']).toContain(
+    '--env-file-if-exists=${PLOTTER_SERVICE_ENV_FILE:-.env}',
+  );
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
   mkdirSync(testDataParent, { recursive: true });
   const dataDirectory = mkdtempSync(resolve(testDataParent, 'service-dev-no-env-'));
   temporaryDirectories.push(dataDirectory);
+  const missingEnvFile = resolve(dataDirectory, 'missing.env');
+  expect(existsSync(missingEnvFile)).toBe(false);
   const port = await reservePort();
   const child = spawn('npm', ['run', 'dev:service'], {
     cwd: repositoryRoot,
@@ -195,6 +202,7 @@ it('runs dev:service without a repository .env using disposable user data', asyn
       PATH: process.env.PATH ?? '',
       PLOTTER_SERVICE_PORT: String(port),
       PLOTTER_SERVICE_DATA_DIR: dataDirectory,
+      PLOTTER_SERVICE_ENV_FILE: missingEnvFile,
     },
     stdio: ['ignore', 'ignore', 'pipe'],
   });

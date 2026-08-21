@@ -32,6 +32,8 @@ that release.
 
 `.env` is optional: `npm run dev:service` and the hosted service tolerate its
 absence, while a present but unreadable file stops service startup. The
+development command uses `.env` by default; set `PLOTTER_SERVICE_ENV_FILE` to
+an alternate optional file when an isolated development run needs one. The
 `VITE_MAPTILER_API_KEY` and `VITE_OPENROUTESERVICE_API_KEY` values are read by
 Vite when development or a browser release starts building and are exposed to
 browser code; restart Vite after changing them. `SERPAPI_API_KEY` is different:
