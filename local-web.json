@@ -45,6 +45,15 @@
       "connectSources": [
         "https://api.maptiler.com",
         "https://api.openrouteservice.org"
+      ],
+      "imgSources": [
+        "blob:"
+      ],
+      "workerSources": [
+        "blob:"
+      ],
+      "childSources": [
+        "blob:"
       ]
     },
     "startCommand": [

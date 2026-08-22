@@ -54,6 +54,9 @@ describe('Plotter local-web service release contract', () => {
             'https://api.maptiler.com',
             'https://api.openrouteservice.org',
           ],
+          imgSources: ['blob:'],
+          workerSources: ['blob:'],
+          childSources: ['blob:'],
         },
         startCommand: [
           '/usr/bin/env', 'node', '{release}/server/service.mjs', '--', '--port', '{port}',
