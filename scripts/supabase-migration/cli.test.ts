@@ -379,6 +379,46 @@ describe('Supabase migration CLI', () => {
     expect(logs.join('\n')).not.toContain(projectRef);
   });
 
+  it('lets the linked Supabase CLI use its stored database credential when no password is supplied', async () => {
+    const dataDirectory = canonicalRoot();
+    const projectRef = 'abcdefghijklmnopqrst';
+    const safeEnvironment = {
+      HOME: '/synthetic/home',
+      PATH: '/synthetic/bin',
+      XDG_CONFIG_HOME: '/synthetic/config',
+      SUPABASE_ACCESS_TOKEN: 'synthetic-cli-access-token',
+    };
+    const calls: Array<{
+      arguments: string[];
+      environment: Record<string, string | undefined>;
+    }> = [];
+
+    const result = await runMigration({ mode: 'dry-run', dataDirectory }, {
+      environment: {
+        ...safeEnvironment,
+        PLOTTER_SUPABASE_URL: `https://${projectRef}.supabase.co`,
+        PLOTTER_SUPABASE_SECRET_KEY: 'sb_secret_synthetic-runtime-value',
+      },
+      async readLinkedProjectReference() { return projectRef; },
+      async runCommand(_file, arguments_, options) {
+        calls.push({ arguments: arguments_, environment: options.environment });
+        if (arguments_[0] === 'projects') return { stdout: JSON.stringify([{ id: projectRef }]) };
+        const outputPath = arguments_[arguments_.indexOf('--file') + 1]!;
+        writeFileSync(outputPath, arguments_.includes('--data-only') ? emptyCopySql() : knownSchemaSql());
+        return { stdout: '' };
+      },
+      createClient() { return emptySyntheticClient(); },
+    });
+
+    expect(result.report.passed).toBe(true);
+    const dumpCalls = calls.filter((call) => call.arguments[0] === 'db');
+    expect(dumpCalls).toHaveLength(4);
+    for (const call of dumpCalls) {
+      expect(call.environment).toEqual(safeEnvironment);
+      expect(call.environment.SUPABASE_DB_PASSWORD).toBeUndefined();
+    }
+  });
+
   it('rejects RLS-limited SDK rows when authoritative COPY contains a fuller table', async () => {
     const dataDirectory = canonicalRoot();
     const projectRef = 'abcdefghijklmnopqrst';

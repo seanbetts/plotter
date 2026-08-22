@@ -94,12 +94,14 @@ npm run migrate:supabase -- --dry-run \
   --fixture scripts/supabase-migration/fixtures/complete-project.json
 ```
 
-A real source dry-run requires runtime-only `PLOTTER_SUPABASE_URL`,
-`PLOTTER_SUPABASE_SECRET_KEY`, and the separate
-`PLOTTER_SUPABASE_DB_PASSWORD`. Never give these variables a `VITE_` prefix or
-put them in a release. The local Supabase CLI must already be authenticated and
-linked to the same project reference as the URL. Migration validates those
-conditions before issuing read-only public-schema and data-only COPY dumps.
+A real source dry-run requires runtime-only `PLOTTER_SUPABASE_URL` and
+`PLOTTER_SUPABASE_SECRET_KEY`. The local Supabase CLI must already be
+authenticated and linked to the same project reference as the URL. If that
+linked CLI does not already hold the database password in native credential
+storage, also set the separate `PLOTTER_SUPABASE_DB_PASSWORD`. Never give any
+secret variable a `VITE_` prefix or put it in a release. Migration validates
+those conditions before issuing read-only public-schema and data-only COPY
+dumps.
 The JavaScript source pass uses exact, paged `select`, Storage `list`, and
 Storage `download` calls only; it disables session persistence, token refresh,
 and URL-session detection. Every downloaded object is checked against the

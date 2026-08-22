@@ -347,7 +347,6 @@ async function captureLiveSource(
   if (!url || !secretKey) {
     throw new Error('PLOTTER_SUPABASE_URL and PLOTTER_SUPABASE_SECRET_KEY are required.');
   }
-  if (!databasePassword) throw new Error('PLOTTER_SUPABASE_DB_PASSWORD is required.');
   assertProjectWideSecretKey(secretKey);
   const expectedProjectReference = projectReference(url);
   const runCommand = dependencies.runCommand ?? defaultRunCommand;
@@ -434,7 +433,10 @@ async function captureLiveSource(
   try {
     const dumpCommandOptions = {
       cwd: repositoryRoot,
-      environment: { ...cliEnvironment, SUPABASE_DB_PASSWORD: databasePassword },
+      environment: {
+        ...cliEnvironment,
+        ...(databasePassword ? { SUPABASE_DB_PASSWORD: databasePassword } : {}),
+      },
     };
     await runCommand(supabaseExecutable, [
       'db', 'dump', '--linked', '--schema', 'public', '--file', schemaPath,
