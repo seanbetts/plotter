@@ -20,6 +20,7 @@ import {
   fingerprintSourceSnapshot,
   parseSourceDumpEvidence,
   readSourceSnapshot,
+  reconcileCopySource,
   sourceFingerprintDigest,
   validateSourceSchema,
   validateStorageObjectBytes,
@@ -830,6 +831,7 @@ export async function runMigration(
     return captureLiveSource(repositoryRoot, dependencies, captureRoot);
   };
   let first: LoadedFixtureSource;
+  let authoritativeFirstSource: SourceSnapshot;
   let firstDumpEvidence: ReturnType<typeof parseSourceDumpEvidence>;
   try {
     first = await load('first');
@@ -838,14 +840,14 @@ export async function runMigration(
       first.rawDataSql,
       first.schema,
     );
-    assertCopyMatchesSource(firstDumpEvidence, first.source);
+    authoritativeFirstSource = reconcileCopySource(firstDumpEvidence, first.source);
   } catch (error) {
     if (runRoot) await retainCaptureFailure(runRoot, error);
     throw error;
   }
   runRoot ??= await createMigrationRunRoot(stagingParent);
   const firstFingerprint = fingerprintSourceSnapshot(
-    first.source,
+    authoritativeFirstSource,
     first.schema,
     firstDumpEvidence,
     first.provenance?.projectReference ?? null,
@@ -871,13 +873,13 @@ export async function runMigration(
   const materialized = await materializeSource({
     destinationRoot: materializedRoot,
     archiveRelativePath,
-    source: first.source,
+    source: authoritativeFirstSource,
     fingerprint: firstFingerprint,
     importedAt: new Date().toISOString(),
     provenance: first.provenance,
   });
   const reconciliationReport = reconcileMaterialization({
-    source: first.source,
+    source: authoritativeFirstSource,
     fingerprint: firstFingerprint,
     materialized,
   });
@@ -892,8 +894,9 @@ export async function runMigration(
       second.rawDataSql,
       second.schema,
     );
+    const authoritativeSecondSource = reconcileCopySource(secondDumpEvidence, second.source);
     const secondDigest = sourceFingerprintDigest(fingerprintSourceSnapshot(
-      second.source,
+      authoritativeSecondSource,
       second.schema,
       secondDumpEvidence,
       second.provenance?.projectReference ?? null,

@@ -169,6 +169,44 @@ describe('Supabase migration CLI', () => {
       .rejects.toThrow('Supabase migration fixture raw dumps are inconsistent.');
   });
 
+  it('materializes the authoritative COPY float8 value without mutating the archived SDK row', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'plotter-float8-reconciliation-'));
+    temporaryDirectories.push(root);
+    const stagingParent = join(root, 'staging');
+    mkdirSync(stagingParent, { mode: 0o700 });
+    const reconciledFixturePath = join(root, 'fixture.json');
+    const fixture = JSON.parse(readFileSync(fixturePath, 'utf8')) as {
+      tables: { destinations: Array<{ id: string; lat: number }> };
+      rawDataSql: string;
+    };
+    fixture.rawDataSql = fixture.rawDataSql.replace(
+      '\t51\t-0.1\t',
+      '\t51.00000000000001\t-0.1\t',
+    );
+    writeFileSync(reconciledFixturePath, JSON.stringify(fixture));
+
+    const result = await runMigration({ mode: 'dry-run', fixturePath: reconciledFixturePath }, {
+      createTemporaryStagingParent: async () => stagingParent,
+    });
+    const stagingRoot = join(stagingParent, result.stagingId);
+    const database = new DatabaseSync(join(stagingRoot, 'materialized', 'plotter.sqlite3'), {
+      readOnly: true,
+    });
+    try {
+      const row = database.prepare('SELECT lat FROM destinations WHERE id = ?').get(
+        fixture.tables.destinations[0]!.id,
+      ) as { lat: number };
+      expect(row.lat).toBe(51.00000000000001);
+      const archivedRows = JSON.parse(readFileSync(
+        join(stagingRoot, 'source-archive', 'tables', 'destinations.json'),
+        'utf8',
+      )) as Array<{ lat: number }>;
+      expect(archivedRows[0]!.lat).toBe(51);
+    } finally {
+      database.close();
+    }
+  });
+
   it('does not reveal absolute fixture or data roots in normal CLI output', async () => {
     const dataDirectory = canonicalRoot();
     let stdout = '';

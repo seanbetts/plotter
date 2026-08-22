@@ -11,6 +11,7 @@ import {
   fingerprintSourceSnapshot,
   parseSourceDumpEvidence,
   readSourceSnapshot,
+  reconcileCopySource,
   sourceFingerprintDigest,
   validateSourceSchema,
   type SourceBackend,
@@ -363,6 +364,57 @@ describe('read-only Supabase source inventory', () => {
       storage: [],
     })).not.toThrow();
     expect(evidence.copyInventories.destinations.rowCount).toBe(2);
+  });
+
+  it.each([
+    ['destinations', 0, 'lat', 51, '51.00000000000001'],
+    ['destinations', 0, 'lng', -0.1, '-0.10000000000000002'],
+    ['route_legs', 0, 'distance_km', 123.456789012345, '123.45678901234504'],
+    ['route_legs', 0, 'travel_time_hours', 8.5, '8.500000000000002'],
+  ] as const)('uses COPY as the authoritative value for %s row %i column %s float8 differences', (
+    table,
+    rowIndex,
+    column,
+    sdkValue,
+    copyValue,
+  ) => {
+    const fixture = completeFixture();
+    fixture.tables[table][rowIndex]![column] = sdkValue;
+    fixture.rawDataSql = replaceCopyRows(fixture.rawDataSql, table, (rows, columns) => {
+      const cells = rows[rowIndex]!.split('\t');
+      cells[columns.indexOf(column)] = copyValue;
+      return rows.map((row, index) => index === rowIndex ? cells.join('\t') : row);
+    });
+    const evidence = parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    );
+    const source = { tables: fixture.tables, storage: [] };
+
+    const reconciled = reconcileCopySource(evidence, source);
+
+    expect(reconciled.tables[table][rowIndex]![column]).toBe(Number(copyValue));
+    expect(source.tables[table][rowIndex]![column]).toBe(sdkValue);
+  });
+
+  it('rejects a meaningful float8 difference at 15 significant digits', () => {
+    const fixture = completeFixture();
+    fixture.rawDataSql = replaceCopyRows(fixture.rawDataSql, 'destinations', (rows, columns) => {
+      const cells = rows[0]!.split('\t');
+      cells[columns.indexOf('lat')] = '51.000000000001';
+      return [cells.join('\t'), ...rows.slice(1)];
+    });
+    const evidence = parseSourceDumpEvidence(
+      fixture.rawSchemaSql,
+      fixture.rawDataSql,
+      fixture.schema,
+    );
+
+    expect(() => reconcileCopySource(evidence, {
+      tables: fixture.tables,
+      storage: [],
+    })).toThrow('Supabase COPY rows do not exactly match the SDK inventory.');
   });
 
   it('distinguishes one-microsecond timestamp drift that millisecond Date parsing loses', () => {

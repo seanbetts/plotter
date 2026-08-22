@@ -188,6 +188,11 @@ const INTEGER_COLUMNS: Partial<Record<SourceTableName, Set<string>>> = {
   media_assets: new Set(['size_bytes', 'sort_order']),
 };
 
+const COPY_AUTHORITATIVE_FLOAT8_COLUMNS: Partial<Record<SourceTableName, Set<string>>> = {
+  destinations: new Set(['lat', 'lng']),
+  route_legs: new Set(['distance_km', 'travel_time_hours']),
+};
+
 function canonicalTimestamp(value: string): string {
   const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}(?::?\d{2})?)$/.exec(value);
   if (!match) throw new Error('Source timestamp is invalid.');
@@ -476,27 +481,58 @@ export function parseSourceDumpEvidence(
   };
 }
 
-export function assertCopyMatchesSource(
+export function reconcileCopySource(
   evidence: SourceDumpEvidence,
   source: SourceSnapshot,
-): void {
+): SourceSnapshot {
   try {
+    const tables = {} as SourceSnapshot['tables'];
     for (const table of SOURCE_TABLES) {
       const copy = evidence.copyInventories[table];
-      const structured = source.tables[table]
-        .map((row) => canonicalStructuredRow(table, copy.columns, row))
-        .sort((left, right) => stableRowKey(table, left).localeCompare(stableRowKey(table, right)));
-      const ids = structured.map((row) => stableRowKey(table, row));
+      const structured = source.tables[table].map((row) => ({
+        original: row,
+        canonical: canonicalStructuredRow(table, copy.columns, row),
+      })).sort((left, right) => (
+        stableRowKey(table, left.canonical).localeCompare(stableRowKey(table, right.canonical))
+      ));
+      const ids = structured.map(({ canonical }) => stableRowKey(table, canonical));
       if (
         new Set(ids).size !== ids.length
         || structured.length !== copy.rowCount
         || sha256(canonicalJson(ids)) !== copy.idsSha256
-        || sha256(canonicalJson(structured)) !== copy.rowsSha256
       ) throw new Error('mismatch');
+      tables[table] = structured.map(({ original, canonical }, index) => {
+        const copyRow = copy.rows[index]!;
+        const reconciled = { ...original };
+        for (const column of copy.columns) {
+          const copyValue = copyRow[column];
+          const structuredValue = canonical[column];
+          if (COPY_AUTHORITATIVE_FLOAT8_COLUMNS[table]?.has(column)) {
+            const matches = copyValue === null || structuredValue === null
+              ? copyValue === structuredValue
+              : typeof copyValue === 'number'
+                && typeof structuredValue === 'number'
+                && copyValue.toPrecision(15) === structuredValue.toPrecision(15);
+            if (!matches) throw new Error('mismatch');
+            reconciled[column] = copyValue;
+          } else if (canonicalJson(copyValue) !== canonicalJson(structuredValue)) {
+            throw new Error('mismatch');
+          }
+        }
+        return reconciled;
+      });
     }
+    return { tables, storage: [...source.storage] };
   } catch {
     throw new Error('Supabase COPY rows do not exactly match the SDK inventory.');
   }
+}
+
+export function assertCopyMatchesSource(
+  evidence: SourceDumpEvidence,
+  source: SourceSnapshot,
+): void {
+  reconcileCopySource(evidence, source);
 }
 
 export function validateSourceSchema(schema: Record<string, readonly string[]>): asserts schema is SourceSchema {
