@@ -108,6 +108,34 @@ it('reports ready after opening the canonical database and service stores', asyn
   });
 });
 
+it('stops cleanly and releases data ownership with an active event stream', async () => {
+  const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
+  mkdirSync(testDataParent, { recursive: true });
+  const dataDirectory = mkdtempSync(resolve(testDataParent, 'service-sse-shutdown-'));
+  temporaryDirectories.push(dataDirectory);
+  const port = await reservePort();
+  const child = spawn(process.execPath, [
+    resolve(repositoryRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    'server/service.ts',
+    '--port', String(port),
+    '--data-dir', dataDirectory,
+  ], {
+    cwd: repositoryRoot,
+    stdio: 'ignore',
+  });
+  processes.push(child);
+
+  await expectReady(port, child);
+  const events = await fetch(`http://127.0.0.1:${port}/api/v1/events`);
+  expect(events.status).toBe(200);
+  expect(existsSync(resolve(dataDirectory, '.plotter-storage-owner.lock'))).toBe(true);
+
+  await stopProcess(child);
+
+  expect(existsSync(resolve(dataDirectory, '.plotter-storage-owner.lock'))).toBe(false);
+  await expectPortClosed(port);
+}, 10_000);
+
 it('starts the bundled service with an existing env file without exposing its contents', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
   mkdirSync(testDataParent, { recursive: true });

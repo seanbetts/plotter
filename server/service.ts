@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseServiceArguments, resolveServiceRepositoryRoot } from './args';
@@ -60,15 +60,24 @@ const handler = createPlotterHttpHandler({
   publicRoot: resolve(repositoryRoot, 'public'),
 });
 
+const eventStreams = new Set<ServerResponse>();
 const server = createServer((request, response) => {
+  if (request.method === 'GET' && request.url === '/api/v1/events') {
+    eventStreams.add(response);
+    response.once('close', () => eventStreams.delete(response));
+  }
   void handler(request, response);
 });
 
+let closing = false;
 function closeService(): void {
+  if (closing) return;
+  closing = true;
   server.close(() => {
     try { storage.close(); } catch { /* Readiness was revoked before physical close. */ }
     try { dataDirectoryOwnership.release(); } catch { /* A retained lock fails closed. */ }
   });
+  for (const response of eventStreams) response.destroy();
 }
 
 process.once('exit', () => {
