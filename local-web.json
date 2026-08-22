@@ -41,6 +41,12 @@
     "proxyPaths": [
       "/api"
     ],
+    "frontendSecurity": {
+      "connectSources": [
+        "https://api.maptiler.com",
+        "https://api.openrouteservice.org"
+      ]
+    },
     "startCommand": [
       "/usr/bin/env",
       "node",

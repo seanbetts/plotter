@@ -49,6 +49,12 @@ describe('Plotter local-web service release contract', () => {
         internalHealthPath: '/healthz',
         frontendOutput: 'public',
         proxyPaths: ['/api'],
+        frontendSecurity: {
+          connectSources: [
+            'https://api.maptiler.com',
+            'https://api.openrouteservice.org',
+          ],
+        },
         startCommand: [
           '/usr/bin/env', 'node', '{release}/server/service.mjs', '--', '--port', '{port}',
           '--data-dir', '{repository}/user-data', '--env-file', '{repository}/.env',
