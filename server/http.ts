@@ -574,7 +574,7 @@ function decodedId(value: string | undefined): string {
   }
 }
 
-function json(response: ServerResponse, status: number, body: unknown): void {
+function json(response: ServerResponse, status: number, body: unknown, omitBody = false): void {
   const bytes = Buffer.from(JSON.stringify(body));
   response.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -582,7 +582,7 @@ function json(response: ServerResponse, status: number, body: unknown): void {
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
   });
-  response.end(bytes);
+  response.end(omitBody ? undefined : bytes);
 }
 
 function errorBody(status: 400 | 404 | 503 | 500, code: 'invalid-request' | 'not-found' | 'storage-unavailable' | 'internal-error', message: string) {
@@ -983,9 +983,9 @@ export function createPlotterHttpHandler(dependencies: PlotterHttpDependencies) 
       const method = request.method ?? '';
       const handle = async (): Promise<void> => {
 
-      if (pathname === '/healthz' && method === 'GET') {
-        if (dependencies.readiness().ready) json(response, 200, { ready: true });
-        else json(response, 503, errorBody(503, 'storage-unavailable', STORAGE_UNAVAILABLE_MESSAGE));
+      if (pathname === '/healthz' && (method === 'GET' || method === 'HEAD')) {
+        if (dependencies.readiness().ready) json(response, 200, { ready: true }, method === 'HEAD');
+        else json(response, 503, errorBody(503, 'storage-unavailable', STORAGE_UNAVAILABLE_MESSAGE), method === 'HEAD');
         return;
       }
 

@@ -190,6 +190,11 @@ describe('Plotter HTTP state routes', () => {
     expect(readyResponse.headers.get('cache-control')).toBe('no-store');
     await expect(readyResponse.json()).resolves.toEqual({ ready: true });
 
+    const readyHeadResponse = await fetch(`${readyBase}/healthz`, { method: 'HEAD' });
+    expect(readyHeadResponse.status).toBe(200);
+    expect(readyHeadResponse.headers.get('cache-control')).toBe('no-store');
+    await expect(readyHeadResponse.text()).resolves.toBe('');
+
     const unavailable = dependencies();
     unavailable.values.readiness = () => ({ ready: false, reason: '/private/path sqlite exploded' });
     const unavailableBase = await start(unavailable.values);
@@ -199,6 +204,11 @@ describe('Plotter HTTP state routes', () => {
       status: 503,
       error: { code: 'storage-unavailable', message: 'Plotter storage is unavailable.' },
     });
+
+    const unavailableHeadResponse = await fetch(`${unavailableBase}/healthz`, { method: 'HEAD' });
+    expect(unavailableHeadResponse.status).toBe(503);
+    expect(unavailableHeadResponse.headers.get('cache-control')).toBe('no-store');
+    await expect(unavailableHeadResponse.text()).resolves.toBe('');
   });
 
   it('routes directory CRUD and coherent trip snapshots through revisioned stores', async () => {
