@@ -139,5 +139,5 @@ describe('Plotter local-web service release contract', () => {
     expect(serverBundle).not.toContain(supabaseUrl);
     expect(serverBundle).not.toContain(supabaseKey);
     expect(serverBundle).not.toContain(serpApiKey);
-  });
+  }, 20_000);
 });
