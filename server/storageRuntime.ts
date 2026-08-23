@@ -177,6 +177,8 @@ export async function createPlotterStorageRuntime(
   };
   const tripRepository = (tripId: string): RevisionedTripStore => ({
     load: async (...arguments_) => requireRuntime().tripRepository(tripId).load(...arguments_),
+    loadContext: async (...arguments_) => requireRuntime().tripRepository(tripId)
+      .loadContext(...arguments_),
     mutate: async (...arguments_) => requireRuntime().tripRepository(tripId).mutate(...arguments_),
     listDestinationMedia: async (...arguments_) => requireRuntime().tripRepository(tripId)
       .listDestinationMedia(...arguments_),

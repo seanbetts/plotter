@@ -49,6 +49,23 @@ function dependencies() {
   };
   const trip: RevisionedTripStore = {
     async load() { return { revision: 4, destinations: [], routeLegs: [], activities: [] }; },
+    async loadContext() {
+      return {
+        directoryRevision: 2,
+        tripRevision: 4,
+        trip: {
+          id: 'trip-1',
+          name: 'North',
+          description: '',
+          createdAt: '2026-08-17T10:00:00.000Z',
+          updatedAt: '2026-08-17T10:00:00.000Z',
+          routingVehicle: { preset: 'standard', profile: 'driving-car', restrictions: {} },
+        },
+        destinations: [],
+        routeLegs: [],
+        activities: [],
+      };
+    },
     async mutate(_expectedRevision, mutation) {
       mutations.push(mutation);
       return { revision: 5 };
@@ -244,6 +261,44 @@ describe('Plotter HTTP state routes', () => {
     });
     await jsonRequest(`${base}/api/v1/trips/trip-1`, 'DELETE', { expectedRevision: 3 }, true);
     expect(remove).toHaveBeenCalledWith(3, 'trip-1');
+  });
+
+  it('returns one active-trip context snapshot without invoking external providers', async () => {
+    const harness = dependencies();
+    const contextSnapshot = {
+      directoryRevision: 2,
+      tripRevision: 4,
+      trip: {
+        id: 'trip-1',
+        name: 'North',
+        description: 'Winter route',
+        createdAt: '2026-08-17T10:00:00.000Z',
+        updatedAt: '2026-08-17T11:00:00.000Z',
+        routingVehicle: {
+          preset: 'large-camper' as const,
+          profile: 'driving-car' as const,
+          restrictions: { height: 3.2 },
+        },
+      },
+      destinations: [],
+      routeLegs: [],
+      activities: [],
+    };
+    const loadContext = vi.fn(async () => contextSnapshot);
+    Object.assign(harness.values.tripRepository('trip-1'), { loadContext });
+    const linkPreview = vi.spyOn(harness.values.providers, 'linkPreview');
+    const imageSearch = vi.spyOn(harness.values.providers, 'imageSearch');
+    const remoteImage = vi.spyOn(harness.values.providers, 'remoteImage');
+    const base = await start(harness.values);
+
+    const response = await fetch(`${base}/api/v1/trips/trip-1/context`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(contextSnapshot);
+    expect(loadContext).toHaveBeenCalledOnce();
+    expect(linkPreview).not.toHaveBeenCalled();
+    expect(imageSearch).not.toHaveBeenCalled();
+    expect(remoteImage).not.toHaveBeenCalled();
   });
 
   it.each<[string, TripMutationRequest]>([

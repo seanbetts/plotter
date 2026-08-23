@@ -1041,6 +1041,15 @@ export function createPlotterHttpHandler(dependencies: PlotterHttpDependencies) 
         return;
       }
 
+      const tripContextMatch = pathname.match(/^\/api\/v1\/trips\/([^/]+)\/context$/);
+      if (tripContextMatch && method === 'GET') {
+        ensureReady(dependencies);
+        const trip = dependencies.tripRepository(decodedId(tripContextMatch[1]));
+        if (!trip.loadContext) throw new Error('Trip context is unavailable.');
+        json(response, 200, await trip.loadContext());
+        return;
+      }
+
       const mutationMatch = pathname.match(/^\/api\/v1\/trips\/([^/]+)\/mutations$/);
       if (mutationMatch && method === 'POST') {
         requireWrite(request); ensureReady(dependencies);

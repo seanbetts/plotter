@@ -6,7 +6,16 @@ import type {
   TripWriteResponse,
 } from '../src/api/contracts';
 import { createActivity, reorderActivities, updateActivity } from '../src/domain/activities';
-import type { Activity, Destination, MediaItem, RouteLeg } from '../src/domain/types';
+import type {
+  Activity,
+  Destination,
+  MediaItem,
+  ResearchLink,
+  RouteIntentSnapshot,
+  RouteLeg,
+  RouteWarning,
+  RouteWaypoint,
+} from '../src/domain/types';
 import {
   activityFromPersistedRow,
   activityToPersistedRow,
@@ -14,11 +23,23 @@ import {
   destinationToPersistedRow,
   routeLegFromPersistedRow,
   routeLegToPersistedRow,
+  tripSummaryFromPersistedRow,
   type PersistedActivityRow,
   type PersistedDestinationRow,
   type PersistedRouteLegRow,
+  type PersistedTripRow,
 } from '../src/storage/persistedRows';
-import type { TripSnapshot } from '../src/storage/revision';
+import type {
+  TripContextActivity,
+  TripContextDestination,
+  TripContextResearchLink,
+  TripContextRouteIntent,
+  TripContextRouteLeg,
+  TripContextRouteWarning,
+  TripContextSnapshot,
+  TripContextWaypoint,
+  TripSnapshot,
+} from '../src/storage/revision';
 import {
   normalizeActivity,
   normalizeDestination,
@@ -46,6 +67,7 @@ export type CreateMediaInput = {
 
 export type RevisionedTripStore = {
   load(): Promise<TripSnapshot>;
+  loadContext(): Promise<TripContextSnapshot>;
   mutate(expectedRevision: number, mutation: TripMutationRequest): Promise<TripWriteResponse>;
   listDestinationMedia(destinationId: string): Promise<MediaItem[]>;
   listActivityMedia(activityId: string): Promise<MediaItem[]>;
@@ -226,6 +248,104 @@ function activityRowFromSqlite(row: Record<string, unknown>): PersistedActivityR
   };
 }
 
+function tripRowFromSqlite(row: Record<string, unknown>): PersistedTripRow {
+  return {
+    id: row.id as string,
+    owner_user_id: row.owner_user_id as string,
+    name: row.name as string,
+    description: row.description as string | null,
+    vehicle_preset: row.vehicle_preset as PersistedTripRow['vehicle_preset'],
+    vehicle_profile: row.vehicle_profile as PersistedTripRow['vehicle_profile'],
+    vehicle_type: row.vehicle_type as PersistedTripRow['vehicle_type'],
+    vehicle_restrictions: row.vehicle_restrictions === null
+      ? undefined
+      : parseJson<PersistedTripRow['vehicle_restrictions']>(row.vehicle_restrictions),
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
+function contextResearchLink(link: ResearchLink): TripContextResearchLink {
+  const { imageUrl: _imageUrl, ...contextLink } = link;
+  void _imageUrl;
+  return contextLink;
+}
+
+function contextDestination(destination: Destination): TripContextDestination {
+  const {
+    media: _media,
+    routingAnchors: _routingAnchors,
+    activities: _legacyActivities,
+    research,
+    ...context
+  } = destination;
+  void _media;
+  void _routingAnchors;
+  void _legacyActivities;
+  return {
+    ...context,
+    research: {
+      ...research,
+      links: research.links.map(contextResearchLink),
+    },
+  };
+}
+
+function contextActivity(activity: Activity): TripContextActivity {
+  return {
+    ...activity,
+    links: activity.links.map(contextResearchLink),
+  };
+}
+
+function contextWaypoint(waypoint: RouteWaypoint): TripContextWaypoint {
+  return {
+    ...waypoint,
+    links: waypoint.links.map(contextResearchLink),
+  };
+}
+
+function contextRouteIntent(intent: RouteIntentSnapshot): TripContextRouteIntent {
+  return {
+    ...intent,
+    waypoints: intent.waypoints.map(contextWaypoint),
+  };
+}
+
+function contextRouteWarning(warning: RouteWarning): TripContextRouteWarning {
+  return {
+    code: warning.code,
+    message: warning.message,
+    ...(warning.context ? {
+      context: {
+        sourceRouteLegId: warning.context.sourceRouteLegId,
+        unresolvedIntent: contextRouteIntent(warning.context.unresolvedIntent),
+      },
+    } : {}),
+  };
+}
+
+function contextRouteLeg(routeLeg: RouteLeg): TripContextRouteLeg {
+  const {
+    geometry: _geometry,
+    routeKey: _routeKey,
+    providerDiagnostic: _providerDiagnostic,
+    error: _error,
+    waypoints = [],
+    warnings = [],
+    ...context
+  } = routeLeg;
+  void _geometry;
+  void _routeKey;
+  void _providerDiagnostic;
+  void _error;
+  return {
+    ...context,
+    waypoints: waypoints.map(contextWaypoint),
+    warnings: warnings.map(contextRouteWarning),
+  };
+}
+
 function assertUniqueIds(ids: string[], message: string): void {
   if (new Set(ids).size !== ids.length) throw new Error(message);
 }
@@ -238,6 +358,35 @@ function assertRouteEndpoints(routeLegs: RouteLeg[], destinationIds: Set<string>
   }
 }
 
+function readTripCollections(connection: DatabaseSync, tripId: string) {
+  const destinations = connection.prepare(`
+    SELECT * FROM destinations
+    WHERE trip_id = ?
+    ORDER BY stop_order, created_at
+  `).all(tripId).map((row) => destinationFromPersistedRow(
+    destinationRowFromSqlite(row as Record<string, unknown>),
+  ));
+  const routeLegs = connection.prepare(`
+    SELECT * FROM route_legs
+    WHERE trip_id = ?
+    ORDER BY updated_at, id
+  `).all(tripId).map((row) => routeLegFromPersistedRow(
+    routeLegRowFromSqlite(row as Record<string, unknown>),
+  ));
+  const activities = connection.prepare(`
+    SELECT activities.*
+    FROM activities
+    JOIN destinations
+      ON destinations.trip_id = activities.trip_id
+      AND destinations.id = activities.destination_id
+    WHERE activities.trip_id = ?
+    ORDER BY destinations.stop_order, activities.activity_order, activities.created_at
+  `).all(tripId).map((row) => activityFromPersistedRow(
+    activityRowFromSqlite(row as Record<string, unknown>),
+  ));
+  return { destinations, routeLegs, activities };
+}
+
 function readSnapshot(connection: DatabaseSync, tripId: string): TripSnapshot {
   connection.exec('BEGIN');
   try {
@@ -245,33 +394,44 @@ function readSnapshot(connection: DatabaseSync, tripId: string): TripSnapshot {
       SELECT revision FROM trip_revisions WHERE trip_id = ?
     `).get(tripId) as { revision?: unknown } | undefined;
     if (typeof revisionRow?.revision !== 'number') throw new Error('Trip not found.');
-    const destinations = connection.prepare(`
-      SELECT * FROM destinations
-      WHERE trip_id = ?
-      ORDER BY stop_order, created_at
-    `).all(tripId).map((row) => destinationFromPersistedRow(
-      destinationRowFromSqlite(row as Record<string, unknown>),
-    ));
-    const routeLegs = connection.prepare(`
-      SELECT * FROM route_legs
-      WHERE trip_id = ?
-      ORDER BY updated_at, id
-    `).all(tripId).map((row) => routeLegFromPersistedRow(
-      routeLegRowFromSqlite(row as Record<string, unknown>),
-    ));
-    const activities = connection.prepare(`
-      SELECT activities.*
-      FROM activities
-      JOIN destinations
-        ON destinations.trip_id = activities.trip_id
-        AND destinations.id = activities.destination_id
-      WHERE activities.trip_id = ?
-      ORDER BY destinations.stop_order, activities.activity_order, activities.created_at
-    `).all(tripId).map((row) => activityFromPersistedRow(
-      activityRowFromSqlite(row as Record<string, unknown>),
-    ));
+    const collections = readTripCollections(connection, tripId);
     connection.exec('COMMIT');
-    return { revision: revisionRow.revision, destinations, routeLegs, activities };
+    return { revision: revisionRow.revision, ...collections };
+  } catch (error) {
+    connection.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function readContextSnapshot(connection: DatabaseSync, tripId: string): TripContextSnapshot {
+  connection.exec('BEGIN');
+  try {
+    const metadata = connection.prepare(`
+      SELECT store_metadata.directory_revision, trip_revisions.revision AS trip_revision,
+        trips.id, trips.owner_user_id, trips.name, trips.description,
+        trips.vehicle_preset, trips.vehicle_profile, trips.vehicle_type,
+        trips.vehicle_restrictions, trips.created_at, trips.updated_at
+      FROM trips
+      JOIN trip_revisions ON trip_revisions.trip_id = trips.id
+      CROSS JOIN store_metadata
+      WHERE trips.id = ? AND store_metadata.singleton = 1
+    `).get(tripId) as Record<string, unknown> | undefined;
+    if (
+      !metadata
+      || typeof metadata.directory_revision !== 'number'
+      || typeof metadata.trip_revision !== 'number'
+    ) throw new Error('Trip not found.');
+    const collections = readTripCollections(connection, tripId);
+    const snapshot: TripContextSnapshot = {
+      directoryRevision: metadata.directory_revision,
+      tripRevision: metadata.trip_revision,
+      trip: tripSummaryFromPersistedRow(tripRowFromSqlite(metadata)),
+      destinations: collections.destinations.map(contextDestination),
+      routeLegs: collections.routeLegs.map(contextRouteLeg),
+      activities: collections.activities.map(contextActivity),
+    };
+    connection.exec('COMMIT');
+    return snapshot;
   } catch (error) {
     connection.exec('ROLLBACK');
     throw error;
@@ -843,6 +1003,10 @@ export function createSqliteTripRepository(
   return {
     async load() {
       return readSnapshot(connection, tripId);
+    },
+
+    async loadContext() {
+      return readContextSnapshot(connection, tripId);
     },
 
     async mutate(expectedRevision, mutation) {

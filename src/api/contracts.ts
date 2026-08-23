@@ -3,7 +3,7 @@ import type { LinkPreviewResult } from '../services/linkPreviewClient';
 import type { WebImageSearchResult, WebImageSearchStopContext } from '../services/webImageSearchClient';
 import type { TripSummary } from '../storage/tripDirectoryRepository';
 import type { TripMutationDelta } from '../storage/tripRepository';
-import type { DirectorySnapshot, RevisionEvent, TripSnapshot } from '../storage/revision';
+import type { DirectorySnapshot, RevisionEvent, TripContextSnapshot, TripSnapshot } from '../storage/revision';
 
 export const plotterApiVersion = 'v1';
 
@@ -32,6 +32,7 @@ export type ApiRouteResponse<T, Status extends 200 | 201 | 204 = 200> =
 
 export type DirectoryReadResponse = DirectorySnapshot;
 export type TripReadResponse = TripSnapshot;
+export type TripContextReadResponse = TripContextSnapshot;
 
 export type CreateTripRequest = {
   expectedRevision: number;
@@ -183,6 +184,7 @@ export type PlotterApiRoute =
   | { method: 'GET'; path: '/api/v1/trips'; response: ApiRouteResponse<DirectoryReadResponse> }
   | { method: 'POST'; path: '/api/v1/trips'; request: CreateTripRequest; response: ApiRouteResponse<DirectoryWriteResponse, 201> }
   | { method: 'GET'; path: '/api/v1/trips/:tripId'; response: ApiRouteResponse<TripReadResponse> }
+  | { method: 'GET'; path: '/api/v1/trips/:tripId/context'; response: ApiRouteResponse<TripContextReadResponse> }
   | { method: 'PATCH'; path: '/api/v1/trips/:tripId'; request: UpdateTripRequest; response: ApiRouteResponse<DirectoryWriteResponse> }
   | { method: 'DELETE'; path: '/api/v1/trips/:tripId'; request: DeleteTripRequest; response: ApiRouteResponse<DirectoryWriteResponse> }
   | { method: 'POST'; path: '/api/v1/trips/:tripId/mutations'; request: RevisionedTripMutationRequest; response: ApiRouteResponse<TripWriteResponse> }

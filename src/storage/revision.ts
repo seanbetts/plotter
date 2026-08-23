@@ -1,4 +1,12 @@
-import type { Activity, Destination, RouteLeg } from '../domain/types';
+import type {
+  Activity,
+  Destination,
+  ResearchLink,
+  RouteIntentSnapshot,
+  RouteLeg,
+  RouteWarning,
+  RouteWaypoint,
+} from '../domain/types';
 import type { TripSummary } from './tripDirectoryRepository';
 
 export type TripSnapshot = {
@@ -6,6 +14,53 @@ export type TripSnapshot = {
   destinations: Destination[];
   routeLegs: RouteLeg[];
   activities: Activity[];
+};
+
+export type TripContextResearchLink = Omit<ResearchLink, 'imageUrl'>;
+
+export type TripContextDestination = Omit<
+  Destination,
+  'media' | 'routingAnchors' | 'activities' | 'research'
+> & {
+  research: Omit<Destination['research'], 'links'> & {
+    links: TripContextResearchLink[];
+  };
+};
+
+export type TripContextActivity = Omit<Activity, 'links'> & {
+  links: TripContextResearchLink[];
+};
+
+export type TripContextWaypoint = Omit<RouteWaypoint, 'links'> & {
+  links: TripContextResearchLink[];
+};
+
+export type TripContextRouteIntent = Omit<RouteIntentSnapshot, 'waypoints'> & {
+  waypoints: TripContextWaypoint[];
+};
+
+export type TripContextRouteWarning = Omit<RouteWarning, 'context'> & {
+  context?: {
+    sourceRouteLegId: string;
+    unresolvedIntent: TripContextRouteIntent;
+  };
+};
+
+export type TripContextRouteLeg = Omit<
+  RouteLeg,
+  'geometry' | 'routeKey' | 'providerDiagnostic' | 'error' | 'waypoints' | 'warnings'
+> & {
+  waypoints: TripContextWaypoint[];
+  warnings: TripContextRouteWarning[];
+};
+
+export type TripContextSnapshot = {
+  directoryRevision: number;
+  tripRevision: number;
+  trip: TripSummary;
+  destinations: TripContextDestination[];
+  routeLegs: TripContextRouteLeg[];
+  activities: TripContextActivity[];
 };
 
 export type DirectorySnapshot = {
