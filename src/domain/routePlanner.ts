@@ -2,7 +2,7 @@ import { createRouteKey, createRouteLeg, createStraightLineGeometry } from './ro
 import type { LineString } from 'geojson';
 import type { Coordinates, Destination, RouteIntentSnapshot, RouteLeg, RouteWaypoint, TripRoutingVehicle } from './types';
 import { standardRoutingVehicle } from './vehiclePresets';
-import { coordinateDistanceKm, validateRoutingAnchor } from './routingAnchors';
+import { coordinateDistanceKm, routingAnchorMaxDistanceKm, validateRoutingAnchor } from './routingAnchors';
 
 export { coordinateDistanceKm };
 
@@ -30,8 +30,88 @@ function routePairKey(originDestinationId: string, targetDestinationId: string) 
 
 const createTimestamp = () => new Date().toISOString();
 const drivingGeometryEndpointTolerance = 0.001;
+const routeIntentCoordinateTolerance = 1e-9;
 function coordinateMatches(value: number | undefined, expected: number, tolerance = 0) {
   return value !== undefined && Math.abs(value - expected) <= tolerance;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function isCoordinateRecord(value: unknown): value is Coordinates {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    typeof (value as { lat?: unknown }).lat === 'number' &&
+    Number.isFinite((value as { lat: number }).lat) &&
+    typeof (value as { lng?: unknown }).lng === 'number' &&
+    Number.isFinite((value as { lng: number }).lng),
+  );
+}
+
+function coordinatesMatch(left: Coordinates, right: Coordinates, tolerance: number) {
+  return (
+    coordinateMatches(left.lat, right.lat, tolerance) &&
+    coordinateMatches(left.lng, right.lng, tolerance)
+  );
+}
+
+function jsonRouteKeyMatchesCurrentIntent(
+  routeKey: string,
+  expectedRouteKeys: string[],
+  origin: Destination,
+  target: Destination,
+) {
+  const parsed = JSON.parse(routeKey) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const parsedRecord = parsed as Record<string, unknown>;
+  if (
+    !isCoordinateRecord(parsedRecord.origin) ||
+    !coordinatesMatch(parsedRecord.origin, origin.coordinates, routeIntentCoordinateTolerance) ||
+    !isCoordinateRecord(parsedRecord.target) ||
+    !coordinatesMatch(parsedRecord.target, target.coordinates, routeIntentCoordinateTolerance)
+  ) return false;
+
+  const normalizedParsed = {
+    ...parsedRecord,
+    origin: origin.coordinates,
+    target: target.coordinates,
+  };
+  return expectedRouteKeys.some((expectedRouteKey) => (
+    canonicalJson(normalizedParsed) === canonicalJson(JSON.parse(expectedRouteKey))
+  ));
+}
+
+function legacyRouteKeyMatchesCurrentIntent(
+  routeKey: string,
+  routeLeg: RouteLeg,
+  origin: Destination,
+  target: Destination,
+  routingVehicle: TripRoutingVehicle,
+) {
+  if (
+    routingVehicle.preset !== 'standard' ||
+    routingVehicle.profile !== 'driving-car' ||
+    routingVehicle.vehicleType != null ||
+    Object.values(routingVehicle.restrictions).some((value) => value != null) ||
+    routeLeg.profile !== 'driving-car' ||
+    (routeLeg.ferryPolicy ?? 'allow') !== 'allow' ||
+    (routeLeg.waypoints?.length ?? 0) > 0
+  ) return false;
+
+  return routeKey === [
+    'driving-car',
+    `${origin.coordinates.lng.toFixed(5)},${origin.coordinates.lat.toFixed(5)}`,
+    `${target.coordinates.lng.toFixed(5)},${target.coordinates.lat.toFixed(5)}`,
+  ].join(':');
 }
 
 function isValidRouteCoordinatePair(value: unknown): value is [number, number] {
@@ -133,9 +213,14 @@ function routeKeyMatchesCurrentIntent(
       ? createRouteKey({ ...keyInput, profile: routeLeg.profile })
       : currentProfileKey;
 
-    return routeKey === currentProfileKey || routeKey === actualProfileKey;
+    return jsonRouteKeyMatchesCurrentIntent(
+      routeKey,
+      [currentProfileKey, actualProfileKey],
+      origin,
+      target,
+    );
   } catch {
-    return false;
+    return legacyRouteKeyMatchesCurrentIntent(routeKey, routeLeg, origin, target, routingVehicle);
   }
 }
 
@@ -152,28 +237,56 @@ function routeGeometryMatchesCurrentEndpoints(
     ? routeLeg.profile
     : undefined;
 
-  const endpointMatches = (coordinate: number[] | undefined, destination: Destination) => {
-    if (
-      coordinateMatches(coordinate?.[0], destination.coordinates.lng, drivingGeometryEndpointTolerance) &&
-      coordinateMatches(coordinate?.[1], destination.coordinates.lat, drivingGeometryEndpointTolerance)
-    ) {
-      return true;
-    }
-    if (!hasAdjustedAnchorProvenance || !profile) return false;
+  const originAnchorCandidate = profile ? origin.routingAnchors[profile] : undefined;
+  const targetAnchorCandidate = profile ? target.routingAnchors[profile] : undefined;
+  const validatedOriginAnchor = originAnchorCandidate && profile
+    ? validateRoutingAnchor({
+        anchor: originAnchorCandidate,
+        canonicalCoordinates: origin.coordinates,
+        profile,
+      })
+    : undefined;
+  const validatedTargetAnchor = targetAnchorCandidate && profile
+    ? validateRoutingAnchor({
+        anchor: targetAnchorCandidate,
+        canonicalCoordinates: target.coordinates,
+        profile,
+      })
+    : undefined;
 
-    const validatedAnchor = validateRoutingAnchor({
-      anchor: destination.routingAnchors[profile],
-      canonicalCoordinates: destination.coordinates,
-      profile,
-    });
-    return Boolean(
-      validatedAnchor &&
-      coordinateMatches(coordinate?.[0], validatedAnchor.anchor.coordinates.lng, drivingGeometryEndpointTolerance) &&
-      coordinateMatches(coordinate?.[1], validatedAnchor.anchor.coordinates.lat, drivingGeometryEndpointTolerance),
-    );
+  if (
+    hasAdjustedAnchorProvenance &&
+    (
+      !profile ||
+      (originAnchorCandidate !== undefined && !validatedOriginAnchor) ||
+      (targetAnchorCandidate !== undefined && !validatedTargetAnchor) ||
+      (!validatedOriginAnchor && !validatedTargetAnchor)
+    )
+  ) return false;
+
+  const endpointMatches = (
+    coordinate: number[] | undefined,
+    destination: Destination,
+    validatedAnchor: ReturnType<typeof validateRoutingAnchor>,
+  ) => {
+    if (!coordinate || !isValidRouteCoordinatePair(coordinate)) return false;
+    if (hasAdjustedAnchorProvenance && validatedAnchor) {
+      const expected = validatedAnchor.anchor.coordinates;
+      return (
+        coordinateMatches(coordinate[0], expected.lng, drivingGeometryEndpointTolerance) &&
+        coordinateMatches(coordinate[1], expected.lat, drivingGeometryEndpointTolerance)
+      );
+    }
+    return coordinateDistanceKm(
+      { lng: coordinate[0], lat: coordinate[1] },
+      destination.coordinates,
+    ) <= routingAnchorMaxDistanceKm;
   };
 
-  return endpointMatches(firstCoordinate, origin) && endpointMatches(lastCoordinate, target);
+  return (
+    endpointMatches(firstCoordinate, origin, validatedOriginAnchor) &&
+    endpointMatches(lastCoordinate, target, validatedTargetAnchor)
+  );
 }
 
 export function reconcileReadyAutomaticRouteLegForCurrentIntent(

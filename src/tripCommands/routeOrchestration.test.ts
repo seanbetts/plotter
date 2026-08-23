@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OpenRouteServiceError } from '../adapters/openRouteService';
 import { createDestination } from '../domain/destinations';
+import { coordinateDistanceKm } from '../domain/routePlanner';
 import { createRouteKey, createRouteLeg } from '../domain/routeLegs';
 import { resolveVehiclePreset } from '../domain/vehiclePresets';
 import type { RouteLeg } from '../domain/types';
@@ -573,6 +574,15 @@ describe('route orchestration', () => {
   ])('fails %s when returned ferry sections contradict intent', async (ferryPolicy, sections, warningCode) => {
     const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 } });
     const target = createDestination({ name: 'Hirtshals', coordinates: { lat: 57.5881, lng: 9.9598 } });
+    const targetAnchorCoordinates = { lat: 57.5981, lng: 9.9598 };
+    const targetAnchor = {
+      profile: 'driving-car' as const,
+      coordinates: targetAnchorCoordinates,
+      originalCoordinates: target.coordinates,
+      snapDistanceKm: coordinateDistanceKm(target.coordinates, targetAnchorCoordinates),
+      provider: 'openrouteservice' as const,
+      resolvedAt: '2026-07-11T00:00:00.000Z',
+    };
     const calculation = await calculateAutomaticRouteLegs({
       destinations: [origin, target],
       routeLegs: [createRouteLeg({
@@ -589,6 +599,7 @@ describe('route orchestration', () => {
         provider: 'test',
         profile: 'driving-car',
         sections,
+        endpointAnchors: { target: targetAnchor },
       }),
     });
     const [result] = calculation.routeLegs;
@@ -603,6 +614,7 @@ describe('route orchestration', () => {
       sections: [],
       warnings: [expect.objectContaining({ code: warningCode })],
     });
+    expect(calculation.destinations[1]).toBe(target);
   });
 
   it('marks the Bremen to Hirtshals defect for review while excluding its metrics', async () => {

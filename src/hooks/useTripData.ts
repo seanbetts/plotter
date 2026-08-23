@@ -229,8 +229,21 @@ async function reconcileLoadedRoutesForVehicle(input: {
 
   if (!input.isCurrentReload()) return null;
 
+  const nonDestructiveRouteLegs = calculation.routeLegs.map((routeLeg, index) => {
+    const priorRouteLeg = input.routeLegs[index];
+    if (
+      staleRouteLegIndexes.has(index) &&
+      priorRouteLeg?.status === 'ready' &&
+      routeLeg.status !== 'ready' &&
+      routeLeg.status !== 'review-required'
+    ) {
+      return priorRouteLeg;
+    }
+    return routeLeg;
+  });
+
   const destinationsToSave = changedDestinationsByReference(input.destinations, calculation.destinations);
-  const routeLegsToSave = calculation.routeLegs.filter(
+  const routeLegsToSave = nonDestructiveRouteLegs.filter(
     (routeLeg, index) => routeLeg !== input.routeLegs[index],
   );
   await persistRouteCalculationBatch({
@@ -243,7 +256,7 @@ async function reconcileLoadedRoutesForVehicle(input: {
   });
 
   if (!input.isCurrentReload()) return null;
-  return calculation;
+  return { ...calculation, routeLegs: nonDestructiveRouteLegs };
 }
 
 export function useTripData(repository: TripRepository, options: UseTripDataOptions = {}) {

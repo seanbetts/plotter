@@ -356,16 +356,19 @@ export async function calculateAutomaticRouteLegs(input: {
         originAnchors: origin.routingAnchors,
         targetAnchors: target.routingAnchors,
       }, input.calculateRoute);
-      const anchoredOrigin = applyEndpointAnchor(origin, route.endpointAnchors.origin);
-      const anchoredTarget = applyEndpointAnchor(target, route.endpointAnchors.target);
-      calculatedRouteLegs.push(applyCalculatedRouteResult({
+      const calculatedRouteLeg = applyCalculatedRouteResult({
         routeLeg: leg,
-        origin: anchoredOrigin,
-        target: anchoredTarget,
+        origin,
+        target,
         routeKey,
         route,
         preserveUnresolvedReview: preservesUnresolvedReview,
-      }));
+      });
+      if (calculatedRouteLeg.status === 'ready' || calculatedRouteLeg.status === 'review-required') {
+        applyEndpointAnchor(origin, route.endpointAnchors.origin);
+        applyEndpointAnchor(target, route.endpointAnchors.target);
+      }
+      calculatedRouteLegs.push(calculatedRouteLeg);
     } catch (caught) {
       calculatedRouteLegs.push({
         ...clearedLeg,

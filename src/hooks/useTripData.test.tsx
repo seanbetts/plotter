@@ -674,7 +674,7 @@ describe('useTripData', () => {
     expect(result.current.routeLegs).toEqual([storedRouteLeg]);
   });
 
-  it('persists and publishes a failed car leg when legacy load reconciliation cannot calculate a route', async () => {
+  it('preserves a loaded ready route when its replacement calculation fails', async () => {
     const origin = createDestination({ name: 'Bremen', coordinates: { lat: 53.0793, lng: 8.8017 }, order: 0 });
     const target = createDestination({ name: 'Hamburg', coordinates: { lat: 53.5502, lng: 10.0013 }, order: 1 });
     const legacyRouteLeg = createReadyRouteLegForVehicle(origin, target, createLegacyLargeCamperRoutingVehicle());
@@ -694,16 +694,10 @@ describe('useTripData', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(calculateRoute).toHaveBeenCalledTimes(1);
-    expect(saveRouteLeg).toHaveBeenCalledTimes(1);
-    expect(storedRouteLeg).toMatchObject({
-      id: legacyRouteLeg.id,
-      status: 'failed',
-      profile: 'driving-car',
-      geometry: undefined,
-      error: 'Legacy car recalculation failed',
-    });
+    expect(saveRouteLeg).not.toHaveBeenCalled();
+    expect(storedRouteLeg).toBe(legacyRouteLeg);
     expect(result.current.destinations).toEqual([origin, target]);
-    expect(result.current.routeLegs).toEqual([storedRouteLeg]);
+    expect(result.current.routeLegs).toEqual([legacyRouteLeg]);
   });
 
   it('does not retry failed or review-required automatic routes merely by loading them', async () => {
