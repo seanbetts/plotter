@@ -257,6 +257,30 @@ describe('Plotter context export', () => {
     });
   });
 
+  it('canonicalizes legacy provenance timestamps and omits invalid ones', async () => {
+    const snapshot = tripContextSnapshot();
+    snapshot.trip.updatedAt = '2026-08-22T16:30:00Z';
+    snapshot.destinations[0].updatedAt = '2026-08-21T11:00:00+01:00';
+    snapshot.activities[0].updatedAt = 'not-a-timestamp';
+    snapshot.routeLegs[0].updatedAt = '2026-08-21T11:00:00Z';
+    const context = await createPlotterContextExportBuilder({
+      client: clientReturning(snapshot),
+      activeTripId: 'trip-north',
+      selectedDestinationId: null,
+      selectedActivityId: null,
+      itineraryCollapsed: false,
+      now: () => new Date(OBSERVED_AT),
+    })({ signal: new AbortController().signal });
+
+    expect(context.provenance.sources.slice(2).map(({ observedAt }) => observedAt)).toEqual([
+      '2026-08-22T16:30:00.000Z',
+      '2026-08-21T10:00:00.000Z',
+      null,
+      '2026-08-21T11:00:00.000Z',
+    ]);
+    expect(validateLocalWebContext(context)).toBe(context);
+  });
+
   it('maps ordered trip evidence and keeps unknown values and prohibited details out', async () => {
     const buildContextExport = createPlotterContextExportBuilder({
       client: clientReturning(),

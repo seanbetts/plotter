@@ -73,10 +73,18 @@ function nullableDate(value: string): string | null {
     : null;
 }
 
+function canonicalTimestamp(value: string): string | null {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
 function latestTimestamp(values: readonly string[]): string | null {
-  return values.reduce<string | null>((latest, value) => (
-    !latest || value > latest ? value : latest
-  ), null);
+  return values
+    .map(canonicalTimestamp)
+    .filter((value): value is string => value !== null)
+    .reduce<string | null>((latest, value) => (
+      !latest || value > latest ? value : latest
+    ), null);
 }
 
 function sumKnown(values: readonly (number | undefined)[]): number | null {
@@ -555,7 +563,7 @@ export function createPlotterContextExportBuilder(
           },
           {
             label: 'Active trip',
-            observedAt: snapshot.trip.updatedAt,
+            observedAt: canonicalTimestamp(snapshot.trip.updatedAt),
             revision: String(snapshot.tripRevision),
           },
           {
