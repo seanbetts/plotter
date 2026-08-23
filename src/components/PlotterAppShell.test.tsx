@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import type { ContextExportBuilder } from '@local-web/ui';
+import { describe, expect, it, vi } from 'vitest';
 import { PlotterAppShell } from './PlotterAppShell';
 
 describe('PlotterAppShell', () => {
@@ -18,5 +19,19 @@ describe('PlotterAppShell', () => {
     expect(screen.getAllByRole('main')).toHaveLength(1);
     expect(screen.getByRole('main')).toHaveClass('lwp-platform-shell__main--edge-to-edge');
     expect(screen.getByRole('region', { name: 'Plotter test content' })).toBeInTheDocument();
+  });
+
+  it('forwards the public context builder without changing the edge-to-edge shell', () => {
+    const buildContextExport = vi.fn() as ContextExportBuilder;
+
+    render(
+      <PlotterAppShell buildContextExport={buildContextExport}>
+        <section aria-label="Plotter export content" />
+      </PlotterAppShell>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Export context' })).toBeInTheDocument();
+    expect(screen.getByRole('main')).toHaveClass('lwp-platform-shell__main--edge-to-edge');
+    expect(screen.getByRole('region', { name: 'Plotter export content' })).toBeInTheDocument();
   });
 });

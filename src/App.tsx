@@ -6,6 +6,7 @@ import {
 } from './adapters/geocoding';
 import type { PlaceSearchResult } from './adapters/geocoding';
 import { calculateOpenRouteServiceRoute, calculateOpenRouteServiceRouteOptions } from './adapters/openRouteService';
+import { createPlotterApiClient } from './api/client';
 import { ActivityPanel } from './components/ActivityPanel';
 import { AppStatusPanel } from './components/AppStatusPanel';
 import { DestinationImagePreviewModal } from './components/DestinationImagePreviewModal';
@@ -18,6 +19,7 @@ import { RouteAlternativesPanel } from './components/RouteAlternativesPanel';
 import { TopToolbar } from './components/TopToolbar';
 import { TripSelector } from './components/TripSelector';
 import { buildTagSuggestions } from './components/tagEditorModel';
+import { createPlotterContextExportBuilder } from './contextExport';
 import { withRoutingAnchor } from './domain/destinations';
 import { createLegacyLocation, formatLocationParts } from './domain/locations';
 import { ensureUniqueRouteOptionIds, type RouteOption } from './domain/routeOptions';
@@ -292,8 +294,10 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
     return () => document.removeEventListener('visibilitychange', reconcileVisibleWorkspace);
   }, [realtime]);
 
-  const workspace = !repository || !linkPreviewClient || !webImageSearchClient ? (
-    <div className="app-shell">
+  if (!repository || !linkPreviewClient || !webImageSearchClient) {
+    return (
+      <PlotterAppShell>
+        <div className="app-shell">
         <style>{blockingStatusMapStyles}</style>
         <section className="map-stage map-stage--blocking-status" aria-label="Plotter map workspace">
           <MapCanvas
@@ -309,8 +313,12 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
             onRetry={error ? retryWorkspace : undefined}
           />
         </section>
-    </div>
-  ) : (
+        </div>
+      </PlotterAppShell>
+    );
+  }
+
+  return (
     <TripWorkspace
       key={activeTrip?.id}
       repository={repository}
@@ -327,8 +335,6 @@ export default function App({ webImageSearchClient: injectedWebImageSearchClient
       realtime={realtime}
     />
   );
-
-  return <PlotterAppShell>{workspace}</PlotterAppShell>;
 }
 
 function TripWorkspace({
@@ -424,6 +430,30 @@ function TripWorkspace({
   const pendingMapStopDialogRef = useRef<HTMLElement | null>(null);
   const previouslyFocusedMapStopElementRef = useRef<HTMLElement | null>(null);
   const isInteractionLocked = isLoading || isTripWorkspaceLoading;
+  const contextActiveTripId = activeTrip?.id ?? null;
+  const contextApiClient = useMemo(
+    () => createPlotterApiClient({ baseUrl: import.meta.env.BASE_URL }),
+    [],
+  );
+  const buildContextExport = useMemo(() => (
+    contextActiveTripId && !isInteractionLocked && !error && import.meta.env.VITE_TRIP_STORAGE !== 'e2e-local'
+      ? createPlotterContextExportBuilder({
+          client: contextApiClient,
+          activeTripId: contextActiveTripId,
+          selectedDestinationId,
+          selectedActivityId,
+          itineraryCollapsed: isStopsPanelCollapsed,
+        })
+      : undefined
+  ), [
+    contextActiveTripId,
+    contextApiClient,
+    error,
+    isInteractionLocked,
+    isStopsPanelCollapsed,
+    selectedActivityId,
+    selectedDestinationId,
+  ]);
 
   useEffect(() => {
     tripRevisionRef.current = revision;
@@ -1437,7 +1467,8 @@ function TripWorkspace({
   }
 
   return (
-    <div className="app-shell">
+    <PlotterAppShell buildContextExport={buildContextExport}>
+      <div className="app-shell">
       <style>{blockingStatusMapStyles}</style>
       <section ref={mapStageRef} className={mapStageClassName} aria-label="Plotter map workspace">
         <MapCanvas
@@ -1636,6 +1667,7 @@ function TripWorkspace({
           />
         ) : null}
       </section>
-    </div>
+      </div>
+    </PlotterAppShell>
   );
 }

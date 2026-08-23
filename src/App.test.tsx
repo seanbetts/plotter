@@ -552,6 +552,7 @@ describe('App', () => {
     expect(screen.getAllByRole('main')).toHaveLength(1);
     expect(screen.getAllByRole('navigation', { name: 'Location' })).toHaveLength(1);
     expect(screen.getAllByRole('region', { name: 'Plotter map workspace' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Export context' })).not.toBeInTheDocument();
   });
 
   it('uses one platform main landmark while the trip workspace is ready', async () => {
@@ -561,6 +562,7 @@ describe('App', () => {
     expect(screen.getAllByRole('main')).toHaveLength(1);
     expect(screen.getAllByRole('navigation', { name: 'Location' })).toHaveLength(1);
     expect(screen.getAllByRole('region', { name: 'Plotter map workspace' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Export context' })).toBeInTheDocument();
   });
 
   it('disables trip map export for an empty trip', async () => {

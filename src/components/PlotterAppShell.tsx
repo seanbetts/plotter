@@ -1,10 +1,18 @@
-import { AppShell } from '@local-web/ui';
+import { AppShell, type ContextExportBuilder } from '@local-web/ui';
 import type { PropsWithChildren } from 'react';
 import { plotterAppIdentity } from '../config/appIdentity';
 
-export function PlotterAppShell({ children }: PropsWithChildren) {
+type PlotterAppShellProps = PropsWithChildren<{
+  buildContextExport?: ContextExportBuilder;
+}>;
+
+export function PlotterAppShell({ children, buildContextExport }: PlotterAppShellProps) {
   return (
-    <AppShell app={plotterAppIdentity} contentMode="edge-to-edge">
+    <AppShell
+      app={plotterAppIdentity}
+      buildContextExport={buildContextExport}
+      contentMode="edge-to-edge"
+    >
       {children}
     </AppShell>
   );

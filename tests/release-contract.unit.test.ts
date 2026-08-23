@@ -64,7 +64,7 @@ describe('Plotter local-web service release contract', () => {
         ],
       },
       home: { icon: 'route', accent: '#D9467A' },
-      platform: { contractVersion: 1, templateVersion: 1, uiVersion: '0.5.2', capabilities: [] },
+      platform: { contractVersion: 1, templateVersion: 2, uiVersion: '0.6.1', capabilities: [] },
     });
   });
 
