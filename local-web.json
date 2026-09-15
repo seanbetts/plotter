@@ -76,7 +76,7 @@
   "platform": {
     "contractVersion": 1,
     "templateVersion": 3,
-    "uiVersion": "0.7.1",
+    "uiVersion": "0.7.2",
     "capabilities": []
   }
 }
