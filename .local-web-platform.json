@@ -9,7 +9,7 @@
   "schemaVersion": 1,
   "templateVersion": 3,
   "ui": {
-    "sha256": "d958d3b64528be70797c852a70d01d1220c7b63dbb1af9dde51859becebf8566",
-    "version": "0.7.0"
+    "sha256": "b10d8943cee73bfaaf25e0561617828feeb70eaee3f4368cd6458929117b3e3d",
+    "version": "0.7.1"
   }
 }
