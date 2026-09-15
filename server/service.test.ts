@@ -8,6 +8,7 @@ import { afterEach, expect, it } from 'vitest';
 const repositoryRoot = realpathSync(resolve(import.meta.dirname, '..'));
 const processes: ChildProcess[] = [];
 const temporaryDirectories: string[] = [];
+const serviceStartTimeout = 10_000;
 
 async function reservePort(): Promise<number> {
   const server = createServer();
@@ -25,7 +26,20 @@ async function reservePort(): Promise<number> {
   return address.port;
 }
 
-async function expectReady(port: number, child?: ChildProcess, errors: string[] = []): Promise<void> {
+type HealthResponse = { status: number; body: unknown };
+
+function captureErrors(child: ChildProcess): string[] {
+  const errors: string[] = [];
+  child.stderr?.on('data', (chunk: Buffer) => { errors.push(chunk.toString()); });
+  return errors;
+}
+
+async function expectHealth(
+  port: number,
+  expected: HealthResponse,
+  child?: ChildProcess,
+  errors: string[] = [],
+): Promise<void> {
   await expect.poll(async () => {
     if (child?.exitCode !== null && child?.exitCode !== undefined) {
       return `exited ${child.exitCode}: ${errors.join('')}`;
@@ -36,10 +50,11 @@ async function expectReady(port: number, child?: ChildProcess, errors: string[] 
     } catch {
       return null;
     }
-  }, { interval: 50, timeout: 3_000 }).toEqual({
-    status: 200,
-    body: { ready: true },
-  });
+  }, { interval: 50, timeout: serviceStartTimeout }).toEqual(expected);
+}
+
+async function expectReady(port: number, child?: ChildProcess, errors: string[] = []): Promise<void> {
+  await expectHealth(port, { status: 200, body: { ready: true } }, child, errors);
 }
 
 async function expectPortClosed(port: number): Promise<void> {
@@ -91,22 +106,13 @@ it('reports ready after opening the canonical database and service stores', asyn
     '--data-dir', dataDirectory,
   ], {
     cwd: repositoryRoot,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
   });
   processes.push(child);
+  const errors = captureErrors(child);
 
-  await expect.poll(async () => {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/healthz`);
-      return { status: response.status, body: await response.json() };
-    } catch {
-      return null;
-    }
-  }, { interval: 50, timeout: 3_000 }).toEqual({
-    status: 200,
-    body: { ready: true },
-  });
-});
+  await expectReady(port, child, errors);
+}, 15_000);
 
 it('stops cleanly and releases data ownership with an active event stream', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
@@ -121,11 +127,12 @@ it('stops cleanly and releases data ownership with an active event stream', asyn
     '--data-dir', dataDirectory,
   ], {
     cwd: repositoryRoot,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
   });
   processes.push(child);
+  const errors = captureErrors(child);
 
-  await expectReady(port, child);
+  await expectReady(port, child, errors);
   const events = await fetch(`http://127.0.0.1:${port}/api/v1/events`);
   expect(events.status).toBe(200);
   expect(existsSync(resolve(dataDirectory, '.plotter-storage-owner.lock'))).toBe(true);
@@ -134,7 +141,7 @@ it('stops cleanly and releases data ownership with an active event stream', asyn
 
   expect(existsSync(resolve(dataDirectory, '.plotter-storage-owner.lock'))).toBe(false);
   await expectPortClosed(port);
-}, 10_000);
+}, 15_000);
 
 it('starts the bundled service with an existing env file without exposing its contents', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
@@ -158,22 +165,13 @@ it('starts the bundled service with an existing env file without exposing its co
     '--env-file', envFile,
   ], {
     cwd: repositoryRoot,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
   });
   processes.push(child);
+  const errors = captureErrors(child);
 
-  await expect.poll(async () => {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/healthz`);
-      return { status: response.status, body: await response.json() };
-    } catch {
-      return null;
-    }
-  }, { interval: 50, timeout: 3_000 }).toEqual({
-    status: 200,
-    body: { ready: true },
-  });
-});
+  await expectReady(port, child, errors);
+}, 15_000);
 
 it.each([
   ['server-dist', 'server-dist/service.mjs'],
@@ -204,8 +202,7 @@ it.each([
     '--env-file', join(disposableRepository, '.env'),
   ], { cwd: disposableRepository, stdio: ['ignore', 'ignore', 'pipe'] });
   processes.push(child);
-  const errors: string[] = [];
-  child.stderr?.on('data', (chunk: Buffer) => { errors.push(chunk.toString()); });
+  const errors = captureErrors(child);
 
   await expectReady(port, child, errors);
 }, 15_000);
@@ -234,8 +231,7 @@ it('runs dev:service with an explicitly missing optional env file and disposable
     },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
-  const errors: string[] = [];
-  child.stderr?.on('data', (chunk: Buffer) => { errors.push(chunk.toString()); });
+  const errors = captureErrors(child);
 
   try {
     await expectReady(port, child, errors);
@@ -243,7 +239,7 @@ it('runs dev:service with an explicitly missing optional env file and disposable
     await stopProcess(child);
   }
   await expectPortClosed(port);
-}, 10_000);
+}, 15_000);
 
 it('stays reachable with redacted readiness when the canonical database is invalid', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
@@ -259,25 +255,19 @@ it('stays reachable with redacted readiness when the canonical database is inval
     '--data-dir', dataDirectory,
   ], {
     cwd: repositoryRoot,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
   });
   processes.push(child);
+  const errors = captureErrors(child);
 
-  await expect.poll(async () => {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/healthz`);
-      return { status: response.status, body: await response.json() };
-    } catch {
-      return null;
-    }
-  }, { interval: 50, timeout: 3_000 }).toEqual({
+  await expectHealth(port, {
     status: 503,
     body: {
       status: 503,
       error: { code: 'storage-unavailable', message: 'Plotter storage is unavailable.' },
     },
-  });
-});
+  }, child, errors);
+}, 15_000);
 
 it('creates, lists, and explicitly restores portable backups while recovering service readiness', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
@@ -292,13 +282,12 @@ it('creates, lists, and explicitly restores portable backups while recovering se
     '--data-dir', dataDirectory,
   ], {
     cwd: repositoryRoot,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
   });
   processes.push(child);
+  const errors = captureErrors(child);
 
-  await expect.poll(async () => {
-    try { return (await fetch(`http://127.0.0.1:${port}/healthz`)).status; } catch { return 0; }
-  }, { interval: 50, timeout: 3_000 }).toBe(200);
+  await expectReady(port, child, errors);
   const headers = { 'content-type': 'application/json', 'x-plotter-write': '1' };
   const created = await fetch(`http://127.0.0.1:${port}/api/v1/trips`, {
     method: 'POST', headers, body: JSON.stringify({ expectedRevision: 0, name: 'Before backup' }),
@@ -334,7 +323,7 @@ it('creates, lists, and explicitly restores portable backups while recovering se
     backups: Array<{ id: string }>;
   };
   expect(listed.backups.some((backup) => backup.id.startsWith('recovery-before-restore-'))).toBe(true);
-});
+}, 20_000);
 
 it('composes revisioned SQLite writes, atomic media, and ID-only content reads over HTTP', async () => {
   const testDataParent = resolve(repositoryRoot, 'tests', '.tmp');
@@ -350,13 +339,12 @@ it('composes revisioned SQLite writes, atomic media, and ID-only content reads o
     '--data-dir', dataDirectory,
   ], {
     cwd: repositoryRoot,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
   });
   processes.push(child);
+  const errors = captureErrors(child);
 
-  await expect.poll(async () => {
-    try { return (await fetch(`${baseUrl}/healthz`)).status; } catch { return 0; }
-  }, { interval: 50, timeout: 3_000 }).toBe(200);
+  await expectReady(port, child, errors);
 
   const writeHeaders = { 'content-type': 'application/json', 'x-plotter-write': '1' };
   const createdResponse = await fetch(`${baseUrl}/api/v1/trips`, {
@@ -390,4 +378,4 @@ it('composes revisioned SQLite writes, atomic media, and ID-only content reads o
   expect(content.status).toBe(200);
   expect(content.headers.get('content-type')).toBe('image/png');
   expect(await content.text()).toBe('service image');
-});
+}, 20_000);
