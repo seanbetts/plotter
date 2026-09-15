@@ -7,9 +7,9 @@
   ],
   "platformContractVersion": 1,
   "schemaVersion": 1,
-  "templateVersion": 2,
+  "templateVersion": 3,
   "ui": {
-    "sha256": "d630e294ecff2a0db5738fa486ebe23d2c362d7d494300046d0d4bef4da2e0a5",
-    "version": "0.6.1"
+    "sha256": "d958d3b64528be70797c852a70d01d1220c7b63dbb1af9dde51859becebf8566",
+    "version": "0.7.0"
   }
 }
