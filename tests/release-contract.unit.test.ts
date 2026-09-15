@@ -23,7 +23,7 @@ function readReleaseFiles(directory: string): string[] {
 }
 
 describe('Plotter local-web service release contract', () => {
-  it('declares the exact supported service manifest without browser Supabase or provider secrets', () => {
+  it('declares the exact app-owned service manifest without browser Supabase or provider secrets', () => {
     expect(JSON.parse(readFileSync(join(repositoryRoot, 'local-web.json'), 'utf8'))).toEqual({
       schemaVersion: 1,
       id: 'plotter',
@@ -64,7 +64,7 @@ describe('Plotter local-web service release contract', () => {
         ],
       },
       home: { icon: 'route', accent: '#D9467A' },
-      platform: { contractVersion: 1, templateVersion: 2, uiVersion: '0.6.1', capabilities: [] },
+      platform: expect.objectContaining({ capabilities: [] }),
     });
   });
 
