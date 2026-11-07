@@ -65,6 +65,11 @@ describe('Plotter local-web service release contract', () => {
       },
       home: { icon: 'route', accent: '#D9467A' },
       platform: expect.objectContaining({ capabilities: [] }),
+      production: expect.objectContaining({
+        dataContract: 'plotter-sqlite-v1-media-v1', rollbackPolicy: 'compatible',
+        nativeDependencies: expect.objectContaining({ lockfiles: ['package-lock.json', 'package.json', 'vendor/local-web-ui.tgz'] }),
+        runtime: expect.objectContaining({ healthRuntime: 'node', secretFiles: ['plotter.env'], user: '10001:10001' }),
+      }),
     });
   });
 

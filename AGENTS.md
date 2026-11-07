@@ -20,6 +20,9 @@
 - Local-web runs the persistent Node service; Caddy serves its immutable `release/public/` frontend and proxies `/plotter/api` and health traffic to that service.
 - `SERPAPI_API_KEY` is not a browser build variable.
 - Trip data reads and writes still use the existing `npm run trip -- <command>` CLI.
+- Production CLI routing comes from the installed Local Web `app data-target` metadata. Missing metadata or NAS/network failure must not fall back to localhost or repository records. `PLOTTER_BASE_URL` is only an explicit fixture/development override.
+- The NAS recipe uses exact `/state`, selected `/run/secrets/plotter.env`, and the configured public origin/proxy/bind interface. Keep Mac repository containment and loopback defaults; development after cutover uses isolated copies.
+- Preserve paired SQLite/media/portable backups and maintenance journals. After NAS writes, rollback uses the latest complete NAS state through the app-owned backup/restore procedure.
 
 ## Debugging And Verification
 

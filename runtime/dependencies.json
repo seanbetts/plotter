@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "nodeImage": "node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9",
+  "runtimeCode": "Bundled service; Node 24 built-ins including node:sqlite. No runtime npm dependencies."
+}

@@ -78,5 +78,67 @@
     "templateVersion": 3,
     "uiVersion": "0.7.2",
     "capabilities": []
+  },
+  "production": {
+    "recipeVersion": "1",
+    "dataContract": "plotter-sqlite-v1-media-v1",
+    "rollbackPolicy": "compatible",
+    "buildCommands": [
+      [
+        "npm",
+        "run",
+        "build"
+      ]
+    ],
+    "nativeDependencies": {
+      "lockfiles": [
+        "package-lock.json",
+        "package.json",
+        "vendor/local-web-ui.tgz"
+      ],
+      "installCommands": [
+        [
+          "npm",
+          "ci",
+          "--ignore-scripts"
+        ]
+      ],
+      "outputs": [
+        "node_modules"
+      ]
+    },
+    "runtime": {
+      "baseImage": "node@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9",
+      "abi": "node-24-debian-bookworm-amd64",
+      "healthRuntime": "node",
+      "lockfiles": [
+        "runtime/dependencies.json"
+      ],
+      "dockerfile": "runtime/Dockerfile",
+      "command": [
+        "node",
+        "/app/current/server/service.mjs",
+        "--runtime",
+        "nas-docker",
+        "--port",
+        "{port}",
+        "--data-dir",
+        "{state}",
+        "--env-file",
+        "/run/secrets/plotter.env",
+        "--bind-host",
+        "{bindHost}",
+        "--public-origin",
+        "{publicOrigin}",
+        "--proxy-address",
+        "{proxyAddress}"
+      ],
+      "cpuLimit": 1,
+      "memoryLimitMib": 512,
+      "secretFiles": [
+        "plotter.env"
+      ],
+      "user": "10001:10001"
+    }
   }
 }

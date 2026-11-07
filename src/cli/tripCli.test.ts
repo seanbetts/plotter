@@ -118,8 +118,10 @@ describe('parseTripCliArgs', () => {
 });
 
 describe('resolvePlotterBaseUrl', () => {
-  it('uses the stable Plotter loopback route by default and accepts an explicit override', () => {
-    expect(resolvePlotterBaseUrl({})).toEqual(new URL('http://127.0.0.1/plotter/'));
+  it('uses the canonical registered route by default and accepts an explicit fixture override', () => {
+    expect(resolvePlotterBaseUrl({}, () => ({ schemaVersion: 1, appId: 'plotter', targetKind: 'macos',
+      baseUrl: 'https://local.example.ts.net/plotter', profileRevision: 'a'.repeat(64) })))
+      .toEqual(new URL('https://local.example.ts.net/plotter/'));
     expect(resolvePlotterBaseUrl({ PLOTTER_BASE_URL: 'http://localhost:9123/custom/' })).toEqual(
       new URL('http://localhost:9123/custom/'),
     );

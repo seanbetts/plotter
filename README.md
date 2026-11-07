@@ -42,7 +42,7 @@ bundle. All three provider values may be left unset when their feature is not
 needed. Keep `.env` readable only by the account that runs Plotter (for example,
 `chmod 600 .env`); never use a `VITE_` prefix for service or migration secrets.
 
-The service receives `user-data/` from the local-web manifest. It is Git-ignored
+On the Mac, the service receives `user-data/` from the local-web manifest. It is Git-ignored
 and must stay owned by the service account; use restrictive owner-only
 permissions (for example, `chmod 700 user-data`) rather than sharing it through
 the release directory. Its normal layout is:
@@ -56,18 +56,55 @@ user-data/
   imports/
 ```
 
-The service validates that this directory remains inside the canonical
-repository. Do not point it at another path or write SQLite/media files from the
-browser or CLI.
+Mac mode validates that this directory remains inside the selected repository.
+An isolated development copy may be used explicitly; production authority comes
+from Local Web. Do not write SQLite/media files directly from the browser or CLI.
+
+The NAS recipe selects `--runtime nas-docker`, exact `/state` storage and a
+read-only code release at `/app/current`. All trips, uploads, media journals,
+automatic/portable backups, trash and maintenance ownership locks stay in that
+same durable mount. NAS mode accepts only `/state` and the optional selected
+`/run/secrets/plotter.env`; it never adopts repository or legacy data. That secret
+file may contain only `SERPAPI_API_KEY`; browser provider keys remain Mac build
+inputs. The app accepts public traffic only with the configured canonical HTTPS
+Host/Origin and forwarded scheme from the exact configured proxy IP. A local,
+body-free readiness check needs no forwarded headers.
+
+`production` declares native Mac build dependencies and a digest-pinned Linux
+Node 24 image, including `node:sqlite`. Runtime code is bundled and needs no
+runtime npm installation. The Dockerfile builds dependencies only; deployments
+mount immutable code, selected state and secrets separately. This source recipe
+does not activate or migrate production.
 
 ## CLI, backups, and recovery
 
-The CLI targets the hosted route by default. For a direct development service,
+The CLI queries the installed `local-web app data-target --repository <source-root>`
+for the registered production base URL and profile revision. Missing or invalid
+metadata and network failures stop the command; there is no implicit localhost,
+repository-file or `.env` fallback. Run production commands from the registered
+repository. For a direct isolated development service,
 set its base URL explicitly:
 
 ```bash
 PLOTTER_BASE_URL=http://127.0.0.1:5175/ npm run trip -- list
 ```
+
+`PLOTTER_BASE_URL` is an explicit fixture/development override and bypasses
+production metadata. After a NAS handoff, fence old Mac services and use copies
+for development. A rollback after NAS writes must preserve the latest complete
+NAS store (including media), never reactivate an old Mac snapshot.
+
+The guarded Linux fixture checks proxy rejection, real SQLite/media mutations,
+portable backup/restore, and old-code readback of a copied post-write store. Build
+the current service and supply a disposable prior committed service bundle:
+
+```sh
+npm run build:service
+python3 scripts/verify-nas-runtime.py --fixture-harness /path/to/slskd/scripts/test.py --old-service /tmp/prior-release/server/service.mjs
+```
+
+It uses only the existing guarded Mac VM, named volumes, a private bridge and
+scoped cleanup, with no host mounts or published ports. It never connects to NAS.
 
 Use `npm run trip -- backup-create`, `backup-list`, and
 `backup-inspect --backup-id <id>` to manage portable backups. The service also

@@ -159,3 +159,24 @@ describe('parseServiceArguments', () => {
     ], repositoryRoot)).toEqual({ port: 5175, dataDir: repositoryDataDir });
   });
 });
+
+describe('explicit NAS paths', () => {
+  const options = ['--runtime', 'nas-docker', '--port', '4174', '--data-dir', '/state',
+    '--bind-host', '0.0.0.0', '--public-origin', 'https://plotter.example.ts.net',
+    '--proxy-address', '172.30.200.2'];
+  it('selects only the fixed durable mount and optional selected secret', () => {
+    expect(parseServiceArguments([...options, '--env-file', '/run/secrets/plotter.env'], repositoryRoot)).toMatchObject({
+      dataDir: '/state', envFile: '/run/secrets/plotter.env', bindHost: '0.0.0.0', runtime: 'nas-docker',
+      ingress: { publicOrigin: 'https://plotter.example.ts.net', proxyAddress: '172.30.200.2' },
+    });
+    expect(resolveServiceRepositoryRoot([...options, '--env-file', '/run/secrets/plotter.env'], repositoryRoot)).toBe(realpathSync(join(repositoryRoot, '..')));
+  });
+  it('refuses arbitrary external stores, secrets, and incomplete proxy configuration', () => {
+    for (const [flag, value] of [['--data-dir', '/tmp/store'], ['--bind-host', '127.0.0.1']]) {
+      const modified = [...options]; modified[modified.indexOf(flag) + 1] = value;
+      expect(() => parseServiceArguments(modified, repositoryRoot)).toThrow();
+    }
+    expect(() => parseServiceArguments([...options, '--env-file', '/etc/passwd'], repositoryRoot)).toThrow();
+    expect(() => parseServiceArguments(options.slice(0, -2), repositoryRoot)).toThrow();
+  });
+});

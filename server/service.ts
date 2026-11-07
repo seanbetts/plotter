@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { createServer, type ServerResponse } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 import { parseServiceArguments, resolveServiceRepositoryRoot } from './args';
 import { createPlotterHttpHandler } from './http';
 import { searchWebImages } from './providers/imageSearch';
@@ -24,7 +25,11 @@ if (!existsSync(serviceArguments.dataDir)) {
 
 if (serviceArguments.envFile !== undefined) {
   try {
-    process.loadEnvFile(serviceArguments.envFile);
+    if (serviceArguments.runtime === 'nas-docker') {
+      const values = parseEnv(readFileSync(serviceArguments.envFile, 'utf8'));
+      if (Object.keys(values).some((key) => key !== 'SERPAPI_API_KEY')) throw new Error('Unexpected NAS secret field.');
+      if (values.SERPAPI_API_KEY) process.env.SERPAPI_API_KEY = values.SERPAPI_API_KEY;
+    } else process.loadEnvFile(serviceArguments.envFile);
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       // The manifest always supplies the repository .env path, but provider keys are optional.
@@ -58,6 +63,7 @@ const handler = createPlotterHttpHandler({
   backups: storage.backups,
   operations: storage.operations,
   publicRoot: resolve(repositoryRoot, 'public'),
+  ingress: serviceArguments.ingress,
 });
 
 const eventStreams = new Set<ServerResponse>();
@@ -86,4 +92,4 @@ process.once('exit', () => {
 
 process.once('SIGINT', closeService);
 process.once('SIGTERM', closeService);
-server.listen(serviceArguments.port, '127.0.0.1');
+server.listen(serviceArguments.port, serviceArguments.bindHost ?? '127.0.0.1');

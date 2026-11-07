@@ -1,10 +1,14 @@
-import { existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { validateIngress, type IngressPolicy } from './nasIngress';
 
 export type ServiceArguments = {
   port: number;
   dataDir: string;
   envFile?: string;
+  runtime?: 'nas-docker';
+  bindHost?: string;
+  ingress?: IngressPolicy;
 };
 
 const INVALID_ARGUMENTS_MESSAGE = 'The service arguments are invalid.';
@@ -19,7 +23,7 @@ const OUTSIDE_ENV_FILE_MESSAGE = 'The service env file is outside the Plotter re
 
 function parseOptions(argv: string[]): Map<string, string> {
   const options = new Map<string, string>();
-  const optionNames = new Set(['--port', '--data-dir', '--env-file']);
+  const optionNames = new Set(['--port', '--data-dir', '--env-file', '--runtime', '--bind-host', '--public-origin', '--proxy-address']);
   const serviceArguments = argv[0] === '--' ? argv.slice(1) : argv;
 
   for (let index = 0; index < serviceArguments.length; index += 2) {
@@ -35,7 +39,9 @@ function parseOptions(argv: string[]): Map<string, string> {
 }
 
 export function resolveServiceRepositoryRoot(argv: string[], moduleDirectory: string): string {
-  const envFile = parseOptions(argv).get('--env-file');
+  const options = parseOptions(argv);
+  if (options.get('--runtime') === 'nas-docker') return realpathSync(resolve(moduleDirectory, '..'));
+  const envFile = options.get('--env-file');
   if (envFile === undefined) {
     return realpathSync(resolve(moduleDirectory, '..'));
   }
@@ -120,6 +126,25 @@ export function parseServiceArguments(argv: string[], repositoryRoot: string): S
   const canonicalRepositoryRoot = realpathSync(repositoryRoot);
   const options = parseOptions(argv);
   const port = parsePort(options.get('--port'));
+  if (options.has('--runtime')) {
+    if (options.get('--runtime') !== 'nas-docker' || options.get('--data-dir') !== '/state'
+        || options.get('--bind-host') !== '0.0.0.0') throw new Error(INVALID_ARGUMENTS_MESSAGE);
+    const envFile = options.get('--env-file');
+    if (envFile !== undefined && envFile !== '/run/secrets/plotter.env') throw new Error(INVALID_ARGUMENTS_MESSAGE);
+    for (const path of ['/state', ...(envFile ? [envFile] : [])]) {
+      if (existsSync(path)) {
+        const info = lstatSync(path);
+        if (info.isSymbolicLink() || (path === '/state' ? !info.isDirectory() : !info.isFile())) {
+          throw new Error(INVALID_ARGUMENTS_MESSAGE);
+        }
+      }
+    }
+    return { port, dataDir: '/state', ...(envFile ? { envFile } : {}), runtime: 'nas-docker',
+      bindHost: '0.0.0.0', ingress: validateIngress(options.get('--public-origin'), options.get('--proxy-address')) };
+  }
+  if (['--bind-host', '--public-origin', '--proxy-address'].some((flag) => options.has(flag))) {
+    throw new Error(INVALID_ARGUMENTS_MESSAGE);
+  }
   const dataDir = resolveDataDirectory(options.get('--data-dir'), canonicalRepositoryRoot);
   const envFile = resolveEnvFile(options.get('--env-file'), canonicalRepositoryRoot);
 

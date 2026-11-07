@@ -16,6 +16,7 @@ import type {
   TripMutationRequest,
 } from '../src/api/contracts';
 import { isCanonicalId } from '../src/api/identifiers';
+import { acceptsIngress, type IngressPolicy } from './nasIngress';
 import type { Activity, Destination, MediaItem, RouteLeg, TripRoutingVehicle } from '../src/domain/types';
 import { buildWebImageProviderQuery, type WebImageSearchResult } from '../src/services/webImageSearchClient';
 import { TripStorageConflictError, type RevisionEvent } from '../src/storage/revision';
@@ -91,6 +92,7 @@ export type PlotterHttpDependencies = {
   backups: PlotterBackupOperations;
   operations?: StorageOperationGate;
   publicRoot: string;
+  ingress?: IngressPolicy;
 };
 
 class HttpError extends Error {
@@ -585,7 +587,7 @@ function json(response: ServerResponse, status: number, body: unknown, omitBody 
   response.end(omitBody ? undefined : bytes);
 }
 
-function errorBody(status: 400 | 404 | 503 | 500, code: 'invalid-request' | 'not-found' | 'storage-unavailable' | 'internal-error', message: string) {
+function errorBody(status: 400 | 403 | 404 | 503 | 500, code: 'invalid-request' | 'request-forbidden' | 'not-found' | 'storage-unavailable' | 'internal-error', message: string) {
   return { status, error: { code, message } };
 }
 
@@ -982,6 +984,15 @@ export function createPlotterHttpHandler(dependencies: PlotterHttpDependencies) 
       const pathname = pathnameFrom(request);
       const method = request.method ?? '';
       const handle = async (): Promise<void> => {
+
+      const peer = request.socket.remoteAddress?.replace(/^::ffff:/, '');
+      const internalHealth = pathname === '/healthz' && ['GET', 'HEAD'].includes(method)
+        && (peer === '127.0.0.1' || peer === '::1')
+        && request.headers['x-forwarded-proto'] === undefined && request.headers.origin === undefined;
+      if (!internalHealth && !acceptsIngress(request, dependencies.ingress)) {
+        json(response, 403, errorBody(403, 'request-forbidden', 'The request origin is not allowed.'));
+        return;
+      }
 
       if (pathname === '/healthz' && (method === 'GET' || method === 'HEAD')) {
         if (dependencies.readiness().ready) json(response, 200, { ready: true }, method === 'HEAD');

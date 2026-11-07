@@ -7,6 +7,7 @@ Run all commands from the repository root. Do not write Supabase rows directly.
 ## Core Rules
 
 - Use `npm run trip -- ...` for all trip data reads and writes.
+- The CLI resolves production authority through installed Local Web `app data-target` metadata for its source repository. Stop on unavailable metadata/service; never substitute localhost, `.env`, SQLite or media files. `PLOTTER_BASE_URL` is an explicit isolated fixture/development override, not a production fallback.
 - Let the app own route-leg `id`, `originDestinationId`, `targetDestinationId`, `status`, `geometry`, `distanceKm`, `travelTimeHours`, `provider`, `profile`, `routeKey`, `calculatedAt`, `sections`, `warnings`, `error`, `createdAt`, and `updatedAt`.
 - Let the app own stored waypoint `id`, `order`, normalized `coordinates`, resolved location/address/provider metadata, and enriched `ResearchLink` metadata. Source `place.coordinates` and URL strings remain writable waypoint-draft inputs.
 - Copy the approved vehicle preset without changing it.

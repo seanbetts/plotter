@@ -14,6 +14,7 @@ import { createLinkEnricher } from '../tripCommands/linkEnrichment';
 import { createPlaceResolver } from '../tripCommands/placeResolver';
 import { createTripDataService } from '../tripCommands/tripDataService';
 import type { TripDataService } from '../tripCommands/tripDataService';
+import { readProductionTarget } from './productionTarget';
 
 type ParsedArgs = {
   command: string;
@@ -46,7 +47,6 @@ export type BackupCliOperations = {
   restore(backupId: string, confirmation: string): Promise<RestoreBackupResponse>;
 };
 
-const defaultPlotterBaseUrl = 'http://127.0.0.1/plotter/';
 const serviceUnavailableMessage = 'Plotter service is unavailable.';
 const configurationErrorMessage = 'Plotter CLI configuration is invalid.';
 const tripCliHelp = {
@@ -61,10 +61,23 @@ const tripCliHelp = {
   ],
 };
 
-export function resolvePlotterBaseUrl(environment: NodeJS.ProcessEnv): URL {
+export function resolvePlotterBaseUrl(environment: NodeJS.ProcessEnv, loadTarget: () => unknown = readProductionTarget): URL {
   let baseUrl: URL;
   try {
-    baseUrl = new URL(environment.PLOTTER_BASE_URL?.trim() || defaultPlotterBaseUrl);
+    const explicit = environment.PLOTTER_BASE_URL;
+    if (explicit !== undefined) {
+      if (!explicit.trim()) throw new Error(configurationErrorMessage);
+      baseUrl = new URL(explicit);
+    } else {
+      const target = loadTarget();
+      if (!isRecord(target) || Object.keys(target).sort().join(',') !== 'appId,baseUrl,profileRevision,schemaVersion,targetKind'
+          || target.schemaVersion !== 1 || target.appId !== 'plotter'
+          || !['macos', 'nas-docker'].includes(String(target.targetKind))
+          || typeof target.profileRevision !== 'string' || !/^[a-f0-9]{64}$/.test(target.profileRevision)
+          || typeof target.baseUrl !== 'string') throw new Error(configurationErrorMessage);
+      baseUrl = new URL(target.baseUrl);
+      if (target.targetKind === 'nas-docker' && baseUrl.protocol !== 'https:') throw new Error(configurationErrorMessage);
+    }
   } catch {
     throw new Error(configurationErrorMessage);
   }
@@ -597,9 +610,14 @@ export async function runTripProgram(input: RunTripProgramInput = {}) {
       return exitCode;
     }
 
-    const service = createService();
+    // Resolve one authority per command so trip and backup operations cannot
+    // independently select different stores during a host-profile transition.
+    const environment = input.createService ? process.env : {
+      ...process.env, PLOTTER_BASE_URL: resolvePlotterBaseUrl(process.env).toString(),
+    };
+    const service = createService(environment);
     const createBackups = input.createBackups ?? createCliBackupOperations;
-    const backups = createBackups();
+    const backups = createBackups(environment);
 
     const exitCode = await runTripCli({
       argv,

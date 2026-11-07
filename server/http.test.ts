@@ -1,4 +1,4 @@
-import { createServer, get as httpGet, type Server } from 'node:http';
+import { createServer, get as httpGet, request as httpRequest, type Server } from 'node:http';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -777,4 +777,31 @@ describe('Plotter HTTP transport and safety', () => {
     expect(queried.headers.get('content-type')).toContain('application/json');
     expect(await queried.text()).not.toContain('<title>Plotter</title>');
   });
+});
+
+it('enforces NAS public origin and proxy identity before any mutation or provider work', async () => {
+  const fixture = dependencies();
+  fixture.values.ingress = { publicOrigin: 'https://plotter.example.ts.net', proxyAddress: '127.0.0.1' };
+  const base = await start(fixture.values);
+  const accepted = { host: 'plotter.example.ts.net', 'x-forwarded-proto': 'https',
+    origin: 'https://plotter.example.ts.net', 'x-plotter-write': '1', 'content-type': 'application/json' };
+  const status = (path: string, headers: Record<string, string>, method = 'GET') => new Promise<number>((resolve, reject) => {
+    const request = httpRequest(`${base}${path}`, { method, headers }, (response) => {
+      response.resume(); resolve(response.statusCode!);
+    });
+    request.on('error', reject);
+    request.end(method === 'POST' ? JSON.stringify({ expectedRevision: 0, name: 'Forbidden' }) : undefined);
+  });
+  for (const headers of [
+    { ...accepted, origin: 'https://evil.example' },
+    { ...accepted, host: 'evil.example' },
+    { ...accepted, 'x-forwarded-proto': 'http' },
+  ]) {
+    expect(await status('/api/v1/trips', headers, 'POST')).toBe(403);
+  }
+  expect(await status('/api/v1/trips', accepted)).toBe(200);
+  expect((await fetch(`${base}/healthz`, { method: 'HEAD' })).status).toBe(200);
+  expect(await status('/healthz', { host: 'evil.example', 'x-forwarded-proto': 'http' })).toBe(403);
+  fixture.values.ingress = { ...fixture.values.ingress, proxyAddress: '172.30.200.2' };
+  expect(await status('/api/v1/trips', accepted)).toBe(403);
 });
