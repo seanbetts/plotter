@@ -3,17 +3,20 @@ import { createServer, type ServerResponse } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
-import { parseServiceArguments, resolveServiceRepositoryRoot } from './args';
+import { parseServiceArguments, resolveServiceRepositoryRoot, resolveRequestedDataDirectory } from './args';
 import { createPlotterHttpHandler } from './http';
 import { searchWebImages } from './providers/imageSearch';
 import { fetchLinkPreview } from './providers/linkPreview';
 import { fetchRemoteImage } from './providers/remoteImage';
 import { acquireDataDirectoryOwnership } from './maintenanceLock';
 import { createPlotterStorageRuntime } from './storageRuntime';
+import { requireMacWriterAuthority } from './writerAuthority';
 
 const moduleDirectory = realpathSync(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = resolveServiceRepositoryRoot(process.argv.slice(2), moduleDirectory);
 const serviceArguments = parseServiceArguments(process.argv.slice(2), repositoryRoot);
+requireMacWriterAuthority({ ...serviceArguments,
+  dataDir: resolveRequestedDataDirectory(process.argv.slice(2), repositoryRoot) }, repositoryRoot);
 
 if (!existsSync(serviceArguments.dataDir)) {
   const initialDataDirectory = resolve(repositoryRoot, 'user-data');

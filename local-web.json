@@ -118,6 +118,7 @@
       "command": [
         "node",
         "/app/current/server/service.mjs",
+        "--",
         "--runtime",
         "nas-docker",
         "--port",

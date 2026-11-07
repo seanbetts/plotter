@@ -90,7 +90,7 @@ PLOTTER_BASE_URL=http://127.0.0.1:5175/ npm run trip -- list
 ```
 
 `PLOTTER_BASE_URL` is an explicit fixture/development override and bypasses
-production metadata. After a NAS handoff, fence old Mac services and use copies
+production metadata. The service checks installed `app data-target` authority before opening repository `user-data`, creating state or listening: NAS authority or an unavailable/malformed lookup refuses Mac startup. Explicit disposable `--data-dir` paths outside canonical `user-data` remain usable; aliases and descendants of production state are fenced, including outward `user-data` symlinks. The originally requested path is retained for this check before storage canonicalization; Git/provenance ownership survives a missing working manifest, with app identity validated from committed main. NAS `--runtime nas-docker` with exact `/state` uses the container contract without a Mac lookup. This needs the Local Web `data-target` capability before the source service is installed. After a NAS handoff, fence old Mac services and use copies
 for development. A rollback after NAS writes must preserve the latest complete
 NAS store (including media), never reactivate an old Mac snapshot.
 

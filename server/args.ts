@@ -122,6 +122,13 @@ function resolveEnvFile(value: string | undefined, repositoryRoot: string): stri
   return canonicalFile;
 }
 
+/** Retain lexical state ownership for the startup fence before realpath validation. */
+export function resolveRequestedDataDirectory(argv: string[], repositoryRoot: string): string {
+  const value = parseOptions(argv).get('--data-dir');
+  if (value === undefined) throw new Error(MISSING_DATA_DIRECTORY_MESSAGE);
+  return resolve(realpathSync(repositoryRoot), value);
+}
+
 export function parseServiceArguments(argv: string[], repositoryRoot: string): ServiceArguments {
   const canonicalRepositoryRoot = realpathSync(repositoryRoot);
   const options = parseOptions(argv);

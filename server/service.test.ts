@@ -1,7 +1,7 @@
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it } from 'vitest';
 
@@ -9,6 +9,19 @@ const repositoryRoot = realpathSync(resolve(import.meta.dirname, '..'));
 const processes: ChildProcess[] = [];
 const temporaryDirectories: string[] = [];
 const serviceStartTimeout = 10_000;
+
+function targetHome(repository: string, kind: 'macos' | 'nas-docker' | 'unavailable'): string {
+  const home = join(repository, 'fixture-home');
+  const bin = join(home, '.codex', 'bin');
+  mkdirSync(bin, { recursive: true });
+  const target = { schemaVersion: 1, appId: 'plotter', targetKind: kind,
+    baseUrl: 'https://local.example.ts.net/plotter', profileRevision: 'a'.repeat(64) };
+  const expectedArguments = ['app', 'data-target', '--repository', realpathSync(repository)];
+  writeFileSync(join(bin, 'local-web'), '#!/usr/bin/env node\n' +
+    `if (JSON.stringify(process.argv.slice(2)) !== ${JSON.stringify(JSON.stringify(expectedArguments))}) process.exit(1);\n` +
+    (kind === 'unavailable' ? 'process.exit(1);\n' : `console.log(${JSON.stringify(JSON.stringify(target))});\n`), { mode: 0o755 });
+  return home;
+}
 
 async function reservePort(): Promise<number> {
   const server = createServer();
@@ -200,12 +213,53 @@ it.each([
     '--port', String(port),
     '--data-dir', join(disposableRepository, 'user-data'),
     '--env-file', join(disposableRepository, '.env'),
-  ], { cwd: disposableRepository, stdio: ['ignore', 'ignore', 'pipe'] });
+  ], { cwd: disposableRepository, env: { ...process.env, HOME: targetHome(disposableRepository, 'macos') }, stdio: ['ignore', 'ignore', 'pipe'] });
   processes.push(child);
   const errors = captureErrors(child);
 
   await expectReady(port, child, errors);
 }, 15_000);
+
+it.each(['nas-docker', 'unavailable'] as const)('refuses canonical Mac startup for %s authority before storage creation', async (kind) => {
+  const repository = realpathSync(mkdtempSync(join(tmpdir(), 'plotter-writer-startup-')));
+  temporaryDirectories.push(repository);
+  writeFileSync(join(repository, 'local-web.json'), JSON.stringify({ id: 'plotter' }));
+  const dataDir = join(repository, 'user-data');
+  const port = await reservePort();
+  execFileSync(process.execPath, [resolve(repositoryRoot, 'scripts/build-service.mjs')], { cwd: repositoryRoot, stdio: 'ignore' });
+  const child = spawn(process.execPath, [resolve(repositoryRoot, 'server-dist/service.mjs'), '--', '--port', String(port), '--data-dir', dataDir,
+    '--env-file', join(repository, '.env')], {
+    cwd: repositoryRoot, env: { ...process.env, HOME: targetHome(repository, kind) }, stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  processes.push(child);
+  const errors = captureErrors(child);
+  await expect.poll(() => child.exitCode, { timeout: serviceStartTimeout }).not.toBeNull();
+  expect(errors.join('')).toContain('Mac production writer authority is unavailable');
+  expect(child.exitCode).toBe(1);
+  expect(existsSync(dataDir)).toBe(false);
+  await expectPortClosed(port);
+}, 15_000);
+
+it('preserves outward-linked production ownership before parser canonicalization at startup', async () => {
+  const repository=realpathSync(mkdtempSync(join(tmpdir(),'plotter-production-link-')));
+  const outside=realpathSync(mkdtempSync(join(tmpdir(),'plotter-production-target-')));
+  temporaryDirectories.push(repository,outside);
+  writeFileSync(join(repository,'local-web.json'),JSON.stringify({id:'plotter'}));
+  const dataDir=join(repository,'user-data');symlinkSync(outside,dataDir);
+  const port=await reservePort();
+  execFileSync(process.execPath,[resolve(repositoryRoot,'scripts/build-service.mjs')],{cwd:repositoryRoot,stdio:'ignore'});
+  const child=spawn(process.execPath,[resolve(repositoryRoot,'server-dist/service.mjs'),'--','--port',String(port),
+    '--data-dir',dataDir,'--env-file',join(outside,'.env')],{
+    cwd:repositoryRoot,env:{...process.env,HOME:targetHome(repository,'nas-docker')},stdio:['ignore','ignore','pipe'],
+  });
+  processes.push(child);const errors=captureErrors(child);
+  await expect.poll(() => child.exitCode,{timeout:serviceStartTimeout}).not.toBeNull();
+  expect(errors.join('')).toContain('Mac production writer authority is unavailable');
+  expect(child.exitCode).toBe(1);
+  expect(existsSync(join(outside,'plotter.sqlite3'))).toBe(false);
+  expect(existsSync(join(outside,'.plotter-storage-owner.lock'))).toBe(false);
+  await expectPortClosed(port);
+},15_000);
 
 it('runs dev:service with an explicitly missing optional env file and disposable user data', async () => {
   const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')) as {
