@@ -7,7 +7,10 @@ The supplied old bundle is a disposable build of the prior committed source.
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
+import shutil
+import socket
 import subprocess
 import tempfile
 import uuid
@@ -133,8 +136,37 @@ def main():
         previous = json.loads(run('exec',names['old'],'node','/app/probe.mjs','http://127.0.0.1:4174','old'))
         if any(fresh[key] != previous[key] for key in ('contextSha256','mediaSha256')):
             raise ValueError('Old code did not retain the latest NAS fixture data/media')
+        # Repatriate only this fenced synthetic store, and read it with the
+        # previous code on the native Mac runtime as well as Linux.
+        run('stop','--time','10',names['old'])
+        with tempfile.TemporaryDirectory(prefix='plotter-return-copy-') as temporary:
+            local = Path(temporary).resolve()
+            (local / 'server').mkdir(); (local / 'user-data').mkdir(mode=0o700)
+            (local / 'server/service.mjs').write_bytes(old.read_bytes())
+            (local / '.env').write_text(''); (local / '.env').chmod(0o600)
+            (local / 'probe.mjs').write_text(PROBE)
+            run('cp', names['seed'] + ':/return/.', str(local / 'user-data'))
+            with socket.socket() as selected:
+                selected.bind(('127.0.0.1', 0)); port = selected.getsockname()[1]
+            node = shutil.which('node')
+            if not node: raise ValueError('Native Node is required for the return-copy fixture')
+            child_environment = dict(PATH=os.environ.get('PATH', ''), HOME=str(local), LANG='C', LC_ALL='C')
+            child = subprocess.Popen([node, str(local / 'server/service.mjs'), '--port', str(port),
+                '--data-dir', str(local / 'user-data'), '--env-file', str(local / '.env')],
+                cwd=local, env=child_environment, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            try:
+                result = subprocess.run([node, str(local / 'probe.mjs'), f'http://127.0.0.1:{port}', 'old'],
+                    cwd=local, env=child_environment, capture_output=True, text=True, timeout=30, check=True)
+                native_previous = json.loads(result.stdout)
+            finally:
+                child.terminate()
+                try: child.communicate(timeout=10)
+                except subprocess.TimeoutExpired: child.kill(); child.communicate(timeout=5)
+            if any(fresh[key] != native_previous[key] for key in ('contextSha256','mediaSha256')):
+                raise ValueError('The native previous code did not preserve the return-copy state/media')
         print(json.dumps(dict(linuxRuntime=True, noHostMounts=True, noPublishedPorts=True,
-                              copiedPostWriteState=True, fresh=fresh, previous=previous, **spoof), sort_keys=True))
+                              copiedPostWriteState=True, fresh=fresh, previous=previous,
+                              nativeMacPrevious=native_previous, **spoof), sort_keys=True))
     except Exception:
         for app in ('new', 'old'):
             if names[app] in containers:

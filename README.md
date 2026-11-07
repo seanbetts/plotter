@@ -95,7 +95,8 @@ for development. A rollback after NAS writes must preserve the latest complete
 NAS store (including media), never reactivate an old Mac snapshot.
 
 The guarded Linux fixture checks proxy rejection, real SQLite/media mutations,
-portable backup/restore, and old-code readback of a copied post-write store. Build
+portable backup/restore, and old-code readback of a copied post-write store on
+both Linux and the native Mac runtime. Build
 the current service and supply a disposable prior committed service bundle:
 
 ```sh
